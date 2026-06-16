@@ -49,3 +49,22 @@ def test_rayher_hr_settings_contains_standard_daily_hours():
 
     assert doc["issingle"] == 1
     assert "standard_daily_hours" in fieldnames(doc)
+
+def load_report(folder: str) -> dict:
+    path = MODULE_ROOT / "report" / folder / f"{folder}.json"
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def test_period_fields_are_derived_read_only_values():
+    for folder in ["rd_cost_allocation", "rd_expense_import", "rd_period_lock"]:
+        fields = {field["fieldname"]: field for field in load_doctype(folder)["fields"]}
+        assert fields["period"].get("read_only") == 1
+
+
+def test_reports_declare_required_filters():
+    exceptions = load_report("rd_timesheet_exceptions")
+    matrix = load_report("rd_allocation_matrix")
+
+    assert {field["fieldname"] for field in exceptions["filters"]} == {"year", "month"}
+    assert {field["fieldname"] for field in matrix["filters"]} == {"allocation"}

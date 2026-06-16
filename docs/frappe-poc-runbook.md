@@ -22,7 +22,7 @@ Run after the app is installed on a Frappe site:
 
 ```bash
 cd ~/frappe-bench
-bench --site rayher.localhost execute rayher_hr_payroll.demo.create_demo_data
+bench --site rayher.localhost execute rayher_hr_payroll.demo.create_demo_data --kwargs "{'force': True}"
 ```
 
 Then open the generated `RD Cost Allocation` document and verify:
@@ -66,7 +66,7 @@ Bench-level verification on the local WSL bench:
 ```bash
 cd /home/rayher/frappe-bench
 bench --site rayher.localhost migrate
-bench --site rayher.localhost execute rayher_hr_payroll.demo.create_demo_data
+bench --site rayher.localhost execute rayher_hr_payroll.demo.create_demo_data --kwargs "{'force': True}"
 ```
 
 Verified on 2026-06-16 after switching WSL networking to NAT and disabling WSL auto proxy. Local bench path is `/home/rayher/frappe-bench`; site is `rayher.localhost`; administrator password is `admin`.

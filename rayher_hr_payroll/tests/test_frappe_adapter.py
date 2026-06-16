@@ -116,3 +116,27 @@ def test_expense_items_from_rows_rejects_duplicate_source_row_key():
 
     with pytest.raises(ValueError, match="Duplicate GL source row in import: dup"):
         expense_items_from_rows(rows)
+
+
+def test_expense_items_from_rows_allows_multiple_missing_source_row_keys():
+    rows = [
+        SimpleNamespace(name="ROW-001", amount="100", account_level_3="Power", category="direct_input", direct_project=None, source_row_key=None),
+        SimpleNamespace(name="ROW-002", amount="200", account_level_3="Water", category="direct_input", direct_project=None, source_row_key=None),
+    ]
+
+    items = expense_items_from_rows(rows)
+
+    assert [item.name for item in items] == ["ROW-001", "ROW-002"]
+
+
+def test_historical_org_for_date_accepts_datetime_strings_with_time():
+    history_rows = [SimpleNamespace(from_date="2026-01-01 00:00:00", department="RD", designation="Engineer")]
+
+    org = historical_org_for_date(
+        history_rows,
+        "2026-01-05 09:30:00",
+        fallback_department="Current",
+        fallback_designation="Current",
+    )
+
+    assert org == {"employee_department": "RD", "employee_designation": "Engineer"}

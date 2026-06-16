@@ -77,6 +77,29 @@ def build_unclassified_rd_rows(
     return rows
 
 
+def parse_year_month_filters(
+    filters: Mapping[str, Any],
+    *,
+    throw: Callable[[str], None],
+    translate: Callable[[str], str] = _identity,
+) -> tuple[int, int]:
+    year = filters.get('year')
+    month = filters.get('month')
+    if year in (None, '') or month in (None, ''):
+        throw(translate('Year and month filters are required.'))
+
+    try:
+        year_int = int(year)
+        month_int = int(month)
+    except (TypeError, ValueError):
+        throw(translate('Year and month filters must be valid numbers.'))
+
+    if month_int < 1 or month_int > 12:
+        throw(translate('Month must be between 1 and 12.'))
+
+    return year_int, month_int
+
+
 def _columns(translate: Callable[[str], str] = _identity) -> list[dict[str, Any]]:
     return [
         {'label': translate('Employee'), 'fieldname': 'employee', 'fieldtype': 'Link', 'options': 'Employee', 'width': 140},
@@ -88,9 +111,8 @@ def _columns(translate: Callable[[str], str] = _identity) -> list[dict[str, Any]
 
 def execute(filters=None):
     filters = filters or {}
-    year = int(filters.get('year'))
-    month = int(filters.get('month'))
     frappe = _get_frappe()
+    year, month = parse_year_month_filters(filters, throw=frappe.throw, translate=frappe._)
 
     employees = frappe.get_all(
         'Employee',

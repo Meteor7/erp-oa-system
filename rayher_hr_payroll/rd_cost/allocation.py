@@ -21,6 +21,13 @@ def _stage_by_project(project_hours: list[ProjectHour]) -> dict[str, ProjectStag
     return {row.project: row.stage for row in project_hours}
 
 
+def _ensure_known_project_stages(project_hours: list[ProjectHour]) -> None:
+    unknown_projects = sorted({row.project for row in project_hours if row.stage == "unknown"})
+    if unknown_projects:
+        projects = ", ".join(unknown_projects)
+        raise ValueError(f"unknown capitalization stage for projects: {projects}")
+
+
 def _sum_hours(project_hours: list[ProjectHour]) -> Decimal:
     total = sum((row.hours for row in project_hours), Decimal("0"))
     if total <= 0:
@@ -69,6 +76,7 @@ def _weighted_amounts(
 def allocate_expenses(
     *, expenses: list[ExpenseItem], project_hours: list[ProjectHour]
 ) -> AllocationResult:
+    _ensure_known_project_stages(project_hours)
     stages = _stage_by_project(project_hours)
 
     # G2 guard: a direct expense must target a project whose stage we know. If the
@@ -92,8 +100,7 @@ def allocate_expenses(
     for expense in expenses:
         amount = _money(expense.amount)
         if expense.direct_project:
-            allocations = {project: ZERO for project in stages}
-            allocations[expense.direct_project] = amount
+            allocations = {expense.direct_project: amount}
         else:
             allocations = _weighted_amounts(amount, project_hours)
 
@@ -101,6 +108,8 @@ def allocate_expenses(
         hours_by_project = {row.project: row.hours for row in project_hours}
         for project in sorted(allocations):
             allocated_amount = _money(allocations[project])
+            if allocated_amount == ZERO:
+                continue
             stage = stages.get(project, "unknown")
             basis_hours = hours_by_project.get(project, Decimal("0"))
             ratio = (basis_hours / total_hours) if not expense.direct_project else Decimal("0")
@@ -116,6 +125,13 @@ def allocate_expenses(
             )
             project_amounts[project] = _money(project_amounts[project] + allocated_amount)
             stage_totals[stage] = _money(stage_totals[stage] + allocated_amount)
+
+    expected_total = _money(sum((_money(expense.amount) for expense in expenses), ZERO))
+    known_total = _money(stage_totals["capitalized"] + stage_totals["expensed"])
+    if known_total != expected_total:
+        raise ValueError(
+            f"allocation totals do not reconcile: allocated {known_total}, expected {expected_total}"
+        )
 
     return AllocationResult(
         lines=lines,

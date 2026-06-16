@@ -27,26 +27,29 @@ def build_allocation_matrix(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     line_rows = list(lines)
     projects = sorted({str(_value(row, 'project')) for row in line_rows if _value(row, 'project')})
+    project_fieldnames = {project: f'project_{index + 1}' for index, project in enumerate(projects)}
     columns: list[dict[str, Any]] = [
         {'label': translate('Voucher No'), 'fieldname': 'voucher_no', 'fieldtype': 'Data', 'width': 140},
         {'label': translate('Expense Item'), 'fieldname': 'expense_item_name', 'fieldtype': 'Data', 'width': 180},
     ]
     columns.extend(
-        {'label': project, 'fieldname': project, 'fieldtype': 'Currency', 'width': 130}
+        {'label': project, 'fieldname': project_fieldnames[project], 'fieldtype': 'Currency', 'width': 130}
         for project in projects
     )
 
     rows_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
     for line in line_rows:
         key = (_value(line, 'voucher_no'), _value(line, 'expense_item_name'))
-        rows_by_key.setdefault(
+        row = rows_by_key.setdefault(
             key,
             {
                 'voucher_no': _value(line, 'voucher_no'),
                 'expense_item_name': _value(line, 'expense_item_name'),
             },
         )
-        rows_by_key[key][str(_value(line, 'project'))] = _value(line, 'allocated_amount')
+        project = str(_value(line, 'project'))
+        fieldname = project_fieldnames[project]
+        row[fieldname] = row.get(fieldname, 0) + _value(line, 'allocated_amount')
 
     return columns, list(rows_by_key.values())
 

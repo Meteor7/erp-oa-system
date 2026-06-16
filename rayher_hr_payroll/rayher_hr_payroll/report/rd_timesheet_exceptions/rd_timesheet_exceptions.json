@@ -4,5 +4,19 @@
   "ref_doctype": "Timesheet",
   "report_type": "Script Report",
   "is_standard": "Yes",
-  "module": "Rayher HR Payroll"
+  "module": "Rayher HR Payroll",
+  "filters": [
+    {
+      "fieldname": "year",
+      "label": "Year",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "month",
+      "label": "Month",
+      "fieldtype": "Int",
+      "reqd": 1
+    }
+  ]
 }

@@ -65,3 +65,19 @@ def test_company_error_is_translatable(monkeypatch):
 
     with pytest.raises(ValueError, match='T:Set a default company'):
         demo._company()
+
+
+def test_create_demo_data_requires_explicit_force(monkeypatch):
+    from rayher_hr_payroll import demo
+
+    class FakeFrappe:
+        def _(self, message):
+            return message
+
+        def throw(self, message):
+            raise ValueError(str(message))
+
+    monkeypatch.setattr(demo, "_get_frappe", lambda: FakeFrappe())
+
+    with pytest.raises(ValueError, match="Pass force=True"):
+        demo.create_demo_data()
