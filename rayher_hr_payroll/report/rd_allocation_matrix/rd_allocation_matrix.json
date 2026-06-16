@@ -1,0 +1,8 @@
+{
+  "doctype": "Report",
+  "name": "RD Allocation Matrix",
+  "ref_doctype": "RD Cost Allocation",
+  "report_type": "Script Report",
+  "is_standard": "Yes",
+  "module": "Rayher HR Payroll"
+}
