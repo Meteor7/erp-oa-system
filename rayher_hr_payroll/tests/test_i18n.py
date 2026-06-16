@@ -83,3 +83,52 @@ def test_set_language_rejects_guest_user():
 
     with pytest.raises(ValueError, match='Login is required'):
         set_language('zh', frappe_module=fake)
+
+
+REQUIRED_TRANSLATION_STRINGS = {
+    'Rayher HR Payroll',
+    'Review R&D timesheet',
+    'Voucher No',
+    'Expense Item',
+    'Employee',
+    'Employee Name',
+    'Exception Type',
+    'Message',
+    'Missing Timesheet',
+    'Unclassified R&D Hours',
+    'R&D period {0} is locked; timesheet changes require a correction workflow.',
+    'Project {0} is not enabled for R&D timesheet entry.',
+    'Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy.',
+    'A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost.',
+    'Set a default company before loading Rayher demo data.',
+}
+
+
+def _translation_path(language):
+    from pathlib import Path
+
+    app_root = Path(__file__).resolve().parents[1]
+    return app_root / 'rayher_hr_payroll' / 'translations' / f'{language}.csv'
+
+
+def _load_translation_csv(language):
+    import csv
+
+    with _translation_path(language).open(encoding='utf-8', newline='') as handle:
+        return {row[0]: row[1] for row in csv.reader(handle) if len(row) >= 2}
+
+
+@pytest.mark.parametrize('language', ['zh', 'fr'])
+def test_translation_files_exist_and_parse_as_utf8_csv(language):
+    translations = _load_translation_csv(language)
+
+    assert translations
+
+
+@pytest.mark.parametrize('language', ['zh', 'fr'])
+def test_translation_files_cover_required_rayher_strings(language):
+    translations = _load_translation_csv(language)
+
+    missing = REQUIRED_TRANSLATION_STRINGS - set(translations)
+    assert missing == set()
+    assert all(translations[source] for source in REQUIRED_TRANSLATION_STRINGS)
