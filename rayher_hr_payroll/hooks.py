@@ -7,6 +7,7 @@ app_license = "MIT"
 
 required_apps = ["erpnext", "hrms"]
 after_install = "rayher_hr_payroll.install.after_install"
+after_migrate = "rayher_hr_payroll.install.after_install"
 
 doc_events = {
     "Timesheet": {

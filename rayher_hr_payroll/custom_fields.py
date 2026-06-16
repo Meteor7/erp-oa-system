@@ -87,11 +87,18 @@ CUSTOM_FIELDS = {
             "insert_after": "capitalization_start_date",
         },
         {
+            "fieldname": "project_owner",
+            "label": "项目负责人",
+            "fieldtype": "Link",
+            "options": "User",
+            "insert_after": "capitalization_end_date",
+        },
+        {
             "fieldname": "supervising_leader",
             "label": "分管领导",
             "fieldtype": "Link",
             "options": "Employee",
-            "insert_after": "capitalization_end_date",
+            "insert_after": "project_owner",
         },
         {
             "fieldname": "ip_reference",

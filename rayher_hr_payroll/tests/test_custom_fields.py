@@ -14,6 +14,8 @@ def test_project_capitalization_fields_exist():
     fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Project"]}
 
     assert fields["allow_rd_timesheet"]["fieldtype"] == "Check"
+    assert fields["project_owner"]["fieldtype"] == "Link"
+    assert fields["project_owner"]["options"] == "User"
     assert fields["capitalization_start_date"]["fieldtype"] == "Date"
     assert fields["capitalization_end_date"]["fieldtype"] == "Date"
 
@@ -29,3 +31,10 @@ def test_custom_fieldnames_are_unique_per_doctype():
     for doctype, fields in CUSTOM_FIELDS.items():
         names = [field["fieldname"] for field in fields]
         assert len(names) == len(set(names)), doctype
+
+
+def test_custom_fields_sync_on_install_and_migrate():
+    from rayher_hr_payroll import hooks
+
+    assert hooks.after_install == "rayher_hr_payroll.install.after_install"
+    assert hooks.after_migrate == "rayher_hr_payroll.install.after_install"
