@@ -32,3 +32,14 @@ def test_validate_compensatory_leave_dates_allows_normal_holiday():
         is_statutory_holiday=lambda work_date: False,
         throw=throw,
     )
+
+def test_validate_compensatory_leave_dates_translates_message():
+    doc = SimpleNamespace(work_from_date='2026-10-01')
+
+    with pytest.raises(RuleError, match='T:Statutory holiday overtime'):
+        validate_compensatory_leave_dates(
+            doc,
+            is_statutory_holiday=lambda date: True,
+            throw=throw,
+            translate=lambda text: f'T:{text}',
+        )

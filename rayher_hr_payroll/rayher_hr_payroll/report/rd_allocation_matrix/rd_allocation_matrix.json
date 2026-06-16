@@ -4,5 +4,14 @@
   "ref_doctype": "RD Cost Allocation",
   "report_type": "Script Report",
   "is_standard": "Yes",
-  "module": "Rayher HR Payroll"
+  "module": "Rayher HR Payroll",
+  "filters": [
+    {
+      "fieldname": "allocation",
+      "label": "Allocation",
+      "fieldtype": "Link",
+      "options": "RD Cost Allocation",
+      "reqd": 1
+    }
+  ]
 }

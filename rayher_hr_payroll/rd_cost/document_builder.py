@@ -55,4 +55,5 @@ def populate_allocation_document(
 
     doc.capitalized_total = result.stage_totals["capitalized"]
     doc.expensed_total = result.stage_totals["expensed"]
+    doc.unknown_total = result.stage_totals["unknown"]
     doc.status = "Calculated"

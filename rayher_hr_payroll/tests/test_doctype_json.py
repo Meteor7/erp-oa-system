@@ -49,3 +49,37 @@ def test_rayher_hr_settings_contains_standard_daily_hours():
 
     assert doc["issingle"] == 1
     assert "standard_daily_hours" in fieldnames(doc)
+
+def load_report(folder: str) -> dict:
+    path = MODULE_ROOT / "report" / folder / f"{folder}.json"
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def test_period_fields_are_derived_read_only_values():
+    for folder in ["rd_cost_allocation", "rd_expense_import", "rd_period_lock"]:
+        fields = {field["fieldname"]: field for field in load_doctype(folder)["fields"]}
+        assert fields["period"].get("read_only") == 1
+        assert fields["period"].get("reqd") != 1
+
+
+def test_reports_declare_required_filters():
+    exceptions = load_report("rd_timesheet_exceptions")
+    matrix = load_report("rd_allocation_matrix")
+
+    assert {field["fieldname"] for field in exceptions["filters"]} == {"year", "month"}
+    assert {field["fieldname"] for field in matrix["filters"]} == {"allocation"}
+
+
+def test_rd_cost_allocation_has_unknown_total():
+    fields = {field["fieldname"]: field for field in load_doctype("rd_cost_allocation")["fields"]}
+
+    assert fields["unknown_total"]["fieldtype"] == "Currency"
+
+
+def test_period_doctype_controllers_normalize_before_insert():
+    from rayher_hr_payroll.rayher_hr_payroll.doctype.rd_cost_allocation.rd_cost_allocation import RDCostAllocation
+    from rayher_hr_payroll.rayher_hr_payroll.doctype.rd_expense_import.rd_expense_import import RDExpenseImport
+    from rayher_hr_payroll.rayher_hr_payroll.doctype.rd_period_lock.rd_period_lock import RDPeriodLock
+
+    assert all(hasattr(cls, "before_insert") for cls in [RDCostAllocation, RDExpenseImport, RDPeriodLock])

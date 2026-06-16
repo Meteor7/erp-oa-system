@@ -51,7 +51,6 @@ def test_direct_project_expense_bypasses_hour_ratio():
     result = allocate_expenses(expenses=expenses, project_hours=hours)
 
     assert result.project_amounts == {
-        "RD-CAP": Decimal("0.00"),
         "RD-EXP": Decimal("500.00"),
     }
     assert result.stage_totals["expensed"] == Decimal("500.00")
@@ -124,3 +123,43 @@ def test_merge_direct_project_stages_adds_zero_hour_entries():
     assert by_project["RD-EXP"].hours == Decimal("40")  # unchanged
     assert by_project["RD-CAP-IDLE"].hours == Decimal("0")
     assert by_project["RD-CAP-IDLE"].stage == "capitalized"
+
+
+def test_unknown_project_stage_is_preserved_for_historical_data():
+    expenses = [
+        ExpenseItem(
+            name="GL-UNKNOWN-001",
+            amount=Decimal("100.00"),
+            account_level_3="power",
+            category="direct_input",
+        )
+    ]
+    hours = [ProjectHour(project="RD-UNKNOWN", hours=Decimal("8"), stage="unknown")]
+
+    result = allocate_expenses(expenses=expenses, project_hours=hours)
+
+    assert result.project_amounts == {"RD-UNKNOWN": Decimal("100.00")}
+    assert result.lines[0].stage == "unknown"
+    assert result.stage_totals["capitalized"] == Decimal("0.00")
+    assert result.stage_totals["expensed"] == Decimal("0.00")
+    assert result.stage_totals["unknown"] == Decimal("100.00")
+
+
+def test_direct_project_expense_emits_only_the_target_project_line():
+    expenses = [
+        ExpenseItem(
+            name="GL-DIRECT-001",
+            amount=Decimal("500.00"),
+            account_level_3="testing",
+            category="direct_input",
+            direct_project="RD-EXP",
+        )
+    ]
+    hours = [
+        ProjectHour(project="RD-CAP", hours=Decimal("99"), stage="capitalized"),
+        ProjectHour(project="RD-EXP", hours=Decimal("1"), stage="expensed"),
+    ]
+
+    result = allocate_expenses(expenses=expenses, project_hours=hours)
+
+    assert [(line.project, line.amount) for line in result.lines] == [("RD-EXP", Decimal("500.00"))]

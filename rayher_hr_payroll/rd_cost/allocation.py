@@ -92,8 +92,7 @@ def allocate_expenses(
     for expense in expenses:
         amount = _money(expense.amount)
         if expense.direct_project:
-            allocations = {project: ZERO for project in stages}
-            allocations[expense.direct_project] = amount
+            allocations = {expense.direct_project: amount}
         else:
             allocations = _weighted_amounts(amount, project_hours)
 
@@ -101,6 +100,8 @@ def allocate_expenses(
         hours_by_project = {row.project: row.hours for row in project_hours}
         for project in sorted(allocations):
             allocated_amount = _money(allocations[project])
+            if allocated_amount == ZERO:
+                continue
             stage = stages.get(project, "unknown")
             basis_hours = hours_by_project.get(project, Decimal("0"))
             ratio = (basis_hours / total_hours) if not expense.direct_project else Decimal("0")
@@ -116,6 +117,15 @@ def allocate_expenses(
             )
             project_amounts[project] = _money(project_amounts[project] + allocated_amount)
             stage_totals[stage] = _money(stage_totals[stage] + allocated_amount)
+
+    expected_total = _money(sum((_money(expense.amount) for expense in expenses), ZERO))
+    allocated_total = _money(
+        stage_totals["capitalized"] + stage_totals["expensed"] + stage_totals["unknown"]
+    )
+    if allocated_total != expected_total:
+        raise ValueError(
+            f"allocation totals do not reconcile: allocated {allocated_total}, expected {expected_total}"
+        )
 
     return AllocationResult(
         lines=lines,

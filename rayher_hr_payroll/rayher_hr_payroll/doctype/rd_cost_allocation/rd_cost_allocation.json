@@ -13,7 +13,7 @@
       "fieldname": "period",
       "label": "Period",
       "fieldtype": "Data",
-      "reqd": 1
+      "read_only": 1
     },
     {
       "fieldname": "year",
@@ -73,6 +73,12 @@
     {
       "fieldname": "expensed_total",
       "label": "Expensed Total",
+      "fieldtype": "Currency",
+      "reqd": 0
+    },
+    {
+      "fieldname": "unknown_total",
+      "label": "Unknown Stage Total",
       "fieldtype": "Currency",
       "reqd": 0
     },

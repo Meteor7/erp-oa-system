@@ -59,7 +59,7 @@ def _company():
     frappe = _get_frappe()
     company = frappe.defaults.get_global_default("company")
     if not company:
-        frappe.throw("Set a default company before loading Rayher demo data.")
+        frappe.throw(frappe._("Set a default company before loading Rayher demo data."))
     return company
 
 
@@ -175,7 +175,15 @@ def _create_expense_import():
     return expense_import
 
 
-def create_demo_data():
+def _ensure_demo_allowed(force: bool) -> None:
+    if force:
+        return
+    frappe = _get_frappe()
+    frappe.throw(frappe._('Pass force=True to create Rayher demo data on this site.'))
+
+
+def create_demo_data(force: bool = False):
+    _ensure_demo_allowed(force)
     frappe = _get_frappe()
     company = _company()
     employee = _ensure_master_data(company)

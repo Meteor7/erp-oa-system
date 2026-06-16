@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -25,10 +25,33 @@ def _value(row: Any, fieldname: str, default: Any = None) -> Any:
 def _parse_date(value: Any) -> date | None:
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value.date()
     if isinstance(value, date):
         return value
-    year, month, day = str(value).split("-")
+    text = str(value).split()[0]
+    year, month, day = text.split("-")
     return date(int(year), int(month), int(day))
+
+
+_LEGACY_SOURCE_ROW_KEY_FIELDS = (
+    "voucher_no",
+    "account_level_1",
+    "account_level_2",
+    "account_level_3",
+    "account_level_4",
+    "amount",
+    "direct_project",
+)
+
+
+def source_row_key_for_row(row: Any) -> str:
+    raw_source_row_key = _value(row, "source_row_key")
+    source_row_key = str(raw_source_row_key).strip() if raw_source_row_key is not None else ""
+    if source_row_key:
+        return source_row_key
+    parts = [str(_value(row, fieldname)).strip() for fieldname in _LEGACY_SOURCE_ROW_KEY_FIELDS]
+    return "legacy|" + "|".join(parts)
 
 
 def stage_for_period(project: Mapping[str, Any], *, year: int, month: int) -> ProjectStage:
@@ -76,7 +99,7 @@ def expense_items_from_rows(rows: Iterable[Any], *, on_duplicate=None) -> list[E
     result: list[ExpenseItem] = []
 
     for row in rows:
-        source_row_key = _value(row, "source_row_key")
+        source_row_key = source_row_key_for_row(row)
         if source_row_key in seen:
             message = f"Duplicate GL source row in import: {source_row_key}"
             if on_duplicate:
@@ -104,7 +127,7 @@ def source_expense_rows_from_rows(rows: Iterable[Any]) -> list[dict[str, Any]]:
         result.append(
             {
                 "expense_item": str(_value(row, "name")),
-                "source_row_key": _value(row, "source_row_key"),
+                "source_row_key": source_row_key_for_row(row),
                 "voucher_no": _value(row, "voucher_no"),
                 "account_level_1": _value(row, "account_level_1"),
                 "account_level_2": _value(row, "account_level_2"),
@@ -176,31 +199,45 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
     return snapshot_rows
 
 
-def get_project_hours(*, year: int, month: int) -> list[ProjectHour]:
-    frappe = _get_frappe()
+def project_hours_from_rows(
+    rows: Iterable[Any],
+    *,
+    year: int,
+    month: int,
+    get_project_fields=None,
+) -> list[ProjectHour]:
+    if get_project_fields is None:
+        frappe = _get_frappe()
+
+        def get_project_fields(project: str):
+            return frappe.db.get_value(
+                "Project",
+                project,
+                ["capitalization_start_date", "capitalization_end_date"],
+                as_dict=True,
+            ) or {}
+
     hours_by_project: dict[str, Decimal] = {}
-    for row in get_project_hour_rows(year=year, month=month):
-        project = str(row["project"])
+    for row in rows:
+        project = str(_value(row, "project"))
         hours_by_project[project] = hours_by_project.get(project, Decimal("0")) + Decimal(
-            str(row["hours"] or 0)
+            str(_value(row, "hours", 0) or 0)
         )
 
     result = []
     for project, hours in sorted(hours_by_project.items()):
-        project_fields = frappe.db.get_value(
-            "Project",
-            project,
-            ["capitalization_start_date", "capitalization_end_date"],
-            as_dict=True,
-        ) or {}
         result.append(
             ProjectHour(
                 project=project,
                 hours=hours,
-                stage=stage_for_period(project_fields, year=year, month=month),
+                stage=stage_for_period(get_project_fields(project), year=year, month=month),
             )
         )
     return result
+
+
+def get_project_hours(*, year: int, month: int) -> list[ProjectHour]:
+    return project_hours_from_rows(get_project_hour_rows(year=year, month=month), year=year, month=month)
 
 
 def _expense_import_rows(expense_import: str) -> list[Any]:
