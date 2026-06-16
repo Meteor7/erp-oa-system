@@ -219,3 +219,36 @@ def get_source_expense_rows(expense_import: str) -> list[dict[str, Any]]:
     rows = _expense_import_rows(expense_import)
     expense_items_from_rows(rows, on_duplicate=frappe.throw)
     return source_expense_rows_from_rows(rows)
+
+
+def ensure_direct_project_stages(
+    project_hours: list[ProjectHour],
+    expenses: list[ExpenseItem],
+    *,
+    year: int,
+    month: int,
+) -> list[ProjectHour]:
+    """G2: a GL line directly attributed to a project that logged no hours this
+    period must still be classified by that project's real capitalization stage.
+    Resolve each such project's stage from its dates and merge it in at zero hours."""
+    from rayher_hr_payroll.rd_cost.allocation import merge_direct_project_stages
+
+    frappe = _get_frappe()
+    present = {ph.project for ph in project_hours}
+    stage_by_project: dict[str, ProjectStage] = {}
+    for expense in expenses:
+        dp = expense.direct_project
+        if dp and dp not in present and dp not in stage_by_project:
+            fields = (
+                frappe.db.get_value(
+                    "Project",
+                    dp,
+                    ["capitalization_start_date", "capitalization_end_date"],
+                    as_dict=True,
+                )
+                or {}
+            )
+            stage_by_project[dp] = stage_for_period(fields, year=year, month=month)
+    if not stage_by_project:
+        return project_hours
+    return merge_direct_project_stages(project_hours, stage_by_project)

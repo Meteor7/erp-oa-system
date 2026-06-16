@@ -69,3 +69,58 @@ def test_zero_hours_without_direct_project_is_rejected():
 
     with pytest.raises(ValueError, match="project_hours total must be greater than zero"):
         allocate_expenses(expenses=expenses, project_hours=[])
+
+# --- G2: direct_project stage classification ---
+
+def test_direct_project_zero_hours_with_stage_classifies_correctly():
+    """A direct expense to a project that has 0 logged hours this month must still
+    land in that project's real capitalization stage, not 'unknown'."""
+    expenses = [
+        ExpenseItem(
+            name="GL-EQUIP-001",
+            amount=Decimal("1000.00"),
+            account_level_3="equipment",
+            category="depreciation",
+            direct_project="RD-CAP-IDLE",
+        )
+    ]
+    hours = [
+        ProjectHour(project="RD-CAP-IDLE", hours=Decimal("0"), stage="capitalized"),
+        ProjectHour(project="RD-EXP", hours=Decimal("40"), stage="expensed"),
+    ]
+
+    result = allocate_expenses(expenses=expenses, project_hours=hours)
+
+    assert result.project_amounts["RD-CAP-IDLE"] == Decimal("1000.00")
+    assert result.stage_totals["capitalized"] == Decimal("1000.00")
+    assert result.stage_totals["unknown"] == Decimal("0.00")
+
+
+def test_direct_project_absent_from_project_hours_raises():
+    """If a direct_project is entirely missing from project_hours, the allocator must
+    fail loudly instead of silently classifying the amount as 'unknown'."""
+    expenses = [
+        ExpenseItem(
+            name="GL-EQUIP-002",
+            amount=Decimal("1000.00"),
+            account_level_3="equipment",
+            category="depreciation",
+            direct_project="RD-GHOST",
+        )
+    ]
+    hours = [ProjectHour(project="RD-EXP", hours=Decimal("40"), stage="expensed")]
+
+    with pytest.raises(ValueError, match="RD-GHOST"):
+        allocate_expenses(expenses=expenses, project_hours=hours)
+
+
+def test_merge_direct_project_stages_adds_zero_hour_entries():
+    from rayher_hr_payroll.rd_cost.allocation import merge_direct_project_stages
+
+    hours = [ProjectHour(project="RD-EXP", hours=Decimal("40"), stage="expensed")]
+    merged = merge_direct_project_stages(hours, {"RD-CAP-IDLE": "capitalized", "RD-EXP": "expensed"})
+
+    by_project = {ph.project: ph for ph in merged}
+    assert by_project["RD-EXP"].hours == Decimal("40")  # unchanged
+    assert by_project["RD-CAP-IDLE"].hours == Decimal("0")
+    assert by_project["RD-CAP-IDLE"].stage == "capitalized"

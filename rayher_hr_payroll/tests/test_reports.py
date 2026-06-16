@@ -61,3 +61,18 @@ def test_build_timesheet_exception_rows_reports_missing_hours():
             "message": "2026-01 has no submitted timesheet hours.",
         }
     ]
+
+def test_build_unclassified_rd_rows_flags_hours_without_rd_type():
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
+        build_unclassified_rd_rows,
+    )
+
+    logs = [
+        {"employee": "EMP-1", "employee_name": "Alice", "rd_personnel_type": "全时研发", "hours": Decimal("8")},
+        {"employee": "EMP-2", "employee_name": "Bob", "rd_personnel_type": None, "hours": Decimal("6")},
+        {"employee": "EMP-3", "employee_name": "Cara", "rd_personnel_type": "非研发", "hours": Decimal("5")},
+    ]
+    rows = build_unclassified_rd_rows(logs)
+
+    assert {r["employee"] for r in rows} == {"EMP-2", "EMP-3"}
+    assert all(r["exception_type"] == "Unclassified R&D Hours" for r in rows)

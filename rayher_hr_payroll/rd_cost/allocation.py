@@ -28,6 +28,23 @@ def _sum_hours(project_hours: list[ProjectHour]) -> Decimal:
     return total
 
 
+def merge_direct_project_stages(
+    project_hours: list[ProjectHour],
+    stage_by_project: dict[str, ProjectStage],
+) -> list[ProjectHour]:
+    """Ensure every project named in ``stage_by_project`` is represented in
+    ``project_hours``. Projects that logged no hours this period are appended with
+    zero hours and their real (date-derived) capitalization stage, so a direct
+    expense to an idle project is still classified correctly instead of 'unknown'."""
+    present = {row.project for row in project_hours}
+    result = list(project_hours)
+    for project, stage in stage_by_project.items():
+        if project not in present:
+            result.append(ProjectHour(project=project, hours=Decimal("0"), stage=stage))
+            present.add(project)
+    return result
+
+
 def _weighted_amounts(
     amount: Decimal, project_hours: list[ProjectHour]
 ) -> dict[str, Decimal]:
@@ -53,6 +70,17 @@ def allocate_expenses(
     *, expenses: list[ExpenseItem], project_hours: list[ProjectHour]
 ) -> AllocationResult:
     stages = _stage_by_project(project_hours)
+
+    # G2 guard: a direct expense must target a project whose stage we know. If the
+    # project is absent from project_hours we cannot classify capitalized/expensed,
+    # so fail loudly instead of silently bucketing the amount into 'unknown'.
+    for expense in expenses:
+        if expense.direct_project and expense.direct_project not in stages:
+            raise ValueError(
+                f"direct_project '{expense.direct_project}' is not present in "
+                "project_hours; its capitalization stage cannot be determined"
+            )
+
     lines = []
     project_amounts = defaultdict(lambda: ZERO)
     stage_totals: dict[ProjectStage, Decimal] = {
