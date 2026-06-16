@@ -80,3 +80,29 @@ capitalized_total = 720.00
 expensed_total = 480.00
 total = 1200.00
 ```
+
+## I18n Verification
+
+Rayher custom app i18n uses Frappe native User.language and app translation CSV files.
+
+Verified on 2026-06-16 from the WSL worktree branch rayher-i18n:
+
+    cd /home/rayher/worktrees/logistics/rayher-i18n
+    /home/rayher/frappe-bench/env/bin/python -m pytest rayher_hr_payroll/tests -q
+    /home/rayher/frappe-bench/env/bin/python -m compileall -q rayher_hr_payroll
+
+Bench verification after syncing the worktree app into /home/rayher/frappe-bench/apps/rayher_hr_payroll:
+
+    cd /home/rayher/frappe-bench
+    /home/rayher/.local/bin/bench --site rayher.localhost migrate
+    /home/rayher/.local/bin/bench --site rayher.localhost clear-cache
+    /home/rayher/.local/bin/bench --site rayher.localhost execute rayher_hr_payroll.i18n.get_language_options
+
+Language switching was verified by executing rayher_hr_payroll.i18n.set_language with fr and then zh. Both calls returned reload true.
+
+The 2026-01 demo allocation was rerun after i18n changes. Verified allocation f35i4qs3n8:
+
+    capitalized_total = 720.000000000
+    expensed_total = 480.000000000
+    RD-CAP capitalized = 720.000000000
+    RD-EXP expensed = 480.000000000
