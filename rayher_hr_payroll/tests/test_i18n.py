@@ -118,7 +118,7 @@ def _translation_path(language):
     from pathlib import Path
 
     app_root = Path(__file__).resolve().parents[1]
-    return app_root / 'rayher_hr_payroll' / 'translations' / f'{language}.csv'
+    return app_root / 'translations' / f'{language}.csv'
 
 
 def _load_translation_csv(language):
