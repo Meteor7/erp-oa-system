@@ -121,6 +121,23 @@ def test_build_unclassified_rd_rows_translates_labels_and_message_template():
     assert rows[0]['message'].endswith('excluded from R&D allocation.')
 
 
+def test_allocation_matrix_skips_blank_project_lines():
+    lines = [
+        SimpleNamespace(voucher_no="V-001", expense_item_name="ITEM-1", project=None, allocated_amount=Decimal("99.00")),
+        SimpleNamespace(voucher_no="V-001", expense_item_name="ITEM-1", project="", allocated_amount=Decimal("88.00")),
+        SimpleNamespace(voucher_no="V-001", expense_item_name="ITEM-1", project="RD-CAP", allocated_amount=Decimal("10.00")),
+    ]
+
+    columns, rows = build_allocation_matrix(lines)
+
+    assert [(column["label"], column["fieldname"]) for column in columns] == [
+        ("Voucher No", "voucher_no"),
+        ("Expense Item", "expense_item_name"),
+        ("RD-CAP", "project_1"),
+    ]
+    assert rows == [{"voucher_no": "V-001", "expense_item_name": "ITEM-1", "project_1": Decimal("10.00")}]
+
+
 def test_allocation_matrix_uses_safe_project_fieldnames_and_accumulates_duplicate_cells():
     lines = [
         SimpleNamespace(voucher_no="V-001", expense_item_name="ITEM-1", project="voucher_no", allocated_amount=Decimal("10.00")),

@@ -4,6 +4,7 @@ import pytest
 
 from rayher_hr_payroll.i18n import (
     SUPPORTED_LANGUAGES,
+    _set_language,
     get_language_options,
     normalize_language,
     set_language,
@@ -68,7 +69,7 @@ def test_language_options_are_limited_to_chinese_english_and_french():
 def test_set_language_persists_current_user_language_and_clears_cache():
     fake = FakeFrappe()
 
-    result = set_language('fr-FR', frappe_module=fake)
+    result = _set_language('fr-FR', frappe_module=fake)
 
     assert result == {'language': 'fr', 'reload': True}
     assert fake.local.lang == 'fr'
@@ -82,7 +83,13 @@ def test_set_language_rejects_guest_user():
     fake = FakeFrappe(user='Guest')
 
     with pytest.raises(ValueError, match='Login is required'):
-        set_language('zh', frappe_module=fake)
+        _set_language('zh', frappe_module=fake)
+
+
+def test_public_set_language_signature_exposes_only_language():
+    import inspect
+
+    assert list(inspect.signature(set_language).parameters) == ['language']
 
 
 REQUIRED_TRANSLATION_STRINGS = {
@@ -100,6 +107,7 @@ REQUIRED_TRANSLATION_STRINGS = {
     'Logged {0} h on R&D projects but rd_personnel_type is ' + chr(39) + '{1}' + chr(39) + '; excluded from R&D allocation.',
     'R&D period {0} is locked; timesheet changes require a correction workflow.',
     'Project {0} is not enabled for R&D timesheet entry.',
+    'Project {0} needs capitalization start and end dates before R&D timesheet entry.',
     'Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy.',
     'A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost.',
     'Set a default company before loading Rayher demo data.',

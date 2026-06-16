@@ -118,21 +118,34 @@ def test_expense_items_from_rows_rejects_duplicate_source_row_key():
         expense_items_from_rows(rows)
 
 
-@pytest.mark.parametrize("source_row_key", [None, "", "   "])
-def test_expense_items_from_rows_rejects_missing_source_row_key(source_row_key):
-    rows = [
-        SimpleNamespace(
-            name="ROW-001",
-            amount="100",
-            account_level_3="Power",
-            category="direct_input",
-            direct_project=None,
-            source_row_key=source_row_key,
-        )
-    ]
+def legacy_row(name, source_row_key=None):
+    return SimpleNamespace(
+        name=name,
+        amount="100",
+        voucher_no="V-001",
+        account_level_1="RD Expense",
+        account_level_2="Direct Input",
+        account_level_3="Power",
+        account_level_4="Electricity",
+        category="direct_input",
+        direct_project=None,
+        source_row_key=source_row_key,
+    )
 
-    with pytest.raises(ValueError, match="Missing GL source row key in import: ROW-001"):
+
+def test_expense_items_from_rows_rejects_duplicate_legacy_rows_without_source_row_key():
+    rows = [legacy_row("ROW-001"), legacy_row("ROW-002", source_row_key="   ")]
+
+    with pytest.raises(ValueError, match="Duplicate GL source row in import: legacy"):
         expense_items_from_rows(rows)
+
+
+def test_source_expense_rows_from_rows_populates_fallback_source_row_key():
+    rows = [legacy_row("ROW-001")]
+
+    snapshots = source_expense_rows_from_rows(rows)
+
+    assert snapshots[0]["source_row_key"].startswith("legacy|V-001|RD Expense|Direct Input|Power|Electricity|100|None")
 
 
 def test_historical_org_for_date_accepts_datetime_strings_with_time():

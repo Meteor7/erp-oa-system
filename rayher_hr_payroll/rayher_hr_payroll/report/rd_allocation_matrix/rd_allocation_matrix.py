@@ -39,6 +39,9 @@ def build_allocation_matrix(
 
     rows_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
     for line in line_rows:
+        project_value = _value(line, 'project')
+        if not project_value:
+            continue
         key = (_value(line, 'voucher_no'), _value(line, 'expense_item_name'))
         row = rows_by_key.setdefault(
             key,
@@ -47,9 +50,9 @@ def build_allocation_matrix(
                 'expense_item_name': _value(line, 'expense_item_name'),
             },
         )
-        project = str(_value(line, 'project'))
+        project = str(project_value)
         fieldname = project_fieldnames[project]
-        row[fieldname] = row.get(fieldname, 0) + _value(line, 'allocated_amount')
+        row[fieldname] = row.get(fieldname, 0) + (_value(line, 'allocated_amount') or 0)
 
     return columns, list(rows_by_key.values())
 

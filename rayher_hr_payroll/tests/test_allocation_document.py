@@ -51,6 +51,7 @@ def test_populate_allocation_document_writes_lines_and_snapshots():
 
     assert doc.capitalized_total == Decimal("600.00")
     assert doc.expensed_total == Decimal("400.00")
+    assert doc.unknown_total == Decimal("0.00")
     assert doc.status == "Calculated"
     assert doc.hour_snapshots == hour_rows
     assert doc.expense_snapshots == expense_rows
@@ -62,3 +63,20 @@ def test_populate_allocation_document_writes_lines_and_snapshots():
         "RD-CAP": 60.0,
         "RD-EXP": 40.0,
     }
+
+
+def test_populate_allocation_document_writes_unknown_total():
+    doc = FakeDoc()
+
+    populate_allocation_document(
+        doc,
+        expenses=[ExpenseItem(name="ROW-UNKNOWN", amount=Decimal("100.00"), account_level_3="Power", category="direct_input")],
+        source_hour_rows=[],
+        source_expense_rows=[{"expense_item": "ROW-UNKNOWN", "voucher_no": "V-UNKNOWN"}],
+        project_hours=[ProjectHour(project="RD-UNKNOWN", hours=Decimal("8"), stage="unknown")],
+    )
+
+    assert doc.capitalized_total == Decimal("0.00")
+    assert doc.expensed_total == Decimal("0.00")
+    assert doc.unknown_total == Decimal("100.00")
+    assert doc.lines[0]["project_stage"] == "unknown"

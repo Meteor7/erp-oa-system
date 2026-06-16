@@ -125,7 +125,7 @@ def test_merge_direct_project_stages_adds_zero_hour_entries():
     assert by_project["RD-CAP-IDLE"].stage == "capitalized"
 
 
-def test_unknown_project_stage_is_rejected_before_money_can_be_dropped():
+def test_unknown_project_stage_is_preserved_for_historical_data():
     expenses = [
         ExpenseItem(
             name="GL-UNKNOWN-001",
@@ -136,8 +136,13 @@ def test_unknown_project_stage_is_rejected_before_money_can_be_dropped():
     ]
     hours = [ProjectHour(project="RD-UNKNOWN", hours=Decimal("8"), stage="unknown")]
 
-    with pytest.raises(ValueError, match="unknown capitalization stage"):
-        allocate_expenses(expenses=expenses, project_hours=hours)
+    result = allocate_expenses(expenses=expenses, project_hours=hours)
+
+    assert result.project_amounts == {"RD-UNKNOWN": Decimal("100.00")}
+    assert result.lines[0].stage == "unknown"
+    assert result.stage_totals["capitalized"] == Decimal("0.00")
+    assert result.stage_totals["expensed"] == Decimal("0.00")
+    assert result.stage_totals["unknown"] == Decimal("100.00")
 
 
 def test_direct_project_expense_emits_only_the_target_project_line():

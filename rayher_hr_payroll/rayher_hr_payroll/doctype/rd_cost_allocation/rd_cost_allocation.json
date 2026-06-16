@@ -77,6 +77,12 @@
       "reqd": 0
     },
     {
+      "fieldname": "unknown_total",
+      "label": "Unknown Stage Total",
+      "fieldtype": "Currency",
+      "reqd": 0
+    },
+    {
       "fieldname": "lines",
       "label": "Lines",
       "fieldtype": "Table",

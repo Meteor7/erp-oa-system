@@ -63,18 +63,37 @@ def ensure_period_unlocked(
             throw(translate(template).format(period))
 
 
+def _row_value(row: Any, fieldname: str, default: Any = None) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(fieldname, default)
+    return getattr(row, fieldname, default)
+
+
+def _entry_date(doc: Any, row: Any) -> date | None:
+    return _as_date(_row_value(row, 'from_time')) or _as_date(getattr(doc, 'start_date', None))
+
+
 def ensure_rd_projects_enabled(
     doc: Any,
     *,
     is_project_enabled: Callable[[str], bool],
     throw: Callable[[str], None],
     translate: Callable[[str], str] = _identity,
+    project_stage_for_entry: Callable[[str, date | None], str | None] | None = None,
+    block_unknown_project_stage: bool = False,
 ) -> None:
-    template = 'Project {0} is not enabled for R&D timesheet entry.'
+    enabled_template = 'Project {0} is not enabled for R&D timesheet entry.'
+    stage_template = 'Project {0} needs capitalization start and end dates before R&D timesheet entry.'
     for row in getattr(doc, 'time_logs', []) or []:
-        project = getattr(row, 'project', None)
-        if project and not is_project_enabled(project):
-            throw(translate(template).format(project))
+        project = _row_value(row, 'project')
+        if not project:
+            continue
+        if not is_project_enabled(project):
+            throw(translate(enabled_template).format(project))
+        if project_stage_for_entry:
+            stage = project_stage_for_entry(project, _entry_date(doc, row))
+            if block_unknown_project_stage and stage == 'unknown':
+                throw(translate(stage_template).format(project))
 
 
 def distinct_project_owners(time_logs: Any, owner_of: Callable[[str], Any]) -> list[str]:
@@ -106,6 +125,21 @@ def _is_period_locked(period: str | None) -> bool:
 def _is_project_enabled(project: str) -> bool:
     frappe = _get_frappe()
     return bool(frappe.db.get_value('Project', project, 'allow_rd_timesheet'))
+
+
+def _project_stage_for_entry(project: str, posting_date: date | None) -> str:
+    if posting_date is None:
+        return 'unknown'
+    frappe = _get_frappe()
+    from rayher_hr_payroll.rd_cost.frappe_adapter import stage_for_period
+
+    fields = frappe.db.get_value(
+        'Project',
+        project,
+        ['capitalization_start_date', 'capitalization_end_date'],
+        as_dict=True,
+    ) or {}
+    return stage_for_period(fields, year=posting_date.year, month=posting_date.month)
 
 
 def block_locked_timesheet_change(doc: Any, method: str | None = None) -> None:

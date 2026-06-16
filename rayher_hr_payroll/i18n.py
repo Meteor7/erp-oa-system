@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import frappe  # type: ignore[import-not-found]
+
 SUPPORTED_LANGUAGES = {
     'zh': {'label': '\u4e2d\u6587', 'name': 'Chinese'},
     'en': {'label': 'English', 'name': 'English'},
@@ -12,8 +14,6 @@ _TRANSLATION_CACHE_KEYS = ('merged_translations', 'lang_user_translations')
 
 
 def _get_frappe():
-    import frappe  # type: ignore[import-not-found]
-
     return frappe
 
 
@@ -70,7 +70,7 @@ def _set_current_user_language(language: str, frappe_module: Any) -> dict[str, A
     return {'language': language, 'reload': True}
 
 
-def set_language(language: str, frappe_module: Any | None = None) -> dict[str, Any]:
+def _set_language(language: str, frappe_module: Any | None = None) -> dict[str, Any]:
     frappe = frappe_module or _get_frappe()
     try:
         normalized = normalize_language(language)
@@ -79,16 +79,6 @@ def set_language(language: str, frappe_module: Any | None = None) -> dict[str, A
     return _set_current_user_language(normalized, frappe)
 
 
-def _register_whitelisted_method(frappe_module: Any | None = None) -> None:
-    frappe = frappe_module or _get_frappe()
-    whitelisted = frappe.whitelisted
-    if set_language not in whitelisted:
-        add_method = getattr(whitelisted, 'add', None) or getattr(whitelisted, 'append')
-        add_method(set_language)
-    frappe.allowed_http_methods_for_whitelisted_func[set_language] = ['POST']
-
-
-try:
-    _register_whitelisted_method()
-except ImportError:
-    pass
+@frappe.whitelist(methods=['POST'])
+def set_language(language: str) -> dict[str, Any]:
+    return _set_language(language)

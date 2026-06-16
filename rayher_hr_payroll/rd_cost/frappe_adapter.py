@@ -34,6 +34,26 @@ def _parse_date(value: Any) -> date | None:
     return date(int(year), int(month), int(day))
 
 
+_LEGACY_SOURCE_ROW_KEY_FIELDS = (
+    "voucher_no",
+    "account_level_1",
+    "account_level_2",
+    "account_level_3",
+    "account_level_4",
+    "amount",
+    "direct_project",
+)
+
+
+def source_row_key_for_row(row: Any) -> str:
+    raw_source_row_key = _value(row, "source_row_key")
+    source_row_key = str(raw_source_row_key).strip() if raw_source_row_key is not None else ""
+    if source_row_key:
+        return source_row_key
+    parts = [str(_value(row, fieldname)).strip() for fieldname in _LEGACY_SOURCE_ROW_KEY_FIELDS]
+    return "legacy|" + "|".join(parts)
+
+
 def stage_for_period(project: Mapping[str, Any], *, year: int, month: int) -> ProjectStage:
     start = _parse_date(project.get("capitalization_start_date"))
     end = _parse_date(project.get("capitalization_end_date"))
@@ -79,14 +99,7 @@ def expense_items_from_rows(rows: Iterable[Any], *, on_duplicate=None) -> list[E
     result: list[ExpenseItem] = []
 
     for row in rows:
-        raw_source_row_key = _value(row, "source_row_key")
-        source_row_key = str(raw_source_row_key).strip() if raw_source_row_key is not None else ""
-        if not source_row_key:
-            row_name = str(_value(row, "name") or "<unknown>")
-            message = f"Missing GL source row key in import: {row_name}"
-            if on_duplicate:
-                on_duplicate(message)
-            raise ValueError(message)
+        source_row_key = source_row_key_for_row(row)
         if source_row_key in seen:
             message = f"Duplicate GL source row in import: {source_row_key}"
             if on_duplicate:
@@ -114,7 +127,7 @@ def source_expense_rows_from_rows(rows: Iterable[Any]) -> list[dict[str, Any]]:
         result.append(
             {
                 "expense_item": str(_value(row, "name")),
-                "source_row_key": _value(row, "source_row_key"),
+                "source_row_key": source_row_key_for_row(row),
                 "voucher_no": _value(row, "voucher_no"),
                 "account_level_1": _value(row, "account_level_1"),
                 "account_level_2": _value(row, "account_level_2"),

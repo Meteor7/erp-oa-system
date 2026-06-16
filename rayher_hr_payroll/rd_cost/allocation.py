@@ -21,13 +21,6 @@ def _stage_by_project(project_hours: list[ProjectHour]) -> dict[str, ProjectStag
     return {row.project: row.stage for row in project_hours}
 
 
-def _ensure_known_project_stages(project_hours: list[ProjectHour]) -> None:
-    unknown_projects = sorted({row.project for row in project_hours if row.stage == "unknown"})
-    if unknown_projects:
-        projects = ", ".join(unknown_projects)
-        raise ValueError(f"unknown capitalization stage for projects: {projects}")
-
-
 def _sum_hours(project_hours: list[ProjectHour]) -> Decimal:
     total = sum((row.hours for row in project_hours), Decimal("0"))
     if total <= 0:
@@ -76,7 +69,6 @@ def _weighted_amounts(
 def allocate_expenses(
     *, expenses: list[ExpenseItem], project_hours: list[ProjectHour]
 ) -> AllocationResult:
-    _ensure_known_project_stages(project_hours)
     stages = _stage_by_project(project_hours)
 
     # G2 guard: a direct expense must target a project whose stage we know. If the
@@ -127,10 +119,12 @@ def allocate_expenses(
             stage_totals[stage] = _money(stage_totals[stage] + allocated_amount)
 
     expected_total = _money(sum((_money(expense.amount) for expense in expenses), ZERO))
-    known_total = _money(stage_totals["capitalized"] + stage_totals["expensed"])
-    if known_total != expected_total:
+    allocated_total = _money(
+        stage_totals["capitalized"] + stage_totals["expensed"] + stage_totals["unknown"]
+    )
+    if allocated_total != expected_total:
         raise ValueError(
-            f"allocation totals do not reconcile: allocated {known_total}, expected {expected_total}"
+            f"allocation totals do not reconcile: allocated {allocated_total}, expected {expected_total}"
         )
 
     return AllocationResult(

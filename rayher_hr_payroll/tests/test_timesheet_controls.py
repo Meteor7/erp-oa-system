@@ -45,6 +45,27 @@ def test_ensure_rd_projects_enabled_blocks_non_rd_project():
             throw=throw,
         )
 
+
+def test_ensure_rd_projects_enabled_does_not_block_unknown_stage_by_default():
+    seen = []
+    doc = SimpleNamespace(
+        start_date=date(2026, 1, 15),
+        time_logs=[SimpleNamespace(project="RD-NO-DATES", from_time="2026-01-15 09:00:00")],
+    )
+
+    def project_stage_for_entry(project, posting_date):
+        seen.append((project, posting_date))
+        return "unknown"
+
+    ensure_rd_projects_enabled(
+        doc,
+        is_project_enabled=lambda project: True,
+        project_stage_for_entry=project_stage_for_entry,
+        throw=throw,
+    )
+
+    assert seen == [("RD-NO-DATES", date(2026, 1, 15))]
+
 # --- G4: period lock must consider every time_log month, not just start_date ---
 
 def test_periods_from_timesheet_includes_all_detail_months():

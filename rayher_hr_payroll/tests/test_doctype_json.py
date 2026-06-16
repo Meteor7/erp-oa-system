@@ -69,3 +69,17 @@ def test_reports_declare_required_filters():
 
     assert {field["fieldname"] for field in exceptions["filters"]} == {"year", "month"}
     assert {field["fieldname"] for field in matrix["filters"]} == {"allocation"}
+
+
+def test_rd_cost_allocation_has_unknown_total():
+    fields = {field["fieldname"]: field for field in load_doctype("rd_cost_allocation")["fields"]}
+
+    assert fields["unknown_total"]["fieldtype"] == "Currency"
+
+
+def test_period_doctype_controllers_normalize_before_insert():
+    from rayher_hr_payroll.rayher_hr_payroll.doctype.rd_cost_allocation.rd_cost_allocation import RDCostAllocation
+    from rayher_hr_payroll.rayher_hr_payroll.doctype.rd_expense_import.rd_expense_import import RDExpenseImport
+    from rayher_hr_payroll.rayher_hr_payroll.doctype.rd_period_lock.rd_period_lock import RDPeriodLock
+
+    assert all(hasattr(cls, "before_insert") for cls in [RDCostAllocation, RDExpenseImport, RDPeriodLock])
