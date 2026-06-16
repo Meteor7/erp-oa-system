@@ -58,14 +58,25 @@ python -m pytest rayher_hr_payroll/tests -q
 Expected result at the time of writing:
 
 ```text
-27 passed
+30 passed
 ```
 
-Bench-level verification still needs a working WSL network and installed Frappe bench:
+Bench-level verification on the local WSL bench:
 
 ```bash
+cd /home/rayher/frappe-bench
 bench --site rayher.localhost migrate
 bench --site rayher.localhost execute rayher_hr_payroll.demo.create_demo_data
 ```
 
-Current local blocker observed on 2026-06-16: WSL Ubuntu has only loopback networking, no `eth0`, no default route, and broken `/etc/resolv.conf`, so apt/bench install cannot proceed inside WSL yet. Windows network works, so this is an environment issue rather than an app-code blocker.
+Verified on 2026-06-16 after switching WSL networking to NAT and disabling WSL auto proxy. Local bench path is `/home/rayher/frappe-bench`; site is `rayher.localhost`; administrator password is `admin`.
+
+Latest verified demo allocation:
+
+```text
+RD-CAP  capitalized  60%  720.00
+RD-EXP  expensed     40%  480.00
+capitalized_total = 720.00
+expensed_total = 480.00
+total = 1200.00
+```
