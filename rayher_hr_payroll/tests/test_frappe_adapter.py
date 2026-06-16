@@ -118,15 +118,21 @@ def test_expense_items_from_rows_rejects_duplicate_source_row_key():
         expense_items_from_rows(rows)
 
 
-def test_expense_items_from_rows_allows_multiple_missing_source_row_keys():
+@pytest.mark.parametrize("source_row_key", [None, "", "   "])
+def test_expense_items_from_rows_rejects_missing_source_row_key(source_row_key):
     rows = [
-        SimpleNamespace(name="ROW-001", amount="100", account_level_3="Power", category="direct_input", direct_project=None, source_row_key=None),
-        SimpleNamespace(name="ROW-002", amount="200", account_level_3="Water", category="direct_input", direct_project=None, source_row_key=None),
+        SimpleNamespace(
+            name="ROW-001",
+            amount="100",
+            account_level_3="Power",
+            category="direct_input",
+            direct_project=None,
+            source_row_key=source_row_key,
+        )
     ]
 
-    items = expense_items_from_rows(rows)
-
-    assert [item.name for item in items] == ["ROW-001", "ROW-002"]
+    with pytest.raises(ValueError, match="Missing GL source row key in import: ROW-001"):
+        expense_items_from_rows(rows)
 
 
 def test_historical_org_for_date_accepts_datetime_strings_with_time():

@@ -79,15 +79,20 @@ def expense_items_from_rows(rows: Iterable[Any], *, on_duplicate=None) -> list[E
     result: list[ExpenseItem] = []
 
     for row in rows:
-        source_row_key = _value(row, "source_row_key")
-        if source_row_key:
-            source_row_key = str(source_row_key)
-            if source_row_key in seen:
-                message = f"Duplicate GL source row in import: {source_row_key}"
-                if on_duplicate:
-                    on_duplicate(message)
-                raise ValueError(message)
-            seen.add(source_row_key)
+        raw_source_row_key = _value(row, "source_row_key")
+        source_row_key = str(raw_source_row_key).strip() if raw_source_row_key is not None else ""
+        if not source_row_key:
+            row_name = str(_value(row, "name") or "<unknown>")
+            message = f"Missing GL source row key in import: {row_name}"
+            if on_duplicate:
+                on_duplicate(message)
+            raise ValueError(message)
+        if source_row_key in seen:
+            message = f"Duplicate GL source row in import: {source_row_key}"
+            if on_duplicate:
+                on_duplicate(message)
+            raise ValueError(message)
+        seen.add(source_row_key)
 
         direct_project = _value(row, "direct_project") or None
         result.append(

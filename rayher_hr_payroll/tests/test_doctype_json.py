@@ -60,6 +60,7 @@ def test_period_fields_are_derived_read_only_values():
     for folder in ["rd_cost_allocation", "rd_expense_import", "rd_period_lock"]:
         fields = {field["fieldname"]: field for field in load_doctype(folder)["fields"]}
         assert fields["period"].get("read_only") == 1
+        assert fields["period"].get("reqd") != 1
 
 
 def test_reports_declare_required_filters():

@@ -13,7 +13,6 @@
       "fieldname": "period",
       "label": "Period",
       "fieldtype": "Data",
-      "reqd": 1,
       "read_only": 1
     },
     {
