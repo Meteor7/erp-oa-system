@@ -142,3 +142,11 @@ def test_manifest_includes_translation_csv_files():
     manifest = (Path(__file__).resolve().parents[2] / 'MANIFEST.in').read_text()
 
     assert '*.csv' in manifest
+
+
+def test_set_language_is_whitelisted_for_post_http_calls():
+    import frappe
+    from rayher_hr_payroll.i18n import set_language
+
+    assert set_language in frappe.whitelisted
+    assert frappe.allowed_http_methods_for_whitelisted_func[set_language] == ['POST']

@@ -79,14 +79,16 @@ def set_language(language: str, frappe_module: Any | None = None) -> dict[str, A
     return _set_current_user_language(normalized, frappe)
 
 
-def _register_whitelisted_method() -> None:
-    try:
-        frappe = _get_frappe()
-        if set_language not in frappe.whitelisted:
-            frappe.whitelisted.append(set_language)
-            frappe.allowed_http_methods_for_whitelisted_func[set_language] = None
-    except Exception:
-        return
+def _register_whitelisted_method(frappe_module: Any | None = None) -> None:
+    frappe = frappe_module or _get_frappe()
+    whitelisted = frappe.whitelisted
+    if set_language not in whitelisted:
+        add_method = getattr(whitelisted, 'add', None) or getattr(whitelisted, 'append')
+        add_method(set_language)
+    frappe.allowed_http_methods_for_whitelisted_func[set_language] = ['POST']
 
 
-_register_whitelisted_method()
+try:
+    _register_whitelisted_method()
+except ImportError:
+    pass
