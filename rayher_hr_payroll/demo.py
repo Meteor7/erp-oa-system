@@ -64,6 +64,7 @@ def _company():
 
 
 def _ensure_master_data(company: str):
+    upsert_doc("Gender", "Male", {"gender": "Male"})
     upsert_doc("Activity Type", "Development", {"activity_type": "Development"})
     employee = upsert_doc(
         "Employee",
