@@ -51,7 +51,7 @@ def upsert_doc(doctype: str, name: str, values: dict[str, Any]):
         return doc
 
     doc = frappe.get_doc({"doctype": doctype, "name": name, **values})
-    doc.insert(ignore_permissions=True)
+    doc.insert(ignore_permissions=True, set_name=name)
     return doc
 
 
@@ -101,6 +101,8 @@ def _ensure_master_data(company: str):
             "status": "Open",
             "company": company,
             "allow_rd_timesheet": 1,
+            "capitalization_start_date": "2025-01-01",
+            "capitalization_end_date": "2025-12-31",
         },
     )
     return employee
