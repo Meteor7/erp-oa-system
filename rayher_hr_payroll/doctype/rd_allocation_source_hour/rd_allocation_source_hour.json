@@ -1,0 +1,67 @@
+{
+  "doctype": "DocType",
+  "name": "RD Allocation Source Hour",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 1,
+  "issingle": 0,
+  "is_submittable": 0,
+  "editable_grid": 1,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "timesheet",
+      "label": "Timesheet",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "Timesheet"
+    },
+    {
+      "fieldname": "timesheet_detail",
+      "label": "Timesheet Detail",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "employee",
+      "label": "Employee",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "Employee"
+    },
+    {
+      "fieldname": "employee_department",
+      "label": "Historical Department",
+      "fieldtype": "Link",
+      "reqd": 0,
+      "options": "Department"
+    },
+    {
+      "fieldname": "employee_designation",
+      "label": "Historical Designation",
+      "fieldtype": "Link",
+      "reqd": 0,
+      "options": "Designation"
+    },
+    {
+      "fieldname": "project",
+      "label": "Project",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "Project"
+    },
+    {
+      "fieldname": "posting_date",
+      "label": "Posting Date",
+      "fieldtype": "Date",
+      "reqd": 1
+    },
+    {
+      "fieldname": "hours",
+      "label": "Hours",
+      "fieldtype": "Float",
+      "reqd": 1
+    }
+  ],
+  "permissions": []
+}

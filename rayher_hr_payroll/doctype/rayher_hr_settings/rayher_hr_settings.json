@@ -1,0 +1,32 @@
+{
+  "doctype": "DocType",
+  "name": "Rayher HR Settings",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 0,
+  "issingle": 1,
+  "is_submittable": 0,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "standard_daily_hours",
+      "label": "Standard Daily Hours",
+      "fieldtype": "Float",
+      "reqd": 1,
+      "default": 8
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 0,
+      "cancel": 0,
+      "amend": 0
+    }
+  ]
+}

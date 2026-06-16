@@ -1,0 +1,80 @@
+{
+  "doctype": "DocType",
+  "name": "RD Period Lock",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 0,
+  "issingle": 0,
+  "is_submittable": 1,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "period",
+      "label": "Period",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "year",
+      "label": "Year",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "month",
+      "label": "Month",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "lock_timesheets",
+      "label": "Lock Timesheets",
+      "fieldtype": "Check",
+      "reqd": 0
+    },
+    {
+      "fieldname": "lock_project_stage",
+      "label": "Lock Project Stage",
+      "fieldtype": "Check",
+      "reqd": 0
+    },
+    {
+      "fieldname": "lock_gl_import",
+      "label": "Lock GL Import",
+      "fieldtype": "Check",
+      "reqd": 0
+    },
+    {
+      "fieldname": "lock_allocations",
+      "label": "Lock Allocations",
+      "fieldtype": "Check",
+      "reqd": 0
+    },
+    {
+      "fieldname": "locked_by",
+      "label": "Locked By",
+      "fieldtype": "Link",
+      "reqd": 0,
+      "options": "User"
+    },
+    {
+      "fieldname": "locked_on",
+      "label": "Locked On",
+      "fieldtype": "Datetime",
+      "reqd": 0
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    }
+  ]
+}

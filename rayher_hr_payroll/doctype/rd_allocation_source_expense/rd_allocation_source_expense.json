@@ -1,0 +1,69 @@
+{
+  "doctype": "DocType",
+  "name": "RD Allocation Source Expense",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 1,
+  "issingle": 0,
+  "is_submittable": 0,
+  "editable_grid": 1,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "expense_item",
+      "label": "Expense Item",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_row_key",
+      "label": "Source Row Key",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "voucher_no",
+      "label": "Voucher No",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_1",
+      "label": "Account Level 1",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_2",
+      "label": "Account Level 2",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_3",
+      "label": "Account Level 3",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_4",
+      "label": "Account Level 4",
+      "fieldtype": "Data",
+      "reqd": 0
+    },
+    {
+      "fieldname": "amount",
+      "label": "Amount",
+      "fieldtype": "Currency",
+      "reqd": 1
+    },
+    {
+      "fieldname": "direct_project",
+      "label": "Direct Project",
+      "fieldtype": "Link",
+      "reqd": 0,
+      "options": "Project"
+    }
+  ],
+  "permissions": []
+}

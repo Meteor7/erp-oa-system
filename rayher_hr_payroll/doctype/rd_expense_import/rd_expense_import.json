@@ -1,0 +1,70 @@
+{
+  "doctype": "DocType",
+  "name": "RD Expense Import",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 0,
+  "issingle": 0,
+  "is_submittable": 1,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "period",
+      "label": "Period",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "year",
+      "label": "Year",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "month",
+      "label": "Month",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_file",
+      "label": "Source File",
+      "fieldtype": "Attach",
+      "reqd": 0
+    },
+    {
+      "fieldname": "source_file_hash",
+      "label": "Source File Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "Draft\nImported\nAllocated\nCancelled",
+      "default": "Draft"
+    },
+    {
+      "fieldname": "items",
+      "label": "Items",
+      "fieldtype": "Table",
+      "reqd": 0,
+      "options": "RD Expense Item"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    }
+  ]
+}

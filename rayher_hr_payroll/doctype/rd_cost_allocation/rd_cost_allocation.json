@@ -1,0 +1,113 @@
+{
+  "doctype": "DocType",
+  "name": "RD Cost Allocation",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 0,
+  "issingle": 0,
+  "is_submittable": 1,
+  "editable_grid": 0,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "period",
+      "label": "Period",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "year",
+      "label": "Year",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "month",
+      "label": "Month",
+      "fieldtype": "Int",
+      "reqd": 1
+    },
+    {
+      "fieldname": "expense_import",
+      "label": "Expense Import",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "RD Expense Import"
+    },
+    {
+      "fieldname": "allocation_basis",
+      "label": "Allocation Basis",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "rd_project_hours",
+      "default": "rd_project_hours"
+    },
+    {
+      "fieldname": "calculation_version",
+      "label": "Calculation Version",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "scope",
+      "label": "Scope",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "all\ncapitalized\nexpensed",
+      "default": "all"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "Draft\nCalculated\nSubmitted\nCancelled",
+      "default": "Draft"
+    },
+    {
+      "fieldname": "capitalized_total",
+      "label": "Capitalized Total",
+      "fieldtype": "Currency",
+      "reqd": 0
+    },
+    {
+      "fieldname": "expensed_total",
+      "label": "Expensed Total",
+      "fieldtype": "Currency",
+      "reqd": 0
+    },
+    {
+      "fieldname": "lines",
+      "label": "Lines",
+      "fieldtype": "Table",
+      "reqd": 0,
+      "options": "RD Cost Allocation Line"
+    },
+    {
+      "fieldname": "hour_snapshots",
+      "label": "Hour Snapshots",
+      "fieldtype": "Table",
+      "reqd": 0,
+      "options": "RD Allocation Source Hour"
+    },
+    {
+      "fieldname": "expense_snapshots",
+      "label": "Expense Snapshots",
+      "fieldtype": "Table",
+      "reqd": 0,
+      "options": "RD Allocation Source Expense"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    }
+  ]
+}

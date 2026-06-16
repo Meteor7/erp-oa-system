@@ -1,0 +1,58 @@
+{
+  "doctype": "DocType",
+  "name": "RD Cost Allocation Line",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 1,
+  "issingle": 0,
+  "is_submittable": 0,
+  "editable_grid": 1,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "expense_item_name",
+      "label": "Expense Item",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "voucher_no",
+      "label": "Voucher No",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "project",
+      "label": "Project",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "Project"
+    },
+    {
+      "fieldname": "project_stage",
+      "label": "Project Stage",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "capitalized\nexpensed\nunknown"
+    },
+    {
+      "fieldname": "basis_hours",
+      "label": "Basis Hours",
+      "fieldtype": "Float",
+      "reqd": 1
+    },
+    {
+      "fieldname": "ratio",
+      "label": "Ratio",
+      "fieldtype": "Percent",
+      "reqd": 1
+    },
+    {
+      "fieldname": "allocated_amount",
+      "label": "Allocated Amount",
+      "fieldtype": "Currency",
+      "reqd": 1
+    }
+  ],
+  "permissions": []
+}

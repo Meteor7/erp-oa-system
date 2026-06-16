@@ -1,0 +1,70 @@
+{
+  "doctype": "DocType",
+  "name": "RD Expense Item",
+  "module": "Rayher HR Payroll",
+  "custom": 0,
+  "istable": 1,
+  "issingle": 0,
+  "is_submittable": 0,
+  "editable_grid": 1,
+  "track_changes": 1,
+  "fields": [
+    {
+      "fieldname": "source_row_key",
+      "label": "Source Row Key",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "voucher_no",
+      "label": "Voucher No",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_1",
+      "label": "Account Level 1",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_2",
+      "label": "Account Level 2",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_3",
+      "label": "Account Level 3",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "account_level_4",
+      "label": "Account Level 4",
+      "fieldtype": "Data",
+      "reqd": 0
+    },
+    {
+      "fieldname": "category",
+      "label": "Category",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "personnel\ndirect_input\ndepreciation\namortization\nother\ndesign"
+    },
+    {
+      "fieldname": "amount",
+      "label": "Amount",
+      "fieldtype": "Currency",
+      "reqd": 1
+    },
+    {
+      "fieldname": "direct_project",
+      "label": "Direct Project",
+      "fieldtype": "Link",
+      "reqd": 0,
+      "options": "Project"
+    }
+  ],
+  "permissions": []
+}
