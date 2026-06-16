@@ -82,3 +82,27 @@ def test_distinct_project_owners_collects_all_not_just_single():
     ]
     owners = distinct_project_owners(time_logs, {"RD-CAP": "alice", "RD-EXP": "bob"}.get)
     assert owners == ["alice", "bob"]
+
+
+def test_ensure_period_unlocked_translates_message_template():
+    doc = SimpleNamespace(start_date=date(2026, 1, 15))
+
+    with pytest.raises(RuleError, match='T:R&D period 202601 is locked'):
+        ensure_period_unlocked(
+            doc,
+            is_period_locked=lambda period: True,
+            throw=throw,
+            translate=lambda text: f'T:{text}',
+        )
+
+
+def test_ensure_rd_projects_enabled_translates_message_template():
+    doc = SimpleNamespace(time_logs=[SimpleNamespace(project='NON-RD')])
+
+    with pytest.raises(RuleError, match='T:Project NON-RD is not enabled'):
+        ensure_rd_projects_enabled(
+            doc,
+            is_project_enabled=lambda project: False,
+            throw=throw,
+            translate=lambda text: f'T:{text}',
+        )

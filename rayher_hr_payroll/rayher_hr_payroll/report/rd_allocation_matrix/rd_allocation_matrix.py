@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 
@@ -10,50 +10,58 @@ def _get_frappe():
     return frappe
 
 
+def _identity(text: str) -> str:
+    return text
+
+
 def _value(row: Any, fieldname: str, default: Any = None) -> Any:
     if isinstance(row, Mapping):
         return row.get(fieldname, default)
     return getattr(row, fieldname, default)
 
 
-def build_allocation_matrix(lines: Iterable[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_allocation_matrix(
+    lines: Iterable[Any],
+    *,
+    translate: Callable[[str], str] = _identity,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     line_rows = list(lines)
-    projects = sorted({str(_value(row, "project")) for row in line_rows if _value(row, "project")})
+    projects = sorted({str(_value(row, 'project')) for row in line_rows if _value(row, 'project')})
     columns: list[dict[str, Any]] = [
-        {"label": "Voucher No", "fieldname": "voucher_no", "fieldtype": "Data", "width": 140},
-        {"label": "Expense Item", "fieldname": "expense_item_name", "fieldtype": "Data", "width": 180},
+        {'label': translate('Voucher No'), 'fieldname': 'voucher_no', 'fieldtype': 'Data', 'width': 140},
+        {'label': translate('Expense Item'), 'fieldname': 'expense_item_name', 'fieldtype': 'Data', 'width': 180},
     ]
     columns.extend(
-        {"label": project, "fieldname": project, "fieldtype": "Currency", "width": 130}
+        {'label': project, 'fieldname': project, 'fieldtype': 'Currency', 'width': 130}
         for project in projects
     )
 
     rows_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
     for line in line_rows:
-        key = (_value(line, "voucher_no"), _value(line, "expense_item_name"))
+        key = (_value(line, 'voucher_no'), _value(line, 'expense_item_name'))
         rows_by_key.setdefault(
             key,
             {
-                "voucher_no": _value(line, "voucher_no"),
-                "expense_item_name": _value(line, "expense_item_name"),
+                'voucher_no': _value(line, 'voucher_no'),
+                'expense_item_name': _value(line, 'expense_item_name'),
             },
         )
-        rows_by_key[key][str(_value(line, "project"))] = _value(line, "allocated_amount")
+        rows_by_key[key][str(_value(line, 'project'))] = _value(line, 'allocated_amount')
 
     return columns, list(rows_by_key.values())
 
 
 def execute(filters=None):
     filters = filters or {}
-    allocation = filters.get("allocation")
+    allocation = filters.get('allocation')
     if not allocation:
         return [], []
 
     frappe = _get_frappe()
     lines = frappe.get_all(
-        "RD Cost Allocation Line",
-        filters={"parent": allocation},
-        fields=["voucher_no", "expense_item_name", "project", "project_stage", "allocated_amount"],
-        order_by="voucher_no, expense_item_name, project",
+        'RD Cost Allocation Line',
+        filters={'parent': allocation},
+        fields=['voucher_no', 'expense_item_name', 'project', 'project_stage', 'allocated_amount'],
+        order_by='voucher_no, expense_item_name, project',
     )
-    return build_allocation_matrix(lines)
+    return build_allocation_matrix(lines, translate=frappe._)

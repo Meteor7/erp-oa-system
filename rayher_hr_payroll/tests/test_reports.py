@@ -76,3 +76,44 @@ def test_build_unclassified_rd_rows_flags_hours_without_rd_type():
 
     assert {r["employee"] for r in rows} == {"EMP-2", "EMP-3"}
     assert all(r["exception_type"] == "Unclassified R&D Hours" for r in rows)
+
+
+def test_build_allocation_matrix_translates_static_columns():
+    lines = [
+        SimpleNamespace(voucher_no='V-001', expense_item_name='ROW-001', project='RD-CAP', allocated_amount=Decimal('600.00')),
+    ]
+
+    columns, _rows = build_allocation_matrix(lines, translate=lambda text: f'T:{text}')
+
+    assert columns[0]['label'] == 'T:Voucher No'
+    assert columns[1]['label'] == 'T:Expense Item'
+
+
+def test_build_timesheet_exception_rows_translates_labels_and_message_template():
+    employees = [SimpleNamespace(name='EMP-002', employee_name='Bob')]
+
+    rows = build_timesheet_exception_rows(
+        employees,
+        hours_by_employee={'EMP-002': Decimal('0')},
+        year=2026,
+        month=1,
+        translate=lambda text: f'T:{text}',
+    )
+
+    assert rows[0]['exception_type'] == 'T:Missing Timesheet'
+    assert rows[0]['message'] == 'T:2026-01 has no submitted timesheet hours.'
+
+
+def test_build_unclassified_rd_rows_translates_labels_and_message_template():
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
+        build_unclassified_rd_rows,
+    )
+
+    rows = build_unclassified_rd_rows(
+        [{'employee': 'EMP-2', 'employee_name': 'Bob', 'rd_personnel_type': None, 'hours': Decimal('6')}],
+        translate=lambda text: f'T:{text}',
+    )
+
+    assert rows[0]['exception_type'] == 'T:Unclassified R&D Hours'
+    assert rows[0]['message'].startswith('T:Logged 6 h on R&D projects')
+    assert rows[0]['message'].endswith('excluded from R&D allocation.')

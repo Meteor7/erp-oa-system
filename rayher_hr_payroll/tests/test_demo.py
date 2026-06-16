@@ -1,3 +1,4 @@
+import pytest
 from decimal import Decimal
 
 from rayher_hr_payroll.demo import expected_demo_allocation
@@ -42,3 +43,25 @@ def test_upsert_doc_preserves_requested_name_for_series_doctypes(monkeypatch):
     assert doc is fake_doc
     assert fake_frappe.payload["name"] == "RD-CAP"
     assert fake_doc.insert_kwargs["set_name"] == "RD-CAP"
+
+
+def test_company_error_is_translatable(monkeypatch):
+    from rayher_hr_payroll import demo
+
+    class FakeDefaults:
+        def get_global_default(self, key):
+            return None
+
+    class FakeFrappe:
+        defaults = FakeDefaults()
+
+        def _(self, message):
+            return f'T:{message}'
+
+        def throw(self, message):
+            raise ValueError(str(message))
+
+    monkeypatch.setattr(demo, '_get_frappe', lambda: FakeFrappe())
+
+    with pytest.raises(ValueError, match='T:Set a default company'):
+        demo._company()

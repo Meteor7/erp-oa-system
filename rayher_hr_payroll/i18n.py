@@ -5,7 +5,7 @@ from typing import Any
 SUPPORTED_LANGUAGES = {
     'zh': {'label': '\u4e2d\u6587', 'name': 'Chinese'},
     'en': {'label': 'English', 'name': 'English'},
-    'fr': {'label': 'Francais', 'name': 'French'},
+    'fr': {'label': 'Fran\u00e7ais', 'name': 'French'},
 }
 
 _TRANSLATION_CACHE_KEYS = ('merged_translations', 'lang_user_translations')

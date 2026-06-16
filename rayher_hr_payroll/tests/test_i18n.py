@@ -96,6 +96,8 @@ REQUIRED_TRANSLATION_STRINGS = {
     'Message',
     'Missing Timesheet',
     'Unclassified R&D Hours',
+    '{0}-{1:02d} has no submitted timesheet hours.',
+    'Logged {0} h on R&D projects but rd_personnel_type is ' + chr(39) + '{1}' + chr(39) + '; excluded from R&D allocation.',
     'R&D period {0} is locked; timesheet changes require a correction workflow.',
     'Project {0} is not enabled for R&D timesheet entry.',
     'Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy.',
@@ -132,3 +134,11 @@ def test_translation_files_cover_required_rayher_strings(language):
     missing = REQUIRED_TRANSLATION_STRINGS - set(translations)
     assert missing == set()
     assert all(translations[source] for source in REQUIRED_TRANSLATION_STRINGS)
+
+
+def test_manifest_includes_translation_csv_files():
+    from pathlib import Path
+
+    manifest = (Path(__file__).resolve().parents[2] / 'MANIFEST.in').read_text()
+
+    assert '*.csv' in manifest

@@ -59,7 +59,7 @@ def _company():
     frappe = _get_frappe()
     company = frappe.defaults.get_global_default("company")
     if not company:
-        frappe.throw("Set a default company before loading Rayher demo data.")
+        frappe.throw(frappe._("Set a default company before loading Rayher demo data."))
     return company
 
 
