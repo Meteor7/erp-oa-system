@@ -17,7 +17,7 @@
 
 1. 支持 `zh`、`en`、`fr` 三个语言代码。
 2. 新增后端白名单方法：当前用户选择语言后，写入 `User.language`，更新当前 request/session 的语言，并清理翻译缓存。
-3. 新增 `rayher_hr_payroll/rayher_hr_payroll/translations/zh.csv` 与 `fr.csv`。
+3. 新增 `rayher_hr_payroll/translations/zh.csv` 与 `fr.csv`。
 4. 把 Rayher 自定义报表列名、异常类型、校验/报错消息接入 `_()`。
 5. 保留现有中文业务枚举值，例如 `全时研发`、`资本化`、`待复核`，本版不做数据迁移。
 6. 文档注明：项目名称、部门名称、岗位名称、费用科目等业务数据不会自动翻译，后续如要三语业务数据，需要主数据翻译表或多语言显示字段。
