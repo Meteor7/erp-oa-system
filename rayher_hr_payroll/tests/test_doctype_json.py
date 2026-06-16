@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
-DOCTYPE_ROOT = APP_ROOT / "doctype"
+MODULE_ROOT = APP_ROOT / "rayher_hr_payroll"
+DOCTYPE_ROOT = MODULE_ROOT / "doctype"
 
 
 def load_doctype(folder: str) -> dict:
@@ -13,6 +14,11 @@ def load_doctype(folder: str) -> dict:
 
 def fieldnames(doc: dict) -> set[str]:
     return {field["fieldname"] for field in doc["fields"] if "fieldname" in field}
+
+
+def test_frappe_module_package_exists_for_modules_txt():
+    assert (MODULE_ROOT / "__init__.py").exists()
+    assert DOCTYPE_ROOT.exists()
 
 
 def test_rd_expense_item_has_source_row_key_for_duplicate_guard():

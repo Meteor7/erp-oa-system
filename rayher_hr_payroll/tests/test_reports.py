@@ -1,10 +1,10 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
+from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
     build_allocation_matrix,
 )
-from rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
+from rayher_hr_payroll.rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
     build_timesheet_exception_rows,
 )
 
