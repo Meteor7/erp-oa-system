@@ -44,9 +44,10 @@ def periods_from_timesheet(doc: Any) -> set[str]:
     if start_date:
         periods.add(_period(start_date))
     for row in getattr(doc, 'time_logs', []) or []:
-        row_date = _as_date(getattr(row, 'from_time', None))
-        if row_date:
-            periods.add(_period(row_date))
+        for attr in ('from_time', 'to_time'):
+            row_date = _as_date(getattr(row, attr, None))
+            if row_date:
+                periods.add(_period(row_date))
     return periods
 
 
@@ -142,24 +143,27 @@ def _project_stage_for_entry(project: str, posting_date: date | None) -> str:
     return stage_for_period(fields, year=posting_date.year, month=posting_date.month)
 
 
+def _ensure_periods_unlocked_incl_history(doc: Any, frappe: Any) -> None:
+    # Check the current doc AND its pre-save version, so a timesheet cannot be
+    # edited OUT of a locked period (consistent with import/allocation guards).
+    ensure_period_unlocked(
+        doc, is_period_locked=_is_period_locked, throw=frappe.throw, translate=frappe._,
+    )
+    before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+    if before is not None:
+        ensure_period_unlocked(
+            before, is_period_locked=_is_period_locked, throw=frappe.throw, translate=frappe._,
+        )
+
+
 def block_locked_timesheet_change(doc: Any, method: str | None = None) -> None:
     frappe = _get_frappe()
-    ensure_period_unlocked(
-        doc,
-        is_period_locked=_is_period_locked,
-        throw=frappe.throw,
-        translate=frappe._,
-    )
+    _ensure_periods_unlocked_incl_history(doc, frappe)
 
 
 def validate_timesheet(doc: Any, method: str | None = None) -> None:
     frappe = _get_frappe()
-    ensure_period_unlocked(
-        doc,
-        is_period_locked=_is_period_locked,
-        throw=frappe.throw,
-        translate=frappe._,
-    )
+    _ensure_periods_unlocked_incl_history(doc, frappe)
     ensure_rd_projects_enabled(
         doc,
         is_project_enabled=_is_project_enabled,

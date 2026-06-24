@@ -63,6 +63,16 @@ def _company():
     return company
 
 
+def _ensure_department(company: str) -> str:
+    frappe = _get_frappe()
+    name = frappe.db.get_value("Department", {"department_name": "研发部", "company": company})
+    if name:
+        return name
+    d = frappe.get_doc({"doctype": "Department", "department_name": "研发部", "company": company})
+    d.insert(ignore_permissions=True)
+    return d.name
+
+
 def _ensure_master_data(company: str):
     upsert_doc("Gender", "Male", {"gender": "Male"})
     upsert_doc("Activity Type", "Development", {"activity_type": "Development"})
@@ -76,9 +86,15 @@ def _ensure_master_data(company: str):
             "date_of_birth": "1990-01-01",
             "date_of_joining": "2026-01-01",
             "company": company,
+            "department": _ensure_department(company),
             "status": "Active",
             "rd_personnel_type": "全时研发",
             "archive_status": "已归档",
+            "id_card_number_cn": "110101199001010031",
+            "rd_mock_base": 20000,
+            "rd_mock_social": 1650,
+            "rd_mock_fund": 2400,
+            "rd_mock_tax": 1080,
         },
     )
     upsert_doc(
@@ -189,6 +205,15 @@ def create_demo_data(force: bool = False):
     employee = _ensure_master_data(company)
     _create_timesheet(employee.name, company)
     expense_import = _create_expense_import()
+
+    # Idempotent under re-run: one submitted allocation per import is enforced by
+    # the controller, so reuse an existing submitted demo allocation instead of
+    # creating a second one (which would be rejected).
+    existing_alloc = frappe.db.exists(
+        "RD Cost Allocation", {"expense_import": expense_import.name, "docstatus": 1}
+    )
+    if existing_alloc:
+        return existing_alloc
 
     allocation = frappe.get_doc(
         {

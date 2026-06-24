@@ -11,56 +11,61 @@
   "fields": [
     {
       "fieldname": "timesheet",
-      "label": "Timesheet",
+      "label": "工时单",
       "fieldtype": "Link",
       "reqd": 1,
-      "options": "Timesheet"
+      "options": "Timesheet",
+      "in_list_view": 1
     },
     {
       "fieldname": "timesheet_detail",
-      "label": "Timesheet Detail",
+      "label": "工时明细行",
       "fieldtype": "Data",
       "reqd": 1
     },
     {
       "fieldname": "employee",
-      "label": "Employee",
+      "label": "员工",
       "fieldtype": "Link",
       "reqd": 1,
-      "options": "Employee"
+      "options": "Employee",
+      "in_list_view": 1
     },
     {
       "fieldname": "employee_department",
-      "label": "Historical Department",
+      "label": "历史部门",
       "fieldtype": "Link",
       "reqd": 0,
       "options": "Department"
     },
     {
       "fieldname": "employee_designation",
-      "label": "Historical Designation",
+      "label": "历史岗位",
       "fieldtype": "Link",
       "reqd": 0,
       "options": "Designation"
     },
     {
       "fieldname": "project",
-      "label": "Project",
+      "label": "项目",
       "fieldtype": "Link",
       "reqd": 1,
-      "options": "Project"
+      "options": "Project",
+      "in_list_view": 1
     },
     {
       "fieldname": "posting_date",
-      "label": "Posting Date",
+      "label": "填报日期",
       "fieldtype": "Date",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "hours",
-      "label": "Hours",
+      "label": "工时",
       "fieldtype": "Float",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     }
   ],
   "permissions": []

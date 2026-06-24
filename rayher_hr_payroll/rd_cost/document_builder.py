@@ -43,7 +43,7 @@ def populate_allocation_document(
         doc.append(
             "lines",
             {
-                "expense_item_name": line.expense_item,
+                "expense_item_name": _value(source, "account_level_3", "") or line.expense_item,
                 "voucher_no": _value(source, "voucher_no", ""),
                 "project": line.project,
                 "project_stage": line.stage,

@@ -11,59 +11,64 @@
   "fields": [
     {
       "fieldname": "source_row_key",
-      "label": "Source Row Key",
+      "label": "来源行键",
       "fieldtype": "Data",
       "reqd": 1
     },
     {
       "fieldname": "voucher_no",
-      "label": "Voucher No",
+      "label": "凭证号",
       "fieldtype": "Data",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "account_level_1",
-      "label": "Account Level 1",
+      "label": "一级科目",
       "fieldtype": "Data",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "account_level_2",
-      "label": "Account Level 2",
+      "label": "二级科目",
       "fieldtype": "Data",
       "reqd": 1
     },
     {
       "fieldname": "account_level_3",
-      "label": "Account Level 3",
+      "label": "三级科目",
       "fieldtype": "Data",
       "reqd": 1
     },
     {
       "fieldname": "account_level_4",
-      "label": "Account Level 4",
+      "label": "四级科目",
       "fieldtype": "Data",
       "reqd": 0
     },
     {
       "fieldname": "category",
-      "label": "Category",
+      "label": "费用类别",
       "fieldtype": "Select",
       "reqd": 1,
-      "options": "personnel\ndirect_input\ndepreciation\namortization\nother\ndesign"
+      "options": "personnel\ndirect_input\ndepreciation\namortization\nother\ndesign",
+      "in_list_view": 1
     },
     {
       "fieldname": "amount",
-      "label": "Amount",
+      "label": "金额",
       "fieldtype": "Currency",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "direct_project",
-      "label": "Direct Project",
+      "label": "直接归属项目",
       "fieldtype": "Link",
       "reqd": 0,
-      "options": "Project"
+      "options": "Project",
+      "in_list_view": 1
     }
   ],
   "permissions": []

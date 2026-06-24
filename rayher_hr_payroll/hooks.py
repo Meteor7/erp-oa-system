@@ -9,7 +9,21 @@ required_apps = ["erpnext", "hrms"]
 after_install = "rayher_hr_payroll.install.after_install"
 after_migrate = "rayher_hr_payroll.install.after_install"
 
+fixtures = [
+    # Ship the DB-stored R&D Query Reports so the SPA's report pages work on a fresh install.
+    {"dt": "Report", "filters": [["module", "=", "Rayher HR Payroll"], ["is_standard", "=", "No"]]},
+]
+
 doc_events = {
+    "Project": {
+        "validate": "rayher_hr_payroll.project_controls.validate_project_stage_lock",
+    },
+    "Employee": {
+        "validate": [
+            "rayher_hr_payroll.employee_controls.validate_employee_archive",
+            "rayher_hr_payroll.employee_controls.validate_employee_rd_lock",
+        ],
+    },
     "Timesheet": {
         "validate": "rayher_hr_payroll.timesheet_controls.validate_timesheet",
         "before_submit": "rayher_hr_payroll.timesheet_controls.validate_timesheet",

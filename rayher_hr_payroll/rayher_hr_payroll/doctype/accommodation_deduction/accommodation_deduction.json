@@ -1,68 +1,115 @@
 {
-  "doctype": "DocType",
-  "name": "Accommodation Deduction",
-  "module": "Rayher HR Payroll",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "is_submittable": 0,
-  "editable_grid": 0,
-  "track_changes": 1,
-  "fields": [
-    {
-      "fieldname": "period",
-      "label": "Period",
-      "fieldtype": "Data",
-      "reqd": 1
-    },
-    {
-      "fieldname": "employee",
-      "label": "Employee",
-      "fieldtype": "Link",
-      "reqd": 1,
-      "options": "Employee"
-    },
-    {
-      "fieldname": "rent_amount",
-      "label": "Rent Amount",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "water_amount",
-      "label": "Water Amount",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "electricity_amount",
-      "label": "Electricity Amount",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "total_amount",
-      "label": "Total Amount",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "exported_to_finance",
-      "label": "Exported To Finance",
-      "fieldtype": "Check",
-      "reqd": 0
-    }
-  ],
-  "permissions": [
-    {
-      "role": "System Manager",
-      "read": 1,
-      "write": 1,
-      "create": 1,
-      "delete": 1,
-      "submit": 0,
-      "cancel": 0,
-      "amend": 0
-    }
-  ]
+ "doctype": "DocType",
+ "name": "Accommodation Deduction",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "is_submittable": 0,
+ "editable_grid": 0,
+ "track_changes": 1,
+ "naming_rule": "Expression (old style)",
+ "autoname": "DORM-.{period}.-.####",
+ "title_field": "period",
+ "fields": [
+  {
+   "fieldname": "period",
+   "label": "期间",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee",
+   "label": "员工",
+   "fieldtype": "Link",
+   "reqd": 1,
+   "options": "Employee",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "rent_amount",
+   "label": "房租",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "water_amount",
+   "label": "水费",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "electricity_amount",
+   "label": "电费",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "total_amount",
+   "label": "合计",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "exported_to_finance",
+   "label": "已导出给财务",
+   "fieldtype": "Check",
+   "reqd": 0,
+   "in_list_view": 1,
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "submit": 0,
+   "cancel": 0,
+   "amend": 0,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "Accounts User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0,
+   "submit": 0,
+   "cancel": 0,
+   "amend": 0,
+   "report": 1,
+   "export": 0,
+   "print": 0,
+   "email": 0,
+   "share": 0
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0,
+   "submit": 0,
+   "cancel": 0,
+   "amend": 0,
+   "report": 1,
+   "export": 0,
+   "print": 0,
+   "email": 0,
+   "share": 0
+  }
+ ]
 }

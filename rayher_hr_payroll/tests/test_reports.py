@@ -180,3 +180,51 @@ def test_parse_year_month_filters_accepts_numeric_strings():
     from rayher_hr_payroll.rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import parse_year_month_filters
 
     assert parse_year_month_filters({"year": "2026", "month": "1"}, throw=report_throw) == (2026, 1)
+def test_matrix_report_checks_parent_read_permission(monkeypatch):
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    checked = []
+
+    class FakeDoc:
+        def check_permission(self, ptype):
+            checked.append(ptype)
+
+    class FakeFrappe:
+        def get_doc(self, doctype, name):
+            return FakeDoc()
+
+        def get_all(self, *args, **kwargs):
+            return []
+
+        def _(self, text):
+            return text
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    mod.execute({"allocation": "ALLOC-1"})
+    assert "read" in checked
+
+
+def test_matrix_report_propagates_denied_parent_read(monkeypatch):
+    import pytest
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    class Denied(Exception):
+        pass
+
+    class FakeDoc:
+        def check_permission(self, ptype):
+            raise Denied()
+
+    class FakeFrappe:
+        def get_doc(self, doctype, name):
+            return FakeDoc()
+
+        def get_all(self, *args, **kwargs):
+            return []
+
+        def _(self, text):
+            return text
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    with pytest.raises(Denied):
+        mod.execute({"allocation": "ALLOC-1"})

@@ -1,0 +1,124 @@
+[
+ {
+  "add_total_row": 0,
+  "add_translate_data": 0,
+  "columns": [],
+  "disable_prepared_report_automation": 0,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Report",
+  "filters": [
+   {
+    "default": "2026-05",
+    "fieldname": "period",
+    "fieldtype": "Data",
+    "label": "会计期间",
+    "mandatory": 0,
+    "options": null,
+    "parent": "研发工时表(明细)",
+    "parentfield": "filters",
+    "parenttype": "Report",
+    "wildcard_filter": 0
+   }
+  ],
+  "is_standard": "No",
+  "javascript": null,
+  "json": null,
+  "letter_head": null,
+  "modified": "2026-06-22 14:50:23.365913",
+  "module": "Rayher HR Payroll",
+  "name": "研发工时表(明细)",
+  "prepared_report": 0,
+  "query": "SELECT e.name AS \"员工ID:Data:1\",\n       e.employee_name AS \"员工:Data:140\",\n       tsd.project AS \"项目:Data:160\",\n       SUM(tsd.hours) AS \"工时:Float:90\"\nFROM `tabEmployee` e\nJOIN `tabTimesheet` ts ON ts.employee=e.name AND ts.docstatus=1\nJOIN `tabTimesheet Detail` tsd ON tsd.parent=ts.name AND DATE_FORMAT(tsd.from_time,'%%Y-%%m')=%(period)s\nJOIN `tabProject` p ON p.name=tsd.project AND COALESCE(p.allow_rd_timesheet,0)=1\nWHERE e.rd_personnel_type IN ('全时研发','非全时研发','研发辅助')\nGROUP BY e.name, tsd.project\nORDER BY e.employee_name, tsd.project",
+  "ref_doctype": "Employee",
+  "reference_report": null,
+  "report_name": "研发工时表(明细)",
+  "report_script": null,
+  "report_type": "Query Report",
+  "roles": [
+   {
+    "parent": "研发工时表(明细)",
+    "parentfield": "roles",
+    "parenttype": "Report",
+    "role": "HR User"
+   },
+   {
+    "parent": "研发工时表(明细)",
+    "parentfield": "roles",
+    "parenttype": "Report",
+    "role": "HR Manager"
+   },
+   {
+    "parent": "研发工时表(明细)",
+    "parentfield": "roles",
+    "parenttype": "Report",
+    "role": "Accounts User"
+   },
+   {
+    "role": "System Manager"
+   }
+  ],
+  "timeout": 0
+ },
+ {
+  "add_total_row": 0,
+  "add_translate_data": 0,
+  "columns": [],
+  "disable_prepared_report_automation": 0,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Report",
+  "filters": [
+   {
+    "default": "2026-05",
+    "fieldname": "period",
+    "fieldtype": "Data",
+    "label": "会计期间",
+    "mandatory": 0,
+    "options": null,
+    "parent": "研发人员台账",
+    "parentfield": "filters",
+    "parenttype": "Report",
+    "wildcard_filter": 0
+   }
+  ],
+  "is_standard": "No",
+  "javascript": null,
+  "json": null,
+  "letter_head": null,
+  "modified": "2026-06-22 14:22:55.195249",
+  "module": "Rayher HR Payroll",
+  "name": "研发人员台账",
+  "prepared_report": 0,
+  "query": "SELECT e.name AS \"工号:Data:110\", e.employee_name AS \"姓名:Data:120\",\n       e.rd_personnel_type AS \"研发人员类型:Data:120\",\n       COUNT(DISTINCT tsd.project) AS \"参与项目数:Int:100\",\n       COALESCE(SUM(tsd.hours),0) AS \"本期工时:Float:100\"\nFROM `tabEmployee` e\nLEFT JOIN `tabTimesheet` ts ON ts.employee = e.name AND ts.docstatus = 1\nLEFT JOIN `tabTimesheet Detail` tsd ON tsd.parent = ts.name AND DATE_FORMAT(tsd.from_time,'%%Y-%%m')=%(period)s AND EXISTS (SELECT 1 FROM `tabProject` p WHERE p.name=tsd.project AND COALESCE(p.allow_rd_timesheet,0)=1)\nWHERE e.rd_personnel_type IN ('全时研发','非全时研发','研发辅助') AND e.date_of_joining <= LAST_DAY(CONCAT(%(period)s,'-01')) AND (e.relieving_date IS NULL OR e.relieving_date >= CONCAT(%(period)s,'-01'))\nGROUP BY e.name ORDER BY 5 DESC",
+  "ref_doctype": "Employee",
+  "reference_report": null,
+  "report_name": "研发人员台账",
+  "report_script": null,
+  "report_type": "Query Report",
+  "roles": [
+   {
+    "parent": "研发人员台账",
+    "parentfield": "roles",
+    "parenttype": "Report",
+    "role": "HR User"
+   },
+   {
+    "parent": "研发人员台账",
+    "parentfield": "roles",
+    "parenttype": "Report",
+    "role": "HR Manager"
+   },
+   {
+    "parent": "研发人员台账",
+    "parentfield": "roles",
+    "parenttype": "Report",
+    "role": "Accounts User"
+   },
+   {
+    "role": "System Manager"
+   }
+  ],
+  "timeout": 0
+ }
+]

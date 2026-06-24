@@ -114,9 +114,22 @@ def execute(filters=None):
     frappe = _get_frappe()
     year, month = parse_year_month_filters(filters, throw=frappe.throw, translate=frappe._)
 
+    month_start = '%04d-%02d-01' % (year, month)
+    month_end = frappe.utils.get_last_day(month_start)
+    # Active-in-period window (matches the other period-scoped reports): employed
+    # by month end and not relieved before the month. Use the date window rather
+    # than current status so a person relieved before the month is excluded and a
+    # person who left DURING the month is still checked for that month.
     employees = frappe.get_all(
         'Employee',
-        filters={'status': 'Active', 'rd_personnel_type': ['in', RD_PERSONNEL_TYPES]},
+        filters={
+            'rd_personnel_type': ['in', RD_PERSONNEL_TYPES],
+            'date_of_joining': ['<=', month_end],
+        },
+        or_filters=[
+            {'relieving_date': ['is', 'not set']},
+            {'relieving_date': ['>=', month_start]},
+        ],
         fields=['name', 'employee_name'],
         order_by='employee_name',
     )
@@ -125,7 +138,9 @@ def execute(filters=None):
         select ts.employee, coalesce(sum(tsd.hours), 0) as hours
           from `tabTimesheet Detail` tsd
           inner join `tabTimesheet` ts on ts.name = tsd.parent
+          inner join `tabProject` p on p.name = tsd.project
          where ts.docstatus = 1
+           and coalesce(p.allow_rd_timesheet, 0) = 1
            and year(tsd.from_time) = %(year)s
            and month(tsd.from_time) = %(month)s
          group by ts.employee

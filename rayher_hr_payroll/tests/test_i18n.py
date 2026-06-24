@@ -153,7 +153,7 @@ def test_manifest_includes_translation_csv_files():
 
 
 def test_set_language_is_whitelisted_for_post_http_calls():
-    import frappe
+    frappe = pytest.importorskip("frappe")
     from rayher_hr_payroll.i18n import set_language
 
     assert set_language in frappe.whitelisted

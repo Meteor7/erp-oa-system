@@ -7,3 +7,13 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# node / 前端构建
+node_modules/
+*.map
+dist/
+.yarn/
+
+# TipRay 透明加密损坏产物
+*.IPGSD
+*%TSD-Header*

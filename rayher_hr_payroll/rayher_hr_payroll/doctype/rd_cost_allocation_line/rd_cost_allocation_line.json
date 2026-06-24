@@ -11,47 +11,53 @@
   "fields": [
     {
       "fieldname": "expense_item_name",
-      "label": "Expense Item",
+      "label": "费用项目",
       "fieldtype": "Data",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "voucher_no",
-      "label": "Voucher No",
+      "label": "凭证号",
       "fieldtype": "Data",
       "reqd": 1
     },
     {
       "fieldname": "project",
-      "label": "Project",
+      "label": "项目",
       "fieldtype": "Link",
       "reqd": 1,
-      "options": "Project"
+      "options": "Project",
+      "in_list_view": 1
     },
     {
       "fieldname": "project_stage",
-      "label": "Project Stage",
+      "label": "研发阶段",
       "fieldtype": "Select",
       "reqd": 1,
-      "options": "capitalized\nexpensed\nunknown"
+      "options": "capitalized\nexpensed\nunknown",
+      "in_list_view": 1
     },
     {
       "fieldname": "basis_hours",
-      "label": "Basis Hours",
+      "label": "分摊工时",
       "fieldtype": "Float",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "ratio",
-      "label": "Ratio",
+      "label": "分摊比例",
       "fieldtype": "Percent",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "allocated_amount",
-      "label": "Allocated Amount",
+      "label": "分摊金额",
       "fieldtype": "Currency",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     }
   ],
   "permissions": []

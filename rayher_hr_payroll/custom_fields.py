@@ -46,6 +46,36 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "graduation_school",
         },
+        {
+            "fieldname": "rd_mock_section",
+            "label": "薪酬（演示）",
+            "fieldtype": "Section Break",
+            "insert_after": "major_cn",
+        },
+        {
+            "fieldname": "rd_mock_base",
+            "label": "应发工资(mock)",
+            "fieldtype": "Currency",
+            "insert_after": "rd_mock_section",
+        },
+        {
+            "fieldname": "rd_mock_social",
+            "label": "社保(mock)",
+            "fieldtype": "Currency",
+            "insert_after": "rd_mock_base",
+        },
+        {
+            "fieldname": "rd_mock_fund",
+            "label": "公积金(mock)",
+            "fieldtype": "Currency",
+            "insert_after": "rd_mock_social",
+        },
+        {
+            "fieldname": "rd_mock_tax",
+            "label": "个税(mock)",
+            "fieldtype": "Currency",
+            "insert_after": "rd_mock_fund",
+        },
     ],
     "Project": [
         {
@@ -128,6 +158,13 @@ CUSTOM_FIELDS = {
             "fieldtype": "Link",
             "options": "User",
             "insert_after": "rd_review_status",
+        },
+        {
+            "fieldname": "rd_spa_managed",
+            "label": "R&D SPA Managed",
+            "fieldtype": "Check",
+            "hidden": 1,
+            "insert_after": "rd_reviewer",
         },
     ],
 }

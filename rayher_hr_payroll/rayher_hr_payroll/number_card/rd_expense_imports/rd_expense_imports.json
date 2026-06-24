@@ -1,0 +1,20 @@
+{
+ "aggregate_function_based_on": "",
+ "color": "#27AE60",
+ "docstatus": 0,
+ "doctype": "Number Card",
+ "document_type": "RD Expense Import",
+ "dynamic_filters_json": "[]",
+ "filters_json": "[[\"RD Expense Import\",\"docstatus\",\"<\",2]]",
+ "function": "Count",
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "研发费用导入",
+ "module": "Rayher HR Payroll",
+ "name": "研发费用导入",
+ "parent_document_type": "",
+ "report_function": "Sum",
+ "show_percentage_stats": 0,
+ "stats_time_interval": "Monthly",
+ "type": "Document Type"
+}

@@ -1,0 +1,218 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"rhc-title\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>研发成本总览</b></span>\",\"col\":12}},{\"id\":\"rhc-nc-alloc\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"研发分摊单\",\"col\":3}},{\"id\":\"rhc-nc-import\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"研发费用导入\",\"col\":3}},{\"id\":\"rhc-nc-cap\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"研发资本化合计\",\"col\":3}},{\"id\":\"rhc-nc-exp\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"研发费用化合计\",\"col\":3}},{\"id\":\"rhc-spacer-1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"rhc-actions-title\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>常用操作</b></span>\",\"col\":12}},{\"id\":\"rhc-sc-import\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"费用导入\",\"col\":3}},{\"id\":\"rhc-sc-alloc\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"分摊单\",\"col\":3}},{\"id\":\"rhc-sc-report\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"分摊矩阵报表\",\"col\":3}},{\"id\":\"rhc-sc-lock\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"期间关账\",\"col\":3}},{\"id\":\"rhc-spacer-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"rhc-lists-title\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>近期业务</b></span>\",\"col\":12}},{\"id\":\"rhc-ql-alloc\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"最近分摊单\",\"col\":4}},{\"id\":\"rhc-ql-import\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"最近费用导入\",\"col\":4}},{\"id\":\"rhc-ql-dorm\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"最近宿舍扣款\",\"col\":4}},{\"id\":\"rhc-spacer-3\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"rhc-links-title\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>业务对象与报表</b></span>\",\"col\":12}},{\"id\":\"rhc-card-month\",\"type\":\"card\",\"data\":{\"card_name\":\"月末分摊\",\"col\":4}},{\"id\":\"rhc-card-master\",\"type\":\"card\",\"data\":{\"card_name\":\"基础资料\",\"col\":4}},{\"id\":\"rhc-card-report\",\"type\":\"card\",\"data\":{\"card_name\":\"报表与例外\",\"col\":4}}]",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 1,
+ "icon": "expenses",
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "研发成本",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "月末分摊",
+   "link_count": 3,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "费用导入单",
+   "link_count": 0,
+   "link_to": "RD Expense Import",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "研发费用分摊单",
+   "link_count": 0,
+   "link_to": "RD Cost Allocation",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "研发期间关账",
+   "link_count": 0,
+   "link_to": "RD Period Lock",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "基础资料",
+   "link_count": 4,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "研发项目",
+   "link_count": 0,
+   "link_to": "Project",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "员工",
+   "link_count": 0,
+   "link_to": "Employee",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "宿舍扣款",
+   "link_count": 0,
+   "link_to": "Accommodation Deduction",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Rayher HR 设置",
+   "link_count": 0,
+   "link_to": "Rayher HR Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "报表与例外",
+   "link_count": 2,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "研发费用分摊矩阵",
+   "link_count": 0,
+   "link_to": "RD Allocation Matrix",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "研发工时例外",
+   "link_count": 0,
+   "link_to": "RD Timesheet Exceptions",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "module": "Rayher HR Payroll",
+ "name": "研发成本",
+ "number_cards": [
+  {
+   "label": "研发分摊单",
+   "number_card_name": "研发分摊单"
+  },
+  {
+   "label": "研发费用导入",
+   "number_card_name": "研发费用导入"
+  },
+  {
+   "label": "研发资本化合计",
+   "number_card_name": "研发资本化合计"
+  },
+  {
+   "label": "研发费用化合计",
+   "number_card_name": "研发费用化合计"
+  }
+ ],
+ "public": 1,
+ "quick_lists": [
+  {
+   "document_type": "RD Cost Allocation",
+   "label": "最近分摊单",
+   "quick_list_filter": "[]"
+  },
+  {
+   "document_type": "RD Expense Import",
+   "label": "最近费用导入",
+   "quick_list_filter": "[]"
+  },
+  {
+   "document_type": "Accommodation Deduction",
+   "label": "最近宿舍扣款",
+   "quick_list_filter": "[]"
+  }
+ ],
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Accounts User"
+  },
+  {
+   "role": "Projects Manager"
+  }
+ ],
+ "sequence_id": 25,
+ "shortcuts": [
+  {
+   "color": "#2F80ED",
+   "doc_view": "New",
+   "format": "{}",
+   "label": "费用导入",
+   "link_to": "RD Expense Import",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "#27AE60",
+   "doc_view": "List",
+   "format": "{}",
+   "label": "分摊单",
+   "link_to": "RD Cost Allocation",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "#9B51E0",
+   "doc_view": "",
+   "format": "{}",
+   "label": "分摊矩阵报表",
+   "link_to": "RD Allocation Matrix",
+   "stats_filter": "[]",
+   "type": "Report"
+  },
+  {
+   "color": "#F2994A",
+   "doc_view": "List",
+   "format": "{}",
+   "label": "期间关账",
+   "link_to": "RD Period Lock",
+   "stats_filter": "[]",
+   "type": "DocType"
+  }
+ ],
+ "title": "研发成本"
+}

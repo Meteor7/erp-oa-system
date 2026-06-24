@@ -1,119 +1,172 @@
 {
-  "doctype": "DocType",
-  "name": "RD Cost Allocation",
-  "module": "Rayher HR Payroll",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "is_submittable": 1,
-  "editable_grid": 0,
-  "track_changes": 1,
-  "fields": [
-    {
-      "fieldname": "period",
-      "label": "Period",
-      "fieldtype": "Data",
-      "read_only": 1
-    },
-    {
-      "fieldname": "year",
-      "label": "Year",
-      "fieldtype": "Int",
-      "reqd": 1
-    },
-    {
-      "fieldname": "month",
-      "label": "Month",
-      "fieldtype": "Int",
-      "reqd": 1
-    },
-    {
-      "fieldname": "expense_import",
-      "label": "Expense Import",
-      "fieldtype": "Link",
-      "reqd": 1,
-      "options": "RD Expense Import"
-    },
-    {
-      "fieldname": "allocation_basis",
-      "label": "Allocation Basis",
-      "fieldtype": "Select",
-      "reqd": 1,
-      "options": "rd_project_hours",
-      "default": "rd_project_hours"
-    },
-    {
-      "fieldname": "calculation_version",
-      "label": "Calculation Version",
-      "fieldtype": "Data",
-      "reqd": 1
-    },
-    {
-      "fieldname": "scope",
-      "label": "Scope",
-      "fieldtype": "Select",
-      "reqd": 1,
-      "options": "all\ncapitalized\nexpensed",
-      "default": "all"
-    },
-    {
-      "fieldname": "status",
-      "label": "Status",
-      "fieldtype": "Select",
-      "reqd": 1,
-      "options": "Draft\nCalculated\nSubmitted\nCancelled",
-      "default": "Draft"
-    },
-    {
-      "fieldname": "capitalized_total",
-      "label": "Capitalized Total",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "expensed_total",
-      "label": "Expensed Total",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "unknown_total",
-      "label": "Unknown Stage Total",
-      "fieldtype": "Currency",
-      "reqd": 0
-    },
-    {
-      "fieldname": "lines",
-      "label": "Lines",
-      "fieldtype": "Table",
-      "reqd": 0,
-      "options": "RD Cost Allocation Line"
-    },
-    {
-      "fieldname": "hour_snapshots",
-      "label": "Hour Snapshots",
-      "fieldtype": "Table",
-      "reqd": 0,
-      "options": "RD Allocation Source Hour"
-    },
-    {
-      "fieldname": "expense_snapshots",
-      "label": "Expense Snapshots",
-      "fieldtype": "Table",
-      "reqd": 0,
-      "options": "RD Allocation Source Expense"
-    }
-  ],
-  "permissions": [
-    {
-      "role": "System Manager",
-      "read": 1,
-      "write": 1,
-      "create": 1,
-      "delete": 1,
-      "submit": 1,
-      "cancel": 1,
-      "amend": 1
-    }
-  ]
+ "doctype": "DocType",
+ "name": "RD Cost Allocation",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "is_submittable": 1,
+ "editable_grid": 0,
+ "track_changes": 1,
+ "naming_rule": "Expression (old style)",
+ "autoname": "ALLOC-.{period}.-.####",
+ "title_field": "period",
+ "fields": [
+  {
+   "fieldname": "period",
+   "label": "期间",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "year",
+   "label": "年度",
+   "fieldtype": "Int",
+   "reqd": 1
+  },
+  {
+   "fieldname": "month",
+   "label": "月份",
+   "fieldtype": "Int",
+   "reqd": 1
+  },
+  {
+   "fieldname": "expense_import",
+   "label": "费用导入单",
+   "fieldtype": "Link",
+   "reqd": 1,
+   "options": "RD Expense Import",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "allocation_basis",
+   "label": "分摊依据",
+   "fieldtype": "Select",
+   "reqd": 1,
+   "options": "rd_project_hours",
+   "default": "rd_project_hours"
+  },
+  {
+   "fieldname": "calculation_version",
+   "label": "计算版本",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "scope",
+   "label": "分摊范围",
+   "fieldtype": "Select",
+   "reqd": 1,
+   "options": "all\ncapitalized\nexpensed",
+   "default": "all",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "状态",
+   "fieldtype": "Select",
+   "reqd": 1,
+   "options": "Draft\nCalculated\nSubmitted\nCancelled",
+   "default": "Draft",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "capitalized_total",
+   "label": "资本化合计",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "expensed_total",
+   "label": "费用化合计",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "unknown_total",
+   "label": "未判定阶段合计",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "lines",
+   "label": "分摊明细",
+   "fieldtype": "Table",
+   "reqd": 0,
+   "options": "RD Cost Allocation Line",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hour_snapshots",
+   "label": "工时来源快照",
+   "fieldtype": "Table",
+   "reqd": 0,
+   "options": "RD Allocation Source Hour",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expense_snapshots",
+   "label": "费用来源快照",
+   "fieldtype": "Table",
+   "reqd": 0,
+   "options": "RD Allocation Source Expense",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "Accounts User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0,
+   "submit": 1,
+   "cancel": 0,
+   "amend": 0,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 0,
+   "share": 0
+  },
+  {
+   "role": "Projects Manager",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0,
+   "submit": 0,
+   "cancel": 0,
+   "amend": 0,
+   "report": 1,
+   "export": 0,
+   "print": 0,
+   "email": 0,
+   "share": 0
+  }
+ ]
 }

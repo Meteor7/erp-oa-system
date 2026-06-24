@@ -59,11 +59,21 @@ def build_allocation_matrix(
 
 def execute(filters=None):
     filters = filters or {}
+    frappe = _get_frappe()
     allocation = filters.get('allocation')
     if not allocation:
-        return [], []
+        # get_list (not get_all) so record-level permissions apply: a restricted
+        # user gets the newest allocation THEY may read, instead of get_all
+        # picking an unreadable one that then fails check_permission.
+        latest = frappe.get_list(
+            'RD Cost Allocation', filters={'docstatus': 1},
+            fields=['name'], order_by='creation desc', limit=1,
+        )
+        if not latest:
+            return [], []
+        allocation = latest[0]['name']
 
-    frappe = _get_frappe()
+    frappe.get_doc("RD Cost Allocation", allocation).check_permission("read")
     lines = frappe.get_all(
         'RD Cost Allocation Line',
         filters={'parent': allocation},

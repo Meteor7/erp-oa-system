@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import frappe  # type: ignore[import-not-found]
+try:  # frappe is unavailable during pure unit-test collection
+    import frappe
+except Exception:  # pragma: no cover
+    frappe = None
 
 SUPPORTED_LANGUAGES = {
     'zh': {'label': '\u4e2d\u6587', 'name': 'Chinese'},
@@ -11,6 +14,14 @@ SUPPORTED_LANGUAGES = {
 }
 
 _TRANSLATION_CACHE_KEYS = ('merged_translations', 'lang_user_translations')
+
+
+def _whitelist(**kwargs):
+    if frappe is not None:
+        return frappe.whitelist(**kwargs)
+    def _noop(fn):
+        return fn
+    return _noop
 
 
 def _get_frappe():
@@ -79,6 +90,6 @@ def _set_language(language: str, frappe_module: Any | None = None) -> dict[str, 
     return _set_current_user_language(normalized, frappe)
 
 
-@frappe.whitelist(methods=['POST'])
+@_whitelist(methods=['POST'])
 def set_language(language: str) -> dict[str, Any]:
     return _set_language(language)

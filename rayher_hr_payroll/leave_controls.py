@@ -13,8 +13,36 @@ def _identity(text: str) -> str:
     return text
 
 
-def _work_date(doc: Any):
-    return getattr(doc, 'work_from_date', None) or getattr(doc, 'work_end_date', None)
+def _to_date(value: Any):
+    from datetime import date as _date
+    if value is None:
+        return None
+    if isinstance(value, _date):
+        return value
+    try:
+        return _date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _work_dates(doc: Any):
+    from datetime import timedelta as _timedelta
+    start = getattr(doc, 'work_from_date', None)
+    end = getattr(doc, 'work_end_date', None)
+    if not start and not end:
+        return []
+    if not end or end == start:
+        return [start or end]
+    s, e = _to_date(start), _to_date(end)
+    if s is None or e is None:
+        return [d for d in (start, end) if d]
+    if e < s:
+        s, e = e, s
+    out, cur = [], s
+    while cur <= e:
+        out.append(cur.isoformat())
+        cur += _timedelta(days=1)
+    return out
 
 
 def validate_compensatory_leave_dates(
@@ -24,14 +52,15 @@ def validate_compensatory_leave_dates(
     throw: Callable[[str], None],
     translate: Callable[[str], str] = _identity,
 ) -> None:
-    work_date = _work_date(doc)
-    if work_date and is_statutory_holiday(work_date):
-        throw(
-            translate(
-                'Statutory holiday overtime cannot be converted into compensatory leave; '
-                'it must be paid according to policy.'
+    for work_date in _work_dates(doc):
+        if is_statutory_holiday(work_date):
+            throw(
+                translate(
+                    'Statutory holiday overtime cannot be converted into compensatory leave; '
+                    'it must be paid according to policy.'
+                )
             )
-        )
+            return
 
 
 def _is_statutory_holiday(attendance_date: Any) -> bool:

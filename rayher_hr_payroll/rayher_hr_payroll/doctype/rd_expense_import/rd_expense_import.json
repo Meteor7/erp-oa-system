@@ -1,70 +1,99 @@
 {
-  "doctype": "DocType",
-  "name": "RD Expense Import",
-  "module": "Rayher HR Payroll",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "is_submittable": 1,
-  "editable_grid": 0,
-  "track_changes": 1,
-  "fields": [
-    {
-      "fieldname": "period",
-      "label": "Period",
-      "fieldtype": "Data",
-      "read_only": 1
-    },
-    {
-      "fieldname": "year",
-      "label": "Year",
-      "fieldtype": "Int",
-      "reqd": 1
-    },
-    {
-      "fieldname": "month",
-      "label": "Month",
-      "fieldtype": "Int",
-      "reqd": 1
-    },
-    {
-      "fieldname": "source_file",
-      "label": "Source File",
-      "fieldtype": "Attach",
-      "reqd": 0
-    },
-    {
-      "fieldname": "source_file_hash",
-      "label": "Source File Hash",
-      "fieldtype": "Data",
-      "reqd": 1
-    },
-    {
-      "fieldname": "status",
-      "label": "Status",
-      "fieldtype": "Select",
-      "reqd": 1,
-      "options": "Draft\nImported\nAllocated\nCancelled",
-      "default": "Draft"
-    },
-    {
-      "fieldname": "items",
-      "label": "Items",
-      "fieldtype": "Table",
-      "reqd": 0,
-      "options": "RD Expense Item"
-    }
-  ],
-  "permissions": [
-    {
-      "role": "System Manager",
-      "read": 1,
-      "write": 1,
-      "create": 1,
-      "delete": 1,
-      "submit": 1,
-      "cancel": 1,
-      "amend": 1
-    }
-  ]
+ "doctype": "DocType",
+ "name": "RD Expense Import",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "is_submittable": 1,
+ "editable_grid": 0,
+ "track_changes": 1,
+ "naming_rule": "Expression (old style)",
+ "autoname": "EXP-.{period}.-.####",
+ "title_field": "period",
+ "fields": [
+  {
+   "fieldname": "period",
+   "label": "期间",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "year",
+   "label": "年度",
+   "fieldtype": "Int",
+   "reqd": 1
+  },
+  {
+   "fieldname": "month",
+   "label": "月份",
+   "fieldtype": "Int",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_file",
+   "label": "来源文件",
+   "fieldtype": "Attach",
+   "reqd": 0
+  },
+  {
+   "fieldname": "source_file_hash",
+   "label": "来源文件哈希(自动)",
+   "fieldtype": "Data",
+   "reqd": 0,
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "状态",
+   "fieldtype": "Select",
+   "reqd": 1,
+   "options": "Draft\nImported\nAllocated\nCancelled",
+   "default": "Draft",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "items",
+   "label": "费用明细",
+   "fieldtype": "Table",
+   "reqd": 0,
+   "options": "RD Expense Item"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "Accounts User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0,
+   "submit": 1,
+   "cancel": 0,
+   "amend": 0,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 0,
+   "share": 0
+  }
+ ]
 }
