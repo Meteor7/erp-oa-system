@@ -35,3 +35,7 @@ doc_events = {
         "validate": "rayher_hr_payroll.leave_controls.validate_compensatory_leave_request",
     },
 }
+
+website_route_rules = [
+    {"from_route": "/rayher/<path:app_path>", "to_route": "rayher"},
+]

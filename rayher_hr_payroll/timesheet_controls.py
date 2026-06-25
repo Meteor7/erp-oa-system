@@ -111,6 +111,86 @@ def distinct_project_owners(time_logs: Any, owner_of: Callable[[str], Any]) -> l
     return sorted(owners)
 
 
+def rd_periods_for_lock(doc: Any, project_rd_enabled: Callable[[str], bool]) -> list:
+    """Distinct (year, month) of the R&D-project rows, SORTED. Callers acquire the
+    per-period locks in this stable order so two concurrent multi-month timesheet writes
+    cannot grab the same import rows in opposite order (AB-BA deadlock)."""
+    periods = set()
+    for row in (getattr(doc, "time_logs", None) or []):
+        project = _row_value(row, "project")
+        d = _entry_date(doc, row)
+        if project and d and project_rd_enabled(project):
+            periods.add((d.year, d.month))
+    return sorted(periods)
+
+
+def ensure_no_submitted_allocation(
+    doc: Any,
+    *,
+    is_rd_employee: Callable[[str], bool],
+    project_rd_enabled: Callable[[str], bool],
+    has_submitted_allocation: Callable[[int, int], bool],
+    throw: Callable[[str], Any],
+    translate: Callable[[str], str] = _identity,
+) -> None:
+    """Freeze R&D hours once their period has a SUBMITTED RD Cost Allocation, on EVERY
+    write path (Desk, REST, custom API) -- enforced in the controller hook, not only in
+    the SPA endpoint. Scoped to rows that actually feed allocation (R&D employee +
+    allow_rd_timesheet project, matching the snapshot query), so ordinary non-R&D
+    timesheets are never blocked. Pure: all I/O is injected for testability."""
+    employee = getattr(doc, "employee", None)
+    if not employee or not is_rd_employee(employee):
+        return
+    rd_periods = set()
+    for row in (getattr(doc, "time_logs", None) or []):
+        project = _row_value(row, "project")
+        d = _entry_date(doc, row)
+        if not project or not d or not project_rd_enabled(project):
+            continue
+        rd_periods.add((d.year, d.month))
+    for (yy, mm) in sorted(rd_periods):
+        if has_submitted_allocation(yy, mm):
+            throw(translate(
+                "本期（{0}-{1:02d}）已存在已提交的研发费用分摊，研发工时已冻结；如需调整请先撤销分摊。"
+            ).format(yy, mm))
+
+
+def _ensure_no_submitted_allocation(doc, frappe) -> None:
+    from rayher_hr_payroll.rd_cost.frappe_adapter import RD_PERSONNEL_TYPES
+    from rayher_hr_payroll.api._guards import lock_period_import
+
+    def is_rd_employee(e):
+        return bool(e) and (frappe.db.get_value("Employee", e, "rd_personnel_type") or "") in RD_PERSONNEL_TYPES
+
+    def project_rd_enabled(pr):
+        return bool(frappe.db.get_value("Project", pr, "allow_rd_timesheet"))
+
+    def has_submitted_allocation(yy, mm):
+        return bool(frappe.db.exists("RD Cost Allocation", {"year": yy, "month": mm, "docstatus": 1}))
+
+    # Evaluate BOTH the post-edit doc AND its pre-save version, so an R&D timesheet cannot be
+    # edited OUT of an allocated period (e.g. reclassified to a non-R&D employee/project) any
+    # more than a new one can be added INTO it -- mirrors the period-lock incl-history guard.
+    before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+    states = [d for d in (doc, before) if d is not None and is_rd_employee(getattr(d, "employee", None))]
+    # Lock every touched period's import row once, in sorted order (no AB-BA), so this write
+    # on ANY path (Desk, REST, SPA save/delete) serializes against a concurrent allocate.
+    periods = set()
+    for d in states:
+        periods.update(rd_periods_for_lock(d, project_rd_enabled))
+    for (yy, mm) in sorted(periods):
+        lock_period_import(yy, mm)
+    for d in states:
+        ensure_no_submitted_allocation(
+            d,
+            is_rd_employee=is_rd_employee,
+            project_rd_enabled=project_rd_enabled,
+            has_submitted_allocation=has_submitted_allocation,
+            throw=frappe.throw,
+            translate=frappe._,
+        )
+
+
 def _is_period_locked(period: str | None) -> bool:
     if not period:
         return False
@@ -159,11 +239,13 @@ def _ensure_periods_unlocked_incl_history(doc: Any, frappe: Any) -> None:
 def block_locked_timesheet_change(doc: Any, method: str | None = None) -> None:
     frappe = _get_frappe()
     _ensure_periods_unlocked_incl_history(doc, frappe)
+    _ensure_no_submitted_allocation(doc, frappe)
 
 
 def validate_timesheet(doc: Any, method: str | None = None) -> None:
     frappe = _get_frappe()
     _ensure_periods_unlocked_incl_history(doc, frappe)
+    _ensure_no_submitted_allocation(doc, frappe)
     ensure_rd_projects_enabled(
         doc,
         is_project_enabled=_is_project_enabled,

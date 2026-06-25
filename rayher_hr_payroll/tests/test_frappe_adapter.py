@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from rayher_hr_payroll.rd_cost.frappe_adapter import (
+    content_row_key_for_row,
     expense_items_from_rows,
     historical_org_for_date,
     source_expense_rows_from_rows,
@@ -159,3 +160,21 @@ def test_historical_org_for_date_accepts_datetime_strings_with_time():
     )
 
     assert org == {"employee_department": "RD", "employee_designation": "Engineer"}
+
+
+def _gl_row(amount="100", source_row_key=""):
+    return SimpleNamespace(
+        voucher_no="V-001", account_level_1="A", account_level_2="B",
+        account_level_3="C", account_level_4="D", amount=amount,
+        direct_project=None, source_row_key=source_row_key,
+    )
+
+
+def test_content_row_key_ignores_explicit_source_row_key():
+    # identical content with DIFFERENT explicit source_row_keys must collide so the
+    # import submit dedup catches a re-keyed duplicate
+    assert content_row_key_for_row(_gl_row(source_row_key="R1")) == content_row_key_for_row(_gl_row(source_row_key="R2"))
+
+
+def test_content_row_key_differs_on_amount():
+    assert content_row_key_for_row(_gl_row(amount="100")) != content_row_key_for_row(_gl_row(amount="200"))

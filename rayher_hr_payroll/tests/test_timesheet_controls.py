@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from rayher_hr_payroll.timesheet_controls import (
+    ensure_no_submitted_allocation,
+    rd_periods_for_lock,
     ensure_period_unlocked,
     ensure_rd_projects_enabled,
     period_from_timesheet,
@@ -127,3 +129,64 @@ def test_ensure_rd_projects_enabled_translates_message_template():
             throw=throw,
             translate=lambda text: f'T:{text}',
         )
+
+
+def _rd_doc():
+    return SimpleNamespace(
+        employee="EMP-1",
+        time_logs=[SimpleNamespace(project="RD-CAP", from_time=date(2026, 5, 15))],
+    )
+
+
+def test_ensure_no_submitted_allocation_freezes_rd_row_in_allocated_period():
+    with pytest.raises(RuleError, match="2026-05"):
+        ensure_no_submitted_allocation(
+            _rd_doc(),
+            is_rd_employee=lambda e: True,
+            project_rd_enabled=lambda pr: True,
+            has_submitted_allocation=lambda y, m: (y, m) == (2026, 5),
+            throw=throw,
+        )
+
+
+def test_ensure_no_submitted_allocation_ignores_non_rd_employee():
+    # a non-R&D employee never feeds allocation, so the freeze must not fire
+    ensure_no_submitted_allocation(
+        _rd_doc(),
+        is_rd_employee=lambda e: False,
+        project_rd_enabled=lambda pr: True,
+        has_submitted_allocation=lambda y, m: True,
+        throw=throw,
+    )
+
+
+def test_ensure_no_submitted_allocation_ignores_non_rd_project_rows():
+    ensure_no_submitted_allocation(
+        _rd_doc(),
+        is_rd_employee=lambda e: True,
+        project_rd_enabled=lambda pr: False,
+        has_submitted_allocation=lambda y, m: True,
+        throw=throw,
+    )
+
+
+def test_ensure_no_submitted_allocation_allows_period_without_allocation():
+    ensure_no_submitted_allocation(
+        _rd_doc(),
+        is_rd_employee=lambda e: True,
+        project_rd_enabled=lambda pr: True,
+        has_submitted_allocation=lambda y, m: False,
+        throw=throw,
+    )
+
+
+def test_rd_periods_for_lock_is_sorted_and_distinct():
+    # multi-month sheet, rows out of order, a non-R&D row mixed in
+    doc = SimpleNamespace(time_logs=[
+        SimpleNamespace(project="RD", from_time=date(2026, 2, 10)),
+        SimpleNamespace(project="RD", from_time=date(2026, 1, 5)),
+        SimpleNamespace(project="NON", from_time=date(2026, 3, 1)),
+        SimpleNamespace(project="RD", from_time=date(2026, 2, 20)),
+    ])
+    # only R&D periods, de-duplicated, ascending -> stable lock order (no AB-BA deadlock)
+    assert rd_periods_for_lock(doc, lambda pr: pr == "RD") == [(2026, 1), (2026, 2)]

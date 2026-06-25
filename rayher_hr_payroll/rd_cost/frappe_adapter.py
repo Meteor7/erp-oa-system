@@ -45,6 +45,17 @@ _LEGACY_SOURCE_ROW_KEY_FIELDS = (
 )
 
 
+def content_row_key_for_row(row: Any) -> str:
+    """Content-only key that ignores any explicit source_row_key: two GL rows with the
+    same voucher / account path / amount collide even when given different source_row_keys,
+    so a manually re-keyed duplicate cannot slip past the submit-time dedup. NOTE: this
+    treats byte-identical GL lines (same voucher+account path+amount) as duplicates; if a
+    source ledger legitimately posts two identical lines distinguished only by their GL
+    line id, that key would need to be folded in here."""
+    parts = [str(_value(row, fieldname)).strip() for fieldname in _LEGACY_SOURCE_ROW_KEY_FIELDS]
+    return "content|" + "|".join(parts)
+
+
 def source_row_key_for_row(row: Any) -> str:
     raw_source_row_key = _value(row, "source_row_key")
     source_row_key = str(raw_source_row_key).strip() if raw_source_row_key is not None else ""

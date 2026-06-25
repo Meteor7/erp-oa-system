@@ -1,3 +1,3 @@
 include rayher_hr_payroll/modules.txt
 include rayher_hr_payroll/patches.txt
-recursive-include rayher_hr_payroll *.json *.js *.py *.html *.css *.csv
+recursive-include rayher_hr_payroll *.json *.js *.py *.html *.css *.csv *.woff2 *.woff *.ttf *.svg

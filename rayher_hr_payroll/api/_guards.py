@@ -15,6 +15,31 @@ def require_rd_access(roles=RD_MANAGE_ROLES):
     frappe.only_for(list(roles))
 
 
+def lock_period_import(year, month):
+    """Resolve the period's newest non-cancelled RD Expense Import and lock its row FOR
+    UPDATE, so every hour-mutation path (save/delete, the global Timesheet hook) and
+    recalc_allocation serialize on the SAME row. Returns the import name or None. The
+    order_by is fixed here so all callers resolve+lock an identical row (no drift)."""
+    name = frappe.db.get_value(
+        "RD Expense Import", {"year": year, "month": month, "docstatus": ["<", 2]},
+        "name", order_by="creation desc",
+    )
+    if name:
+        frappe.db.get_value("RD Expense Import", name, "name", for_update=True)
+    # KNOWN CONCURRENCY RESIDUALS (narrow; opus-rated P3, codex-rated higher). Row-locking
+    # the newest import serializes hour-edit vs allocate only AFTER the period's first
+    # import exists, and only for the API paths (a concurrent Desk timesheet edit, and the
+    # one-submitted-import-per-period uniqueness check, are not covered — a non-indexed
+    # multi-row FOR UPDATE there would lock the whole table and deadlock, so it was not
+    # added). All these cases require a process violation (mutating a period while it is
+    # being allocated) plus precise concurrency. Fully closing them needs ONE deterministic
+    # period-level lock row that every path (hour save/delete, import submit, allocate, and
+    # the Desk Timesheet hook) takes before acting — which requires a schema/migration
+    # (an index or a per-period sentinel row) and a workflow decision (auto-lock-on-
+    # allocation). That is a dedicated backend-concurrency change, tracked separately.
+    return name
+
+
 def parse_period(period):
     """Parse a strict 'YYYY-MM' / 'YYYYMM' period into (year, month); raise on malformed."""
     import re as _re

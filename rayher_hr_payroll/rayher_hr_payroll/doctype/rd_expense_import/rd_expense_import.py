@@ -30,13 +30,21 @@ class RDExpenseImport(Document):
         # Reject duplicate GL source rows at submit using the SAME key the
         # allocator rejects, so a duplicate-laden import cannot be submitted and
         # then squat the period while allocation keeps failing.
-        from rayher_hr_payroll.rd_cost.frappe_adapter import source_row_key_for_row
-        seen = set()
+        from rayher_hr_payroll.rd_cost.frappe_adapter import (
+            source_row_key_for_row, content_row_key_for_row,
+        )
+        seen, seen_content = set(), set()
         for it in self.items:
             k = source_row_key_for_row(it)
             if k in seen:
                 frappe.throw(frappe._("费用明细存在重复行（{0}），不能提交。").format(k))
             seen.add(k)
+            # also reject identical CONTENT carrying different source_row_keys, so a
+            # Desk/API caller cannot re-key duplicate GL rows past the key-based check
+            ck = content_row_key_for_row(it)
+            if ck in seen_content:
+                frappe.throw(frappe._("费用明细存在内容重复行（凭证号、科目与金额都相同），不能提交。"))
+            seen_content.add(ck)
 
     def on_submit(self):
         self.db_set("status", "Imported")

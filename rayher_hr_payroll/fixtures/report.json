@@ -49,12 +49,6 @@
     "role": "HR Manager"
    },
    {
-    "parent": "研发工时表(明细)",
-    "parentfield": "roles",
-    "parenttype": "Report",
-    "role": "Accounts User"
-   },
-   {
     "role": "System Manager"
    }
   ],
@@ -108,12 +102,6 @@
     "parentfield": "roles",
     "parenttype": "Report",
     "role": "HR Manager"
-   },
-   {
-    "parent": "研发人员台账",
-    "parentfield": "roles",
-    "parenttype": "Report",
-    "role": "Accounts User"
    },
    {
     "role": "System Manager"
