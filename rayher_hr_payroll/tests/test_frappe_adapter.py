@@ -178,3 +178,21 @@ def test_content_row_key_ignores_explicit_source_row_key():
 
 def test_content_row_key_differs_on_amount():
     assert content_row_key_for_row(_gl_row(amount="100")) != content_row_key_for_row(_gl_row(amount="200"))
+
+
+def test_content_row_key_normalizes_amount():
+    # "100" / 100 / "100.00" are the same GL amount and must collide
+    assert content_row_key_for_row(_gl_row(amount="100")) == content_row_key_for_row(_gl_row(amount=100))
+    assert content_row_key_for_row(_gl_row(amount="100")) == content_row_key_for_row(_gl_row(amount="100.00"))
+    assert content_row_key_for_row(_gl_row(amount="100")) != content_row_key_for_row(_gl_row(amount="100.01"))
+
+
+def test_content_row_key_treats_none_and_blank_optional_field_the_same():
+    a = SimpleNamespace(voucher_no="V-001", account_level_1="A", account_level_2="B",
+                        account_level_3="C", account_level_4=None, amount="100",
+                        direct_project=None, source_row_key="")
+    b = SimpleNamespace(voucher_no="V-001", account_level_1="A", account_level_2="B",
+                        account_level_3="C", account_level_4="", amount="100",
+                        direct_project="", source_row_key="")
+    # one leaves optional fields unset (None), the other sends them blank ("") -> still a duplicate
+    assert content_row_key_for_row(a) == content_row_key_for_row(b)

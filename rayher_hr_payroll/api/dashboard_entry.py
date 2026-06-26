@@ -9,8 +9,7 @@ RD_TYPES = ("全时研发", "非全时研发", "研发辅助")
 def get_dashboard(period):
     require_rd_access()
     year, month = parse_period(period)
-    emps = frappe.get_all("Employee", fields=["name", "archive_status", "rd_personnel_type",
-                                              "rd_mock_base", "rd_mock_social", "rd_mock_fund", "rd_mock_tax"])
+    emps = frappe.get_all("Employee", fields=["name", "archive_status", "rd_personnel_type"])
     total = len(emps)
     confirmed = sum(1 for e in emps if (e.archive_status or "") == "已归档")
     pending = total - confirmed
