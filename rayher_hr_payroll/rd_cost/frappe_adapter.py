@@ -52,7 +52,19 @@ def content_row_key_for_row(row: Any) -> str:
     treats byte-identical GL lines (same voucher+account path+amount) as duplicates; if a
     source ledger legitimately posts two identical lines distinguished only by their GL
     line id, that key would need to be folded in here."""
-    parts = [str(_value(row, fieldname)).strip() for fieldname in _LEGACY_SOURCE_ROW_KEY_FIELDS]
+    parts = []
+    for fieldname in _LEGACY_SOURCE_ROW_KEY_FIELDS:
+        raw = _value(row, fieldname)
+        if fieldname == "amount":
+            # normalize like the API dedup (save_expense) so 100, "100", "100.00" collide
+            try:
+                parts.append("%.2f" % round(float(raw or 0), 2))
+            except (TypeError, ValueError):
+                parts.append("0.00")
+        else:
+            # treat None and "" identically so a row leaving an optional field unset
+            # collides with one sending it blank
+            parts.append(str(raw if raw is not None else "").strip())
     return "content|" + "|".join(parts)
 
 

@@ -147,13 +147,6 @@ def save_rd_hours(period, employee, project, hours):
     frappe.db.get_value("Employee", employee, "name", for_update=True)  # serialize concurrent saves for this employee so the drop+insert cannot double-count
     _drop_combo(employee, project, year, month)
     if hours > 0:
-        # Start this log right after the latest remaining timesheet log for the
-        # employee in this period, so it never overlaps an existing one (ERPNext
-        # derives to_time from from_time+hours and rejects overlapping employee
-        # time when ignore_employee_time_overlap is off). Using max(to_time)
-        # rather than a cumulative offset keeps edits/re-adds collision-free even
-        # when the edited row originally preceded another. Monthly RD hours
-        # (<=~200) fit well inside the month.
         # Place the log in the EARLIEST free slot of the month that fits `hours`,
         # considering ALL the employee's logs (manual + SPA) so it overlaps none,
         # yet packs from the 1st so a late-month entry is never pushed out of the

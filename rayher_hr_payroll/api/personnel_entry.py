@@ -1,6 +1,6 @@
 import frappe
 
-from rayher_hr_payroll.api._guards import require_rd_access, RD_HR_ROLES
+from rayher_hr_payroll.api._guards import require_rd_access
 
 RD_HR_WRITE = ("System Manager", "HR User", "HR Manager")
 
@@ -14,10 +14,12 @@ def list_employees():
     # id_card_number_cn is permlevel:1 PII — only HR-level roles may see it
     if set(frappe.get_roles()) & {"System Manager", "HR User", "HR Manager"}:
         fields.insert(2, "id_card_number_cn")
-    # Role-gated org-wide view (the app uses role-based access, not per-user
-    # Employee User Permissions; finance/HR management roles see the full roster).
-    # get_all (not get_list) so it also works for roles without an Employee
-    # read DocPerm -- the require_rd_access role gate above is the control.
+    # Role-gated org-wide view: the app uses role-based access (not per-user Employee User
+    # Permissions), and HR-level roles are deliberately allowed to see id_card_number_cn
+    # (permlevel-1 PII). NOTE: get_all bypasses both DocPerm and permlevel field filtering, so
+    # the require_rd_access gate above -- NOT the permission model -- is the access control
+    # here. To make this model-driven/auditable, add a permlevel-1 read DocPerm for these roles
+    # and switch to get_list.
     return frappe.get_all("Employee", fields=fields, order_by="employee_name")
 
 
