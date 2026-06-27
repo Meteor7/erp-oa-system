@@ -22,3 +22,8 @@ def test_notifications_enabled_with_document_type():
 def test_notification_names_unique():
     names = [n["name"] for n in NOTIFICATIONS]
     assert len(names) == len(set(names))
+
+
+def test_install_calls_ensure_notifications():
+    import inspect, rayher_hr_payroll.install as install
+    assert "ensure_notifications" in inspect.getsource(install)
