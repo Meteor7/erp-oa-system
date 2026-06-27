@@ -1,0 +1,15 @@
+{
+ "doctype": "Report",
+ "name": "员工信息总表",
+ "report_name": "员工信息总表",
+ "ref_doctype": "Employee",
+ "report_type": "Query Report",
+ "is_standard": "Yes",
+ "module": "Rayher HR Payroll",
+ "query": "SELECT emp.employee_name AS \"姓名:Data:160\", emp.id_card_number_cn AS \"身份证号:Data:160\", emp.gender AS \"性别:Data:80\", edu.qualification AS \"学历:Data:120\", edu.school_univ AS \"毕业院校:Data:180\", edu.maj_optional AS \"专业:Data:140\", emp.department AS \"部门:Link/Department:160\", emp.designation AS \"岗位:Link/Designation:160\", emp.status AS \"状态:Data:90\" FROM `tabEmployee` emp LEFT JOIN (SELECT e1.parent, e1.qualification, e1.school_univ, e1.maj_optional FROM `tabEmployee Education` e1 INNER JOIN (SELECT parent, MAX(idx) AS max_idx FROM `tabEmployee Education` GROUP BY parent) e2 ON e1.parent = e2.parent AND e1.idx = e2.max_idx) edu ON edu.parent = emp.name ORDER BY emp.employee_name",
+ "roles": [
+  {"role": "System Manager"},
+  {"role": "HR User"},
+  {"role": "HR Manager"}
+ ]
+}
