@@ -13,7 +13,13 @@ from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workf
 # Employee would also expose permlevel-0 fields (incl. the reserved rd_mock_* salary
 # fields). The SPA's role-scoped read/write perms ship with the SPA endpoints in
 # split 2/2, where they belong.
-SPA_PERMS = []
+SPA_PERMS = [
+    # The 待我审批 (Pending My Approval) report is a Script Report whose ref_doctype
+    # is Expense Claim; Frappe gates report execution on has_permission(ref_doctype,
+    # "report"). The approver roles need that, plus read to open the linked docs.
+    ("Expense Claim", "Department Manager", {"read": 1, "report": 1}),
+    ("Expense Claim", "Accounts User", {"read": 1, "report": 1}),
+]
 
 
 def _ensure_spa_perms():
@@ -27,7 +33,7 @@ def _ensure_spa_perms():
 
 def after_install():
     create_custom_fields(CUSTOM_FIELDS, update=True)
-    _ensure_spa_perms()
-    ensure_access_control()
+    ensure_access_control()  # create roles/profile FIRST so grants below can target them
     ensure_workflow_masters()
+    _ensure_spa_perms()
     ensure_notifications()

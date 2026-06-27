@@ -2,15 +2,19 @@
  "doctype": "Report",
  "name": "Pending My Approval",
  "report_name": "Pending My Approval",
- "ref_doctype": "Leave Application",
+ "ref_doctype": "Expense Claim",
  "report_type": "Script Report",
  "is_standard": "Yes",
  "module": "Rayher HR Payroll",
  "roles": [
-  {"role": "Department Manager"},
-  {"role": "Accounts User"},
-  {"role": "HR User"},
-  {"role": "HR Manager"},
-  {"role": "System Manager"}
+  {
+   "role": "Department Manager"
+  },
+  {
+   "role": "Accounts User"
+  },
+  {
+   "role": "System Manager"
+  }
  ]
 }

@@ -24,3 +24,13 @@ def test_employee_workspace_has_four_quick_actions():
 def test_approval_center_links_pending_report():
     sc = _load()["审批中心"]["shortcuts"]
     assert any(s["link_to"] == "Pending My Approval" and s["type"] == "Report" for s in sc)
+
+
+def test_workspace_content_embeds_shortcut_blocks():
+    # Frappe Desk renders a workspace from its `content` blocks; shortcuts only
+    # appear if the content has matching {"type":"shortcut"} blocks.
+    import json
+    ws = _load()
+    for name in ("员工工作台", "审批中心"):
+        content = json.loads(ws[name]["content"])
+        assert any(b.get("type") == "shortcut" for b in content), name

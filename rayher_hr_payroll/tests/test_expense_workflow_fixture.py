@@ -66,3 +66,8 @@ def test_manager_approval_scoped_to_expense_approver():
     # expense_approver, not merely holding the Department Manager role.
     cond = _transitions()[("待经理审批", "待财务复核")].get("condition", "")
     assert "expense_approver" in cond and "session.user" in cond
+
+
+def test_manager_reject_also_scoped_to_approver():
+    cond = _transitions()[("待经理审批", "已拒绝")].get("condition", "")
+    assert "expense_approver" in cond and "session.user" in cond
