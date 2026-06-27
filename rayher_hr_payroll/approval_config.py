@@ -1,51 +1,44 @@
 import frappe
 
-_TYPES = [
-    ("Leave Application", "请假", "leave_approver", "status"),
-    ("Travel Request", "出差", None, "status"),
-    ("Expense Claim", "报销", "expense_approver", "workflow_state"),
-    ("Compensatory Leave Request", "调休", "leave_approver", "status"),
+# Notify the APPLICANT (owner) when their request is decided. The trigger differs
+# per doctype because their approval mechanics differ (verified against HRMS):
+#   - Leave Application: tracks a real `status` field -> Value Change on status.
+#   - Expense Claim: driven by our Workflow -> Value Change on workflow_state.
+#   - Travel Request / Compensatory Leave Request: approved by submission and have
+#     NO status field -> fire on Submit (a Value Change on a missing field would be
+#     auto-disabled by Frappe).
+# Approver-side reminders are intentionally NOT modeled as custom notifications:
+# the Expense Claim workflow's `send_email_alert` notifies the next actor, HRMS
+# already notifies leave/travel approvers natively, and the P5 "待我审批" report is
+# the in-app pending queue. This avoids dead/duplicate notifications.
+_RESULT = [
+    ("Leave Application", "请假", "Value Change", "status"),
+    ("Expense Claim", "报销", "Value Change", "workflow_state"),
+    ("Travel Request", "出差", "Submit", None),
+    ("Compensatory Leave Request", "调休", "Submit", None),
 ]
 
 
-def _submit(doctype, label, approver_field):
-    recipients = [{"receiver_by_document_field": approver_field}] if approver_field else []
-    return {
-        "doctype": "Notification",
-        "name": doctype + " 提交提醒",
-        "subject": "新的" + label + "申请待审批: {{ doc.name }}",
-        "document_type": doctype,
-        "event": "Submit",
-        "channel": "System Notification",
-        "enabled": 1,
-        "is_standard": 0,
-        "module": "Rayher HR Payroll",
-        "recipients": recipients,
-        "message": "{{ doc.owner }} 提交了" + label + "申请 {{ doc.name }},请及时处理。",
-    }
-
-
-def _decision(doctype, label, state_field):
-    return {
+def _result_notification(doctype, label, event, value_changed):
+    n = {
         "doctype": "Notification",
         "name": doctype + " 结果提醒",
         "subject": "你的" + label + "申请已更新: {{ doc.name }}",
         "document_type": doctype,
-        "event": "Value Change",
-        "value_changed": state_field,
+        "event": event,
         "channel": "System Notification",
         "enabled": 1,
         "is_standard": 0,
         "module": "Rayher HR Payroll",
         "recipients": [{"receiver_by_document_field": "owner"}],
-        "message": "你的" + label + "申请 {{ doc.name }} 状态已更新。",
+        "message": "你的" + label + "申请 {{ doc.name }} 已处理,请查看最新状态。",
     }
+    if value_changed:
+        n["value_changed"] = value_changed
+    return n
 
 
-NOTIFICATIONS = []
-for _dt, _label, _appr, _state in _TYPES:
-    NOTIFICATIONS.append(_submit(_dt, _label, _appr))
-    NOTIFICATIONS.append(_decision(_dt, _label, _state))
+NOTIFICATIONS = [_result_notification(dt, label, ev, vc) for dt, label, ev, vc in _RESULT]
 
 
 def ensure_notifications():

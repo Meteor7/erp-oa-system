@@ -5,18 +5,36 @@ def _by_name():
     return {n["name"]: n for n in NOTIFICATIONS}
 
 
-def test_each_request_type_has_submit_and_decision_reminders():
+def test_one_result_reminder_per_request_type():
     names = set(_by_name())
     for doctype in ("Leave Application", "Travel Request", "Expense Claim", "Compensatory Leave Request"):
-        assert f"{doctype} 提交提醒" in names, doctype
         assert f"{doctype} 结果提醒" in names, doctype
+    assert len(NOTIFICATIONS) == 4
 
 
-def test_notifications_enabled_with_document_type():
+def test_notifications_are_creatable_and_notify_applicant():
     for n in NOTIFICATIONS:
+        # is_standard=1 would be rejected outside developer mode:
+        assert n["is_standard"] == 0
+        # only Email/Slack/System Notification/SMS are valid; bell == System Notification:
+        assert n["channel"] == "System Notification"
         assert n["enabled"] == 1
         assert n["document_type"]
-        assert n["channel"] in ("Email", "System Notification")
+        # applicant is the recipient:
+        assert n["recipients"] == [{"receiver_by_document_field": "owner"}]
+
+
+def test_value_change_notifications_reference_real_fields_only():
+    by = _by_name()
+    # Leave Application has a real `status` field; Expense Claim uses workflow_state.
+    assert by["Leave Application 结果提醒"]["event"] == "Value Change"
+    assert by["Leave Application 结果提醒"]["value_changed"] == "status"
+    assert by["Expense Claim 结果提醒"]["value_changed"] == "workflow_state"
+    # Travel Request & Compensatory Leave Request have NO status field -> must fire on Submit,
+    # NOT a Value Change on a missing column (which Frappe would auto-disable).
+    for dt in ("Travel Request", "Compensatory Leave Request"):
+        assert by[f"{dt} 结果提醒"]["event"] == "Submit"
+        assert "value_changed" not in by[f"{dt} 结果提醒"]
 
 
 def test_notification_names_unique():
@@ -25,12 +43,6 @@ def test_notification_names_unique():
 
 
 def test_install_calls_ensure_notifications():
-    import inspect, rayher_hr_payroll.install as install
+    import inspect
+    import rayher_hr_payroll.install as install
     assert "ensure_notifications" in inspect.getsource(install)
-
-
-def test_notifications_are_not_standard_so_they_can_be_created():
-    # is_standard=1 Notifications cannot be created/edited outside developer mode
-    # (Frappe raises "Cannot edit Standard Notification"). Code-created ones must be 0.
-    for n in NOTIFICATIONS:
-        assert n["is_standard"] == 0

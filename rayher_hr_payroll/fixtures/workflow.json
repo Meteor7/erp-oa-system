@@ -9,15 +9,18 @@
   "workflow_state_field": "workflow_state",
   "states": [
    {"state": "草稿", "doc_status": "0", "allow_edit": "Employee"},
-   {"state": "经理已批", "doc_status": "0", "allow_edit": "Department Manager"},
-   {"state": "财务已审", "doc_status": "1", "allow_edit": "Accounts User"},
-   {"state": "已拒绝", "doc_status": "0", "allow_edit": "Employee"}
+   {"state": "待经理审批", "doc_status": "0", "allow_edit": "Department Manager"},
+   {"state": "待财务复核", "doc_status": "0", "allow_edit": "Accounts User"},
+   {"state": "财务已审", "doc_status": "1", "allow_edit": "Accounts User", "update_field": "approval_status", "update_value": "Approved"},
+   {"state": "已拒绝", "doc_status": "0", "allow_edit": "Employee", "update_field": "approval_status", "update_value": "Rejected"}
   ],
   "transitions": [
-   {"state": "草稿", "action": "提交审批", "next_state": "经理已批", "allowed": "Department Manager"},
-   {"state": "草稿", "action": "拒绝", "next_state": "已拒绝", "allowed": "Department Manager"},
-   {"state": "经理已批", "action": "财务复核", "next_state": "财务已审", "allowed": "Accounts User"},
-   {"state": "经理已批", "action": "拒绝", "next_state": "已拒绝", "allowed": "Accounts User"}
+   {"state": "草稿", "action": "提交审批", "next_state": "待经理审批", "allowed": "Employee", "allow_self_approval": 1},
+   {"state": "待经理审批", "action": "经理批准", "next_state": "待财务复核", "allowed": "Department Manager", "allow_self_approval": 0},
+   {"state": "待经理审批", "action": "驳回", "next_state": "已拒绝", "allowed": "Department Manager", "allow_self_approval": 1},
+   {"state": "待财务复核", "action": "财务复核", "next_state": "财务已审", "allowed": "Accounts User", "allow_self_approval": 0},
+   {"state": "待财务复核", "action": "驳回", "next_state": "已拒绝", "allowed": "Accounts User", "allow_self_approval": 1},
+   {"state": "已拒绝", "action": "重新提交", "next_state": "草稿", "allowed": "Employee", "allow_self_approval": 1}
   ]
  }
 ]
