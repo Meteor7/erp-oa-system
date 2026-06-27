@@ -32,3 +32,17 @@ def period_salaries(ym):
         fields=["employee", "gross_pay"],
     )
     return {r.employee: float(r.gross_pay) for r in rows}
+
+
+def period_pay_totals(ym):
+    """Aggregate {gross, deductions} from submitted Salary Slips in the period."""
+    start, end = month_bounds(ym)
+    rows = frappe.get_all(
+        "Salary Slip",
+        filters={"docstatus": 1, "start_date": ["between", [start, end]]},
+        fields=["gross_pay", "total_deduction"],
+    )
+    return {
+        "gross": float(sum((r["gross_pay"] or 0) for r in rows)),
+        "deductions": float(sum((r["total_deduction"] or 0) for r in rows)),
+    }

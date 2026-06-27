@@ -47,15 +47,21 @@ def get_dashboard(period):
     dorm_count = len(dorms)
     dorm_sum = sum((d.total_amount or 0) for d in dorms)
 
-    # Wage calculation is out of scope (payroll design spec); the SPA shows no
-    # salary, so no salary aggregate is computed or returned here.
+    # payroll/salary aggregates are only exposed to HR/Accounts roles
     can_see_cost = bool(set(frappe.get_roles()) & set(RD_FINANCE_ROLES))
     alloc = (frappe.db.get_value("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
                                  ["capitalized_total", "expensed_total", "unknown_total"],
                                  as_dict=True, order_by="creation desc") or {}) if can_see_cost else {}
-    if not can_see_cost:
+    if can_see_cost:
+        from rayher_hr_payroll.payroll_bridge import period_pay_totals
+        pay = period_pay_totals(period_canon)
+        gross = pay["gross"]
+        deductions = pay["deductions"]
+    else:
         cost_sum = 0
         cost_items = 0
+        gross = 0
+        deductions = 0
 
     return {
         "period": period,
@@ -67,4 +73,5 @@ def get_dashboard(period):
         "alloc": {"capitalized": alloc.get("capitalized_total") or 0,
                   "expensed": alloc.get("expensed_total") or 0,
                   "unknown": alloc.get("unknown_total") or 0},
+        "salary": {"gross": gross, "deductions": deductions},
     }
