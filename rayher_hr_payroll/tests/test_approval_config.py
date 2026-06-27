@@ -1,0 +1,24 @@
+from rayher_hr_payroll.approval_config import NOTIFICATIONS
+
+
+def _by_name():
+    return {n["name"]: n for n in NOTIFICATIONS}
+
+
+def test_each_request_type_has_submit_and_decision_reminders():
+    names = set(_by_name())
+    for doctype in ("Leave Application", "Travel Request", "Expense Claim", "Compensatory Leave Request"):
+        assert f"{doctype} 提交提醒" in names, doctype
+        assert f"{doctype} 结果提醒" in names, doctype
+
+
+def test_notifications_enabled_with_document_type():
+    for n in NOTIFICATIONS:
+        assert n["enabled"] == 1
+        assert n["document_type"]
+        assert n["channel"] in ("Email", "Notification")
+
+
+def test_notification_names_unique():
+    names = [n["name"] for n in NOTIFICATIONS]
+    assert len(names) == len(set(names))
