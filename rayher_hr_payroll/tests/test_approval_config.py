@@ -27,3 +27,10 @@ def test_notification_names_unique():
 def test_install_calls_ensure_notifications():
     import inspect, rayher_hr_payroll.install as install
     assert "ensure_notifications" in inspect.getsource(install)
+
+
+def test_notifications_are_not_standard_so_they_can_be_created():
+    # is_standard=1 Notifications cannot be created/edited outside developer mode
+    # (Frappe raises "Cannot edit Standard Notification"). Code-created ones must be 0.
+    for n in NOTIFICATIONS:
+        assert n["is_standard"] == 0
