@@ -7,35 +7,48 @@ def _target_email(doc):
     return doc.company_email or doc.personal_email or None
 
 
-def _should_disable(doc):
-    return doc.status == "Left"
-
-
 def sync_user_for_employee(doc, method=None):
-    """Onboarding/HR creates the Employee; ensure a matching login account.
-    Active + has email + no user  -> create User (Employee role only) and bind user_id.
-    Left                          -> disable the linked User. New management roles are
-    NEVER auto-granted here (least privilege); HR adds them by hand afterwards."""
-    if _should_disable(doc):
-        if doc.user_id and frappe.db.exists("User", doc.user_id):
-            user = frappe.get_doc("User", doc.user_id)
-            if user.enabled:
-                user.enabled = 0
-                user.save(ignore_permissions=True)
+    """Keep an Employee's login account in step with employment.
+
+    - If the Employee already has a linked User (`user_id`), keep that account's
+      `enabled` flag in sync with status (Active -> enabled, otherwise disabled).
+      This covers separation AND rehire (Left -> Active re-enables).
+    - If the Employee has NO linked account yet and is Active with an email,
+      auto-provision a least-privilege login (role `Employee` only) and bind it.
+
+    Security: we NEVER adopt/modify a pre-existing User found by email. Employee
+    emails are not unique, so a reused address (e.g. an existing System Manager's)
+    must not be silently taken over and granted roles. If a User already exists for
+    the email, we leave `user_id` unset and let HR link it deliberately. All User
+    writes use ignore_permissions because this runs from HR-driven Employee saves,
+    not necessarily as System Manager.
+
+    Note: the auto-created account has no password set (send_welcome_email=0 to stay
+    SMTP-independent); credential delivery (welcome email / password reset / SSO) is
+    an HR/ops step.
+    """
+    if doc.user_id and frappe.db.exists("User", doc.user_id):
+        want_enabled = 1 if doc.status == "Active" else 0
+        user = frappe.get_doc("User", doc.user_id)
+        if user.enabled != want_enabled:
+            user.enabled = want_enabled
+            user.flags.ignore_permissions = True
+            user.save(ignore_permissions=True)
         return
 
-    if doc.status != "Active" or doc.user_id:
+    if doc.status != "Active":
         return
     email = _target_email(doc)
     if not email:
         return
     if frappe.db.exists("User", email):
-        user = frappe.get_doc("User", email)
-    else:
-        user = frappe.new_doc("User")
-        user.email = email
-        user.first_name = doc.employee_name or email.split("@")[0]
-        user.send_welcome_email = 0
-        user.insert(ignore_permissions=True)
+        return
+
+    user = frappe.new_doc("User")
+    user.email = email
+    user.first_name = doc.employee_name or email.split("@")[0]
+    user.send_welcome_email = 0
+    user.flags.ignore_permissions = True
+    user.insert(ignore_permissions=True)
     user.add_roles(*DEFAULT_EMPLOYEE_ROLES)
     doc.db_set("user_id", email)
