@@ -20,3 +20,10 @@ def test_should_disable_only_when_left():
 
 def test_default_role_is_employee_only():
     assert lc.DEFAULT_EMPLOYEE_ROLES == ["Employee"]
+
+
+def test_hooks_register_user_sync():
+    from rayher_hr_payroll import hooks
+    ev = hooks.doc_events["Employee"]
+    flat = str(ev)
+    assert "lifecycle_controls.sync_user_for_employee" in flat

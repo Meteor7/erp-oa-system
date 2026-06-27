@@ -24,6 +24,8 @@ doc_events = {
             "rayher_hr_payroll.employee_controls.validate_employee_archive",
             "rayher_hr_payroll.employee_controls.validate_employee_rd_lock",
         ],
+        "after_insert": "rayher_hr_payroll.lifecycle_controls.sync_user_for_employee",
+        "on_update": "rayher_hr_payroll.lifecycle_controls.sync_user_for_employee",
     },
     "Timesheet": {
         "validate": "rayher_hr_payroll.timesheet_controls.validate_timesheet",
