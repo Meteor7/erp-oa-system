@@ -22,3 +22,13 @@ def test_expense_claim_filter_uses_current_workflow_states():
     expense = [t for t in rpt._TYPES if t[1] == "Expense Claim"][0]
     filters = expense[2]
     assert filters["workflow_state"] == ["in", ["待经理审批", "待财务复核"]]
+
+
+def test_statusless_doctypes_have_no_state_field():
+    # Travel Request / Compensatory Leave Request have NO `status` column; their
+    # state_field must be None so _fetch does not SELECT a non-existent column.
+    by_dt = {t[1]: t[3] for t in rpt._TYPES}
+    assert by_dt["Travel Request"] is None
+    assert by_dt["Compensatory Leave Request"] is None
+    assert by_dt["Leave Application"] == "status"
+    assert by_dt["Expense Claim"] == "workflow_state"
