@@ -35,3 +35,16 @@ def test_combine_results_sums_two_allocations():
     c = combine_results(a, b)
     assert c.project_amounts["P1"] == Decimal("300.00")
     assert len(c.lines) == 2
+
+
+def test_net_zero_hours_employee_is_skipped_not_raising():
+    from decimal import Decimal
+    from rayher_hr_payroll.rd_cost.allocation import allocate_labor
+    from rayher_hr_payroll.rd_cost.types import ExpenseItem, ProjectHour
+    # E1 has a salary but their hours net to zero (a correction reversed the log).
+    res = allocate_labor(
+        salaries=[ExpenseItem(name="labor:E1", amount=Decimal("8000"), account_level_3="人工费", category="人工费")],
+        employee_hours={"labor:E1": [ProjectHour(project="P1", hours=Decimal("0"), stage="capitalized")]},
+    )
+    assert res.lines == []
+    assert res.stage_totals["capitalized"] == Decimal("0.00")

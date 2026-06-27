@@ -158,7 +158,11 @@ def allocate_labor(*, salaries, employee_hours):
     )
     for item in salaries:
         hours = employee_hours.get(item.name)
-        if not hours:
+        # Skip an employee whose net R&D hours are 0 (e.g. a correction reversed a
+        # prior log): their salary is simply not capitalizable this month. Without
+        # this guard allocate_expenses -> _sum_hours would raise and abort the whole
+        # allocation for one net-zero researcher.
+        if not hours or sum((h.hours for h in hours), ZERO) <= ZERO:
             continue
         result = combine_results(result, allocate_expenses(expenses=[item], project_hours=hours))
     return result
