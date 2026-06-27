@@ -12,6 +12,9 @@ after_migrate = "rayher_hr_payroll.install.after_install"
 fixtures = [
     # Ship the DB-stored R&D Query Reports so the SPA's report pages work on a fresh install.
     {"dt": "Report", "filters": [["module", "=", "Rayher HR Payroll"], ["is_standard", "=", "No"]]},
+    {"dt": "Workflow", "filters": [["name", "=", "Expense Claim Approval"]]},
+    {"dt": "Workflow State", "filters": [["workflow_state_name", "in", ["草稿", "经理已批", "财务已审", "已拒绝"]]]},
+    {"dt": "Workflow Action Master", "filters": [["workflow_action_name", "in", ["提交审批", "财务复核", "拒绝"]]]},
 ]
 
 doc_events = {
