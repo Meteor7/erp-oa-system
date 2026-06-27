@@ -27,8 +27,22 @@ def ensure_access_control():
 
 
 def _ensure_custom_roles():
+    # Declarative config-as-code: create the role if missing, and reconcile its
+    # declared flags (e.g. desk_access) if it already exists with stale values.
     for r in CUSTOM_ROLES:
-        if not frappe.db.exists("Role", r["role_name"]):
+        name = r["role_name"]
+        if frappe.db.exists("Role", name):
+            doc = frappe.get_doc("Role", name)
+            changed = False
+            for field, value in r.items():
+                if field == "role_name":
+                    continue
+                if doc.get(field) != value:
+                    doc.set(field, value)
+                    changed = True
+            if changed:
+                doc.save(ignore_permissions=True)
+        else:
             doc = frappe.new_doc("Role")
             doc.update(r)
             doc.insert(ignore_permissions=True)

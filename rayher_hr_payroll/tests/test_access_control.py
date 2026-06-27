@@ -85,3 +85,56 @@ def test_role_profile_rebuilds_when_roles_differ(monkeypatch):
     monkeypatch.setattr(ac.frappe, "get_doc", lambda *a, **k: FakeDoc(["System Manager"]))
     ac._ensure_role_profiles()
     assert saved == [True]
+
+
+def test_custom_role_reconciles_stale_flags(monkeypatch):
+    """Existing role with wrong desk_access gets reconciled (declarative config)."""
+    import types
+    import rayher_hr_payroll.access_control as ac
+
+    saved = []
+
+    class FakeRole:
+        def __init__(self, **kw):
+            self._d = kw
+
+        def get(self, k):
+            return self._d.get(k)
+
+        def set(self, k, v):
+            self._d[k] = v
+
+        def save(self, **k):
+            saved.append(dict(self._d))
+
+    role = FakeRole(role_name="Department Manager", desk_access=0)
+    monkeypatch.setattr(ac.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
+    monkeypatch.setattr(ac.frappe, "get_doc", lambda *a, **k: role)
+    ac._ensure_custom_roles()
+    assert saved and saved[0]["desk_access"] == 1
+
+
+def test_custom_role_no_save_when_flags_match(monkeypatch):
+    import types
+    import rayher_hr_payroll.access_control as ac
+
+    saved = []
+
+    class FakeRole:
+        def __init__(self, **kw):
+            self._d = kw
+
+        def get(self, k):
+            return self._d.get(k)
+
+        def set(self, k, v):
+            self._d[k] = v
+
+        def save(self, **k):
+            saved.append(True)
+
+    role = FakeRole(role_name="Department Manager", desk_access=1)
+    monkeypatch.setattr(ac.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
+    monkeypatch.setattr(ac.frappe, "get_doc", lambda *a, **k: role)
+    ac._ensure_custom_roles()
+    assert saved == []
