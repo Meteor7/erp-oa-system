@@ -17,3 +17,10 @@ def test_owner_role_profile_bundles_required_roles():
 def test_role_profile_roles_are_unique():
     for p in ROLE_PROFILES:
         assert len(p["roles"]) == len(set(p["roles"])), p["role_profile"]
+
+
+def test_install_calls_ensure_access_control():
+    import inspect
+    import rayher_hr_payroll.install as install
+    src = inspect.getsource(install)
+    assert "ensure_access_control" in src

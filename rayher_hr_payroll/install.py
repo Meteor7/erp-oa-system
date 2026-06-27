@@ -1,6 +1,7 @@
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 from rayher_hr_payroll.custom_fields import CUSTOM_FIELDS
+from rayher_hr_payroll.access_control import ensure_access_control
 
 # Permissions the R&D cost SPA needs so its reports/endpoints work for the
 # management roles (finance = Accounts User, HR = HR User). Shipped here so a
@@ -26,3 +27,4 @@ def _ensure_spa_perms():
 def after_install():
     create_custom_fields(CUSTOM_FIELDS, update=True)
     _ensure_spa_perms()
+    ensure_access_control()
