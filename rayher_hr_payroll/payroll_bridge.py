@@ -18,9 +18,9 @@ def get_period_salary(employee, ym):
     rows = frappe.get_all(
         "Salary Slip",
         filters={"employee": employee, "docstatus": 1, "start_date": ["between", [start, end]]},
-        fields=["gross_pay"], limit=1,
+        fields=["gross_pay"],
     )
-    return float(rows[0].gross_pay) if rows else 0.0
+    return float(sum((r.gross_pay or 0) for r in rows))
 
 
 def period_salaries(ym):
@@ -31,7 +31,10 @@ def period_salaries(ym):
         filters={"docstatus": 1, "start_date": ["between", [start, end]]},
         fields=["employee", "gross_pay"],
     )
-    return {r.employee: float(r.gross_pay) for r in rows}
+    out = {}
+    for r in rows:
+        out[r.employee] = out.get(r.employee, 0.0) + float(r.gross_pay or 0)
+    return out
 
 
 def period_pay_totals(ym):

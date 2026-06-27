@@ -47,7 +47,7 @@ def get_dashboard(period):
     dorm_count = len(dorms)
     dorm_sum = sum((d.total_amount or 0) for d in dorms)
 
-    # payroll/salary aggregates are only exposed to HR/Accounts roles
+    # salary aggregates are exposed only to finance roles (RD_FINANCE_ROLES)
     can_see_cost = bool(set(frappe.get_roles()) & set(RD_FINANCE_ROLES))
     alloc = (frappe.db.get_value("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
                                  ["capitalized_total", "expensed_total", "unknown_total"],
