@@ -16,12 +16,13 @@ from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workf
 SPA_PERMS = [
     # The 待我审批 (Pending My Approval) report is a Script Report whose ref_doctype
     # is Expense Claim; Frappe gates report execution on has_permission(ref_doctype,
-    # "report"). The approver roles need that, plus read to open the linked docs.
-    ("Expense Claim", "Department Manager", {"read": 1, "report": 1}),
-    ("Expense Claim", "Accounts User", {"read": 1, "report": 1}),
+    # "report"). Grant report ONLY (not read) so a manager cannot browse every claim
+    # in Desk; read for opening/approving comes from the user's stock Employee role.
+    ("Expense Claim", "Department Manager", {"report": 1}),
+    ("Expense Claim", "Accounts User", {"report": 1}),
     # Employees self-serve Travel Requests from the portal but the stock Employee
     # role lacks create on it (unlike Leave/Expense/Comp-Leave).
-    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1}),
+    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1, "submit": 1, "if_owner": 1}),
 ]
 
 
