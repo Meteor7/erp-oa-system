@@ -1,0 +1,16 @@
+{
+ "doctype": "Report",
+ "name": "待我审批",
+ "report_name": "待我审批",
+ "ref_doctype": "Leave Application",
+ "report_type": "Script Report",
+ "is_standard": "Yes",
+ "module": "Rayher HR Payroll",
+ "roles": [
+  {"role": "Department Manager"},
+  {"role": "Accounts User"},
+  {"role": "HR User"},
+  {"role": "HR Manager"},
+  {"role": "System Manager"}
+ ]
+}
