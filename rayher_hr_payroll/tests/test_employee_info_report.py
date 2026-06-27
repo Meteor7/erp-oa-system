@@ -37,3 +37,12 @@ def test_report_includes_left_employees_pii_and_education():
     # PII column + education join present:
     assert "id_card_number_cn" in q
     assert "tabemployee education" in q
+
+
+def test_report_uses_real_employee_education_columns():
+    # Guard against regressions to non-existent columns: HRMS major field is
+    # `maj_opt_subj` (not `maj_optional`); school is `school_univ`.
+    q = _load()["query"].lower()
+    assert "maj_opt_subj" in q
+    assert "maj_optional" not in q
+    assert "school_univ" in q
