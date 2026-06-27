@@ -16,7 +16,7 @@ def test_notifications_enabled_with_document_type():
     for n in NOTIFICATIONS:
         assert n["enabled"] == 1
         assert n["document_type"]
-        assert n["channel"] in ("Email", "Notification")
+        assert n["channel"] in ("Email", "System Notification")
 
 
 def test_notification_names_unique():
