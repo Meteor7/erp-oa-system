@@ -64,3 +64,20 @@ def ensure_notifications():
     for stale in frappe.get_all("Notification", filters={"module": "Rayher HR Payroll"}, pluck="name"):
         if stale not in managed:
             frappe.delete_doc("Notification", stale, ignore_permissions=True, force=True)
+
+
+# The Expense Claim workflow references these state/action names. They are Link
+# targets (workflow_state -> Workflow State), and fixture import does NOT create
+# the masters, so a real transition (or even creating a claim whose default state
+# is 草稿) fails link validation until these exist. Create them idempotently.
+WORKFLOW_STATES = ["草稿", "待经理审批", "待财务复核", "财务已审", "已拒绝"]
+WORKFLOW_ACTIONS = ["提交审批", "经理批准", "财务复核", "驳回", "重新提交"]
+
+
+def ensure_workflow_masters():
+    for name in WORKFLOW_STATES:
+        if not frappe.db.exists("Workflow State", name):
+            frappe.get_doc({"doctype": "Workflow State", "workflow_state_name": name}).insert(ignore_permissions=True)
+    for name in WORKFLOW_ACTIONS:
+        if not frappe.db.exists("Workflow Action Master", name):
+            frappe.get_doc({"doctype": "Workflow Action Master", "workflow_action_name": name}).insert(ignore_permissions=True)

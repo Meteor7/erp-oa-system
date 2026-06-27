@@ -53,3 +53,30 @@ def test_no_salaries_means_no_labor_lines_backward_compatible():
     )
     assert doc.tables["lines"] == []
     assert doc.capitalized_total == Decimal("0.00")
+
+
+def test_labor_scaled_by_rd_hour_ratio():
+    # E1 logged 4 R&D hours on capitalized P1, but 8 total worked hours that month
+    # (4 non-R&D). gross 10000 -> only 4/8 = 50% is R&D-capitalisable -> 5000.
+    doc = FakeDoc()
+    source_hour_rows = [{"employee": "E1", "project": "P1", "hours": Decimal("4")}]
+    project_hours = [ProjectHour(project="P1", hours=Decimal("4"), stage="capitalized")]
+    populate_allocation_document(
+        doc, expenses=[], source_hour_rows=source_hour_rows,
+        source_expense_rows=[], project_hours=project_hours,
+        salaries={"E1": 10000}, total_hours={"E1": 8},
+    )
+    assert doc.capitalized_total == Decimal("5000.00")
+
+
+def test_labor_full_salary_when_all_time_is_rd():
+    # total == R&D hours -> ratio 1 -> full salary capitalised (full-time researcher).
+    doc = FakeDoc()
+    source_hour_rows = [{"employee": "E1", "project": "P1", "hours": Decimal("8")}]
+    project_hours = [ProjectHour(project="P1", hours=Decimal("8"), stage="capitalized")]
+    populate_allocation_document(
+        doc, expenses=[], source_hour_rows=source_hour_rows,
+        source_expense_rows=[], project_hours=project_hours,
+        salaries={"E1": 10000}, total_hours={"E1": 8},
+    )
+    assert doc.capitalized_total == Decimal("10000.00")

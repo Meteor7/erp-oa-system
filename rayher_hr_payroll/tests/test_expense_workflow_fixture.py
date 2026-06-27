@@ -59,3 +59,10 @@ def test_rejected_can_be_resubmitted():
     tr = _transitions()
     assert ("已拒绝", "草稿") in tr
     assert tr[("已拒绝", "草稿")]["allowed"] == "Employee"
+
+
+def test_manager_approval_scoped_to_expense_approver():
+    # The 经理批准 transition must be conditioned on the viewer being the claim's
+    # expense_approver, not merely holding the Department Manager role.
+    cond = _transitions()[("待经理审批", "待财务复核")].get("condition", "")
+    assert "expense_approver" in cond and "session.user" in cond

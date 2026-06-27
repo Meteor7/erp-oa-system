@@ -51,3 +51,15 @@ def test_install_calls_ensure_notifications():
     import inspect
     import rayher_hr_payroll.install as install
     assert "ensure_notifications" in inspect.getsource(install)
+
+
+def test_workflow_masters_cover_states_and_actions():
+    from rayher_hr_payroll.approval_config import WORKFLOW_STATES, WORKFLOW_ACTIONS
+    assert set(WORKFLOW_STATES) == {"草稿", "待经理审批", "待财务复核", "财务已审", "已拒绝"}
+    assert {"提交审批", "经理批准", "财务复核", "驳回", "重新提交"} == set(WORKFLOW_ACTIONS)
+
+
+def test_install_calls_ensure_workflow_masters():
+    import inspect
+    import rayher_hr_payroll.install as install
+    assert "ensure_workflow_masters" in inspect.getsource(install)

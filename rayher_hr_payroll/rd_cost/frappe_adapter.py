@@ -312,3 +312,27 @@ def ensure_direct_project_stages(
     if not stage_by_project:
         return project_hours
     return merge_direct_project_stages(project_hours, stage_by_project)
+
+
+def total_hours_by_employee(*, year: int, month: int) -> dict[str, float]:
+    """Total submitted timesheet hours per R&D employee in the period, across ALL
+    projects (R&D and non-R&D). This is the denominator for the R&D labour ratio
+    (R&D hours / total hours) so a part-time researcher's salary is only partially
+    capitalised, per the spec ("工资 × 研发工时占比")."""
+    frappe = _get_frappe()
+    rows = frappe.db.sql(
+        """
+        select ts.employee as employee, sum(tsd.hours) as hours
+          from `tabTimesheet Detail` tsd
+          inner join `tabTimesheet` ts on ts.name = tsd.parent
+          inner join `tabEmployee` e on e.name = ts.employee
+         where ts.docstatus = 1
+           and month(tsd.from_time) = %(month)s
+           and year(tsd.from_time) = %(year)s
+           and e.rd_personnel_type in %(rd_personnel_types)s
+         group by ts.employee
+        """,
+        {"year": year, "month": month, "rd_personnel_types": RD_PERSONNEL_TYPES},
+        as_dict=True,
+    )
+    return {r.employee: float(r.hours or 0) for r in rows}

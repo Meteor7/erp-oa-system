@@ -8,6 +8,7 @@ from rayher_hr_payroll.rd_cost.frappe_adapter import (
     get_project_hour_rows,
     get_source_expense_rows,
     project_hours_from_rows,
+    total_hours_by_employee,
 )
 
 
@@ -134,6 +135,7 @@ class RDCostAllocation(Document):
 
         period = "%04d-%02d" % (int(self.year), int(self.month))
         salaries = period_salaries(period)
+        total_hours = total_hours_by_employee(year=self.year, month=self.month)
 
         populate_allocation_document(
             self,
@@ -142,4 +144,5 @@ class RDCostAllocation(Document):
             source_expense_rows=source_expense_rows,
             project_hours=project_hours,
             salaries=salaries,
+            total_hours=total_hours,
         )
