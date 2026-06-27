@@ -1,7 +1,7 @@
 {
  "doctype": "Report",
- "name": "待我审批",
- "report_name": "待我审批",
+ "name": "Pending My Approval",
+ "report_name": "Pending My Approval",
  "ref_doctype": "Leave Application",
  "report_type": "Script Report",
  "is_standard": "Yes",

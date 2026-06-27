@@ -8,7 +8,7 @@
    {"type": "DocType", "link_to": "Travel Request", "label": "出差申请", "doc_view": "New"},
    {"type": "DocType", "link_to": "Expense Claim", "label": "报销申请", "doc_view": "New"},
    {"type": "DocType", "link_to": "Compensatory Leave Request", "label": "加班/调休", "doc_view": "New"},
-   {"type": "Report", "link_to": "待我审批", "label": "我的待办"}
+   {"type": "Report", "link_to": "Pending My Approval", "label": "我的待办"}
   ]
  },
  {
@@ -16,7 +16,7 @@
   "public": 1, "module": "Rayher HR Payroll",
   "content": "[{\"type\":\"header\",\"data\":{\"text\":\"待我审批\"}}]",
   "shortcuts": [
-   {"type": "Report", "link_to": "待我审批", "label": "待我审批"}
+   {"type": "Report", "link_to": "Pending My Approval", "label": "待我审批"}
   ]
  }
 ]

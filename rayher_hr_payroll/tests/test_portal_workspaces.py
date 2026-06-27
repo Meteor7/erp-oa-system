@@ -23,4 +23,4 @@ def test_employee_workspace_has_four_quick_actions():
 
 def test_approval_center_links_pending_report():
     sc = _load()["审批中心"]["shortcuts"]
-    assert any(s["link_to"] == "待我审批" and s["type"] == "Report" for s in sc)
+    assert any(s["link_to"] == "Pending My Approval" and s["type"] == "Report" for s in sc)
