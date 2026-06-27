@@ -55,3 +55,10 @@ def ensure_notifications():
         for r in n.get("recipients", []):
             doc.append("recipients", r)
         doc.save(ignore_permissions=True)
+
+    # Declarative cleanup: drop any module-owned Notification no longer in the set
+    # (e.g. the earlier submit/approver reminders that were removed as broken).
+    managed = {n["name"] for n in NOTIFICATIONS}
+    for stale in frappe.get_all("Notification", filters={"module": "Rayher HR Payroll"}, pluck="name"):
+        if stale not in managed:
+            frappe.delete_doc("Notification", stale, ignore_permissions=True, force=True)
