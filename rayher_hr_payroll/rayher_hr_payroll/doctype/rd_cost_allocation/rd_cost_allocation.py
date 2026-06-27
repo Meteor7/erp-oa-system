@@ -128,10 +128,18 @@ class RDCostAllocation(Document):
             project_hours, expenses, year=self.year, month=self.month
         )
 
+        # R&D labour cost: each researcher's submitted Salary Slip gross for the
+        # period, allocated across THEIR own project hours and merged with expenses.
+        from rayher_hr_payroll.payroll_bridge import period_salaries
+
+        period = "%04d-%02d" % (int(self.year), int(self.month))
+        salaries = period_salaries(period)
+
         populate_allocation_document(
             self,
             expenses=expenses,
             source_hour_rows=source_hour_rows,
             source_expense_rows=source_expense_rows,
             project_hours=project_hours,
+            salaries=salaries,
         )
