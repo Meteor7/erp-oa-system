@@ -19,6 +19,9 @@ SPA_PERMS = [
     # "report"). The approver roles need that, plus read to open the linked docs.
     ("Expense Claim", "Department Manager", {"read": 1, "report": 1}),
     ("Expense Claim", "Accounts User", {"read": 1, "report": 1}),
+    # Employees self-serve Travel Requests from the portal but the stock Employee
+    # role lacks create on it (unlike Leave/Expense/Comp-Leave).
+    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1}),
 ]
 
 

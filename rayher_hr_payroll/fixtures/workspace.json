@@ -37,6 +37,11 @@
     "link_to": "Pending My Approval",
     "label": "我的待办"
    }
+  ],
+  "roles": [
+   {
+    "role": "Employee"
+   }
   ]
  },
  {
@@ -52,6 +57,17 @@
     "type": "Report",
     "link_to": "Pending My Approval",
     "label": "待我审批"
+   }
+  ],
+  "roles": [
+   {
+    "role": "Department Manager"
+   },
+   {
+    "role": "Accounts User"
+   },
+   {
+    "role": "System Manager"
    }
   ]
  }
