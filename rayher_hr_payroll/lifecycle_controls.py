@@ -41,6 +41,7 @@ def sync_user_for_employee(doc, method=None):
     email = _target_email(doc)
     if not email:
         return
+    email = email.strip().lower()  # User.name is force-lowercased; match it
     if frappe.db.exists("User", email):
         return
 
@@ -50,5 +51,10 @@ def sync_user_for_employee(doc, method=None):
     user.send_welcome_email = 0
     user.flags.ignore_permissions = True
     user.insert(ignore_permissions=True)
+    # Establish the Employee->User link BEFORE granting roles: ERPNext's
+    # validate_employee_role strips the Employee role from a User that has no
+    # Employee linked, so order matters (this also matches ERPNext create_user,
+    # which sets user_id = user.name then assigns roles). Bind user.name (the
+    # normalized id), not the raw email.
+    doc.db_set("user_id", user.name)
     user.add_roles(*DEFAULT_EMPLOYEE_ROLES)
-    doc.db_set("user_id", email)

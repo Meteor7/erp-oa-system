@@ -27,9 +27,11 @@ class FakeUser:
         self.first_name = None
         self.send_welcome_email = None
         self.inserted = False
+        self.name = None
 
     def insert(self, **k):
         self.inserted = True
+        self.name = self.email
 
     def add_roles(self, *roles):
         self.roles_added.extend(roles)
