@@ -31,10 +31,15 @@ def test_value_change_notifications_reference_real_fields_only():
     assert by["Leave Application 结果提醒"]["value_changed"] == "status"
     assert by["Expense Claim 结果提醒"]["value_changed"] == "workflow_state"
     # Travel Request & Compensatory Leave Request have NO status field -> must fire on Submit,
-    # NOT a Value Change on a missing column (which Frappe would auto-disable).
+    # NOT a Value Change on a missing column (which Frappe would auto-disable). value_changed
+    # is reconciled to "" (present, empty) so a stale prior value cannot linger in the DB.
     for dt in ("Travel Request", "Compensatory Leave Request"):
         assert by[f"{dt} 结果提醒"]["event"] == "Submit"
-        assert "value_changed" not in by[f"{dt} 结果提醒"]
+        assert by[f"{dt} 结果提醒"]["value_changed"] == ""
+    # Expense result reminder only fires on terminal decision states (not on the
+    # applicant's own submit or intermediate manager/finance steps):
+    cond = by["Expense Claim 结果提醒"]["condition"]
+    assert "财务已审" in cond and "已拒绝" in cond
 
 
 def test_notification_names_unique():

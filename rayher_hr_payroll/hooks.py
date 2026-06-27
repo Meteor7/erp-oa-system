@@ -13,8 +13,6 @@ fixtures = [
     # Ship the DB-stored R&D Query Reports so the SPA's report pages work on a fresh install.
     {"dt": "Report", "filters": [["module", "=", "Rayher HR Payroll"], ["is_standard", "=", "No"]]},
     {"dt": "Workflow", "filters": [["name", "=", "Expense Claim Approval"]]},
-    {"dt": "Workflow State", "filters": [["workflow_state_name", "in", ["草稿", "待经理审批", "待财务复核", "财务已审", "已拒绝"]]]},
-    {"dt": "Workflow Action Master", "filters": [["workflow_action_name", "in", ["提交审批", "经理批准", "财务复核", "驳回", "重新提交"]]]},
 ]
 
 doc_events = {

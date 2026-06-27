@@ -1,31 +1,36 @@
 import frappe
 
-# Notify the APPLICANT (owner) when their request is decided. The trigger differs
-# per doctype because their approval mechanics differ (verified against HRMS):
-#   - Leave Application: tracks a real `status` field -> Value Change on status.
-#   - Expense Claim: driven by our Workflow -> Value Change on workflow_state.
-#   - Travel Request / Compensatory Leave Request: approved by submission and have
-#     NO status field -> fire on Submit (a Value Change on a missing field would be
-#     auto-disabled by Frappe).
-# Approver-side reminders are intentionally NOT modeled as custom notifications:
-# the Expense Claim workflow's `send_email_alert` notifies the next actor, HRMS
-# already notifies leave/travel approvers natively, and the P5 "待我审批" report is
-# the in-app pending queue. This avoids dead/duplicate notifications.
+# Notify the APPLICANT (owner) when their request is DECIDED. Trigger differs per
+# doctype because their approval mechanics differ (verified against HRMS):
+#   - Leave Application: real `status` field -> Value Change on status.
+#   - Expense Claim: our Workflow -> Value Change on workflow_state, gated by a
+#     condition to the terminal states so the applicant isn't pinged on their own
+#     submission or on intermediate manager/finance steps.
+#   - Travel Request / Compensatory Leave Request: no status field, approved by
+#     submission -> fire on Submit (a Value Change on a missing field is auto-disabled).
+# Approver-side routing is handled by the workflow's email alert, by HRMS native
+# notifications, and by the P5 "待我审批" report — not by custom notifications here.
+# (HRMS also pushes its own PWA approval notification for Expense Claim; the custom
+# System Notification is the in-bell complement.)
 _RESULT = [
-    ("Leave Application", "请假", "Value Change", "status"),
-    ("Expense Claim", "报销", "Value Change", "workflow_state"),
-    ("Travel Request", "出差", "Submit", None),
-    ("Compensatory Leave Request", "调休", "Submit", None),
+    ("Leave Application", "请假", "Value Change", "status", ""),
+    ("Expense Claim", "报销", "Value Change", "workflow_state", "doc.workflow_state in ['财务已审', '已拒绝']"),
+    ("Travel Request", "出差", "Submit", "", ""),
+    ("Compensatory Leave Request", "调休", "Submit", "", ""),
 ]
 
 
-def _result_notification(doctype, label, event, value_changed):
-    n = {
+def _result_notification(doctype, label, event, value_changed, condition):
+    # value_changed and condition are ALWAYS present (possibly "") so the idempotent
+    # update path reconciles any stale value left by an earlier version.
+    return {
         "doctype": "Notification",
         "name": doctype + " 结果提醒",
         "subject": "你的" + label + "申请已更新: {{ doc.name }}",
         "document_type": doctype,
         "event": event,
+        "value_changed": value_changed,
+        "condition": condition,
         "channel": "System Notification",
         "enabled": 1,
         "is_standard": 0,
@@ -33,12 +38,9 @@ def _result_notification(doctype, label, event, value_changed):
         "recipients": [{"receiver_by_document_field": "owner"}],
         "message": "你的" + label + "申请 {{ doc.name }} 已处理,请查看最新状态。",
     }
-    if value_changed:
-        n["value_changed"] = value_changed
-    return n
 
 
-NOTIFICATIONS = [_result_notification(dt, label, ev, vc) for dt, label, ev, vc in _RESULT]
+NOTIFICATIONS = [_result_notification(*spec) for spec in _RESULT]
 
 
 def ensure_notifications():
