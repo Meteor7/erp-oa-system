@@ -156,5 +156,6 @@ class RDCostAllocation(Document):
         if skipped:
             frappe.msgprint(
                 "以下员工本期工时不完整(非全时研发),未纳入研发人工分摊;"
-                "请补全其非研发工时后重新分摊:" + ", ".join(skipped)
+                "请在工时单补录其非研发工时(项目可留空)以提供总工时分母后重新分摊:"
+                + ", ".join(skipped)
             )

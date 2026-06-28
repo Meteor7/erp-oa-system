@@ -1,9 +1,10 @@
 import frappe
 
 # Four-tier role model. 员工=Employee, HR=HR User/HR Manager, 财务=Accounts User
-# all reuse stock roles; only "Department Manager" is new — it scopes 本部门
-# visibility for 工时/看板/审批 (range enforced later via User Permission). The
-# role is also consumed by the P2 Expense Claim workflow (manager stage).
+# all reuse stock roles; only "Department Manager" is new — it gates the OA *approval*
+# layer: the Expense Claim workflow manager stage and per-document request visibility
+# (员工只见自己 / 经理只见指派给自己的, in request_visibility). The R&D 工时/看板 APIs stay
+# scoped to the finance/R&D-manage roles (RD_MANAGE_ROLES), not Department Manager.
 CUSTOM_ROLES = [
     {"role_name": "Department Manager", "desk_access": 1},
 ]

@@ -55,7 +55,7 @@
     "next_state": "待财务复核",
     "allowed": "Department Manager",
     "allow_self_approval": 0,
-    "condition": "doc.expense_approver == frappe.session.user and frappe.db.get_value('Employee', doc.employee, 'user_id') != frappe.session.user"
+    "condition": "doc.expense_approver == frappe.session.user and frappe.db.get_value('Employee', {'user_id': frappe.session.user}, 'name') != doc.employee"
    },
    {
     "state": "待经理审批",
@@ -71,7 +71,7 @@
     "next_state": "财务已审",
     "allowed": "Accounts User",
     "allow_self_approval": 0,
-    "condition": "frappe.db.get_value('Employee', doc.employee, 'user_id') != frappe.session.user"
+    "condition": "frappe.db.get_value('Employee', {'user_id': frappe.session.user}, 'name') != doc.employee"
    },
    {
     "state": "待财务复核",

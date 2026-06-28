@@ -38,3 +38,21 @@ non-bug. None is a data-loss/security/correctness defect in the delivered backen
 
 ## 5. External gates (USER action)
 - GitHub Codex review of the PRs needs Codex credits / a connected account on the repo.
+
+## 非全时研发 partial capitalization requires a total-hours denominator (operational, not a defect)
+
+The R&D labour ratio is `工资 × (研发工时 / 总工时)`. The denominator (`total_hours_by_employee`)
+sums **all** submitted Timesheet Detail hours for the employee — including rows with **no
+project** (the Timesheet validator only rejects rows on *non-R&D projects*, never project-less
+rows). So a 非全时研发/研发辅助 researcher's non-R&D time must be logged as **project-less**
+timesheet rows; then `total_hours > rd_hours` and their salary is prorated correctly.
+
+If their non-R&D time is *not* logged (so `total_hours == rd_hours`), the system cannot know the
+ratio and **skips** that employee's labour rather than over-capitalising 100% or aborting the
+whole period. Skipped employees are surfaced two ways: a `msgprint` on calculate and the persisted
+read-only `labor_skipped` field on the allocation. Finance completes the timesheet (project-less
+hours) and re-runs. Verified on bench: an R&D row (4h) + a project-less row (4h) yields
+`total_hours = 8 > 4`, so the ratio (0.5) is computed and the employee is capitalised.
+
+This is an operational requirement (log non-R&D time), not a code defect: the feature is fully
+functional when timesheets are complete, and fails safe + visibly when they are not.
