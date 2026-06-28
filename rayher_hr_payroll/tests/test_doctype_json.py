@@ -182,3 +182,9 @@ def test_exact_permission_matrix_on_all_changed_doctypes():
         actual = {p["role"]: {name for f, name in rights.items() if p.get(name)} for p in doc["permissions"]}
         expected = {role: {rights[f] for f in fl} for role, fl in roles.items()}
         assert actual == expected, (folder, actual, expected)
+
+
+def test_rd_cost_allocation_persists_skipped_labor():
+    fields = {field["fieldname"]: field for field in load_doctype("rd_cost_allocation")["fields"]}
+    assert "labor_skipped" in fields  # under-counted (incomplete-hours) employees recorded on the doc
+    assert fields["labor_skipped"]["read_only"] == 1

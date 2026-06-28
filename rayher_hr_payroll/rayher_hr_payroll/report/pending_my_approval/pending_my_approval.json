@@ -15,6 +15,12 @@
   },
   {
    "role": "System Manager"
+  },
+  {
+   "role": "Leave Approver"
+  },
+  {
+   "role": "Expense Approver"
   }
  ]
 }

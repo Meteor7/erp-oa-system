@@ -4,8 +4,9 @@ import rayher_hr_payroll.payroll_bridge as pb
 
 
 class Slip:
-    def __init__(self, start_date):
+    def __init__(self, start_date, employee="EMP-1"):
         self.start_date = start_date
+        self.employee = employee
 
 
 def test_period_from_date():
@@ -20,14 +21,15 @@ def test_blocks_slip_change_when_allocation_submitted(monkeypatch):
         raise Exception(msg)
 
     monkeypatch.setattr(pb, "frappe", types.SimpleNamespace(
-        db=types.SimpleNamespace(exists=lambda dt, flt: True), throw=throw))
+        db=types.SimpleNamespace(exists=lambda dt, flt: True, get_value=lambda dt, n, f: "全时研发"),
+        throw=throw))
     with pytest.raises(Exception):
         pb.block_locked_salary_slip_change(Slip("2026-07-31"))
 
 
 def test_allows_slip_change_when_no_allocation(monkeypatch):
     monkeypatch.setattr(pb, "frappe", types.SimpleNamespace(
-        db=types.SimpleNamespace(exists=lambda dt, flt: False),
+        db=types.SimpleNamespace(exists=lambda dt, flt: False, get_value=lambda dt, n, f: "全时研发"),
         throw=lambda m: (_ for _ in ()).throw(Exception(m))))
     # no submitted allocation -> no throw
     pb.block_locked_salary_slip_change(Slip("2026-07-31"))
@@ -35,6 +37,14 @@ def test_allows_slip_change_when_no_allocation(monkeypatch):
 
 def test_noop_without_start_date(monkeypatch):
     monkeypatch.setattr(pb, "frappe", types.SimpleNamespace(
-        db=types.SimpleNamespace(exists=lambda *a: True),
+        db=types.SimpleNamespace(exists=lambda *a: True, get_value=lambda dt, n, f: "全时研发"),
         throw=lambda m: (_ for _ in ()).throw(Exception(m))))
     pb.block_locked_salary_slip_change(Slip(None))  # returns early, no throw
+
+
+def test_allows_non_rd_employee_slip_even_when_allocated(monkeypatch):
+    # A non-R&D employee's slip cannot change a submitted allocation -> must not be blocked.
+    monkeypatch.setattr(pb, "frappe", types.SimpleNamespace(
+        db=types.SimpleNamespace(exists=lambda dt, flt: True, get_value=lambda dt, n, f: "非研发"),
+        throw=lambda m: (_ for _ in ()).throw(Exception(m))))
+    pb.block_locked_salary_slip_change(Slip("2026-07-31", employee="EMP-NONRD"))  # no throw

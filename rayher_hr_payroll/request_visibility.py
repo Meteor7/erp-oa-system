@@ -34,7 +34,9 @@ def _scope_sql(doctype, user, roles, employee):
     emp_field, approver_field = _SCOPING[doctype]
     tbl = "`tab" + doctype + "`"
     clauses = []
-    if approver_field and "Department Manager" in roles:
+    # Anyone named as the assigned approver sees the request -- covers our Department
+    # Manager flow AND stock HRMS Leave Approver / Expense Approver assigned per-document.
+    if approver_field:
         clauses.append("{0}.{1} = {2}".format(tbl, approver_field, frappe.db.escape(user)))
     if employee:
         clauses.append("{0}.{1} = {2}".format(tbl, emp_field, frappe.db.escape(employee)))
@@ -50,7 +52,7 @@ def _in_scope(doctype, doc, user, roles, employee):
     if doctype == "Expense Claim" and (roles & _FINANCE_ROLES):
         return True
     emp_field, approver_field = _SCOPING[doctype]
-    if approver_field and "Department Manager" in roles and doc.get(approver_field) == user:
+    if approver_field and doc.get(approver_field) == user:
         return True
     if employee and doc.get(emp_field) == employee:
         return True

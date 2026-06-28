@@ -61,6 +61,7 @@ def test_scope_sql_unrestricted_for_see_all_and_finance(monkeypatch):
 def test_scope_sql_employee_and_manager(monkeypatch):
     monkeypatch.setattr(rv.frappe, "db", types.SimpleNamespace(escape=lambda v: "'%s'" % v))
     emp = rv._scope_sql("Expense Claim", "e1@co", {"Employee"}, "E1")
-    assert "employee = 'E1'" in emp and "expense_approver" not in emp
+    # own claims OR claims where they are the assigned approver (covers stock approver roles)
+    assert "employee = 'E1'" in emp and "expense_approver = 'e1@co'" in emp
     mgr = rv._scope_sql("Expense Claim", "mgr@co", {"Department Manager"}, "M1")
     assert "expense_approver = 'mgr@co'" in mgr and "employee = 'M1'" in mgr

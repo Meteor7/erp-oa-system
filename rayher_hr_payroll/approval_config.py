@@ -153,10 +153,12 @@ def notify_applicant_on_decision(doc, method=None):
     if not check or not check(doc):
         return
     # Value-Change doctypes (Expense/Leave) fire on_update on every save; only act on the
-    # transition INTO the terminal state, not repeated saves while already terminal.
-    before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
-    if before is not None and check(before):
-        return
+    # transition INTO the terminal state. Submit-driven doctypes (Travel/Comp) fire on_submit
+    # exactly once, where get_doc_before_save() is the pre-submit draft -- skip the dedup there.
+    if method != "on_submit":
+        before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+        if before is not None and check(before):
+            return
     emp = getattr(doc, "employee", None)
     if not emp:
         return

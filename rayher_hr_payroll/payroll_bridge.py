@@ -71,6 +71,13 @@ def block_locked_salary_slip_change(doc, method=None):
     if not period:
         return
     year, month = period
+    # Only R&D employees' slips feed an allocation (labour is capitalised solely for R&D
+    # personnel with R&D hours); a non-R&D employee's payroll correction cannot change a
+    # submitted allocation, so don't lock it.
+    from rayher_hr_payroll.rd_cost.frappe_adapter import RD_PERSONNEL_TYPES
+    emp = getattr(doc, "employee", None)
+    if not emp or (frappe.db.get_value("Employee", emp, "rd_personnel_type") or "") not in RD_PERSONNEL_TYPES:
+        return
     if frappe.db.exists("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1}):
         frappe.throw(
             "本期(%04d-%02d)已有已提交的研发费用分摊,工资单不可新增/修改/取消;"

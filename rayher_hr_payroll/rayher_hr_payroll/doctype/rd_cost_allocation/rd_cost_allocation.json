@@ -98,6 +98,12 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "labor_skipped",
+   "fieldtype": "Small Text",
+   "label": "未纳入人工(工时不完整)",
+   "read_only": 1
+  },
+  {
    "fieldname": "lines",
    "label": "分摊明细",
    "fieldtype": "Table",
