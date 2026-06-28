@@ -32,6 +32,10 @@ SPA_PERMS = [
     # 财务看全员工资 (spec L64): stock Salary Slip grants no read to Accounts User; add it so
     # finance can view payroll (request_visibility lets finance see all salary slips).
     ("Salary Slip", "Accounts User", {"read": 1, "report": 1}),
+    # HR 见 PII (spec): id_card_number_cn 等是 Employee 的 permlevel-1 字段; 授予 HR 角色
+    # permlevel-1 读写, 让 HR 看到/维护 PII。Accounts User 无 permlevel-1 -> 财务不看 PII。
+    ("Employee", "HR Manager", {"read": 1, "write": 1}, 1),
+    ("Employee", "HR User", {"read": 1, "write": 1}, 1),
 ]
 
 # Permissions a prior version granted that are now revoked: Travel Request portal
