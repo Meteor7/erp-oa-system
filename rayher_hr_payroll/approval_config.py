@@ -119,3 +119,56 @@ def ensure_workflow_masters():
     for name in WORKFLOW_ACTIONS:
         if not frappe.db.exists("Workflow Action Master", name):
             frappe.get_doc({"doctype": "Workflow Action Master", "workflow_action_name": name}).insert(ignore_permissions=True)
+
+
+# ---- Applicant decision notification (covers HR-created-on-behalf requests) ----
+# The declarative Notifications above notify doc.owner, which for a self-submitted request
+# IS the applicant. When HR/admin creates a request on behalf of an employee, owner is the
+# staff creator, so the employee would never hear the decision. This hook posts a bell
+# Notification Log to the employee's own login on the terminal decision, only when that
+# user differs from owner (else the declarative owner notification already covers it).
+
+def _expense_terminal(doc):
+    return getattr(doc, "workflow_state", "") in ("财务已审", "已拒绝")
+
+
+def _leave_terminal(doc):
+    return getattr(doc, "status", "") in ("Approved", "Rejected")
+
+
+def _submit_terminal(doc):
+    return True  # wired to on_submit, so reaching the hook means it was just submitted
+
+
+_APPLICANT_TERMINAL = {
+    "Expense Claim": _expense_terminal,
+    "Leave Application": _leave_terminal,
+    "Travel Request": _submit_terminal,
+    "Compensatory Leave Request": _submit_terminal,
+}
+
+
+def notify_applicant_on_decision(doc, method=None):
+    check = _APPLICANT_TERMINAL.get(getattr(doc, "doctype", None))
+    if not check or not check(doc):
+        return
+    # Value-Change doctypes (Expense/Leave) fire on_update on every save; only act on the
+    # transition INTO the terminal state, not repeated saves while already terminal.
+    before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+    if before is not None and check(before):
+        return
+    emp = getattr(doc, "employee", None)
+    if not emp:
+        return
+    user = frappe.db.get_value("Employee", emp, "user_id")
+    if not user or user == getattr(doc, "owner", None):
+        return  # owner notification already reaches the applicant
+    frappe.get_doc({
+        "doctype": "Notification Log",
+        "for_user": user,
+        "type": "Alert",
+        "document_type": doc.doctype,
+        "document_name": doc.name,
+        "subject": "你的申请已更新: " + str(doc.name),
+        "email_content": "你的" + doc.doctype + "申请 " + str(doc.name) + " 已处理,请查看最新状态。",
+    }).insert(ignore_permissions=True)

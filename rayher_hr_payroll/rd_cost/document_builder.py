@@ -47,7 +47,7 @@ def _employee_project_hours(
     return employee_hours
 
 
-def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, personnel_types=None):
+def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, personnel_types=None, skipped=None):
     employee_hours = _employee_project_hours(source_hour_rows, project_hours)
     total_hours = total_hours or {}
     personnel_types = personnel_types or {}
@@ -72,11 +72,11 @@ def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, p
             # 非全时研发/研发辅助 with no usable total denominator: their non-R&D time was
             # not captured (the Timesheet validator only accepts R&D project rows), so
             # 研发工时占比 cannot be computed. Capitalising the full salary would over-state
-            # R&D cost -- refuse so finance completes the timesheet or reclassifies.
-            raise ValueError(
-                "员工 " + str(emp) + " 本期缺少完整工时,无法计算研发工时占比(非全时研发)。"
-                "请补全该员工的非研发工时,或确认其人员类型后再分摊。"
-            )
+            # R&D cost AND aborting the whole period is too blunt -- skip this employee and
+            # surface them so finance completes the timesheet or reclassifies, then re-runs.
+            if skipped is not None:
+                skipped.append(str(emp))
+            continue
         amount = Decimal(str(gross)) * ratio
         if amount <= 0:
             continue
@@ -95,21 +95,25 @@ def populate_allocation_document(
     total_hours: Mapping[str, float] | None = None,
     personnel_types: Mapping[str, str] | None = None,
 ) -> None:
-    if salaries and any((e.category or "") == "personnel" for e in expenses):
-        # Personnel-category rows in the R&D expense import ARE R&D labour booked via
-        # GL (the pre-payroll way); with Salary-Slip labour added below they would be
-        # double-counted. We do NOT silently drop them (GL rows carry no employee key,
-        # so dropping could also under-count non-replaced costs) -- force the operator
-        # to keep exactly one labour source.
+    skipped: list = []
+    labor = None
+    if salaries:
+        labor = _labor_result(
+            salaries, source_hour_rows, project_hours, total_hours, personnel_types, skipped
+        )
+    if labor and labor.lines and any((e.category or "") == "personnel" for e in expenses):
+        # Personnel-category GL rows ARE R&D labour booked via GL; combined with the
+        # Salary-Slip labour they double-count R&D personnel cost. Only a real conflict
+        # (slips that actually produced labour) raises -- a period whose salaried R&D
+        # employees logged no R&D hours produces no labour, so the GL rows are the sole
+        # source and there is nothing to double-count.
         raise ValueError(
             "本期同时存在「人工费」类导入费用与工资单(研发人工费),会重复计算研发人工成本。"
             "请移除人工费类导入费用,或本期不纳入工资单人工费,只保留一种来源。"
         )
     result = allocate_expenses(expenses=expenses, project_hours=project_hours)
-    if salaries:
-        result = combine_results(
-            result, _labor_result(salaries, source_hour_rows, project_hours, total_hours, personnel_types)
-        )
+    if labor:
+        result = combine_results(result, labor)
     expense_sources = _source_expense_by_name(source_expense_rows)
 
     doc.set("hour_snapshots", [])
@@ -148,3 +152,4 @@ def populate_allocation_document(
     doc.expensed_total = result.stage_totals["expensed"]
     doc.unknown_total = result.stage_totals["unknown"]
     doc.status = "Calculated"
+    return skipped

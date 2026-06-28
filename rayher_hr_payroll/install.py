@@ -20,7 +20,7 @@ SPA_PERMS = [
     # both invalid (Frappe needs a basic perm) and non-functional; stock HRMS already
     # grants every Employee read+write on Expense Claim, so this is not a new exposure.
     ("Expense Claim", "Department Manager", {"read": 1, "write": 1, "report": 1}),
-    ("Expense Claim", "Accounts User", {"read": 1, "write": 1, "submit": 1, "report": 1}),
+    ("Expense Claim", "Accounts User", {"read": 1, "write": 1, "report": 1}),  # no submit: finance review never submits (doc_status 0)
 ]
 
 # Permissions a prior version granted that are now revoked: Travel Request portal

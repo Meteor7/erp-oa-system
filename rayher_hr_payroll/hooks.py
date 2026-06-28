@@ -39,6 +39,16 @@ doc_events = {
     },
     "Compensatory Leave Request": {
         "validate": "rayher_hr_payroll.leave_controls.validate_compensatory_leave_request",
+        "on_submit": "rayher_hr_payroll.approval_config.notify_applicant_on_decision",
+    },
+    "Expense Claim": {
+        "on_update": "rayher_hr_payroll.approval_config.notify_applicant_on_decision",
+    },
+    "Leave Application": {
+        "on_update": "rayher_hr_payroll.approval_config.notify_applicant_on_decision",
+    },
+    "Travel Request": {
+        "on_submit": "rayher_hr_payroll.approval_config.notify_applicant_on_decision",
     },
     "Salary Slip": {
         "validate": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",

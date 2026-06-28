@@ -139,7 +139,7 @@ class RDCostAllocation(Document):
         total_hours = total_hours_by_employee(year=self.year, month=self.month)
         personnel_types = personnel_types_by_employee()
 
-        populate_allocation_document(
+        skipped = populate_allocation_document(
             self,
             expenses=expenses,
             source_hour_rows=source_hour_rows,
@@ -149,3 +149,8 @@ class RDCostAllocation(Document):
             total_hours=total_hours,
             personnel_types=personnel_types,
         )
+        if skipped:
+            frappe.msgprint(
+                "以下员工本期工时不完整(非全时研发),未纳入研发人工分摊;"
+                "请补全其非研发工时后重新分摊:" + ", ".join(skipped)
+            )

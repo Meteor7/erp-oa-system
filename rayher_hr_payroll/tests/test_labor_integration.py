@@ -121,18 +121,19 @@ def test_non_personnel_imports_coexist_with_labor():
     assert "GL-MATERIAL" in names and any(n.startswith("人工费") for n in names)
 
 
-def test_part_time_rd_without_denominator_raises():
-    # 非全时研发 with only R&D hours logged (total == rd_hours) must NOT capitalize 100%:
-    # their non-R&D time was not captured, so the ratio is unknowable -> refuse.
-    import pytest
+def test_part_time_rd_without_denominator_skips_and_surfaces():
+    # 非全时研发 with only R&D hours logged (total == rd_hours): the ratio is unknowable,
+    # so the employee is skipped (NOT capitalized 100%, NOT aborting the period) and
+    # reported back to the caller so finance can complete the timesheet.
     doc = FakeDoc()
-    with pytest.raises(ValueError):
-        populate_allocation_document(
-            doc, expenses=[],
-            source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
-            source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
-            salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "非全时研发"},
-        )
+    skipped = populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+        salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "非全时研发"},
+    )
+    assert skipped == ["E1"]
+    assert not [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
 
 
 def test_part_time_rd_with_real_denominator_prorates():
