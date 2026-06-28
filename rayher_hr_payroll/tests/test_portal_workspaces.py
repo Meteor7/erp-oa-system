@@ -41,3 +41,18 @@ def test_workspace_content_embeds_shortcut_blocks():
     for name in ("员工工作台", "审批中心"):
         content = json.loads(ws[name]["content"])
         assert any(b.get("type") == "shortcut" for b in content), name
+
+
+def test_content_shortcut_blocks_match_shortcut_rows():
+    # Every {"type":"shortcut"} block in content must have a backing shortcut row,
+    # else the workspace renders empty/broken tiles (and could re-expose a removed
+    # flow). Guards against a half-applied shortcut change.
+    import json as _json
+    for ws in _load().values():
+        block_names = {
+            b["data"]["shortcut_name"]
+            for b in _json.loads(ws["content"])
+            if b.get("type") == "shortcut"
+        }
+        row_labels = {s["label"] for s in ws.get("shortcuts", [])}
+        assert block_names <= row_labels, (ws["name"], block_names - row_labels)

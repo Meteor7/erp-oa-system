@@ -6,7 +6,7 @@
   "title": "员工工作台",
   "public": 1,
   "module": "Rayher HR Payroll",
-  "content": "[{\"type\": \"header\", \"data\": {\"text\": \"快捷申请\", \"col\": 12}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"请假申请\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"出差申请\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"报销申请\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"加班/调休\", \"col\": 3}}]",
+  "content": "[{\"type\": \"header\", \"data\": {\"text\": \"快捷申请\", \"col\": 12}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"请假申请\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"报销申请\", \"col\": 3}}]",
   "shortcuts": [
    {
     "type": "DocType",
