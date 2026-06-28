@@ -82,11 +82,16 @@ def populate_allocation_document(
     salaries: Mapping[str, float] | None = None,
     total_hours: Mapping[str, float] | None = None,
 ) -> None:
-    if salaries:
-        # Labor now comes from Salary Slips; drop any personnel-category imported
-        # expenses (legacy GL payroll rows) for this period so labor is not counted
-        # twice with the Salary-Slip labor added below.
-        expenses = [e for e in expenses if (e.category or "") != "personnel"]
+    if salaries and any((e.category or "") == "personnel" for e in expenses):
+        # Personnel-category rows in the R&D expense import ARE R&D labour booked via
+        # GL (the pre-payroll way); with Salary-Slip labour added below they would be
+        # double-counted. We do NOT silently drop them (GL rows carry no employee key,
+        # so dropping could also under-count non-replaced costs) -- force the operator
+        # to keep exactly one labour source.
+        raise ValueError(
+            "本期同时存在「人工费」类导入费用与工资单(研发人工费),会重复计算研发人工成本。"
+            "请移除人工费类导入费用,或本期不纳入工资单人工费,只保留一种来源。"
+        )
     result = allocate_expenses(expenses=expenses, project_hours=project_hours)
     if salaries:
         result = combine_results(

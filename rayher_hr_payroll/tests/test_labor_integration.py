@@ -94,19 +94,28 @@ def test_labor_lines_have_nonempty_voucher_no():
     assert labor and all(l["voucher_no"] for l in labor)
 
 
-def test_personnel_imports_excluded_when_salaries_present():
-    # With Salary-Slip labor, a personnel-category import would double-count -> excluded.
+def test_personnel_import_with_salaries_raises_conflict():
+    # Personnel-category import + Salary-Slip labour = double-count of R&D labour.
+    # Must raise (force one source), NOT silently drop (which could under-count).
+    import pytest
     doc = FakeDoc()
-    expenses = [
-        ExpenseItem(name="GL-PERSONNEL", amount=Decimal("5000"), account_level_3="工资", category="personnel"),
-        ExpenseItem(name="GL-MATERIAL", amount=Decimal("3000"), account_level_3="材料", category="other"),
-    ]
+    expenses = [ExpenseItem(name="GL-PERSONNEL", amount=Decimal("5000"), account_level_3="工资", category="personnel")]
+    with pytest.raises(ValueError):
+        populate_allocation_document(
+            doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+            source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+            salaries={"E1": 10000}, total_hours={"E1": 4},
+        )
+
+
+def test_non_personnel_imports_coexist_with_labor():
+    # Non-personnel imports + Salary-Slip labour are fine (no double-count).
+    doc = FakeDoc()
+    expenses = [ExpenseItem(name="GL-MATERIAL", amount=Decimal("3000"), account_level_3="材料", category="other")]
     populate_allocation_document(
         doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
         source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
         salaries={"E1": 10000}, total_hours={"E1": 4},
     )
     names = [str(l["expense_item_name"]) for l in doc.tables["lines"]]
-    assert "GL-PERSONNEL" not in names
-    assert "GL-MATERIAL" in names
-    assert any(n.startswith("人工费") for n in names)
+    assert "GL-MATERIAL" in names and any(n.startswith("人工费") for n in names)
