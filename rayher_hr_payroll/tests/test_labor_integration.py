@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from rayher_hr_payroll.rd_cost.document_builder import populate_allocation_document
-from rayher_hr_payroll.rd_cost.types import ProjectHour
+from rayher_hr_payroll.rd_cost.types import ExpenseItem, ProjectHour
 
 
 class FakeDoc:
@@ -80,3 +80,33 @@ def test_labor_full_salary_when_all_time_is_rd():
         salaries={"E1": 10000}, total_hours={"E1": 8},
     )
     assert doc.capitalized_total == Decimal("10000.00")
+
+
+def test_labor_lines_have_nonempty_voucher_no():
+    # voucher_no is reqd on the allocation line; a labor line writing "" would fail insert.
+    doc = FakeDoc()
+    populate_allocation_document(
+        doc, expenses=[], source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+        salaries={"E1": 10000}, total_hours={"E1": 4},
+    )
+    labor = [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
+    assert labor and all(l["voucher_no"] for l in labor)
+
+
+def test_personnel_imports_excluded_when_salaries_present():
+    # With Salary-Slip labor, a personnel-category import would double-count -> excluded.
+    doc = FakeDoc()
+    expenses = [
+        ExpenseItem(name="GL-PERSONNEL", amount=Decimal("5000"), account_level_3="工资", category="personnel"),
+        ExpenseItem(name="GL-MATERIAL", amount=Decimal("3000"), account_level_3="材料", category="other"),
+    ]
+    populate_allocation_document(
+        doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+        salaries={"E1": 10000}, total_hours={"E1": 4},
+    )
+    names = [str(l["expense_item_name"]) for l in doc.tables["lines"]]
+    assert "GL-PERSONNEL" not in names
+    assert "GL-MATERIAL" in names
+    assert any(n.startswith("人工费") for n in names)

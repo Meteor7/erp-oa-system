@@ -138,3 +138,12 @@ def test_custom_role_no_save_when_flags_match(monkeypatch):
     monkeypatch.setattr(ac.frappe, "get_doc", lambda *a, **k: role)
     ac._ensure_custom_roles()
     assert saved == []
+
+
+def test_before_install_creates_role_and_masters_for_fresh_install():
+    import inspect
+    import rayher_hr_payroll.install as install
+    from rayher_hr_payroll import hooks
+    assert hooks.before_install == "rayher_hr_payroll.install.before_install"
+    src = inspect.getsource(install.before_install)
+    assert "ensure_access_control" in src and "ensure_workflow_masters" in src

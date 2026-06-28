@@ -82,6 +82,11 @@ def populate_allocation_document(
     salaries: Mapping[str, float] | None = None,
     total_hours: Mapping[str, float] | None = None,
 ) -> None:
+    if salaries:
+        # Labor now comes from Salary Slips; drop any personnel-category imported
+        # expenses (legacy GL payroll rows) for this period so labor is not counted
+        # twice with the Salary-Slip labor added below.
+        expenses = [e for e in expenses if (e.category or "") != "personnel"]
     result = allocate_expenses(expenses=expenses, project_hours=project_hours)
     if salaries:
         result = combine_results(
@@ -101,8 +106,9 @@ def populate_allocation_document(
 
     for line in result.lines:
         if str(line.expense_item).startswith(LABOR_PREFIX):
-            item_name = "人工费-" + str(line.expense_item)[len(LABOR_PREFIX):]
-            voucher = ""
+            emp = str(line.expense_item)[len(LABOR_PREFIX):]
+            item_name = "人工费-" + emp
+            voucher = "工资单:" + emp  # voucher_no is reqd; mark the Salary Slip source
         else:
             source = expense_sources.get(line.expense_item, {})
             item_name = _value(source, "account_level_3", "") or line.expense_item

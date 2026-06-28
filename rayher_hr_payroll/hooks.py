@@ -6,6 +6,7 @@ app_email = "admin@example.com"
 app_license = "MIT"
 
 required_apps = ["erpnext", "hrms"]
+before_install = "rayher_hr_payroll.install.before_install"
 after_install = "rayher_hr_payroll.install.after_install"
 after_migrate = "rayher_hr_payroll.install.after_install"
 
