@@ -14,15 +14,13 @@ from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workf
 # fields). The SPA's role-scoped read/write perms ship with the SPA endpoints in
 # split 2/2, where they belong.
 SPA_PERMS = [
-    # The 待我审批 (Pending My Approval) report is a Script Report whose ref_doctype
-    # is Expense Claim; Frappe gates report execution on has_permission(ref_doctype,
-    # "report"). Grant report ONLY (not read) so a manager cannot browse every claim
-    # in Desk; read for opening/approving comes from the user's stock Employee role.
-    # NOTE: frappe.add_permission() defaults ptype to "read" on creation, so we
-    # MUST explicitly set read:0 to keep these report-only (otherwise the role could
-    # browse every Expense Claim in Desk). _ensure_spa_perms applies each flag.
-    ("Expense Claim", "Department Manager", {"read": 0, "report": 1}),
-    ("Expense Claim", "Accounts User", {"read": 1, "report": 1}),  # finance legitimately reviews all reimbursements (opens finance-stage claims; not shared per-doc)
+    # Expense Claim approvers need real document access to apply the workflow: the
+    # manager step (待经理审批->待财务复核) saves a draft (needs write) and the finance
+    # step (待财务复核->财务已审) SUBMITS the claim (needs submit). A report-only row is
+    # both invalid (Frappe needs a basic perm) and non-functional; stock HRMS already
+    # grants every Employee read+write on Expense Claim, so this is not a new exposure.
+    ("Expense Claim", "Department Manager", {"read": 1, "write": 1, "report": 1}),
+    ("Expense Claim", "Accounts User", {"read": 1, "write": 1, "submit": 1, "report": 1}),
 ]
 
 # Permissions a prior version granted that are now revoked: Travel Request portal
