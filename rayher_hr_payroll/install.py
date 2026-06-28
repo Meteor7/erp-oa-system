@@ -33,6 +33,16 @@ def _ensure_spa_perms():
     from frappe.permissions import add_permission, update_permission_property
 
     for dt, role, props in SPA_PERMS:
+        # Idempotent + declarative. add_permission only matches an if_owner=0 row, so
+        # re-running on a site whose row is if_owner=1 would create a SECOND row and
+        # leave the stale one; Frappe ORs flags across rows, resurrecting a revoked
+        # permission (e.g. Travel submit). Remove every prior row for this
+        # (doctype, role, permlevel) first, then create exactly one with the declared
+        # flags. props must list if_owner LAST so it is flipped after the other flags.
+        for name in frappe.get_all(
+            "Custom DocPerm", filters={"parent": dt, "role": role, "permlevel": 0}, pluck="name"
+        ):
+            frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
         add_permission(dt, role, 0)
         for prop, value in props.items():
             update_permission_property(dt, role, 0, prop, value)

@@ -71,3 +71,11 @@ def test_manager_approval_scoped_to_expense_approver():
 def test_manager_reject_also_scoped_to_approver():
     cond = _transitions()[("待经理审批", "已拒绝")].get("condition", "")
     assert "expense_approver" in cond and "session.user" in cond
+
+
+def test_draft_state_resets_approval_status():
+    # A rejected claim resubmitted (已拒绝 -> 草稿) must clear HRMS approval_status
+    # back to Draft, else it keeps Rejected behavior after re-entering the flow.
+    draft = _states()["草稿"]
+    assert draft.get("update_field") == "approval_status"
+    assert draft.get("update_value") == "Draft"
