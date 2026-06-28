@@ -45,3 +45,17 @@ doc_events = {
 website_route_rules = [
     {"from_route": "/rayher/<path:app_path>", "to_route": "rayher"},
 ]
+
+permission_query_conditions = {
+    "Expense Claim": "rayher_hr_payroll.request_visibility.expense_claim_query",
+    "Leave Application": "rayher_hr_payroll.request_visibility.leave_application_query",
+    "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_query",
+    "Compensatory Leave Request": "rayher_hr_payroll.request_visibility.compensatory_leave_query",
+}
+
+has_permission = {
+    "Expense Claim": "rayher_hr_payroll.request_visibility.expense_claim_has_permission",
+    "Leave Application": "rayher_hr_payroll.request_visibility.leave_application_has_permission",
+    "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_has_permission",
+    "Compensatory Leave Request": "rayher_hr_payroll.request_visibility.compensatory_leave_has_permission",
+}

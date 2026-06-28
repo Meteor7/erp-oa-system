@@ -62,11 +62,22 @@ def sync_user_for_employee(doc, method=None):
     # (Employee + Company), which db_set bypasses. Without these the auto-provisioned
     # account would see every employee's (and, on multi-company sites, every company's)
     # records instead of only its own.
-    for allow, value in (("Employee", doc.name), ("Company", getattr(doc, "company", None))):
+    # The Employee permission is scoped applicable_for="Employee" so it ONLY narrows the
+    # Employee doctype (employee sees own record), NOT request doctypes -- otherwise a
+    # promoted manager/finance reviewer could not open subordinate claims. Row-level
+    # request visibility is handled by request_visibility (permission_query_conditions).
+    for allow, value, applicable in (
+        ("Employee", doc.name, "Employee"),
+        ("Company", getattr(doc, "company", None), None),
+    ):
         if value and not frappe.db.exists(
             "User Permission", {"user": user.name, "allow": allow, "for_value": value}
         ):
-            frappe.get_doc({
+            up = {
                 "doctype": "User Permission", "user": user.name,
                 "allow": allow, "for_value": value,
-            }).insert(ignore_permissions=True)
+            }
+            if applicable:
+                up["applicable_for"] = applicable
+                up["apply_to_all_doctypes"] = 0
+            frappe.get_doc(up).insert(ignore_permissions=True)

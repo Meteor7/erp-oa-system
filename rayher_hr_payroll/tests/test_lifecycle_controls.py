@@ -120,3 +120,7 @@ def test_new_user_gets_own_employee_user_permission(monkeypatch):
     allows = {(u["allow"], u["for_value"]) for u in ups}
     assert ("Employee", "HR-EMP-9001") in allows  # scoped to own employee record
     assert ("Company", "Test Co") in allows         # and own company (matches ERPNext native)
+    emp_up = next(u for u in ups if u["allow"] == "Employee")
+    # Employee UP must be scoped to the Employee doctype only, so it never blocks a future
+    # manager/finance reviewer from opening subordinate request docs.
+    assert emp_up.get("applicable_for") == "Employee"
