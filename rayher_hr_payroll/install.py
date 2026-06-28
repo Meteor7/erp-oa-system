@@ -21,6 +21,10 @@ SPA_PERMS = [
     # grants every Employee read+write on Expense Claim, so this is not a new exposure.
     ("Expense Claim", "Department Manager", {"read": 1, "write": 1, "report": 1}),
     ("Expense Claim", "Accounts User", {"read": 1, "write": 1, "report": 1}),  # no submit: finance review never submits (doc_status 0)
+    # Leave Approver runs the shared 待我审批 report whose ref_doctype is Expense Claim;
+    # Frappe gates report execution on report perm of the ref_doctype. read is scoped to
+    # their own claims by request_visibility.
+    ("Expense Claim", "Leave Approver", {"read": 1, "report": 1}),
 ]
 
 # Permissions a prior version granted that are now revoked: Travel Request portal

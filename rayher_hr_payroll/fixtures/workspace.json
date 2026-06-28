@@ -51,6 +51,9 @@
    },
    {
     "role": "System Manager"
+   },
+   {
+    "role": "Leave Approver"
    }
   ]
  }

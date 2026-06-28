@@ -46,7 +46,8 @@
     "action": "提交审批",
     "next_state": "待经理审批",
     "allowed": "Employee",
-    "allow_self_approval": 1
+    "allow_self_approval": 1,
+    "condition": "doc.owner == frappe.session.user or frappe.db.get_value('Employee', doc.employee, 'user_id') == frappe.session.user"
    },
    {
     "state": "待经理审批",
@@ -84,7 +85,8 @@
     "action": "重新提交",
     "next_state": "草稿",
     "allowed": "Employee",
-    "allow_self_approval": 1
+    "allow_self_approval": 1,
+    "condition": "doc.owner == frappe.session.user or frappe.db.get_value('Employee', doc.employee, 'user_id') == frappe.session.user"
    }
   ]
  }
