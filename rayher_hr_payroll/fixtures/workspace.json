@@ -16,20 +16,8 @@
    },
    {
     "type": "DocType",
-    "link_to": "Travel Request",
-    "label": "出差申请",
-    "doc_view": "New"
-   },
-   {
-    "type": "DocType",
     "link_to": "Expense Claim",
     "label": "报销申请",
-    "doc_view": "New"
-   },
-   {
-    "type": "DocType",
-    "link_to": "Compensatory Leave Request",
-    "label": "加班/调休",
     "doc_view": "New"
    }
   ],

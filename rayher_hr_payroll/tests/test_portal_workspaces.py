@@ -14,11 +14,18 @@ def test_two_portal_workspaces_present():
     assert "员工工作台" in ws and "审批中心" in ws
 
 
-def test_employee_workspace_has_four_quick_actions():
+def test_employee_workspace_quick_actions_only_fully_routed_types():
+    # Only the request types with a complete approval route are offered as
+    # create shortcuts: 请假 (Leave) and 报销 (Expense). Travel Request and
+    # Compensatory Leave Request have no approval routing yet, so exposing a
+    # create shortcut for them would be a dead-end -> intentionally omitted.
     sc = _load()["员工工作台"]["shortcuts"]
     targets = {(s["link_to"], s.get("doc_view")) for s in sc}
-    for dt in ("Leave Application", "Travel Request", "Expense Claim", "Compensatory Leave Request"):
-        assert (dt, "New") in targets
+    assert ("Leave Application", "New") in targets
+    assert ("Expense Claim", "New") in targets
+    links = {s["link_to"] for s in sc}
+    assert "Travel Request" not in links
+    assert "Compensatory Leave Request" not in links
 
 
 def test_approval_center_links_pending_report():

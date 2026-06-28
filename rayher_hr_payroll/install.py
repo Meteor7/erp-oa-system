@@ -23,10 +23,12 @@ SPA_PERMS = [
     # browse every Expense Claim in Desk). _ensure_spa_perms applies each flag.
     ("Expense Claim", "Department Manager", {"read": 0, "report": 1}),
     ("Expense Claim", "Accounts User", {"read": 1, "report": 1}),  # finance legitimately reviews all reimbursements (opens finance-stage claims; not shared per-doc)
-    # Employees DRAFT Travel Requests from the portal (stock Employee role lacks create);
-    # NO submit -> they cannot self-approve; an HR/approver submits (travel approval routing is a follow-up).
-    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1, "submit": 0, "if_owner": 1}),
 ]
+
+# Permissions a prior version granted that are now revoked: Travel Request portal
+# self-service is deferred until its approval routing exists, so drop the Employee
+# grant entirely (any lingering Custom DocPerm row is removed on migrate).
+REVOKE_PERMS = [("Travel Request", "Employee")]
 
 
 def _ensure_spa_perms():
@@ -40,13 +42,28 @@ def _ensure_spa_perms():
         # permission (e.g. Travel submit). Remove every prior row for this
         # (doctype, role, permlevel) first, then create exactly one with the declared
         # flags. props must list if_owner LAST so it is flipped after the other flags.
-        for name in frappe.get_all(
-            "Custom DocPerm", filters={"parent": dt, "role": role, "permlevel": 0}, pluck="name"
-        ):
-            frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
+        _drop_role_perms(dt, role)
         add_permission(dt, role, 0)
         for prop, value in props.items():
             update_permission_property(dt, role, 0, prop, value)
+
+    # Revoke obsolete grants (delete any lingering row for these app-owned pairs).
+    for dt, role in REVOKE_PERMS:
+        _drop_role_perms(dt, role)
+
+
+def _drop_role_perms(dt, role):
+    # These (doctype, role) permission rows are EXCLUSIVELY managed by this app
+    # (verified: no stock perm ships for them), so removing all rows for the pair
+    # before re-granting is config-as-code ownership, not clobbering of others'
+    # customizations. It also collapses the if_owner duplicate add_permission would
+    # otherwise leave (which ORed flags to resurrect a revoked permission).
+    import frappe
+
+    for name in frappe.get_all(
+        "Custom DocPerm", filters={"parent": dt, "role": role, "permlevel": 0}, pluck="name"
+    ):
+        frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
 
 
 def after_install():
