@@ -96,7 +96,9 @@ def ensure_notifications():
     # other-app Notification under the same module is never deleted.
     managed = {n["name"] for n in NOTIFICATIONS}
     our_doctypes = ("Leave Application", "Expense Claim", "Travel Request", "Compensatory Leave Request")
-    our_suffixes = ("结果提醒", "经理待办", "财务待办", "提交提醒", "审批提醒", "提醒", "待办")
+    # OUR specific reminder name suffixes only -- never the generic "提醒"/"待办", which
+    # would also match an admin notification like "付款提醒" under the same module.
+    our_suffixes = ("结果提醒", "经理待办", "财务待办")
     for stale in frappe.get_all("Notification", filters={"module": "Rayher HR Payroll"}, fields=["name", "document_type"]):
         if stale.name in managed:
             continue

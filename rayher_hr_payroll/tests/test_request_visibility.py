@@ -65,3 +65,30 @@ def test_scope_sql_employee_and_manager(monkeypatch):
     assert "employee = 'E1'" in emp and "expense_approver = 'e1@co'" in emp
     mgr = rv._scope_sql("Expense Claim", "mgr@co", {"Department Manager"}, "M1")
     assert "expense_approver = 'mgr@co'" in mgr and "employee = 'M1'" in mgr
+
+
+def test_linked_employee_cannot_open_doc_they_own_for_another(monkeypatch):
+    # _in_scope must NOT fall back to owner for a LINKED employee (consistency with list scoping):
+    # a linked employee who somehow owns a claim for another employee can't open it directly.
+    foreign = Doc(employee="E2", owner="e1@co", expense_approver="m@co")
+    assert rv._in_scope("Expense Claim", foreign, "e1@co", {"Employee"}, "E1") is False
+
+
+def test_unlinked_user_owner_fallback(monkeypatch):
+    own = Doc(employee="E9", owner="contractor@co", expense_approver="m@co")
+    assert rv._in_scope("Expense Claim", own, "contractor@co", {"Employee"}, None) is True
+
+
+def test_claimant_cannot_write_own_claim_in_approval_state(monkeypatch):
+    monkeypatch.setattr(rv, "frappe", types.SimpleNamespace(
+        session=types.SimpleNamespace(user="fin@co"),
+        get_roles=lambda u: ["Employee", "Accounts User"],
+        db=types.SimpleNamespace(get_value=lambda dt, flt, f: "F1")))  # fin@co's Employee is F1
+    claim = Doc(employee="F1", owner="fin@co", workflow_state="待财务复核", expense_approver="other@co")
+    # finance-claimant: in scope (finance sees all) but write denied mid-review on own claim
+    assert rv.expense_claim_has_permission(claim, "write", "fin@co") is False
+    # ...but reading is fine (defer)
+    assert rv.expense_claim_has_permission(claim, "read", "fin@co") is None
+    # ...and editing their own DRAFT is fine
+    draft = Doc(employee="F1", owner="fin@co", workflow_state="草稿")
+    assert rv.expense_claim_has_permission(draft, "write", "fin@co") is None

@@ -54,9 +54,9 @@ def _in_scope(doctype, doc, user, roles, employee):
     emp_field, approver_field = _SCOPING[doctype]
     if approver_field and doc.get(approver_field) == user:
         return True
-    if employee and doc.get(emp_field) == employee:
-        return True
-    return doc.get("owner") == user
+    if employee:
+        return doc.get(emp_field) == employee  # linked employee: own requests only (matches _scope_sql)
+    return doc.get("owner") == user            # unlinked user: fall back to what they created
 
 
 def _employee_of(user):
@@ -68,12 +68,28 @@ def _query(doctype, user):
     return _scope_sql(doctype, user, set(frappe.get_roles(user)), _employee_of(user))
 
 
-def _perm(doctype, doc, user):
+# Expense Claim states where the claimant may still edit their OWN claim. Once submitted into
+# the approval flow, only the assigned approver (or System Manager) edits it -- even if the
+# claimant also holds the approver role -- so a finance-claimant can't edit their own claim
+# while it waits for finance review.
+_CLAIMANT_EDITABLE_STATES = {"草稿", "已拒绝"}
+
+
+def _perm(doctype, doc, user, ptype=None):
     user = user or frappe.session.user
-    # return False to deny out-of-scope docs; None to defer in-scope ones to role perms.
-    if _in_scope(doctype, doc, user, set(frappe.get_roles(user)), _employee_of(user)):
-        return None
-    return False
+    roles = set(frappe.get_roles(user))
+    employee = _employee_of(user)
+    if not _in_scope(doctype, doc, user, roles, employee):
+        return False  # out of scope -> deny
+    if (
+        ptype == "write"
+        and doctype == "Expense Claim"
+        and employee
+        and doc.get("employee") == employee
+        and (doc.get("workflow_state") or "草稿") not in _CLAIMANT_EDITABLE_STATES
+    ):
+        return False  # claimant cannot edit their own claim once it is in the approval flow
+    return None  # in scope -> defer to role perms
 
 
 # permission_query_conditions hooks (one per doctype; the hook passes only `user`)
@@ -95,16 +111,16 @@ def compensatory_leave_query(user=None):
 
 # has_permission hooks (signature: doc, ptype, user)
 def expense_claim_has_permission(doc, ptype=None, user=None):
-    return _perm("Expense Claim", doc, user)
+    return _perm("Expense Claim", doc, user, ptype)
 
 
 def leave_application_has_permission(doc, ptype=None, user=None):
-    return _perm("Leave Application", doc, user)
+    return _perm("Leave Application", doc, user, ptype)
 
 
 def travel_request_has_permission(doc, ptype=None, user=None):
-    return _perm("Travel Request", doc, user)
+    return _perm("Travel Request", doc, user, ptype)
 
 
 def compensatory_leave_has_permission(doc, ptype=None, user=None):
-    return _perm("Compensatory Leave Request", doc, user)
+    return _perm("Compensatory Leave Request", doc, user, ptype)
