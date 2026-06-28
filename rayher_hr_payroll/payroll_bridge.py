@@ -49,3 +49,30 @@ def period_pay_totals(ym):
         "gross": float(sum((r["gross_pay"] or 0) for r in rows)),
         "deductions": float(sum((r["total_deduction"] or 0) for r in rows)),
     }
+
+
+def _period_from_date(start_date):
+    """(year, month) from a Salary Slip start_date, or None."""
+    if not start_date:
+        return None
+    s = str(start_date)
+    return int(s[:4]), int(s[5:7])
+
+
+def block_locked_salary_slip_change(doc, method=None):
+    """Freeze a period's payroll once an RD Cost Allocation has been submitted for it.
+
+    The allocation reads live submitted Salary Slips at submit time, so letting payroll
+    change afterwards (amend/cancel/add a slip) would silently desync the booked R&D
+    labour from the slips. Block any Salary Slip new-save/amend/cancel/delete in a period
+    that already has a submitted allocation; the operator must cancel the allocation first.
+    """
+    period = _period_from_date(getattr(doc, "start_date", None))
+    if not period:
+        return
+    year, month = period
+    if frappe.db.exists("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1}):
+        frappe.throw(
+            "本期(%04d-%02d)已有已提交的研发费用分摊,工资单不可新增/修改/取消;"
+            "请先作废该分摊后再调整工资。" % (year, month)
+        )

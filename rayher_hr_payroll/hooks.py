@@ -40,6 +40,11 @@ doc_events = {
     "Compensatory Leave Request": {
         "validate": "rayher_hr_payroll.leave_controls.validate_compensatory_leave_request",
     },
+    "Salary Slip": {
+        "validate": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
+        "before_cancel": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
+        "on_trash": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
+    },
 }
 
 website_route_rules = [
