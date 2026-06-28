@@ -30,6 +30,7 @@ SPA_PERMS = [
 
 
 def _ensure_spa_perms():
+    import frappe
     from frappe.permissions import add_permission, update_permission_property
 
     for dt, role, props in SPA_PERMS:
