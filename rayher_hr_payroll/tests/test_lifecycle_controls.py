@@ -7,7 +7,7 @@ class FakeEmp:
     def __init__(self, **kw):
         self.__dict__.update(
             {"status": "Active", "user_id": None, "company_email": None,
-             "personal_email": None, "employee_name": "X", "name": "HR-EMP-TEST"}
+             "personal_email": None, "employee_name": "X", "name": "HR-EMP-TEST", "company": "Test Co"}
         )
         self.__dict__.update(kw)
         self._db_set = []
@@ -113,8 +113,10 @@ def test_new_user_gets_own_employee_user_permission(monkeypatch):
     monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: False))
     monkeypatch.setattr(lc.frappe, "new_doc", lambda *a, **k: user)
     monkeypatch.setattr(lc.frappe, "get_doc", lambda d: inserted.append(d) or types.SimpleNamespace(insert=lambda **k: None))
-    emp = FakeEmp(company_email="newhire@corp.example.invalid", employee_name="新人")
+    emp = FakeEmp(company_email="newhire@corp.example.invalid", employee_name="新人", company="Test Co")
     emp.name = "HR-EMP-9001"
     lc.sync_user_for_employee(emp)
     ups = [d for d in inserted if d.get("doctype") == "User Permission"]
-    assert ups and ups[0]["allow"] == "Employee" and ups[0]["for_value"] == "HR-EMP-9001"
+    allows = {(u["allow"], u["for_value"]) for u in ups}
+    assert ("Employee", "HR-EMP-9001") in allows  # scoped to own employee record
+    assert ("Company", "Test Co") in allows         # and own company (matches ERPNext native)

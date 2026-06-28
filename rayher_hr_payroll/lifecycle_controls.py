@@ -58,14 +58,15 @@ def sync_user_for_employee(doc, method=None):
     # normalized id), not the raw email.
     doc.db_set("user_id", user.name)
     user.add_roles(*DEFAULT_EMPLOYEE_ROLES)
-    # Scope the new login to its own Employee record. HRMS adds this User Permission
-    # from Employee.on_update (create_user_permission), which db_set bypasses, so an
-    # auto-provisioned account would otherwise see every employee's records. Create it
-    # here so "employee sees only their own" holds.
-    if not frappe.db.exists(
-        "User Permission", {"user": user.name, "allow": "Employee", "for_value": doc.name}
-    ):
-        frappe.get_doc({
-            "doctype": "User Permission", "user": user.name,
-            "allow": "Employee", "for_value": doc.name,
-        }).insert(ignore_permissions=True)
+    # Scope the new login like ERPNext's native Employee.update_user_permissions
+    # (Employee + Company), which db_set bypasses. Without these the auto-provisioned
+    # account would see every employee's (and, on multi-company sites, every company's)
+    # records instead of only its own.
+    for allow, value in (("Employee", doc.name), ("Company", getattr(doc, "company", None))):
+        if value and not frappe.db.exists(
+            "User Permission", {"user": user.name, "allow": allow, "for_value": value}
+        ):
+            frappe.get_doc({
+                "doctype": "User Permission", "user": user.name,
+                "allow": allow, "for_value": value,
+            }).insert(ignore_permissions=True)

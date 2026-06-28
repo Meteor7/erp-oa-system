@@ -30,16 +30,19 @@ def test_five_stage_states_present():
     assert set(_states()) == {"草稿", "待经理审批", "待财务复核", "财务已审", "已拒绝"}
 
 
-def test_approved_state_submits_and_sets_approval_status():
-    # HRMS Expense Claim.on_submit rejects approval_status == "Draft"; the approved
-    # state must flip approval_status to Approved AND set doc_status 1.
+def test_finance_approval_confirms_without_submitting():
+    # Spec L33/L155: finance does 复核确认 only; 报销实际付款/记账 is out of scope. The
+    # approved state must NOT submit the claim (doc_status 0) so HRMS on_submit ->
+    # make_gl_entries never runs (no accounting posting on review).
     approved = _states()["财务已审"]
-    assert approved["doc_status"] == "1"
+    assert approved["doc_status"] == "0"
     assert approved["update_field"] == "approval_status"
     assert approved["update_value"] == "Approved"
+    # 已拒绝 must NOT set approval_status=Rejected: HRMS zeroes every row sanctioned_amount
+    # while approval_status==Rejected, and 重新提交 never restores it -> a resubmitted
+    # claim would approve/pay 0. Rejection is carried by workflow_state alone.
     rejected = _states()["已拒绝"]
-    assert rejected["update_field"] == "approval_status"
-    assert rejected["update_value"] == "Rejected"
+    assert not rejected.get("update_field")
 
 
 def test_employee_submits_manager_then_finance_approve():
