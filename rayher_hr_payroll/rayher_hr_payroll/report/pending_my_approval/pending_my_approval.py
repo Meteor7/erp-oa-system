@@ -54,13 +54,13 @@ def _fetch():
     # any Accounts User (role-based; the finance step has no per-doc approver).
     expense = frappe.get_all(
         "Expense Claim",
-        filters={"workflow_state": MANAGER_STATE, "expense_approver": user},
+        filters={"workflow_state": MANAGER_STATE, "expense_approver": user, "docstatus": 0},
         fields=["name", "owner", "employee_name", "workflow_state"],
     )
     if "Accounts User" in roles:
         expense += frappe.get_all(
             "Expense Claim",
-            filters={"workflow_state": FINANCE_STATE},
+            filters={"workflow_state": FINANCE_STATE, "docstatus": 0},
             fields=["name", "owner", "employee_name", "workflow_state"],
         )
     sources.append(("报销", "Expense Claim", expense))

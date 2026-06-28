@@ -20,9 +20,9 @@ SPA_PERMS = [
     # in Desk; read for opening/approving comes from the user's stock Employee role.
     ("Expense Claim", "Department Manager", {"report": 1}),
     ("Expense Claim", "Accounts User", {"report": 1}),
-    # Employees self-serve Travel Requests from the portal but the stock Employee
-    # role lacks create on it (unlike Leave/Expense/Comp-Leave).
-    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1, "submit": 1, "if_owner": 1}),
+    # Employees DRAFT Travel Requests from the portal (stock Employee role lacks create);
+    # NO submit -> they cannot self-approve; an HR/approver submits (travel approval routing is a follow-up).
+    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1, "if_owner": 1}),
 ]
 
 

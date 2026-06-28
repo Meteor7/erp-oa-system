@@ -27,9 +27,15 @@ def test_archive_missing_id_flagged():
     assert "身份证号需≥15位" in _archive_problems(_complete(id_card_number_cn="123"))
 
 
-def test_archive_missing_joining_and_base_flagged():
-    probs = _archive_problems(_complete(date_of_joining=None, rd_mock_base=0))
-    assert "入职日期必填" in probs and "应发工资需>0" in probs
+def test_archive_missing_joining_flagged():
+    probs = _archive_problems(_complete(date_of_joining=None))
+    assert "入职日期必填" in probs
+
+
+def test_archive_does_not_require_salary():
+    # Real payroll (Salary Slip) is the salary source now; archive must not be
+    # blocked on the legacy rd_mock_base field.
+    assert _archive_problems(_complete(rd_mock_base=0)) == []
 
 
 def test_non_archived_has_no_problems():
