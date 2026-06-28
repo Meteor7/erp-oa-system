@@ -54,6 +54,9 @@
    },
    {
     "role": "Leave Approver"
+   },
+   {
+    "role": "Expense Approver"
    }
   ]
  }
