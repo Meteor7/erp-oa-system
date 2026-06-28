@@ -16,12 +16,14 @@ _SCOPING = {
     "Leave Application": ("employee", "leave_approver"),
     "Travel Request": ("employee", None),
     "Compensatory Leave Request": ("employee", None),
+    "Salary Slip": ("employee", None),  # 工资单: 员工只见自己; HR/财务/总控见全员
 }
 
 # See every request regardless of owner.
 _SEE_ALL_ROLES = {"System Manager", "HR Manager", "HR User"}
-# Finance reviews all reimbursements (spec L64: 财务见全员费用) -- Expense Claim only.
+# Finance reviews all reimbursements + sees all payroll (spec L64: 财务见全员工资/费用).
 _FINANCE_ROLES = {"Accounts User"}
+_FINANCE_DOCTYPES = {"Expense Claim", "Salary Slip"}
 
 
 def _scope_sql(doctype, user, roles, employee):
@@ -29,7 +31,7 @@ def _scope_sql(doctype, user, roles, employee):
     be None."""
     if user == "Administrator" or (roles & _SEE_ALL_ROLES):
         return ""
-    if doctype == "Expense Claim" and (roles & _FINANCE_ROLES):
+    if doctype in _FINANCE_DOCTYPES and (roles & _FINANCE_ROLES):
         return ""
     emp_field, approver_field = _SCOPING[doctype]
     tbl = "`tab" + doctype + "`"
@@ -49,7 +51,7 @@ def _in_scope(doctype, doc, user, roles, employee):
     """Pure: may this user access this single doc? doc is a mapping/obj with .get."""
     if user == "Administrator" or (roles & _SEE_ALL_ROLES):
         return True
-    if doctype == "Expense Claim" and (roles & _FINANCE_ROLES):
+    if doctype in _FINANCE_DOCTYPES and (roles & _FINANCE_ROLES):
         return True
     emp_field, approver_field = _SCOPING[doctype]
     if approver_field and doc.get(approver_field) == user:
@@ -110,6 +112,10 @@ def compensatory_leave_query(user=None):
     return _query("Compensatory Leave Request", user)
 
 
+def salary_slip_query(user=None):
+    return _query("Salary Slip", user)
+
+
 # has_permission hooks (signature: doc, ptype, user)
 def expense_claim_has_permission(doc, ptype=None, user=None):
     return _perm("Expense Claim", doc, user, ptype)
@@ -125,3 +131,7 @@ def travel_request_has_permission(doc, ptype=None, user=None):
 
 def compensatory_leave_has_permission(doc, ptype=None, user=None):
     return _perm("Compensatory Leave Request", doc, user, ptype)
+
+
+def salary_slip_has_permission(doc, ptype=None, user=None):
+    return _perm("Salary Slip", doc, user, ptype)

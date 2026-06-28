@@ -111,3 +111,16 @@ def test_claimant_can_submit_their_own_draft(monkeypatch):
     # editing a fresh draft (no before) is also fine
     draft = Doc(employee="E1", owner="e1@co", workflow_state="草稿")
     assert rv.expense_claim_has_permission(draft, "write", "e1@co") is None
+
+
+def test_salary_slip_employee_own_finance_all_manager_none():
+    own = Doc(employee="E1", owner="e1@co")
+    other = Doc(employee="E2", owner="e2@co")
+    # employee: only their own slip (fixes the leak where stock Employee read is blanket)
+    assert rv._in_scope("Salary Slip", own, "e1@co", {"Employee"}, "E1") is True
+    assert rv._in_scope("Salary Slip", other, "e1@co", {"Employee"}, "E1") is False
+    # finance + HR see all payroll (spec L64: 财务/HR 见全员工资)
+    assert rv._in_scope("Salary Slip", other, "fin@co", {"Accounts User"}, None) is True
+    assert rv._in_scope("Salary Slip", other, "hr@co", {"HR User"}, "H1") is True
+    # a manager is NOT special for salary -> sees only their own
+    assert rv._in_scope("Salary Slip", other, "mgr@co", {"Department Manager", "Employee"}, "M1") is False

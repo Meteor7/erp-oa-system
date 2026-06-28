@@ -29,6 +29,9 @@ SPA_PERMS = [
     # Frappe gates report execution on report perm of the ref_doctype. read is scoped to
     # their own claims by request_visibility.
     ("Expense Claim", "Leave Approver", {"read": 1, "report": 1}),
+    # 财务看全员工资 (spec L64): stock Salary Slip grants no read to Accounts User; add it so
+    # finance can view payroll (request_visibility lets finance see all salary slips).
+    ("Salary Slip", "Accounts User", {"read": 1, "report": 1}),
 ]
 
 # Permissions a prior version granted that are now revoked: Travel Request portal

@@ -66,6 +66,7 @@ permission_query_conditions = {
     "Leave Application": "rayher_hr_payroll.request_visibility.leave_application_query",
     "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_query",
     "Compensatory Leave Request": "rayher_hr_payroll.request_visibility.compensatory_leave_query",
+    "Salary Slip": "rayher_hr_payroll.request_visibility.salary_slip_query",
 }
 
 has_permission = {
@@ -73,4 +74,5 @@ has_permission = {
     "Leave Application": "rayher_hr_payroll.request_visibility.leave_application_has_permission",
     "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_has_permission",
     "Compensatory Leave Request": "rayher_hr_payroll.request_visibility.compensatory_leave_has_permission",
+    "Salary Slip": "rayher_hr_payroll.request_visibility.salary_slip_has_permission",
 }
