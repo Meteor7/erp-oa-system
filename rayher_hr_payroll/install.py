@@ -66,12 +66,14 @@ def _drop_role_perms(dt, role):
         frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
 
 
-def before_install():
-    # On a FRESH install the app's standard reports and the workflow fixture (which
-    # reference the custom Department Manager role and the workflow state/action
-    # masters) can be imported before after_install runs. Create those link targets
-    # here so the import never validates against a missing role/master. All targets
-    # are framework/HRMS doctypes that already exist at before_install time.
+def ensure_link_targets():
+    # The app's standard reports, workflow fixture, and workspaces reference the
+    # custom Department Manager role + workflow state/action masters. Frappe syncs
+    # those (sync_for / sync_fixtures) BEFORE after_install/after_migrate runs, so on
+    # a fresh install AND on an existing-site upgrade the sync can validate the links
+    # before they exist. Create them in before_install/before_migrate so the targets
+    # are always present first. All targets are framework/HRMS doctypes available at
+    # before_install/before_migrate time.
     ensure_access_control()
     ensure_workflow_masters()
 

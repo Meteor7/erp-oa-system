@@ -140,10 +140,13 @@ def test_custom_role_no_save_when_flags_match(monkeypatch):
     assert saved == []
 
 
-def test_before_install_creates_role_and_masters_for_fresh_install():
+def test_link_targets_created_before_install_and_migrate():
+    # Role + workflow masters must exist before Frappe syncs the reports/workflow/
+    # workspaces that reference them -- on BOTH fresh install and existing-site migrate.
     import inspect
     import rayher_hr_payroll.install as install
     from rayher_hr_payroll import hooks
-    assert hooks.before_install == "rayher_hr_payroll.install.before_install"
-    src = inspect.getsource(install.before_install)
+    assert hooks.before_install == "rayher_hr_payroll.install.ensure_link_targets"
+    assert hooks.before_migrate == "rayher_hr_payroll.install.ensure_link_targets"
+    src = inspect.getsource(install.ensure_link_targets)
     assert "ensure_access_control" in src and "ensure_workflow_masters" in src
