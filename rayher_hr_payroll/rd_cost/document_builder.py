@@ -47,9 +47,10 @@ def _employee_project_hours(
     return employee_hours
 
 
-def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None):
+def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, personnel_types=None):
     employee_hours = _employee_project_hours(source_hour_rows, project_hours)
     total_hours = total_hours or {}
+    personnel_types = personnel_types or {}
     items = []
     for emp, gross in salaries.items():
         if not gross:
@@ -60,11 +61,22 @@ def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None):
             continue
         rd_hours = sum((h.hours for h in hours), Decimal("0"))
         total = Decimal(str(total_hours.get(emp) or 0))
-        # ratio = R&D hours / total worked hours (<= 1). If total is missing or not
-        # greater than R&D hours, the employee's whole logged time is R&D, so the
-        # full salary is capitalisable (ratio 1). This implements the spec's
-        # "工资 × 研发工时占比" so a part-time researcher is only partially capitalised.
-        ratio = (rd_hours / total) if (total > rd_hours and total > 0) else Decimal("1")
+        # ratio = R&D hours / total worked hours (<= 1), per the spec "工资 × 研发工时占比".
+        if total > rd_hours and total > 0:
+            ratio = rd_hours / total
+        elif str(personnel_types.get(emp) or "") == "全时研发":
+            # Full-time R&D: by definition all worked time is R&D, so the full salary
+            # is capitalisable even when only R&D hours are logged.
+            ratio = Decimal("1")
+        else:
+            # 非全时研发/研发辅助 with no usable total denominator: their non-R&D time was
+            # not captured (the Timesheet validator only accepts R&D project rows), so
+            # 研发工时占比 cannot be computed. Capitalising the full salary would over-state
+            # R&D cost -- refuse so finance completes the timesheet or reclassifies.
+            raise ValueError(
+                "员工 " + str(emp) + " 本期缺少完整工时,无法计算研发工时占比(非全时研发)。"
+                "请补全该员工的非研发工时,或确认其人员类型后再分摊。"
+            )
         amount = Decimal(str(gross)) * ratio
         if amount <= 0:
             continue
@@ -81,6 +93,7 @@ def populate_allocation_document(
     project_hours: list[ProjectHour],
     salaries: Mapping[str, float] | None = None,
     total_hours: Mapping[str, float] | None = None,
+    personnel_types: Mapping[str, str] | None = None,
 ) -> None:
     if salaries and any((e.category or "") == "personnel" for e in expenses):
         # Personnel-category rows in the R&D expense import ARE R&D labour booked via
@@ -95,7 +108,7 @@ def populate_allocation_document(
     result = allocate_expenses(expenses=expenses, project_hours=project_hours)
     if salaries:
         result = combine_results(
-            result, _labor_result(salaries, source_hour_rows, project_hours, total_hours)
+            result, _labor_result(salaries, source_hour_rows, project_hours, total_hours, personnel_types)
         )
     expense_sources = _source_expense_by_name(source_expense_rows)
 

@@ -90,12 +90,18 @@ def ensure_notifications():
             doc.append("recipients", r)
         doc.save(ignore_permissions=True)
 
-    # Declarative cleanup: drop any module-owned Notification no longer in the set
-    # (e.g. the earlier submit/approver reminders that were removed as broken).
+    # Declarative cleanup of OUR own stale reminders only (e.g. the earlier
+    # submit/approver reminders removed as broken). Scope strictly to names matching
+    # our "<our doctype> <reminder-suffix>" convention so a co-located admin- or
+    # other-app Notification under the same module is never deleted.
     managed = {n["name"] for n in NOTIFICATIONS}
-    for stale in frappe.get_all("Notification", filters={"module": "Rayher HR Payroll"}, pluck="name"):
-        if stale not in managed:
-            frappe.delete_doc("Notification", stale, ignore_permissions=True, force=True)
+    our_doctypes = ("Leave Application", "Expense Claim", "Travel Request", "Compensatory Leave Request")
+    our_suffixes = ("结果提醒", "经理待办", "财务待办", "提交提醒", "审批提醒", "提醒", "待办")
+    for stale in frappe.get_all("Notification", filters={"module": "Rayher HR Payroll"}, fields=["name", "document_type"]):
+        if stale.name in managed:
+            continue
+        if stale.document_type in our_doctypes and any(stale.name.endswith(sfx) for sfx in our_suffixes):
+            frappe.delete_doc("Notification", stale.name, ignore_permissions=True, force=True)
 
 
 # The Expense Claim workflow references these state/action names. They are Link

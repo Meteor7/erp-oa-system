@@ -33,7 +33,7 @@ def test_labor_cost_allocated_by_employee_hours_and_merged():
     populate_allocation_document(
         doc, expenses=[], source_hour_rows=source_hour_rows,
         source_expense_rows=[], project_hours=project_hours,
-        salaries={"E1": 10000},
+        salaries={"E1": 10000}, personnel_types={"E1": "全时研发"},
     )
     # 10000 split 3:1 -> 7500 capitalized (P1), 2500 expensed (P2)
     assert doc.capitalized_total == Decimal("7500.00")
@@ -64,7 +64,7 @@ def test_labor_scaled_by_rd_hour_ratio():
     populate_allocation_document(
         doc, expenses=[], source_hour_rows=source_hour_rows,
         source_expense_rows=[], project_hours=project_hours,
-        salaries={"E1": 10000}, total_hours={"E1": 8},
+        salaries={"E1": 10000}, total_hours={"E1": 8}, personnel_types={"E1": "全时研发"},
     )
     assert doc.capitalized_total == Decimal("5000.00")
 
@@ -77,7 +77,7 @@ def test_labor_full_salary_when_all_time_is_rd():
     populate_allocation_document(
         doc, expenses=[], source_hour_rows=source_hour_rows,
         source_expense_rows=[], project_hours=project_hours,
-        salaries={"E1": 10000}, total_hours={"E1": 8},
+        salaries={"E1": 10000}, total_hours={"E1": 8}, personnel_types={"E1": "全时研发"},
     )
     assert doc.capitalized_total == Decimal("10000.00")
 
@@ -88,7 +88,7 @@ def test_labor_lines_have_nonempty_voucher_no():
     populate_allocation_document(
         doc, expenses=[], source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
         source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
-        salaries={"E1": 10000}, total_hours={"E1": 4},
+        salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "全时研发"},
     )
     labor = [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
     assert labor and all(l["voucher_no"] for l in labor)
@@ -104,7 +104,7 @@ def test_personnel_import_with_salaries_raises_conflict():
         populate_allocation_document(
             doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
             source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
-            salaries={"E1": 10000}, total_hours={"E1": 4},
+            salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "全时研发"},
         )
 
 
@@ -115,7 +115,34 @@ def test_non_personnel_imports_coexist_with_labor():
     populate_allocation_document(
         doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
         source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
-        salaries={"E1": 10000}, total_hours={"E1": 4},
+        salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "全时研发"},
     )
     names = [str(l["expense_item_name"]) for l in doc.tables["lines"]]
     assert "GL-MATERIAL" in names and any(n.startswith("人工费") for n in names)
+
+
+def test_part_time_rd_without_denominator_raises():
+    # 非全时研发 with only R&D hours logged (total == rd_hours) must NOT capitalize 100%:
+    # their non-R&D time was not captured, so the ratio is unknowable -> refuse.
+    import pytest
+    doc = FakeDoc()
+    with pytest.raises(ValueError):
+        populate_allocation_document(
+            doc, expenses=[],
+            source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+            source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+            salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "非全时研发"},
+        )
+
+
+def test_part_time_rd_with_real_denominator_prorates():
+    # With a real total > R&D hours, 非全时研发 prorates correctly (no raise).
+    doc = FakeDoc()
+    populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+        salaries={"E1": 10000}, total_hours={"E1": 8}, personnel_types={"E1": "非全时研发"},
+    )
+    labor = [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
+    assert labor and sum(float(l["allocated_amount"]) for l in labor) == 5000.0  # 10000 * 4/8

@@ -314,6 +314,19 @@ def ensure_direct_project_stages(
     return merge_direct_project_stages(project_hours, stage_by_project)
 
 
+def personnel_types_by_employee() -> dict[str, str]:
+    """{employee: rd_personnel_type} for every R&D employee. Used to decide whether a
+    full salary may be capitalised when only R&D hours are logged: only 全时研发 may,
+    because their whole worked time is R&D by definition."""
+    frappe = _get_frappe()
+    rows = frappe.db.sql(
+        "select name, rd_personnel_type from `tabEmployee` where rd_personnel_type in %(t)s",
+        {"t": RD_PERSONNEL_TYPES},
+        as_dict=True,
+    )
+    return {r.name: r.rd_personnel_type for r in rows}
+
+
 def total_hours_by_employee(*, year: int, month: int) -> dict[str, float]:
     """Total submitted timesheet hours per R&D employee in the period, across ALL
     projects (R&D and non-R&D). This is the denominator for the R&D labour ratio
