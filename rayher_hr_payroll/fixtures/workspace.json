@@ -5,7 +5,7 @@
   "label": "员工工作台",
   "title": "员工工作台",
   "public": 1,
-  "module": "Rayher HR Payroll",
+  "module": "",
   "content": "[{\"type\": \"header\", \"data\": {\"text\": \"快捷申请\", \"col\": 12}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"请假申请\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"报销申请\", \"col\": 3}}]",
   "shortcuts": [
    {
@@ -33,7 +33,7 @@
   "label": "审批中心",
   "title": "审批中心",
   "public": 1,
-  "module": "Rayher HR Payroll",
+  "module": "",
   "content": "[{\"type\": \"header\", \"data\": {\"text\": \"审批中心\", \"col\": 12}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"待我审批\", \"col\": 4}}]",
   "shortcuts": [
    {
