@@ -18,11 +18,14 @@ SPA_PERMS = [
     # is Expense Claim; Frappe gates report execution on has_permission(ref_doctype,
     # "report"). Grant report ONLY (not read) so a manager cannot browse every claim
     # in Desk; read for opening/approving comes from the user's stock Employee role.
-    ("Expense Claim", "Department Manager", {"report": 1}),
-    ("Expense Claim", "Accounts User", {"report": 1}),
+    # NOTE: frappe.add_permission() defaults ptype to "read" on creation, so we
+    # MUST explicitly set read:0 to keep these report-only (otherwise the role could
+    # browse every Expense Claim in Desk). _ensure_spa_perms applies each flag.
+    ("Expense Claim", "Department Manager", {"read": 0, "report": 1}),
+    ("Expense Claim", "Accounts User", {"read": 1, "report": 1}),  # finance legitimately reviews all reimbursements (opens finance-stage claims; not shared per-doc)
     # Employees DRAFT Travel Requests from the portal (stock Employee role lacks create);
     # NO submit -> they cannot self-approve; an HR/approver submits (travel approval routing is a follow-up).
-    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1, "if_owner": 1}),
+    ("Travel Request", "Employee", {"read": 1, "create": 1, "write": 1, "submit": 0, "if_owner": 1}),
 ]
 
 
