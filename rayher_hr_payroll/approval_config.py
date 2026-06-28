@@ -13,7 +13,7 @@ import frappe
 # (HRMS also pushes its own PWA approval notification for Expense Claim; the custom
 # System Notification is the in-bell complement.)
 _RESULT = [
-    ("Leave Application", "请假", "Value Change", "status", ""),
+    ("Leave Application", "请假", "Value Change", "status", "doc.status in ['Approved', 'Rejected']"),
     ("Expense Claim", "报销", "Value Change", "workflow_state", "doc.workflow_state in ['财务已审', '已拒绝']"),
     ("Travel Request", "出差", "Submit", "", ""),
     ("Compensatory Leave Request", "调休", "Submit", "", ""),
@@ -40,7 +40,39 @@ def _result_notification(doctype, label, event, value_changed, condition):
     }
 
 
-NOTIFICATIONS = [_result_notification(*spec) for spec in _RESULT]
+# Approver-side reminders for the Expense Claim workflow: notify the assigned
+# manager when a claim reaches 待经理审批, and any Accounts User when it reaches
+# 待财务复核. (The other request types route via HRMS-native approver notifications.)
+_APPROVER = [
+    ("Expense Claim 经理待办", "待经理审批", "有报销待你审批: {{ doc.name }}",
+     [{"receiver_by_document_field": "expense_approver"}]),
+    ("Expense Claim 财务待办", "待财务复核", "有报销待财务复核: {{ doc.name }}",
+     [{"receiver_by_role": "Accounts User"}]),
+]
+
+
+def _approver_notification(name, state, subject, recipients):
+    return {
+        "doctype": "Notification",
+        "name": name,
+        "subject": subject,
+        "document_type": "Expense Claim",
+        "event": "Value Change",
+        "value_changed": "workflow_state",
+        "condition": "doc.workflow_state == '" + state + "'",
+        "channel": "System Notification",
+        "enabled": 1,
+        "is_standard": 0,
+        "module": "Rayher HR Payroll",
+        "recipients": recipients,
+        "message": subject,
+    }
+
+
+NOTIFICATIONS = (
+    [_result_notification(*spec) for spec in _RESULT]
+    + [_approver_notification(*spec) for spec in _APPROVER]
+)
 
 
 def ensure_notifications():

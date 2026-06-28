@@ -9,7 +9,7 @@ def test_one_result_reminder_per_request_type():
     names = set(_by_name())
     for doctype in ("Leave Application", "Travel Request", "Expense Claim", "Compensatory Leave Request"):
         assert f"{doctype} 结果提醒" in names, doctype
-    assert len(NOTIFICATIONS) == 4
+    assert len(NOTIFICATIONS) == 6  # 4 result reminders + 2 expense approver reminders
 
 
 def test_notifications_are_creatable_and_notify_applicant():
@@ -20,8 +20,10 @@ def test_notifications_are_creatable_and_notify_applicant():
         assert n["channel"] == "System Notification"
         assert n["enabled"] == 1
         assert n["document_type"]
-        # applicant is the recipient:
-        assert n["recipients"] == [{"receiver_by_document_field": "owner"}]
+        if n["name"].endswith("结果提醒"):
+            assert n["recipients"] == [{"receiver_by_document_field": "owner"}]
+        else:  # approver reminders route to the approver / finance role
+            assert n["recipients"]
 
 
 def test_value_change_notifications_reference_real_fields_only():
@@ -63,3 +65,20 @@ def test_install_calls_ensure_workflow_masters():
     import inspect
     import rayher_hr_payroll.install as install
     assert "ensure_workflow_masters" in inspect.getsource(install)
+
+
+def test_leave_result_gated_to_terminal_status():
+    # The Leave result reminder must not fire on the initial pending/open status when
+    # the employee submits -- only on Approved/Rejected.
+    cond = _by_name()["Leave Application 结果提醒"]["condition"]
+    assert "Approved" in cond and "Rejected" in cond
+
+
+def test_expense_approver_reminders_present_and_routed():
+    by = _by_name()
+    mgr = by["Expense Claim 经理待办"]
+    assert mgr["condition"] == "doc.workflow_state == '待经理审批'"
+    assert mgr["recipients"] == [{"receiver_by_document_field": "expense_approver"}]
+    fin = by["Expense Claim 财务待办"]
+    assert fin["condition"] == "doc.workflow_state == '待财务复核'"
+    assert fin["recipients"] == [{"receiver_by_role": "Accounts User"}]
