@@ -7,6 +7,9 @@ class Doc(dict):
     def get(self, k, d=None):
         return dict.get(self, k, d)
 
+    def get_doc_before_save(self):
+        return self.get("_before")
+
 
 # ---- _in_scope (direct doc access) ----
 
@@ -79,16 +82,32 @@ def test_unlinked_user_owner_fallback(monkeypatch):
     assert rv._in_scope("Expense Claim", own, "contractor@co", {"Employee"}, None) is True
 
 
-def test_claimant_cannot_write_own_claim_in_approval_state(monkeypatch):
+def _claim_with_before(before_state, **kw):
+    d = Doc(**kw)
+    d["_before"] = Doc(workflow_state=before_state, employee=kw.get("employee"), owner=kw.get("owner"))
+    return d
+
+
+def test_claimant_cannot_write_own_claim_already_under_review(monkeypatch):
     monkeypatch.setattr(rv, "frappe", types.SimpleNamespace(
         session=types.SimpleNamespace(user="fin@co"),
         get_roles=lambda u: ["Employee", "Accounts User"],
         db=types.SimpleNamespace(get_value=lambda dt, flt, f: "F1")))  # fin@co's Employee is F1
-    claim = Doc(employee="F1", owner="fin@co", workflow_state="待财务复核", expense_approver="other@co")
-    # finance-claimant: in scope (finance sees all) but write denied mid-review on own claim
+    # claim ALREADY in 待财务复核 before this save -> finance-claimant edit denied
+    claim = _claim_with_before("待财务复核", employee="F1", owner="fin@co", workflow_state="待财务复核")
     assert rv.expense_claim_has_permission(claim, "write", "fin@co") is False
-    # ...but reading is fine (defer)
+    # reading is fine
     assert rv.expense_claim_has_permission(claim, "read", "fin@co") is None
-    # ...and editing their own DRAFT is fine
-    draft = Doc(employee="F1", owner="fin@co", workflow_state="草稿")
-    assert rv.expense_claim_has_permission(draft, "write", "fin@co") is None
+
+
+def test_claimant_can_submit_their_own_draft(monkeypatch):
+    # 提交审批: before-state 草稿 -> the new 待经理审批 state must NOT block the claimant's own submit.
+    monkeypatch.setattr(rv, "frappe", types.SimpleNamespace(
+        session=types.SimpleNamespace(user="e1@co"),
+        get_roles=lambda u: ["Employee"],
+        db=types.SimpleNamespace(get_value=lambda dt, flt, f: "E1")))
+    submitting = _claim_with_before("草稿", employee="E1", owner="e1@co", workflow_state="待经理审批")
+    assert rv.expense_claim_has_permission(submitting, "write", "e1@co") is None
+    # editing a fresh draft (no before) is also fine
+    draft = Doc(employee="E1", owner="e1@co", workflow_state="草稿")
+    assert rv.expense_claim_has_permission(draft, "write", "e1@co") is None

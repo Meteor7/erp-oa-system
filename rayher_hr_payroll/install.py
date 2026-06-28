@@ -21,6 +21,10 @@ SPA_PERMS = [
     # grants every Employee read+write on Expense Claim, so this is not a new exposure.
     ("Expense Claim", "Department Manager", {"read": 1, "write": 1, "report": 1}),
     ("Expense Claim", "Accounts User", {"read": 1, "write": 1, "report": 1}),  # no submit: finance review never submits (doc_status 0)
+    # permlevel-1: the 财务已审 state sets approval_status (the ONLY permlevel-1 field on
+    # Expense Claim) to Approved; without lvl1 write Frappe silently drops that update and
+    # the claim stays Draft. Accounts User is the finance reviewer, so this is correct.
+    ("Expense Claim", "Accounts User", {"read": 1, "write": 1}, 1),
     # Leave Approver runs the shared 待我审批 report whose ref_doctype is Expense Claim;
     # Frappe gates report execution on report perm of the ref_doctype. read is scoped to
     # their own claims by request_visibility.
@@ -37,24 +41,26 @@ def _ensure_spa_perms():
     import frappe
     from frappe.permissions import add_permission, update_permission_property
 
-    for dt, role, props in SPA_PERMS:
+    for entry in SPA_PERMS:
+        dt, role, props = entry[0], entry[1], entry[2]
+        permlevel = entry[3] if len(entry) > 3 else 0
         # Idempotent + declarative. add_permission only matches an if_owner=0 row, so
         # re-running on a site whose row is if_owner=1 would create a SECOND row and
         # leave the stale one; Frappe ORs flags across rows, resurrecting a revoked
         # permission (e.g. Travel submit). Remove every prior row for this
         # (doctype, role, permlevel) first, then create exactly one with the declared
         # flags. props must list if_owner LAST so it is flipped after the other flags.
-        _drop_role_perms(dt, role)
-        add_permission(dt, role, 0)
+        _drop_role_perms(dt, role, permlevel)
+        add_permission(dt, role, permlevel)
         for prop, value in props.items():
-            update_permission_property(dt, role, 0, prop, value)
+            update_permission_property(dt, role, permlevel, prop, value)
 
     # Revoke obsolete grants (delete any lingering row for these app-owned pairs).
     for dt, role in REVOKE_PERMS:
         _drop_role_perms(dt, role)
 
 
-def _drop_role_perms(dt, role):
+def _drop_role_perms(dt, role, permlevel=0):
     # These (doctype, role) permission rows are EXCLUSIVELY managed by this app
     # (verified: no stock perm ships for them), so removing all rows for the pair
     # before re-granting is config-as-code ownership, not clobbering of others'
@@ -63,7 +69,7 @@ def _drop_role_perms(dt, role):
     import frappe
 
     for name in frappe.get_all(
-        "Custom DocPerm", filters={"parent": dt, "role": role, "permlevel": 0}, pluck="name"
+        "Custom DocPerm", filters={"parent": dt, "role": role, "permlevel": permlevel}, pluck="name"
     ):
         frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
 

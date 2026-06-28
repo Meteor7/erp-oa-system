@@ -81,14 +81,15 @@ def _perm(doctype, doc, user, ptype=None):
     employee = _employee_of(user)
     if not _in_scope(doctype, doc, user, roles, employee):
         return False  # out of scope -> deny
-    if (
-        ptype == "write"
-        and doctype == "Expense Claim"
-        and employee
-        and doc.get("employee") == employee
-        and (doc.get("workflow_state") or "草稿") not in _CLAIMANT_EDITABLE_STATES
-    ):
-        return False  # claimant cannot edit their own claim once it is in the approval flow
+    if ptype == "write" and doctype == "Expense Claim" and employee and doc.get("employee") == employee:
+        # The claimant may write their own claim only while it is (or was) in 草稿/已拒绝 -- this
+        # covers creating a draft AND applying 提交审批/重新提交 (which transition OUT of those
+        # states). Once the claim is ALREADY under review, the claimant can't edit it. Key on the
+        # PRE-save state so a legitimate claimant transition isn't blocked by its own new state.
+        before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+        before_state = (before.get("workflow_state") if before else None) or "草稿"
+        if before_state not in _CLAIMANT_EDITABLE_STATES:
+            return False  # claim already under review -> claimant may not edit it
     return None  # in scope -> defer to role perms
 
 
