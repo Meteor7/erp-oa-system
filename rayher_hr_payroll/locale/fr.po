@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Rayher HR Payroll VERSION\n"
 "Report-Msgid-Bugs-To: admin@example.com\n"
-"POT-Creation-Date: 2026-06-29 16:57+0806\n"
+"POT-Creation-Date: 2026-06-29 19:03+0806\n"
 "PO-Revision-Date: 2026-06-29 16:57+0806\n"
 "Last-Translator: admin@example.com\n"
 "Language-Team: admin@example.com\n"
@@ -84,6 +84,14 @@ msgstr "Employé"
 msgid "Employee Name"
 msgstr "Nom de l’employé"
 
+#: rayher_hr_payroll/translatable_labels.py:25
+msgid "Exception Type"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:26
+msgid "Expense Item"
+msgstr ""
+
 #. Name of a role
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
@@ -93,6 +101,22 @@ msgstr ""
 #. Option for the '状态' (Select) field in DocType 'RD Expense Import'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
 msgid "Imported"
+msgstr ""
+
+#: rayher_hr_payroll/public/js/language_switcher.js:43
+msgid "Language"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:33
+msgid "Logged {0} h on R&D projects but rd_personnel_type is '{1}'; excluded from R&D allocation."
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:27
+msgid "Missing Timesheet"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:31
+msgid "Month must be between 1 and 12."
 msgstr ""
 
 #: rayher_hr_payroll/demo.py:198
@@ -108,6 +132,10 @@ msgstr ""
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
 msgid "Period"
 msgstr "Période"
+
+#: rayher_hr_payroll/translatable_labels.py:21
+msgid "RD Allocation Matrix"
+msgstr ""
 
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
@@ -154,9 +182,17 @@ msgstr ""
 msgid "RD Ratio"
 msgstr ""
 
+#: rayher_hr_payroll/translatable_labels.py:22
+msgid "RD Timesheet Exceptions"
+msgstr ""
+
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
 msgid "RD Work Ratio Snapshot"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:19
+msgid "Rayher HR Payroll"
 msgstr ""
 
 #. Name of a DocType
@@ -205,6 +241,18 @@ msgstr ""
 #. Label of a Float field in DocType 'RD Work Ratio Snapshot'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
 msgid "Total Submitted Timesheet Hours"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:28
+msgid "Unclassified R&D Hours"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:29
+msgid "Year and month filters are required."
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:30
+msgid "Year and month filters must be valid numbers."
 msgstr ""
 
 #. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
@@ -282,6 +330,10 @@ msgstr ""
 #. Option for the '研发阶段' (Select) field in DocType 'RD Cost Allocation Line'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
 msgid "unknown"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:32
+msgid "{0}-{1:02d} has no submitted timesheet hours."
 msgstr ""
 
 #: rayher_hr_payroll/employee_controls.py:86
@@ -918,7 +970,3 @@ msgstr ""
 msgid "项目"
 msgstr ""
 
-
-#: translatable_labels.py:16
-msgid "Rayher HR Payroll"
-msgstr ""
