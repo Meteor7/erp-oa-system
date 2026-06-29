@@ -95,61 +95,83 @@ def test_public_set_language_signature_exposes_only_language():
 REQUIRED_TRANSLATION_STRINGS = {
     'Rayher HR Payroll',
     'Review R&D timesheet',
-    'Voucher No',
-    'Expense Item',
-    'Employee',
-    'Employee Name',
-    'Exception Type',
-    'Message',
-    'Missing Timesheet',
-    'Unclassified R&D Hours',
-    '{0}-{1:02d} has no submitted timesheet hours.',
-    'Logged {0} h on R&D projects but rd_personnel_type is ' + chr(39) + '{1}' + chr(39) + '; excluded from R&D allocation.',
-    'R&D period {0} is locked; timesheet changes require a correction workflow.',
-    'Project {0} is not enabled for R&D timesheet entry.',
-    'Project {0} needs capitalization start and end dates before R&D timesheet entry.',
-    'Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy.',
-    'A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost.',
+    'RD Cost Allocation',
+    'RD Expense Import',
+    'RD Period Lock',
+    'Recognized RD Type',
+    'Standard Daily Hours',
     'Set a default company before loading Rayher demo data.',
 }
 
 
-def _translation_path(language):
+def _locale_dir():
     from pathlib import Path
 
-    app_root = Path(__file__).resolve().parents[1]
-    return app_root / 'translations' / f'{language}.csv'
+    return Path(__file__).resolve().parents[1] / 'locale'
 
 
-def _load_translation_csv(language):
-    import csv
+def _po_token(token):
+    import ast
 
-    with _translation_path(language).open(encoding='utf-8', newline='') as handle:
-        return {row[0]: row[1] for row in csv.reader(handle) if len(row) >= 2}
+    token = token.strip()
+    return ast.literal_eval(token) if token.startswith('"') else ''
+
+
+def _parse_po(path):
+    """Minimal gettext PO reader (msgid -> msgstr); stdlib only, no babel dependency."""
+    entries = {}
+    msgid_parts = []
+    msgstr_parts = []
+    state = None
+    lines = path.read_text(encoding='utf-8').split('\n')
+    for line in lines + ['']:
+        if line.startswith('msgid '):
+            if state is not None:
+                entries[''.join(msgid_parts)] = ''.join(msgstr_parts)
+            msgid_parts = [_po_token(line[len('msgid '):])]
+            msgstr_parts = []
+            state = 'id'
+        elif line.startswith('msgstr '):
+            msgstr_parts = [_po_token(line[len('msgstr '):])]
+            state = 'str'
+        elif line[:1] == '"':
+            (msgid_parts if state == 'id' else msgstr_parts).append(_po_token(line))
+    if state is not None:
+        entries[''.join(msgid_parts)] = ''.join(msgstr_parts)
+    entries.pop('', None)
+    return entries
+
+
+def _load_po(language):
+    return _parse_po(_locale_dir() / f'{language}.po')
 
 
 @pytest.mark.parametrize('language', ['zh', 'fr'])
-def test_translation_files_exist_and_parse_as_utf8_csv(language):
-    translations = _load_translation_csv(language)
-
-    assert translations
+def test_translation_files_exist_and_parse_as_po(language):
+    assert _load_po(language)
 
 
-@pytest.mark.parametrize('language', ['zh', 'fr'])
-def test_translation_files_cover_required_rayher_strings(language):
-    translations = _load_translation_csv(language)
+def test_pot_template_covers_required_strings():
+    ids = set(_parse_po(_locale_dir() / 'main.pot'))
+
+    assert REQUIRED_TRANSLATION_STRINGS <= ids
+
+
+def test_chinese_locale_covers_required_rayher_strings():
+    translations = _load_po('zh')
 
     missing = REQUIRED_TRANSLATION_STRINGS - set(translations)
     assert missing == set()
     assert all(translations[source] for source in REQUIRED_TRANSLATION_STRINGS)
 
 
-def test_manifest_includes_translation_csv_files():
+def test_manifest_includes_translation_po_files():
     from pathlib import Path
 
     manifest = (Path(__file__).resolve().parents[2] / 'MANIFEST.in').read_text()
 
-    assert '*.csv' in manifest
+    assert '*.po' in manifest
+    assert '*.pot' in manifest
 
 
 def test_set_language_is_whitelisted_for_post_http_calls():

@@ -5,6 +5,9 @@ app_description = "Rayher HR, R&D timesheet, and R&D cost allocation customizati
 app_email = "admin@example.com"
 app_license = "MIT"
 
+# Desk: load the language switcher (navbar dropdown -> i18n.set_language).
+app_include_js = "/assets/rayher_hr_payroll/js/language_switcher.js"
+
 required_apps = ["erpnext", "hrms"]
 before_install = "rayher_hr_payroll.install.ensure_link_targets"
 before_migrate = "rayher_hr_payroll.install.ensure_link_targets"

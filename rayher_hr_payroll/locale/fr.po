@@ -1,0 +1,924 @@
+# Translations template for Rayher HR Payroll.
+# Copyright (C) 2026 Rayher
+# This file is distributed under the same license as the Rayher HR Payroll project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Rayher HR Payroll VERSION\n"
+"Report-Msgid-Bugs-To: admin@example.com\n"
+"POT-Creation-Date: 2026-06-29 16:57+0806\n"
+"PO-Revision-Date: 2026-06-29 16:57+0806\n"
+"Last-Translator: admin@example.com\n"
+"Language-Team: admin@example.com\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.13.1\n"
+
+#. Header text in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "<span class=\"h4\"><b>业务对象与报表</b></span>"
+msgstr ""
+
+#. Header text in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "<span class=\"h4\"><b>常用操作</b></span>"
+msgstr ""
+
+#. Header text in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "<span class=\"h4\"><b>研发成本总览</b></span>"
+msgstr ""
+
+#. Header text in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "<span class=\"h4\"><b>近期业务</b></span>"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+msgid "Accommodation Deduction"
+msgstr ""
+
+#. Name of a role
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "Accounts User"
+msgstr ""
+
+#. Option for the '状态' (Select) field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "Allocated"
+msgstr ""
+
+#. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "Calculated"
+msgstr ""
+
+#. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
+#. Option for the '状态' (Select) field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "Cancelled"
+msgstr ""
+
+#. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
+#. Option for the '状态' (Select) field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "Draft"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "Employee"
+msgstr "Employé"
+
+#. Label of a Data field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "Employee Name"
+msgstr "Nom de l’employé"
+
+#. Name of a role
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "HR User"
+msgstr ""
+
+#. Option for the '状态' (Select) field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "Imported"
+msgstr ""
+
+#: rayher_hr_payroll/demo.py:198
+msgid "Pass force=True to create Rayher demo data on this site."
+msgstr "Passez force=True pour créer les données de démonstration Rayher sur ce site."
+
+#. Name of a report
+#: rayher_hr_payroll/rayher_hr_payroll/report/pending_my_approval/pending_my_approval.json
+msgid "Pending My Approval"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "Period"
+msgstr "Période"
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+msgid "RD Allocation Source Expense"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "RD Allocation Source Hour"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "RD Cost Allocation"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "RD Cost Allocation Line"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "RD Expense Import"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "RD Expense Item"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "RD Period Lock"
+msgstr ""
+
+#. Label of a Float field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "RD Project Hours"
+msgstr ""
+
+#. Label of a Percent field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "RD Ratio"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "RD Work Ratio Snapshot"
+msgstr ""
+
+#. Name of a DocType
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
+msgid "Rayher HR Settings"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "Rayher HR 设置"
+msgstr ""
+
+#. Label of a Select field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "Recognized RD Type"
+msgstr ""
+
+#: rayher_hr_payroll/timesheet_controls.py:280
+msgid "Review R&D timesheet"
+msgstr "Vérifier la feuille de temps R&D"
+
+#: rayher_hr_payroll/demo.py:62
+msgid "Set a default company before loading Rayher demo data."
+msgstr "Définissez une société par défaut avant de charger les données de démonstration Rayher."
+
+#. Label of a Float field in DocType 'Rayher HR Settings'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
+msgid "Standard Daily Hours"
+msgstr ""
+
+#. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "Submitted"
+msgstr ""
+
+#. Name of a role
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "System Manager"
+msgstr ""
+
+#. Label of a Float field in DocType 'RD Work Ratio Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "Total Submitted Timesheet Hours"
+msgstr ""
+
+#. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "all"
+msgstr ""
+
+#. Option for the '费用类别' (Select) field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "amortization"
+msgstr ""
+
+#. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
+#. Option for the '研发阶段' (Select) field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "capitalized"
+msgstr ""
+
+#. Option for the '费用类别' (Select) field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "depreciation"
+msgstr ""
+
+#. Option for the '费用类别' (Select) field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "design"
+msgstr ""
+
+#. Option for the '费用类别' (Select) field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "direct_input"
+msgstr ""
+
+#. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
+#. Option for the '研发阶段' (Select) field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "expensed"
+msgstr ""
+
+#. Option for the 'Recognized RD Type' (Select) field in DocType 'RD Work Ratio
+#. Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "full_time"
+msgstr ""
+
+#. Option for the 'Recognized RD Type' (Select) field in DocType 'RD Work Ratio
+#. Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "non_rd"
+msgstr ""
+
+#. Option for the '费用类别' (Select) field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "other"
+msgstr ""
+
+#. Option for the 'Recognized RD Type' (Select) field in DocType 'RD Work Ratio
+#. Snapshot'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_work_ratio_snapshot/rd_work_ratio_snapshot.json
+msgid "part_time"
+msgstr ""
+
+#. Option for the '费用类别' (Select) field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "personnel"
+msgstr ""
+
+#. Option for the '分摊依据' (Select) field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "rd_project_hours"
+msgstr ""
+
+#. Option for the '研发阶段' (Select) field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "unknown"
+msgstr ""
+
+#: rayher_hr_payroll/employee_controls.py:86
+msgid "{0}不能为负"
+msgstr ""
+
+#. Count format of shortcut in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "{}"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "一级科目"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "三级科目"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "二级科目"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:138
+msgid "仅可为研发人员登记工时。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:204
+msgid "仅可删除本工具创建的单行研发工时单；多行/手工工时单请在后台处理，以免误删其他工时。"
+msgstr ""
+
+#: rayher_hr_payroll/employee_controls.py:74
+msgid "会改变已锁定期间（{0}）的研发分摊输入，不允许修改该员工的研发人员类型。"
+msgstr ""
+
+#: rayher_hr_payroll/project_controls.py:67
+msgid "会改变已锁定期间（{0}）的研发分摊输入，不允许修改该项目的资本化日期或研发工时资格。"
+msgstr ""
+
+#: rayher_hr_payroll/api/_guards.py:64
+msgid "会计期间 {0} 已{1}锁定，操作被阻止。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:118
+msgid "会计期间 {0} 已锁定（费用导入），不能修改。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:68
+msgid "会计期间 {0} 已锁定，不能修改宿舍代扣。"
+msgstr ""
+
+#: rayher_hr_payroll/api/portal.py:106
+msgid "你的员工档案未设置报销审批人，请联系 HR。"
+msgstr ""
+
+#: rayher_hr_payroll/api/portal.py:75
+msgid "你的员工档案未设置请假审批人，请联系 HR。"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "关账人"
+msgstr ""
+
+#. Label of a Datetime field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "关账时间"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Cost Allocation Line'
+#. Label of a Data field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "凭证号"
+msgstr ""
+
+#. Label of a Select field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "分摊依据"
+msgstr ""
+
+#. Label of a shortcut in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/report/rd_allocation_matrix/rd_allocation_matrix.js:5
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "分摊单"
+msgstr ""
+
+#. Label of a Float field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "分摊工时"
+msgstr ""
+
+#. Label of a Table field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "分摊明细"
+msgstr ""
+
+#. Label of a Percent field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "分摊比例"
+msgstr ""
+
+#. Label of a shortcut in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "分摊矩阵报表"
+msgstr ""
+
+#. Label of a Select field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "分摊范围"
+msgstr ""
+
+#. Label of a Currency field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "分摊金额"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Allocation Source Hour'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "历史岗位"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Allocation Source Hour'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "历史部门"
+msgstr ""
+
+#. Label of a Currency field in DocType 'Accommodation Deduction'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+msgid "合计"
+msgstr ""
+
+#. Label of a Link field in DocType 'Accommodation Deduction'
+#. Label of a Link field in DocType 'RD Allocation Source Hour'
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "员工"
+msgstr ""
+
+#. Name of a report
+#: rayher_hr_payroll/rayher_hr_payroll/report/employee_info_summary/employee_info_summary.json
+msgid "员工信息总表"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "四级科目"
+msgstr ""
+
+#. Label of a Card Break in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "基础资料"
+msgstr ""
+
+#. Label of a Date field in DocType 'RD Allocation Source Hour'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "填报日期"
+msgstr ""
+
+#: rayher_hr_payroll/api/expense_entry.py:45
+msgid "存在重复的费用行（凭证号、科目与金额都相同），请合并或更正。"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "宿舍扣款"
+msgstr ""
+
+#. Label of a Float field in DocType 'RD Allocation Source Hour'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "工时"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:135
+msgid "工时不能为负数。"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Allocation Source Hour'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "工时单"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:78
+msgid "工时单 {0} 含本组合以外的工时行，请在后台处理以避免误删。"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Hour'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+msgid "工时明细行"
+msgstr ""
+
+#. Label of a Table field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "工时来源快照"
+msgstr ""
+
+#. Label of a Check field in DocType 'Accommodation Deduction'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+msgid "已导出给财务"
+msgstr ""
+
+#. Label of a Int field in DocType 'RD Cost Allocation'
+#. Label of a Int field in DocType 'RD Expense Import'
+#. Label of a Int field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "年度"
+msgstr ""
+
+#: rayher_hr_payroll/api/accommodation_entry.py:30
+msgid "您无权为该员工登记宿舍代扣。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:129
+msgid "您无权为该员工登记工时。"
+msgstr ""
+
+#: rayher_hr_payroll/api/personnel_entry.py:79
+msgid "您无权修改该员工。"
+msgstr ""
+
+#: rayher_hr_payroll/api/personnel_entry.py:108
+msgid "您无权删除该员工。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:202
+msgid "您无权删除该员工的工时。"
+msgstr ""
+
+#: rayher_hr_payroll/api/personnel_entry.py:85
+msgid "您无权新增员工。"
+msgstr ""
+
+#. Label of a Currency field in DocType 'Accommodation Deduction'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+msgid "房租"
+msgstr ""
+
+#. Label of a Card Break in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "报表与例外"
+msgstr ""
+
+#: rayher_hr_payroll/api/portal.py:104
+msgid "报销金额必须大于 0。"
+msgstr ""
+
+#: rayher_hr_payroll/employee_controls.py:89
+msgid "无法归档，信息不完整："
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:75
+msgid "无法计算分摊：{0}"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:79
+msgid "无法读取源文件以计算校验哈希，请检查附件后重试。"
+msgstr ""
+
+#. Label of a quick_list in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "最近分摊单"
+msgstr ""
+
+#. Label of a quick_list in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "最近宿舍扣款"
+msgstr ""
+
+#. Label of a quick_list in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "最近费用导入"
+msgstr ""
+
+#. Label of a Int field in DocType 'RD Cost Allocation'
+#. Label of a Int field in DocType 'RD Expense Import'
+#. Label of a Int field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "月份"
+msgstr ""
+
+#: rayher_hr_payroll/api/_guards.py:52
+msgid "月份必须在 01-12 之间"
+msgstr ""
+
+#. Label of a Card Break in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "月末分摊"
+msgstr ""
+
+#. Label of a Data field in DocType 'Accommodation Deduction'
+#. Label of a Data field in DocType 'RD Cost Allocation'
+#. Label of a Data field in DocType 'RD Expense Import'
+#. Label of a Data field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "期间"
+msgstr ""
+
+#. Label of a shortcut in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "期间关账"
+msgstr ""
+
+#: rayher_hr_payroll/api/_guards.py:49
+msgid "期间格式应为 YYYY-MM"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:45
+msgid "期间格式无效，应为 YYYY-MM（例如 2026-01）。"
+msgstr ""
+
+#. Label of a Currency field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "未判定阶段合计"
+msgstr ""
+
+#: rayher_hr_payroll/api/portal.py:26
+msgid "未找到与当前账号关联的在职员工记录，请联系 HR。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:42
+msgid "未指定费用导入单，不能分摊。"
+msgstr ""
+
+#. Label of a Small Text field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "未纳入人工(工时不完整)"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:181
+msgid "本月工时累计过大，无法分布在本月内，请核对工时。"
+msgstr ""
+
+#: rayher_hr_payroll/api/expense_entry.py:73
+msgid "本期导入含直接归属项目的费用，请在后台编辑以免丢失归属。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:133
+#: rayher_hr_payroll/api/timesheet_entry.py:146
+msgid "本期已存在已提交的研发费用分摊，工时已冻结；如需调整请先撤销分摊。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:212
+msgid "本期已存在已提交的研发费用分摊，请先撤销分摊后再删除工时。"
+msgstr ""
+
+#: rayher_hr_payroll/import_controls.py:68
+msgid "本期已存在未取消的费用导入单（{0}）；每个会计期间只能有一张，请先取消原单再重建。"
+msgstr ""
+
+#: rayher_hr_payroll/api/allocation_entry.py:42
+msgid "本期已有已提交的分摊单，如需重算请联系系统管理员先撤销。"
+msgstr ""
+
+#: rayher_hr_payroll/api/allocation_entry.py:34
+msgid "本期没有费用导入单，无法分摊。请先在「财务费用导入」录入费用。"
+msgstr ""
+
+#: rayher_hr_payroll/api/expense_entry.py:71
+msgid "本期费用已提交或已分摊，如需修改请先撤销分摊单。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:55
+msgid "本费用导入仍被已提交的分摊单引用，请先撤销分摊单后再取消。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:105
+msgid "本费用导入已被已提交的分摊单引用，请先撤销分摊单后再修改费用导入。"
+msgstr ""
+
+#. Label of a Attach field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "来源文件"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "来源文件哈希(自动)"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "来源行键"
+msgstr ""
+
+#. Label of a Currency field in DocType 'Accommodation Deduction'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+msgid "水费"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:77
+msgid "没有可分摊的数据，不能提交。"
+msgstr ""
+
+#. Label of a Select field in DocType 'RD Cost Allocation'
+#. Label of a Select field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "状态"
+msgstr ""
+
+#. Label of a Currency field in DocType 'Accommodation Deduction'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
+msgid "电费"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Allocation Source Expense'
+#. Label of a Link field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "直接归属项目"
+msgstr ""
+
+#. Label of a number card in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发分摊单"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发工时例外"
+msgstr ""
+
+#. Name of a Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发成本"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发期间关账"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发费用分摊单"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发费用分摊矩阵"
+msgstr ""
+
+#. Label of a number card in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发费用化合计"
+msgstr ""
+
+#. Label of a number card in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发费用导入"
+msgstr ""
+
+#. Label of a number card in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发资本化合计"
+msgstr ""
+
+#. Label of a Select field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "研发阶段"
+msgstr ""
+
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "研发项目"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "计算版本"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:77
+msgid "该员工在期间 {0} 已有宿舍代扣记录（{1}），不能重复。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:70
+msgid "该员工本期该项目存在手工工时单 {0}，请在后台处理后再填报。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:27
+msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统管理员）。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:33
+msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统管理员）。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:66
+msgid "该费用导入单已有已提交的分摊单（{0}），不能重复分摊。"
+msgstr ""
+
+#: rayher_hr_payroll/api/timesheet_entry.py:140
+msgid "该项目未开启研发工时填报。"
+msgstr ""
+
+#: rayher_hr_payroll/api/portal.py:17
+msgid "请用员工账号登录。"
+msgstr ""
+
+#: rayher_hr_payroll/api/expense_entry.py:63
+msgid "请至少录入一条有效费用（金额需大于 0）。"
+msgstr ""
+
+#. Label of a Currency field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "费用化合计"
+msgstr ""
+
+#. Label of a shortcut in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "费用导入"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Cost Allocation'
+#. Label of a Link in the 研发成本 Workspace
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+#: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
+msgid "费用导入单"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:51
+msgid "费用导入单尚未提交或已取消，不能分摊。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:29
+msgid "费用导入单没有有效的费用明细（合计需大于零），不能提交。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:34
+msgid "费用导入单的期间与分摊期间不一致，不能分摊。"
+msgstr ""
+
+#. Label of a Table field in DocType 'RD Expense Import'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.json
+msgid "费用明细"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:46
+msgid "费用明细存在内容重复行（凭证号、科目与金额都相同），不能提交。"
+msgstr ""
+
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:40
+msgid "费用明细存在重复行（{0}），不能提交。"
+msgstr ""
+
+#. Label of a Table field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "费用来源快照"
+msgstr ""
+
+#. Label of a Select field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "费用类别"
+msgstr ""
+
+#: rayher_hr_payroll/api/expense_entry.py:51
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_import/rd_expense_import.py:123
+msgid "费用金额不能为负数。"
+msgstr ""
+
+#. Label of a Data field in DocType 'RD Allocation Source Expense'
+#. Label of a Data field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "费用项目"
+msgstr ""
+
+#. Label of a Currency field in DocType 'RD Cost Allocation'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
+msgid "资本化合计"
+msgstr ""
+
+#. Label of a Currency field in DocType 'RD Allocation Source Expense'
+#. Label of a Currency field in DocType 'RD Expense Item'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_expense/rd_allocation_source_expense.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_expense_item/rd_expense_item.json
+msgid "金额"
+msgstr ""
+
+#: rayher_hr_payroll/api/accommodation_entry.py:36
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:50
+msgid "金额不能为负数。"
+msgstr ""
+
+#. Label of a Check field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "锁定分摊单"
+msgstr ""
+
+#. Label of a Check field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "锁定工时单"
+msgstr ""
+
+#. Label of a Check field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "锁定费用导入"
+msgstr ""
+
+#. Label of a Check field in DocType 'RD Period Lock'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_period_lock/rd_period_lock.json
+msgid "锁定项目阶段"
+msgstr ""
+
+#. Label of a Link field in DocType 'RD Allocation Source Hour'
+#. Label of a Link field in DocType 'RD Cost Allocation Line'
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_allocation_source_hour/rd_allocation_source_hour.json
+#: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation_line/rd_cost_allocation_line.json
+msgid "项目"
+msgstr ""
+
+
+#: translatable_labels.py:16
+msgid "Rayher HR Payroll"
+msgstr ""
