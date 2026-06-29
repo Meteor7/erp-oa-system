@@ -24,6 +24,8 @@ UNEXTRACTED_LABELS = (
     # Report column labels / exception types / messages (report/*.py, injected translate).
     _lt("Exception Type"),
     _lt("Expense Item"),
+    _lt("Voucher No"),
+    _lt("Message"),
     _lt("Missing Timesheet"),
     _lt("Unclassified R&D Hours"),
     _lt("{0}-{1:02d} has no submitted timesheet hours."),

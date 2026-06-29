@@ -36,7 +36,7 @@ msgstr ""
 msgid "<span class=\"h4\"><b>近期业务</b></span>"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:36
+#: rayher_hr_payroll/translatable_labels.py:38
 msgid "A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost."
 msgstr "期间 {0} 已存在已提交的研发费用导入（{1}）；重复导入会导致研发费用重复计算。"
 
@@ -111,15 +111,15 @@ msgstr "已导入"
 msgid "Language"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:30
+#: rayher_hr_payroll/translatable_labels.py:32
 msgid "Logged {0} h on R&D projects but rd_personnel_type is '{1}'; excluded from R&D allocation."
 msgstr "在研发项目上填报了 {0} 小时，但 rd_personnel_type 为 '{1}'；已从研发分摊中排除。"
 
-#: rayher_hr_payroll/translatable_labels.py:27
+#: rayher_hr_payroll/translatable_labels.py:29
 msgid "Missing Timesheet"
 msgstr "缺少工时"
 
-#: rayher_hr_payroll/translatable_labels.py:35
+#: rayher_hr_payroll/translatable_labels.py:37
 msgid "Month must be between 1 and 12."
 msgstr "月份必须在 1 到 12 之间。"
 
@@ -137,15 +137,15 @@ msgstr "待我审批"
 msgid "Period"
 msgstr "期间"
 
-#: rayher_hr_payroll/translatable_labels.py:39
+#: rayher_hr_payroll/translatable_labels.py:41
 msgid "Project {0} is not enabled for R&D timesheet entry."
 msgstr "项目 {0} 未启用研发工时填报。"
 
-#: rayher_hr_payroll/translatable_labels.py:40
+#: rayher_hr_payroll/translatable_labels.py:42
 msgid "Project {0} needs capitalization start and end dates before R&D timesheet entry."
 msgstr "项目 {0} 需要先维护资本化开始和结束日期，才能填报研发工时。"
 
-#: rayher_hr_payroll/translatable_labels.py:38
+#: rayher_hr_payroll/translatable_labels.py:40
 msgid "R&D period {0} is locked; timesheet changes require a correction workflow."
 msgstr "研发期间 {0} 已锁定；工时修改必须走更正流程。"
 
@@ -239,7 +239,7 @@ msgstr "加载 Rayher 演示数据前，请先设置默认公司。"
 msgid "Standard Daily Hours"
 msgstr "标准日工时"
 
-#: rayher_hr_payroll/translatable_labels.py:37
+#: rayher_hr_payroll/translatable_labels.py:39
 msgid "Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy."
 msgstr "法定节假日加班不能转为调休，必须按制度支付。"
 
@@ -263,19 +263,19 @@ msgstr ""
 msgid "Total Submitted Timesheet Hours"
 msgstr "已提交工时合计"
 
-#: rayher_hr_payroll/translatable_labels.py:28
+#: rayher_hr_payroll/translatable_labels.py:30
 msgid "Unclassified R&D Hours"
 msgstr "未归类研发工时"
 
-#: rayher_hr_payroll/translatable_labels.py:32
+#: rayher_hr_payroll/translatable_labels.py:34
 msgid "Year and month filters are required."
 msgstr "必须填写年份和月份筛选条件。"
 
-#: rayher_hr_payroll/translatable_labels.py:33
+#: rayher_hr_payroll/translatable_labels.py:35
 msgid "Year and month filters must be valid numbers."
 msgstr "年份和月份筛选条件必须是有效数字。"
 
-#: rayher_hr_payroll/translatable_labels.py:34
+#: rayher_hr_payroll/translatable_labels.py:36
 msgid "Year and month must be valid numbers."
 msgstr "年份和月份必须是有效数字。"
 
@@ -356,7 +356,7 @@ msgstr "研发项目工时"
 msgid "unknown"
 msgstr "未知"
 
-#: rayher_hr_payroll/translatable_labels.py:29
+#: rayher_hr_payroll/translatable_labels.py:31
 msgid "{0}-{1:02d} has no submitted timesheet hours."
 msgstr "{0}-{1:02d} 没有已提交工时。"
 
@@ -994,3 +994,39 @@ msgstr ""
 msgid "项目"
 msgstr ""
 
+
+#: rayher_hr_payroll/translatable_labels.py:27
+msgid "Voucher No"
+msgstr "凭证编号"
+
+#: rayher_hr_payroll/translatable_labels.py:28
+msgid "Message"
+msgstr "信息"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:25
+msgid "Employee Exits"
+msgstr "员工离职"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:26
+msgid "Employees Working on a Holiday"
+msgstr "节假日上班员工"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:27
+msgid "Shift Attendance"
+msgstr "排班考勤"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:28
+msgid "Employee Hours Utilization Based On Timesheet"
+msgstr "基于工时单的员工工时利用率"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:29
+msgid "Project Profitability"
+msgstr "项目盈利能力"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:30
+msgid "Appraisal Overview"
+msgstr "绩效评估总览"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:31
+msgid "Income Tax Computation"
+msgstr "个人所得税计算"

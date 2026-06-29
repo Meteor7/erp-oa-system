@@ -49,34 +49,36 @@ class FakeFrappe:
 
 @pytest.mark.parametrize(
     ('raw', 'expected'),
-    [('zh', 'zh'), ('zh-CN', 'zh'), ('fr-FR', 'fr'), ('fr_FR', 'fr'), (' EN ', 'en')],
+    [('zh', 'zh'), ('zh-CN', 'zh'), (' EN ', 'en')],
 )
 def test_normalize_language_accepts_supported_language_and_regions(raw, expected):
     assert normalize_language(raw) == expected
 
 
-@pytest.mark.parametrize('raw', ['de', 'es-MX', '', None])
+@pytest.mark.parametrize('raw', ['de', 'es-MX', 'fr', 'fr-FR', '', None])
 def test_normalize_language_rejects_unsupported_language(raw):
     with pytest.raises(ValueError, match='Unsupported language|Language is required'):
         normalize_language(raw)
 
 
-def test_language_options_are_limited_to_chinese_english_and_french():
-    assert set(SUPPORTED_LANGUAGES) == {'zh', 'en', 'fr'}
-    assert [row['value'] for row in get_language_options()] == ['zh', 'en', 'fr']
+def test_language_options_are_limited_to_chinese_and_english():
+    # French is intentionally deferred (fr.po is incomplete for the Chinese-source
+    # strings), so it must not be advertised or accepted until fully translated.
+    assert set(SUPPORTED_LANGUAGES) == {'zh', 'en'}
+    assert [row['value'] for row in get_language_options()] == ['zh', 'en']
 
 
 def test_set_language_persists_current_user_language_and_clears_cache():
     fake = FakeFrappe()
 
-    result = _set_language('fr-FR', frappe_module=fake)
+    result = _set_language('zh-CN', frappe_module=fake)
 
-    assert result == {'language': 'fr', 'reload': True}
-    assert fake.local.lang == 'fr'
-    assert fake.db.set_values == [('User', 'user@example.com', 'language', 'fr')]
+    assert result == {'language': 'zh', 'reload': True}
+    assert fake.local.lang == 'zh'
+    assert fake.db.set_values == [('User', 'user@example.com', 'language', 'zh')]
     assert fake.cleared_users == ['user@example.com']
-    assert ('merged_translations', 'fr') in fake.cache.deleted
-    assert ('lang_user_translations', 'fr') in fake.cache.deleted
+    assert ('merged_translations', 'zh') in fake.cache.deleted
+    assert ('lang_user_translations', 'zh') in fake.cache.deleted
 
 
 def test_set_language_rejects_guest_user():
@@ -105,6 +107,8 @@ REQUIRED_TRANSLATION_STRINGS = {
     'RD Allocation Matrix',
     'RD Timesheet Exceptions',
     'Expense Item',
+    'Voucher No',
+    'Message',
     'Missing Timesheet',
     'Unclassified R&D Hours',
     # Validation messages raised via injected translate() in controls/*.py.
@@ -204,3 +208,39 @@ def test_core_string_corrections_csv_overrides_mistranslations():
     expected = {"Like": "包含", "Not Like": "不包含", "Clear": "清除", "Reset": "重置", "Done": "完成"}
     for source, translation in expected.items():
         assert rows.get(source) == translation
+
+
+def test_french_po_carries_restored_csv_translations():
+    """French is deferred from the UI, but the previously-shipped fr.csv strings must
+    remain in fr.po so any French-preference user does not regress to source text."""
+    fr = _load_po('fr')
+    for source in (
+        'Exception Type',
+        'Missing Timesheet',
+        'Rayher HR Payroll',
+        'R&D period {0} is locked; timesheet changes require a correction workflow.',
+    ):
+        assert fr.get(source), f'missing French for {source!r}'
+
+
+SUPPLEMENTAL_CORE_REPORT_LABELS = {
+    'Employee Exits',
+    'Employees Working on a Holiday',
+    'Shift Attendance',
+    'Employee Hours Utilization Based On Timesheet',
+    'Project Profitability',
+    'Appraisal Overview',
+    'Income Tax Computation',
+}
+
+
+def test_core_report_label_supplements_have_chinese():
+    """Upstream HRMS/Payroll report names surfaced in Desk workspace report lists
+    ship no Chinese in the base apps, so this app supplements them via PO. Desk
+    renders those report-card labels client-side, so the catalogue is the only
+    source that reaches the client (see core_report_label_supplements.py)."""
+    zh = _load_po('zh')
+    pot = set(_parse_po(_locale_dir() / 'main.pot'))
+    assert SUPPLEMENTAL_CORE_REPORT_LABELS <= pot
+    for source in SUPPLEMENTAL_CORE_REPORT_LABELS:
+        assert zh.get(source), f'missing Chinese for {source!r}'

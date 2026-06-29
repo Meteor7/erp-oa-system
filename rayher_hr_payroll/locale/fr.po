@@ -36,9 +36,9 @@ msgstr ""
 msgid "<span class=\"h4\"><b>近期业务</b></span>"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:36
+#: rayher_hr_payroll/translatable_labels.py:38
 msgid "A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost."
-msgstr ""
+msgstr "Une importation de dépenses R&D soumise existe déjà pour la période {0} ({1}) ; réimporter la même période compterait deux fois le coût R&D."
 
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
@@ -90,11 +90,11 @@ msgstr "Nom de l’employé"
 
 #: rayher_hr_payroll/translatable_labels.py:25
 msgid "Exception Type"
-msgstr ""
+msgstr "Type d’exception"
 
 #: rayher_hr_payroll/translatable_labels.py:26
 msgid "Expense Item"
-msgstr ""
+msgstr "Ligne de dépense"
 
 #. Name of a role
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
@@ -111,17 +111,17 @@ msgstr ""
 msgid "Language"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:30
+#: rayher_hr_payroll/translatable_labels.py:32
 msgid "Logged {0} h on R&D projects but rd_personnel_type is '{1}'; excluded from R&D allocation."
-msgstr ""
+msgstr "A saisi {0} h sur des projets R&D, mais rd_personnel_type vaut '{1}' ; exclu de la répartition R&D."
 
-#: rayher_hr_payroll/translatable_labels.py:27
+#: rayher_hr_payroll/translatable_labels.py:29
 msgid "Missing Timesheet"
-msgstr ""
+msgstr "Feuille de temps manquante"
 
-#: rayher_hr_payroll/translatable_labels.py:35
+#: rayher_hr_payroll/translatable_labels.py:37
 msgid "Month must be between 1 and 12."
-msgstr ""
+msgstr "Le mois doit être compris entre 1 et 12."
 
 #: rayher_hr_payroll/demo.py:198
 msgid "Pass force=True to create Rayher demo data on this site."
@@ -137,17 +137,17 @@ msgstr ""
 msgid "Period"
 msgstr "Période"
 
-#: rayher_hr_payroll/translatable_labels.py:39
+#: rayher_hr_payroll/translatable_labels.py:41
 msgid "Project {0} is not enabled for R&D timesheet entry."
-msgstr ""
+msgstr "Le projet {0} n’est pas activé pour la saisie des temps R&D."
+
+#: rayher_hr_payroll/translatable_labels.py:42
+msgid "Project {0} needs capitalization start and end dates before R&D timesheet entry."
+msgstr "Le projet {0} doit avoir des dates de début et de fin de capitalisation avant la saisie des temps R&D."
 
 #: rayher_hr_payroll/translatable_labels.py:40
-msgid "Project {0} needs capitalization start and end dates before R&D timesheet entry."
-msgstr ""
-
-#: rayher_hr_payroll/translatable_labels.py:38
 msgid "R&D period {0} is locked; timesheet changes require a correction workflow."
-msgstr ""
+msgstr "La période R&D {0} est verrouillée ; toute modification des temps doit suivre un flux de correction."
 
 #: rayher_hr_payroll/translatable_labels.py:22
 msgid "RD Allocation Matrix"
@@ -209,7 +209,7 @@ msgstr ""
 
 #: rayher_hr_payroll/translatable_labels.py:20
 msgid "Rayher HR Payroll"
-msgstr ""
+msgstr "Rayher RH et temps R&D"
 
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
@@ -239,9 +239,9 @@ msgstr "Définissez une société par défaut avant de charger les données de d
 msgid "Standard Daily Hours"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:37
+#: rayher_hr_payroll/translatable_labels.py:39
 msgid "Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy."
-msgstr ""
+msgstr "Les heures supplémentaires d’un jour férié légal ne peuvent pas être converties en repos compensateur ; elles doivent être payées selon la politique."
 
 #. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
@@ -263,21 +263,21 @@ msgstr ""
 msgid "Total Submitted Timesheet Hours"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:28
+#: rayher_hr_payroll/translatable_labels.py:30
 msgid "Unclassified R&D Hours"
-msgstr ""
-
-#: rayher_hr_payroll/translatable_labels.py:32
-msgid "Year and month filters are required."
-msgstr ""
-
-#: rayher_hr_payroll/translatable_labels.py:33
-msgid "Year and month filters must be valid numbers."
-msgstr ""
+msgstr "Heures R&D non classées"
 
 #: rayher_hr_payroll/translatable_labels.py:34
+msgid "Year and month filters are required."
+msgstr "Les filtres année et mois sont obligatoires."
+
+#: rayher_hr_payroll/translatable_labels.py:35
+msgid "Year and month filters must be valid numbers."
+msgstr "Les filtres année et mois doivent être des nombres valides."
+
+#: rayher_hr_payroll/translatable_labels.py:36
 msgid "Year and month must be valid numbers."
-msgstr ""
+msgstr "L'année et le mois doivent être des nombres valides."
 
 #. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
@@ -356,9 +356,9 @@ msgstr ""
 msgid "unknown"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:29
+#: rayher_hr_payroll/translatable_labels.py:31
 msgid "{0}-{1:02d} has no submitted timesheet hours."
-msgstr ""
+msgstr "{0}-{1:02d} ne contient aucune heure de feuille de temps soumise."
 
 #: rayher_hr_payroll/employee_controls.py:86
 msgid "{0}不能为负"
@@ -994,3 +994,39 @@ msgstr ""
 msgid "项目"
 msgstr ""
 
+
+#: rayher_hr_payroll/translatable_labels.py:27
+msgid "Voucher No"
+msgstr "N° de pièce"
+
+#: rayher_hr_payroll/translatable_labels.py:28
+msgid "Message"
+msgstr "Message"
+
+#: rayher_hr_payroll/core_report_label_supplements.py:25
+msgid "Employee Exits"
+msgstr ""
+
+#: rayher_hr_payroll/core_report_label_supplements.py:26
+msgid "Employees Working on a Holiday"
+msgstr ""
+
+#: rayher_hr_payroll/core_report_label_supplements.py:27
+msgid "Shift Attendance"
+msgstr ""
+
+#: rayher_hr_payroll/core_report_label_supplements.py:28
+msgid "Employee Hours Utilization Based On Timesheet"
+msgstr ""
+
+#: rayher_hr_payroll/core_report_label_supplements.py:29
+msgid "Project Profitability"
+msgstr ""
+
+#: rayher_hr_payroll/core_report_label_supplements.py:30
+msgid "Appraisal Overview"
+msgstr ""
+
+#: rayher_hr_payroll/core_report_label_supplements.py:31
+msgid "Income Tax Computation"
+msgstr ""
