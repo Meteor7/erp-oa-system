@@ -132,3 +132,37 @@ def allocate_expenses(
         project_amounts=dict(project_amounts),
         stage_totals=stage_totals,
     )
+
+
+def combine_results(a, b):
+    project_amounts = dict(a.project_amounts)
+    for proj, amt in b.project_amounts.items():
+        project_amounts[proj] = _money(project_amounts.get(proj, ZERO) + amt)
+    stage_totals = dict(a.stage_totals)
+    for stage, amt in b.stage_totals.items():
+        stage_totals[stage] = _money(stage_totals.get(stage, ZERO) + amt)
+    return AllocationResult(
+        lines=list(a.lines) + list(b.lines),
+        project_amounts=project_amounts,
+        stage_totals=stage_totals,
+    )
+
+
+def allocate_labor(*, salaries, employee_hours):
+    """Allocate each employee's salary across THEIR own project hours (reusing
+    allocate_expenses), then sum. `salaries` are ExpenseItem(name='labor:<emp>');
+    `employee_hours` maps that same name -> list[ProjectHour]."""
+    result = AllocationResult(
+        lines=[], project_amounts={},
+        stage_totals={"capitalized": ZERO, "expensed": ZERO, "unknown": ZERO},
+    )
+    for item in salaries:
+        hours = employee_hours.get(item.name)
+        # Skip an employee whose net R&D hours are 0 (e.g. a correction reversed a
+        # prior log): their salary is simply not capitalizable this month. Without
+        # this guard allocate_expenses -> _sum_hours would raise and abort the whole
+        # allocation for one net-zero researcher.
+        if not hours or sum((h.hours for h in hours), ZERO) <= ZERO:
+            continue
+        result = combine_results(result, allocate_expenses(expenses=[item], project_hours=hours))
+    return result

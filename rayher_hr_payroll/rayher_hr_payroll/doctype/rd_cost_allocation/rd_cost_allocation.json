@@ -98,6 +98,12 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "labor_skipped",
+   "fieldtype": "Small Text",
+   "label": "未纳入人工(工时不完整)",
+   "read_only": 1
+  },
+  {
    "fieldname": "lines",
    "label": "分摊明细",
    "fieldtype": "Table",
@@ -150,21 +156,6 @@
    "report": 1,
    "export": 1,
    "print": 1,
-   "email": 0,
-   "share": 0
-  },
-  {
-   "role": "Projects Manager",
-   "read": 1,
-   "write": 0,
-   "create": 0,
-   "delete": 0,
-   "submit": 0,
-   "cancel": 0,
-   "amend": 0,
-   "report": 1,
-   "export": 0,
-   "print": 0,
    "email": 0,
    "share": 0
   }

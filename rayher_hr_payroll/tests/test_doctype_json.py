@@ -129,11 +129,12 @@ def test_submit_perm_only_on_submittable_doctypes():
             assert not p.get("submit") and not p.get("cancel") and not p.get("amend"), (folder, p["role"])
 
 
-def test_projects_manager_is_view_only_on_allocation():
-    pm = next(p for p in load_doctype("rd_cost_allocation")["permissions"] if p["role"] == "Projects Manager")
-    assert pm.get("read") and pm.get("report")
-    for blocked in ("write", "create", "submit", "cancel", "delete", "export", "print", "email", "share"):
-        assert not pm.get(blocked), blocked
+def test_projects_manager_has_no_access_to_allocation():
+    # The allocation now embeds per-employee salary-derived labor rows, so it must
+    # not be visible to Projects Manager (salary data is finance/HR only).
+    roles = {p["role"] for p in load_doctype("rd_cost_allocation")["permissions"]}
+    assert "Projects Manager" not in roles
+    assert "Projects Manager" not in {r["role"] for r in load_report("rd_allocation_matrix").get("roles", [])}
 
 
 def test_hr_user_has_no_access_to_rd_cost_allocation():
@@ -170,7 +171,7 @@ def test_exact_permission_matrix_on_all_changed_doctypes():
               "x": "cancel", "a": "amend", "R": "report", "E": "export", "P": "print",
               "M": "email", "S": "share"}
     flags = {
-        "rd_cost_allocation": {"System Manager": "rwcdsxaREPMS", "Accounts User": "rwcsREP", "Projects Manager": "rR"},
+        "rd_cost_allocation": {"System Manager": "rwcdsxaREPMS", "Accounts User": "rwcsREP"},
         "rd_expense_import": {"System Manager": "rwcdsxaREPMS", "Accounts User": "rwcsREP"},
         "rd_period_lock": {"System Manager": "rwcdsxaREP", "Accounts User": "rwcsR"},
         "accommodation_deduction": {"System Manager": "rwcdREPMS", "Accounts User": "rwcR", "HR User": "rwcR"},
@@ -181,3 +182,9 @@ def test_exact_permission_matrix_on_all_changed_doctypes():
         actual = {p["role"]: {name for f, name in rights.items() if p.get(name)} for p in doc["permissions"]}
         expected = {role: {rights[f] for f in fl} for role, fl in roles.items()}
         assert actual == expected, (folder, actual, expected)
+
+
+def test_rd_cost_allocation_persists_skipped_labor():
+    fields = {field["fieldname"]: field for field in load_doctype("rd_cost_allocation")["fields"]}
+    assert "labor_skipped" in fields  # under-counted (incomplete-hours) employees recorded on the doc
+    assert fields["labor_skipped"]["read_only"] == 1

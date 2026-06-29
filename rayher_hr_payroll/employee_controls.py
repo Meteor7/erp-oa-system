@@ -8,6 +8,8 @@ def _negative_mock_fields(doc):
 
 
 def _archive_problems(doc):
+    # Salary is no longer an archive prerequisite: real payroll (Salary Slip) is the
+    # source of truth (P4), so we do NOT require rd_mock_base>0 to archive.
     """Pure: completeness problems for an 已归档 employee. Empty list when the
     employee is not archived or all required info is present."""
     if (doc.get("archive_status") or "") != "已归档":
@@ -17,8 +19,6 @@ def _archive_problems(doc):
         problems.append("身份证号需≥15位")
     if not doc.get("date_of_joining"):
         problems.append("入职日期必填")
-    if not (doc.get("rd_mock_base") or 0) > 0:
-        problems.append("应发工资需>0")
     if not (doc.get("department") or "").strip():
         problems.append("部门必填")
     return problems

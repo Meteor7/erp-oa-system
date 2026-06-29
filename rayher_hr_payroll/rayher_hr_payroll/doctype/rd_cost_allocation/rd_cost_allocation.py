@@ -8,6 +8,8 @@ from rayher_hr_payroll.rd_cost.frappe_adapter import (
     get_project_hour_rows,
     get_source_expense_rows,
     project_hours_from_rows,
+    total_hours_by_employee,
+    personnel_types_by_employee,
 )
 
 
@@ -128,10 +130,32 @@ class RDCostAllocation(Document):
             project_hours, expenses, year=self.year, month=self.month
         )
 
-        populate_allocation_document(
+        # R&D labour cost: each researcher's submitted Salary Slip gross for the
+        # period, allocated across THEIR own project hours and merged with expenses.
+        import frappe
+        from rayher_hr_payroll.payroll_bridge import period_salaries
+
+        period = "%04d-%02d" % (int(self.year), int(self.month))
+        salaries = period_salaries(period)
+        total_hours = total_hours_by_employee(year=self.year, month=self.month)
+        personnel_types = personnel_types_by_employee()
+
+        skipped = populate_allocation_document(
             self,
             expenses=expenses,
             source_hour_rows=source_hour_rows,
             source_expense_rows=source_expense_rows,
             project_hours=project_hours,
+            salaries=salaries,
+            total_hours=total_hours,
+            personnel_types=personnel_types,
         )
+        # Persist an explicit unresolved-skip state so a submitted allocation records the
+        # under-counted employees (auditable), not just a transient warning.
+        self.labor_skipped = ", ".join(skipped)
+        if skipped:
+            frappe.msgprint(
+                "以下员工本期工时不完整(非全时研发),未纳入研发人工分摊;"
+                "请在工时单补录其非研发工时(项目可留空)以提供总工时分母后重新分摊:"
+                + ", ".join(skipped)
+            )
