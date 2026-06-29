@@ -1,0 +1,6 @@
+# Core string corrections: fix frappe/erpnext v15 mistranslations on shared Desk controls (filter operators / buttons). App-specific strings live in locale/zh.po. Borrowed from gitee.com/yuzelin/erpnext_oob (MIT).
+Like,包含
+Not Like,不包含
+Clear,清除
+Reset,重置
+Done,完成

@@ -180,3 +180,14 @@ def test_set_language_is_whitelisted_for_post_http_calls():
 
     assert set_language in frappe.whitelisted
     assert frappe.allowed_http_methods_for_whitelisted_func[set_language] == ['POST']
+
+def test_core_string_corrections_csv_overrides_mistranslations():
+    """translations/zh.csv ships only core-string corrections; app strings live in PO."""
+    import csv
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "translations" / "zh.csv"
+    rows = {r[0]: r[1] for r in csv.reader(path.open(encoding="utf-8")) if len(r) >= 2}
+    expected = {"Like": "包含", "Not Like": "不包含", "Clear": "清除", "Reset": "重置", "Done": "完成"}
+    for source, translation in expected.items():
+        assert rows.get(source) == translation
