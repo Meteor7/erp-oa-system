@@ -223,6 +223,10 @@ def test_french_po_carries_restored_csv_translations():
         'Missing Timesheet',
         'Rayher HR Payroll',
         'R&D period {0} is locked; timesheet changes require a correction workflow.',
+        # report filter labels were also French in the old fr.csv
+        'Allocation',
+        'Year',
+        'Month',
     ):
         assert fr.get(source), f'missing French for {source!r}'
 

@@ -1035,12 +1035,12 @@ msgstr ""
 
 #: rayher_hr_payroll/translatable_labels.py:46
 msgid "Allocation"
-msgstr ""
+msgstr "Répartition"
 
 #: rayher_hr_payroll/translatable_labels.py:47
 msgid "Year"
-msgstr ""
+msgstr "Année"
 
 #: rayher_hr_payroll/translatable_labels.py:48
 msgid "Month"
-msgstr ""
+msgstr "Mois"
