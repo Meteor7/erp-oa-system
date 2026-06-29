@@ -95,10 +95,11 @@ Bench verification after syncing the worktree app into /home/rayher/frappe-bench
 
     cd /home/rayher/frappe-bench
     /home/rayher/.local/bin/bench --site rayher.localhost migrate
+    /home/rayher/.local/bin/bench compile-po-to-mo --app rayher_hr_payroll
     /home/rayher/.local/bin/bench --site rayher.localhost clear-cache
     /home/rayher/.local/bin/bench --site rayher.localhost execute rayher_hr_payroll.i18n.get_language_options
 
-Language switching was verified by executing rayher_hr_payroll.i18n.set_language with fr and then zh. Both calls returned reload true.
+Frappe v15 loads compiled MO catalogues (and CSV), not locale/*.po directly, and migrate/clear-cache do not compile translations -- so after any PO change the compile-po-to-mo step above (also run by bench build) is required before the new Chinese strings appear; without it the runtime serves stale/empty catalogues. Language switching was verified by executing rayher_hr_payroll.i18n.set_language with zh and en; both returned reload true. French (fr) is intentionally deferred: SUPPORTED_LANGUAGES (and therefore normalize_language / set_language) accept only zh and en until locale/fr.po is complete, so set_language('fr') now raises "Unsupported language: fr". The fr.po catalogue is retained so any existing French-preference user does not regress to source text.
 
 The 2026-01 demo allocation was rerun after i18n changes. Verified allocation f35i4qs3n8:
 
