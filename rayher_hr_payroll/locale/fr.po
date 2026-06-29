@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Rayher HR Payroll VERSION\n"
 "Report-Msgid-Bugs-To: admin@example.com\n"
-"POT-Creation-Date: 2026-06-29 19:03+0806\n"
+"POT-Creation-Date: 2026-06-29 19:35+0806\n"
 "PO-Revision-Date: 2026-06-29 16:57+0806\n"
 "Last-Translator: admin@example.com\n"
 "Language-Team: admin@example.com\n"
@@ -34,6 +34,10 @@ msgstr ""
 #. Header text in the 研发成本 Workspace
 #: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
 msgid "<span class=\"h4\"><b>近期业务</b></span>"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:36
+msgid "A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost."
 msgstr ""
 
 #. Name of a DocType
@@ -107,7 +111,7 @@ msgstr ""
 msgid "Language"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:33
+#: rayher_hr_payroll/translatable_labels.py:30
 msgid "Logged {0} h on R&D projects but rd_personnel_type is '{1}'; excluded from R&D allocation."
 msgstr ""
 
@@ -115,7 +119,7 @@ msgstr ""
 msgid "Missing Timesheet"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:31
+#: rayher_hr_payroll/translatable_labels.py:35
 msgid "Month must be between 1 and 12."
 msgstr ""
 
@@ -133,7 +137,19 @@ msgstr ""
 msgid "Period"
 msgstr "Période"
 
-#: rayher_hr_payroll/translatable_labels.py:21
+#: rayher_hr_payroll/translatable_labels.py:39
+msgid "Project {0} is not enabled for R&D timesheet entry."
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:40
+msgid "Project {0} needs capitalization start and end dates before R&D timesheet entry."
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:38
+msgid "R&D period {0} is locked; timesheet changes require a correction workflow."
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:22
 msgid "RD Allocation Matrix"
 msgstr ""
 
@@ -182,7 +198,7 @@ msgstr ""
 msgid "RD Ratio"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:22
+#: rayher_hr_payroll/translatable_labels.py:23
 msgid "RD Timesheet Exceptions"
 msgstr ""
 
@@ -191,7 +207,7 @@ msgstr ""
 msgid "RD Work Ratio Snapshot"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:19
+#: rayher_hr_payroll/translatable_labels.py:20
 msgid "Rayher HR Payroll"
 msgstr ""
 
@@ -223,6 +239,10 @@ msgstr "Définissez une société par défaut avant de charger les données de d
 msgid "Standard Daily Hours"
 msgstr ""
 
+#: rayher_hr_payroll/translatable_labels.py:37
+msgid "Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy."
+msgstr ""
+
 #. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
 msgid "Submitted"
@@ -247,12 +267,16 @@ msgstr ""
 msgid "Unclassified R&D Hours"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:29
+#: rayher_hr_payroll/translatable_labels.py:32
 msgid "Year and month filters are required."
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:30
+#: rayher_hr_payroll/translatable_labels.py:33
 msgid "Year and month filters must be valid numbers."
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:34
+msgid "Year and month must be valid numbers."
 msgstr ""
 
 #. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
@@ -332,7 +356,7 @@ msgstr ""
 msgid "unknown"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:32
+#: rayher_hr_payroll/translatable_labels.py:29
 msgid "{0}-{1:02d} has no submitted timesheet hours."
 msgstr ""
 

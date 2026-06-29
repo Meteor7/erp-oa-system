@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Rayher HR Payroll VERSION\n"
 "Report-Msgid-Bugs-To: admin@example.com\n"
-"POT-Creation-Date: 2026-06-29 19:03+0806\n"
+"POT-Creation-Date: 2026-06-29 19:35+0806\n"
 "PO-Revision-Date: 2026-06-29 16:57+0806\n"
 "Last-Translator: admin@example.com\n"
 "Language-Team: admin@example.com\n"
@@ -35,6 +35,10 @@ msgstr ""
 #: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
 msgid "<span class=\"h4\"><b>近期业务</b></span>"
 msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:36
+msgid "A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost."
+msgstr "期间 {0} 已存在已提交的研发费用导入（{1}）；重复导入会导致研发费用重复计算。"
 
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
@@ -107,7 +111,7 @@ msgstr "已导入"
 msgid "Language"
 msgstr ""
 
-#: rayher_hr_payroll/translatable_labels.py:33
+#: rayher_hr_payroll/translatable_labels.py:30
 msgid "Logged {0} h on R&D projects but rd_personnel_type is '{1}'; excluded from R&D allocation."
 msgstr "在研发项目上填报了 {0} 小时，但 rd_personnel_type 为 '{1}'；已从研发分摊中排除。"
 
@@ -115,7 +119,7 @@ msgstr "在研发项目上填报了 {0} 小时，但 rd_personnel_type 为 '{1}'
 msgid "Missing Timesheet"
 msgstr "缺少工时"
 
-#: rayher_hr_payroll/translatable_labels.py:31
+#: rayher_hr_payroll/translatable_labels.py:35
 msgid "Month must be between 1 and 12."
 msgstr "月份必须在 1 到 12 之间。"
 
@@ -133,7 +137,19 @@ msgstr "待我审批"
 msgid "Period"
 msgstr "期间"
 
-#: rayher_hr_payroll/translatable_labels.py:21
+#: rayher_hr_payroll/translatable_labels.py:39
+msgid "Project {0} is not enabled for R&D timesheet entry."
+msgstr "项目 {0} 未启用研发工时填报。"
+
+#: rayher_hr_payroll/translatable_labels.py:40
+msgid "Project {0} needs capitalization start and end dates before R&D timesheet entry."
+msgstr "项目 {0} 需要先维护资本化开始和结束日期，才能填报研发工时。"
+
+#: rayher_hr_payroll/translatable_labels.py:38
+msgid "R&D period {0} is locked; timesheet changes require a correction workflow."
+msgstr "研发期间 {0} 已锁定；工时修改必须走更正流程。"
+
+#: rayher_hr_payroll/translatable_labels.py:22
 msgid "RD Allocation Matrix"
 msgstr "研发费用分摊矩阵"
 
@@ -182,7 +198,7 @@ msgstr "研发项目工时"
 msgid "RD Ratio"
 msgstr "研发比例"
 
-#: rayher_hr_payroll/translatable_labels.py:22
+#: rayher_hr_payroll/translatable_labels.py:23
 msgid "RD Timesheet Exceptions"
 msgstr "研发工时例外"
 
@@ -191,7 +207,7 @@ msgstr "研发工时例外"
 msgid "RD Work Ratio Snapshot"
 msgstr "研发工时比例快照"
 
-#: rayher_hr_payroll/translatable_labels.py:19
+#: rayher_hr_payroll/translatable_labels.py:20
 msgid "Rayher HR Payroll"
 msgstr "Rayher 人事研发工时系统"
 
@@ -223,6 +239,10 @@ msgstr "加载 Rayher 演示数据前，请先设置默认公司。"
 msgid "Standard Daily Hours"
 msgstr "标准日工时"
 
+#: rayher_hr_payroll/translatable_labels.py:37
+msgid "Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy."
+msgstr "法定节假日加班不能转为调休，必须按制度支付。"
+
 #. Option for the '状态' (Select) field in DocType 'RD Cost Allocation'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
 msgid "Submitted"
@@ -247,13 +267,17 @@ msgstr "已提交工时合计"
 msgid "Unclassified R&D Hours"
 msgstr "未归类研发工时"
 
-#: rayher_hr_payroll/translatable_labels.py:29
+#: rayher_hr_payroll/translatable_labels.py:32
 msgid "Year and month filters are required."
 msgstr "必须填写年份和月份筛选条件。"
 
-#: rayher_hr_payroll/translatable_labels.py:30
+#: rayher_hr_payroll/translatable_labels.py:33
 msgid "Year and month filters must be valid numbers."
 msgstr "年份和月份筛选条件必须是有效数字。"
+
+#: rayher_hr_payroll/translatable_labels.py:34
+msgid "Year and month must be valid numbers."
+msgstr "年份和月份必须是有效数字。"
 
 #. Option for the '分摊范围' (Select) field in DocType 'RD Cost Allocation'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.json
@@ -332,7 +356,7 @@ msgstr "研发项目工时"
 msgid "unknown"
 msgstr "未知"
 
-#: rayher_hr_payroll/translatable_labels.py:32
+#: rayher_hr_payroll/translatable_labels.py:29
 msgid "{0}-{1:02d} has no submitted timesheet hours."
 msgstr "{0}-{1:02d} 没有已提交工时。"
 

@@ -101,6 +101,18 @@ REQUIRED_TRANSLATION_STRINGS = {
     'Recognized RD Type',
     'Standard Daily Hours',
     'Set a default company before loading Rayher demo data.',
+    # Report names + labels (Babel-unextractable; registered via translatable_labels._lt).
+    'RD Allocation Matrix',
+    'RD Timesheet Exceptions',
+    'Expense Item',
+    'Missing Timesheet',
+    'Unclassified R&D Hours',
+    # Validation messages raised via injected translate() in controls/*.py.
+    'A submitted RD Expense Import already exists for period {0} ({1}); importing the same period twice would double-count R&D cost.',
+    'R&D period {0} is locked; timesheet changes require a correction workflow.',
+    'Project {0} is not enabled for R&D timesheet entry.',
+    'Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy.',
+    'Year and month must be valid numbers.',
 }
 
 

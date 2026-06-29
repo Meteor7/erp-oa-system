@@ -1,11 +1,11 @@
 frappe.provide('rayher.i18n');
 
-// Languages offered by the switcher. Keep in sync with
-// rayher_hr_payroll/i18n.py: SUPPORTED_LANGUAGES.
+// Languages offered by the switcher. Only fully-translated locales are listed;
+// French (fr) stays out until locale/fr.po is complete (backend i18n.py still
+// accepts it). Keep in sync with rayher_hr_payroll/i18n.py: SUPPORTED_LANGUAGES.
 rayher.i18n.LANGUAGES = [
 	{ value: 'en', label: 'English' },
 	{ value: 'zh', label: '中文' },
-	{ value: 'fr', label: 'Français' },
 ];
 
 rayher.i18n.set_language = function (language) {
