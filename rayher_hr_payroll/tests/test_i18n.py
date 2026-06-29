@@ -252,3 +252,19 @@ def test_core_report_label_supplements_have_chinese():
     assert SUPPLEMENTAL_CORE_REPORT_LABELS <= pot
     for source in SUPPLEMENTAL_CORE_REPORT_LABELS:
         assert zh.get(source), f'missing Chinese for {source!r}'
+
+
+def test_switcher_language_list_matches_backend_supported_languages():
+    """The navbar switcher hardcodes its LANGUAGES list in language_switcher.js and
+    must stay in sync with i18n.py:SUPPORTED_LANGUAGES (the set set_language accepts).
+    Pin them together so the two lists cannot drift."""
+    import re
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / 'public' / 'js' / 'language_switcher.js').read_text(
+        encoding='utf-8'
+    )
+    block = re.search(r'rayher\.i18n\.LANGUAGES\s*=\s*\[(.*?)\];', js, re.DOTALL)
+    assert block, 'could not find rayher.i18n.LANGUAGES in language_switcher.js'
+    js_values = set(re.findall(r"value:\s*'([a-z]{2})'", block.group(1)))
+    assert js_values == set(SUPPORTED_LANGUAGES), (js_values, set(SUPPORTED_LANGUAGES))
