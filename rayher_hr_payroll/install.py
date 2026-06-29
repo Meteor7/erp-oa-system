@@ -99,3 +99,22 @@ def after_install():
     ensure_workflow_masters()
     _ensure_spa_perms()
     ensure_notifications()
+    ensure_hidden_workspaces()
+
+
+# Stock ERPNext workspaces irrelevant to this HR/OA + R&D-cost deployment (no role uses
+# commerce/manufacturing/CRM/integrations). Hidden via is_hidden=1, NOT deleted --
+# reversible and non-destructive. Re-applied each migrate so an ERPNext re-sync cannot
+# bring the clutter back.
+HIDE_WORKSPACES = [
+    "Buying", "Selling", "Stock", "Assets", "Manufacturing", "Quality", "Support",
+    "Website", "CRM", "Integrations", "ERPNext Integrations", "Welcome Workspace", "Build",
+]
+
+
+def ensure_hidden_workspaces():
+    import frappe
+
+    for name in HIDE_WORKSPACES:
+        if frappe.db.exists("Workspace", name) and not frappe.db.get_value("Workspace", name, "is_hidden"):
+            frappe.db.set_value("Workspace", name, "is_hidden", 1)
