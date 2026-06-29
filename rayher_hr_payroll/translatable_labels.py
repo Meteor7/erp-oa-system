@@ -40,4 +40,10 @@ UNEXTRACTED_LABELS = (
     _lt("R&D period {0} is locked; timesheet changes require a correction workflow."),
     _lt("Project {0} is not enabled for R&D timesheet entry."),
     _lt("Project {0} needs capitalization start and end dates before R&D timesheet entry."),
+    # Script Report *filter* labels (report JSON; Babel does not extract report-JSON
+    # filter labels). Values match the base-app catalogue, so registering them keeps
+    # our catalogue self-sufficient without overriding these generic words elsewhere.
+    _lt("Allocation"),
+    _lt("Year"),
+    _lt("Month"),
 )

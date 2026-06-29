@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Rayher HR Payroll VERSION\n"
 "Report-Msgid-Bugs-To: admin@example.com\n"
-"POT-Creation-Date: 2026-06-29 19:35+0806\n"
-"PO-Revision-Date: 2026-06-29 16:57+0806\n"
+"POT-Creation-Date: 2026-06-29 19:35+0800\n"
+"PO-Revision-Date: 2026-06-29 16:57+0800\n"
 "Last-Translator: admin@example.com\n"
 "Language-Team: admin@example.com\n"
 "MIME-Version: 1.0\n"
@@ -1031,4 +1031,16 @@ msgstr ""
 
 #: rayher_hr_payroll/core_report_label_supplements.py:31
 msgid "Income Tax Computation"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:46
+msgid "Allocation"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:47
+msgid "Year"
+msgstr ""
+
+#: rayher_hr_payroll/translatable_labels.py:48
+msgid "Month"
 msgstr ""

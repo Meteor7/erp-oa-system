@@ -118,6 +118,10 @@ REQUIRED_TRANSLATION_STRINGS = {
     'Project {0} needs capitalization start and end dates before R&D timesheet entry.',
     'Statutory holiday overtime cannot be converted into compensatory leave; it must be paid according to policy.',
     'Year and month must be valid numbers.',
+    # Script Report filter labels (report JSON; values match base-app catalogue).
+    'Allocation',
+    'Year',
+    'Month',
 }
 
 
