@@ -1,20 +1,52 @@
 // Role-aware page access for the SPA nav + route gating.
-// Mirrors the backend guards: expense/allocation are finance-only; the rest
-// require an R&D management role. Employees (no management role) see nothing.
+// Expense/allocation stay finance-only; HR pages stay HR-only.
+// Employees and department managers can use the R&D timesheet entry page.
 const FINANCE = ["System Manager", "Accounts User"];
 const HR = ["System Manager", "HR User", "HR Manager"];
 const MANAGE = ["System Manager", "Accounts User", "HR User", "HR Manager"];
-// HR manages people/hours; finance does expense import + allocation. The HR pages
-// read Employee (report/record perms) which finance lacks, so they are HR-scoped.
+const TIME_ENTRY = ["System Manager", "Accounts User", "HR User", "HR Manager", "Department Manager", "Employee"];
+const TIME_VIEW = [...TIME_ENTRY, "Accounts User"];
+const ROUTE_ORDER = ["/dashboard", "/personnel", "/accommodation", "/projects", "/entry", "/timesheet", "/expense", "/allocation"];
+
 const PAGE_ROLES = {
-  "/expense": FINANCE, "/allocation": FINANCE,
-  "/personnel": HR, "/accommodation": HR, "/ledger": HR, "/entry": HR, "/timesheet": HR,
+  "/expense": FINANCE,
+  "/allocation": FINANCE,
+  "/personnel": HR,
+  "/accommodation": HR,
+  "/projects": MANAGE,
+  "/ledger": [],
+  "/entry": TIME_VIEW,
+  "/timesheet": TIME_VIEW,
 };
 
 function myRoles() {
   return (typeof window !== "undefined" && Array.isArray(window.roles)) ? window.roles : [];
 }
+
 export function canSee(path) {
   const need = PAGE_ROLES[path] || MANAGE;
-  return myRoles().some((r) => need.includes(r));
+  return myRoles().some((role) => need.includes(role));
+}
+
+export function canEditTimesheetEntry() {
+  return myRoles().some((role) => TIME_ENTRY.includes(role));
+}
+
+export function firstVisiblePath() {
+  return ROUTE_ORDER.find((path) => canSee(path)) || "/dashboard";
+}
+
+
+export function roleLabel() {
+  const roles = myRoles();
+  if (roles.includes("System Manager")) return "\u603b\u63a7";
+  if (roles.includes("HR Manager") || roles.includes("HR User")) return "HR";
+  if (roles.includes("Accounts User")) return "\u8d22\u52a1";
+  if (roles.includes("Department Manager")) return "\u90e8\u95e8\u4e3b\u7ba1";
+  if (roles.includes("Employee")) return "\u5458\u5de5";
+  return "\u666e\u901a\u8d26\u53f7";
+}
+export function currentUser() {
+  if (typeof window === "undefined") return "";
+  return window.full_name || window.user || "";
 }

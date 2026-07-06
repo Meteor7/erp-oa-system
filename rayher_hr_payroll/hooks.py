@@ -8,6 +8,16 @@ app_license = "MIT"
 # Desk: load the language switcher (navbar dropdown -> i18n.set_language).
 app_include_js = "/assets/rayher_hr_payroll/js/language_switcher.js"
 
+
+add_to_apps_screen = [
+    {
+        "name": "rayher_hr_payroll",
+        "logo": "/assets/rayher_hr_payroll/images/rayher-logo.svg",
+        "title": "Rayher",
+        "route": "/rayher",
+    }
+]
+
 required_apps = ["erpnext", "hrms"]
 before_install = "rayher_hr_payroll.install.ensure_link_targets"
 before_migrate = "rayher_hr_payroll.install.ensure_link_targets"

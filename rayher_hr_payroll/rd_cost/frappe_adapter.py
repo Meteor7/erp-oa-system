@@ -78,6 +78,11 @@ def source_row_key_for_row(row: Any) -> str:
 
 
 def stage_for_period(project: Mapping[str, Any], *, year: int, month: int) -> ProjectStage:
+    rd_stage = str(project.get("rd_stage") or "").strip()
+    if rd_stage == "资本化":
+        return "capitalized"
+    if rd_stage == "费用化":
+        return "expensed"
     start = _parse_date(project.get("capitalization_start_date"))
     end = _parse_date(project.get("capitalization_end_date"))
     if not start or not end:
@@ -236,7 +241,7 @@ def project_hours_from_rows(
             return frappe.db.get_value(
                 "Project",
                 project,
-                ["capitalization_start_date", "capitalization_end_date"],
+                ["rd_stage", "capitalization_start_date", "capitalization_end_date"],
                 as_dict=True,
             ) or {}
 
@@ -303,7 +308,7 @@ def ensure_direct_project_stages(
                 frappe.db.get_value(
                     "Project",
                     dp,
-                    ["capitalization_start_date", "capitalization_end_date"],
+                    ["rd_stage", "capitalization_start_date", "capitalization_end_date"],
                     as_dict=True,
                 )
                 or {}

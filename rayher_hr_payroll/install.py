@@ -3,6 +3,10 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from rayher_hr_payroll.custom_fields import CUSTOM_FIELDS
 from rayher_hr_payroll.access_control import ensure_access_control
 from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workflow_masters
+from rayher_hr_payroll.api.timesheet_entry import ensure_rd_activity_types
+from rayher_hr_payroll.api.project_entry import ensure_default_projects
+
+RAYHER_DEFAULT_APP = "rayher_hr_payroll"
 
 # Permissions the R&D cost SPA needs so its reports/endpoints work for the
 # management roles (finance = Accounts User, HR = HR User). Shipped here so a
@@ -93,14 +97,85 @@ def ensure_link_targets():
     ensure_workflow_masters()
 
 
+def ensure_default_rayher_app():
+    import frappe
+
+    frappe.db.set_single_value("System Settings", "default_app", RAYHER_DEFAULT_APP)
+
+
 def after_install():
+    ensure_default_rayher_app()
     create_custom_fields(CUSTOM_FIELDS, update=True)
+    backfill_timesheet_detail_project_codes()
+    backfill_rd_project_keys()
     ensure_access_control()  # create roles/profile FIRST so grants below can target them
     ensure_workflow_masters()
     _ensure_spa_perms()
+    ensure_rd_activity_types()
+    ensure_default_projects()
     ensure_notifications()
     ensure_hidden_workspaces()
 
+
+
+
+def backfill_timesheet_detail_project_codes():
+    import frappe
+
+    if not frappe.db.has_column("Timesheet Detail", "rd_project_code"):
+        return
+    frappe.db.sql(
+        """
+        update `tabTimesheet Detail` tsd
+        inner join `tabProject` p on p.name = tsd.project
+        set tsd.rd_project_code = p.rd_project_code
+        where coalesce(tsd.project, '') != ''
+          and coalesce(tsd.rd_project_code, '') = ''
+          and coalesce(p.rd_project_code, '') != ''
+        """
+    )
+
+
+def backfill_rd_project_keys():
+    import frappe
+
+    if frappe.db.has_column("Project", "rd_project_key"):
+        frappe.db.sql(
+            """
+            update `tabProject`
+            set rd_project_key = concat(rd_project_code, ' | ', project_name)
+            where coalesce(rd_project_key, '') = ''
+              and coalesce(rd_project_code, '') != ''
+              and coalesce(project_name, '') != ''
+            """
+        )
+
+    if frappe.db.has_column("Timesheet Detail", "rd_project_name"):
+        frappe.db.sql(
+            """
+            update `tabTimesheet Detail` tsd
+            inner join `tabProject` p on p.name = tsd.project
+            set tsd.rd_project_name = p.project_name
+            where coalesce(tsd.project, '') != ''
+              and coalesce(tsd.rd_project_name, '') = ''
+              and coalesce(p.project_name, '') != ''
+            """
+        )
+
+    if frappe.db.has_column("Timesheet Detail", "rd_project_key"):
+        frappe.db.sql(
+            """
+            update `tabTimesheet Detail` tsd
+            inner join `tabProject` p on p.name = tsd.project
+            set tsd.rd_project_key = concat(
+                coalesce(nullif(tsd.rd_project_code, ''), nullif(p.rd_project_code, ''), tsd.project),
+                ' | ',
+                coalesce(nullif(tsd.rd_project_name, ''), nullif(p.project_name, ''), tsd.project)
+            )
+            where coalesce(tsd.project, '') != ''
+              and coalesce(tsd.rd_project_key, '') = ''
+            """
+        )
 
 # Stock ERPNext workspaces irrelevant to this HR/OA + R&D-cost deployment (no role uses
 # commerce/manufacturing/CRM/integrations). Hidden via is_hidden=1, NOT deleted --

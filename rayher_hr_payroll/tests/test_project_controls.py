@@ -8,8 +8,8 @@ pytest.importorskip("frappe")
 from rayher_hr_payroll.project_controls import _stage
 
 
-def _proj(start, end):
-    return SimpleNamespace(capitalization_start_date=start, capitalization_end_date=end)
+def _proj(start, end, rd_stage=None):
+    return SimpleNamespace(capitalization_start_date=start, capitalization_end_date=end, rd_stage=rd_stage)
 
 
 def test_stage_capitalized_inside_window():
@@ -32,3 +32,8 @@ def test_stage_within_month_start_shift_flips_classification():
     assert _stage(_proj("2026-01-01", "2026-12-31"), "202601") == "capitalized"
     # Move start to mid-month: 2026-01-15 > 2026-01-01 => January now expensed.
     assert _stage(_proj("2026-01-15", "2026-12-31"), "202601") == "expensed"
+
+
+def test_stage_prefers_backend_rd_stage():
+    assert _stage(_proj(None, None, "资本化"), "202606") == "capitalized"
+    assert _stage(_proj("2026-01-01", "2026-12-31", "费用化"), "202606") == "expensed"

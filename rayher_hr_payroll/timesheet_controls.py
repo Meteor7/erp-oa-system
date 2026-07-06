@@ -217,7 +217,7 @@ def _project_stage_for_entry(project: str, posting_date: date | None) -> str:
     fields = frappe.db.get_value(
         'Project',
         project,
-        ['capitalization_start_date', 'capitalization_end_date'],
+        ['rd_stage', 'capitalization_start_date', 'capitalization_end_date'],
         as_dict=True,
     ) or {}
     return stage_for_period(fields, year=posting_date.year, month=posting_date.month)

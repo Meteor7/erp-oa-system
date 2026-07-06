@@ -1,6 +1,7 @@
 import frappe
 
 DEFAULT_EMPLOYEE_ROLES = ["Employee"]
+RAYHER_DEFAULT_APP = "rayher_hr_payroll"
 
 
 def _target_email(doc):
@@ -49,6 +50,7 @@ def sync_user_for_employee(doc, method=None):
     user.email = email
     user.first_name = doc.employee_name or email.split("@")[0]
     user.send_welcome_email = 0
+    user.default_app = RAYHER_DEFAULT_APP
     user.flags.ignore_permissions = True
     user.insert(ignore_permissions=True)
     # Establish the Employee->User link BEFORE granting roles: ERPNext's

@@ -102,6 +102,8 @@ def _ensure_master_data(company: str):
         "RD-CAP",
         {
             "project_name": "RD-CAP",
+            "rd_project_code": "001",
+            "rd_project_key": "001 | RD-CAP",
             "status": "Open",
             "company": company,
             "allow_rd_timesheet": 1,
@@ -115,6 +117,8 @@ def _ensure_master_data(company: str):
         "RD-EXP",
         {
             "project_name": "RD-EXP",
+            "rd_project_code": "002",
+            "rd_project_key": "002 | RD-EXP",
             "status": "Open",
             "company": company,
             "allow_rd_timesheet": 1,

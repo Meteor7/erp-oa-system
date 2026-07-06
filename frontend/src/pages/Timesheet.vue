@@ -1,22 +1,25 @@
 <script setup>
-import { ref, computed, watch } from "vue";
+import { computed, watch } from "vue";
 import { Card, Spinner, createResource } from "frappe-ui";
 import { period } from "../lib/period";
 
 const r = createResource({
-  url: "frappe.desk.query_report.run",
+  url: "rayher_hr_payroll.api.timesheet_entry.list_rd_hours",
   method: "GET",
-  makeParams: () => ({ report_name: "研发工时表(明细)", filters: JSON.stringify({ period: period.value }) }),
+  makeParams: () => ({ period: period.value }),
   auto: true,
 });
 watch(period, () => r.reload());
 
-const rows = computed(() => (r.data && r.data.result) || []);
+const rows = computed(() => r.data || []);
 // dynamic pivot: employees x projects
 const pivot = computed(() => {
   const emps = [], projSet = new Set(), cell = {};
   for (const row of rows.value) {
-    const id = row["员工id"] || row["员工ID"] || row["员工"], name = row["员工"], p = row["项目"], h = row["工时"] || 0;
+    const id = row.employee;
+    const name = row.employee_name || row.employee;
+    const p = row.rd_project_key || row.project_name || row.rd_project_code || row.project;
+    const h = Number(row.hours || 0);
     if (!id || !p) continue;
     if (!cell[id]) { cell[id] = {}; emps.push({ id, name }); }
     cell[id][p] = (cell[id][p] || 0) + h;
@@ -64,6 +67,6 @@ const fmt = (n) => (n || 0).toLocaleString("zh-CN");
         </tr>
       </tfoot>
     </table>
-    <p class="text-xs text-gray-400 mt-3">会计期间 {{ period }} · 透视按本期实际项目动态生成</p>
+    <p class="text-xs text-gray-400 mt-3">会计期间 {{ period }} &middot; 透视按本期实际项目动态生成</p>
   </Card>
 </template>

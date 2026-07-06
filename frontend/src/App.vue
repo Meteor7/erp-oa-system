@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { canSee } from "./lib/access";
+import { canSee, currentUser, roleLabel } from "./lib/access";
 
 const groups = [
   { label: "总览", items: [{ to: "/dashboard", step: "", label: "数据看板" }] },
@@ -10,7 +10,7 @@ const groups = [
     { to: "/accommodation", step: "02", label: "宿舍住宿费用" },
   ] },
   { label: "研发台账", items: [
-    { to: "/ledger", step: "03", label: "研发人员台账" },
+    { to: "/projects", step: "03", label: "项目管理" },
     { to: "/entry", step: "04", label: "研发工时填报" },
     { to: "/timesheet", step: "05", label: "研发工时表" },
     { to: "/expense", step: "06", label: "财务费用导入" },
@@ -25,6 +25,10 @@ const visibleGroups = computed(() =>
     .filter((g) => g.items.length)
 );
 const allowed = computed(() => canSee(route.path));
+
+function logout() {
+  window.location.href = "/?cmd=web_logout";
+}
 </script>
 <template>
   <div class="flex min-h-screen bg-gray-50 text-gray-900">
@@ -45,8 +49,13 @@ const allowed = computed(() => canSee(route.path));
       </nav>
     </aside>
     <main class="flex-1 min-w-0 flex flex-col">
-      <header class="h-14 bg-white border-b flex items-center px-6">
-        <div class="text-sm text-gray-500">研发成本一体化 · 人事 / 工时 / 费用 / 薪酬</div>
+      <header class="h-14 bg-white border-b flex items-center px-6 gap-4">
+        <div class="text-sm text-gray-500 flex-1">&#x7814;&#x53d1;&#x6210;&#x672c;&#x4e00;&#x4f53;&#x5316; &middot; &#x4eba;&#x4e8b; / &#x5de5;&#x65f6; / &#x8d39;&#x7528; / &#x85aa;&#x916c;</div>
+        <div class="flex items-center gap-3 text-sm">
+          <span class="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-gray-700">{{ roleLabel() }}</span>
+          <span class="text-gray-600 max-w-[220px] truncate">{{ currentUser() }}</span>
+          <button type="button" class="rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50" @click="logout">&#x9000;&#x51fa;&#x767b;&#x5f55;</button>
+        </div>
       </header>
       <div class="p-7 max-w-6xl w-full mx-auto flex-1">
         <router-view v-if="allowed" />

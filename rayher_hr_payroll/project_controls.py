@@ -5,9 +5,13 @@ from frappe.utils import getdate
 
 
 def _stage(doc, ym):
-    """R&D stage of period `ym` (YYYYMM) for a project: capitalized inside the
-    capitalization window, expensed when complete dates exist but the period is
-    outside the window, else unknown (incomplete dates)."""
+    """R&D stage of period `ym` (YYYYMM) for a project. Prefer the explicit
+    backend rd_stage; fall back to the legacy capitalization date window."""
+    explicit = (getattr(doc, "rd_stage", None) or "").strip() if doc else ""
+    if explicit == "资本化":
+        return "capitalized"
+    if explicit == "费用化":
+        return "expensed"
     s = doc.capitalization_start_date if doc else None
     e = doc.capitalization_end_date if doc else None
     if not (s and e):
@@ -42,7 +46,8 @@ def validate_project_stage_lock(doc, method=None):
     would include/exclude those hours from the locked period's allocation)."""
     if doc.is_new():
         return
-    cap_changed = (doc.has_value_changed("capitalization_start_date")
+    cap_changed = (doc.has_value_changed("rd_stage")
+                   or doc.has_value_changed("capitalization_start_date")
                    or doc.has_value_changed("capitalization_end_date"))
     rd_changed = doc.has_value_changed("allow_rd_timesheet")
     if not (cap_changed or rd_changed):

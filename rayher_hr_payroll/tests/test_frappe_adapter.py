@@ -196,3 +196,8 @@ def test_content_row_key_treats_none_and_blank_optional_field_the_same():
                         direct_project="", source_row_key="")
     # one leaves optional fields unset (None), the other sends them blank ("") -> still a duplicate
     assert content_row_key_for_row(a) == content_row_key_for_row(b)
+
+
+def test_stage_for_period_prefers_backend_rd_stage():
+    assert stage_for_period({"rd_stage": "资本化"}, year=2026, month=7) == "capitalized"
+    assert stage_for_period({"rd_stage": "费用化", "capitalization_start_date": "2026-01-01", "capitalization_end_date": "2026-12-31"}, year=2026, month=7) == "expensed"

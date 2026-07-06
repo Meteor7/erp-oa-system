@@ -11,6 +11,7 @@ def get_context(context):
         "sitename": frappe.local.site,
         "site_name": frappe.local.site,
         "user": frappe.session.user,
+        "full_name": frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user,
         "roles": frappe.get_roles(),
     }
     return context
