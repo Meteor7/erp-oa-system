@@ -23,7 +23,8 @@ UNEXTRACTED_LABELS = (
     _lt("RD Timesheet Exceptions"),
     # Report column labels / exception types / messages (report/*.py, injected translate).
     _lt("Exception Type"),
-    _lt("Expense Item"),
+    _lt("3级费用科目"),
+    _lt("4级费用科目"),
     _lt("Voucher No"),
     _lt("Message"),
     _lt("Missing Timesheet"),

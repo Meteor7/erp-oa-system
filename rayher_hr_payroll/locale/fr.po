@@ -736,7 +736,7 @@ msgid "本期已有已提交的分摊单，如需重算请联系系统管理员�
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:34
-msgid "本期没有费用导入单，无法分摊。请先在「财务费用导入」录入费用。"
+msgid "本期没有费用导入单，无法分摊。请先在「研发费用导入」录入费用。"
 msgstr ""
 
 #: rayher_hr_payroll/api/expense_entry.py:71

@@ -5,10 +5,41 @@ from rayher_hr_payroll.api._guards import require_rd_access, parse_period, ensur
 
 
 _EDITABLE_REPLACEMENT_STATUSES = {"Imported", "Allocated"}
+_VALID_CATEGORIES = {"personnel", "direct_input", "depreciation", "amortization", "other", "design"}
 
 
 def _clean(value):
     return (value or "").strip() if isinstance(value, str) else value
+
+
+def _text(value):
+    return str(_clean(value) or "")
+
+
+def _category_for_accounts(level_2, level_3, level_4, category=None):
+    category = _text(category)
+    if category in _VALID_CATEGORIES:
+        return category
+    text = " ".join([_text(level_2), _text(level_3), _text(level_4)])
+    if any(token in text for token in ["人员人工", "人工", "工资", "社保", "社会保险", "养老保险", "医疗保险", "生育保险", "工伤保险", "失业保险", "住房公积金"]):
+        return "personnel"
+    if "直接投入" in text:
+        return "direct_input"
+    if "折旧" in text:
+        return "depreciation"
+    if "摊销" in text or "无形资产" in text:
+        return "amortization"
+    if "设计" in text:
+        return "design"
+    return "other"
+
+
+def _account_levels(row):
+    level_3 = _text(row.get("account_level_3")) or "费用"
+    level_1 = _text(row.get("account_level_1")) or "研发支出"
+    level_2 = _text(row.get("account_level_2")) or level_3
+    level_4 = _text(row.get("account_level_4"))
+    return level_1, level_2, level_3, level_4
 
 
 def _direct_project_for_row(row):
@@ -33,29 +64,34 @@ def _expense_rows(items):
     rows = []
     for idx, it in enumerate(items):
         amt = float(it.get("amount") or 0)
-        if amt < 0:
-            frappe.throw(frappe._("费用金额不能为负数。"))
         direct_project = _direct_project_for_row(it)
-        desc = _clean(it.get("account_level_3")) or "费用"
+        account_level_1, account_level_2, account_level_3, account_level_4 = _account_levels(it)
         voucher_no = _clean(it.get("voucher_no")) or ("V%03d" % (idx + 1))
-        if amt == 0:
-            continue
-        duplicate_key = (voucher_no, desc, round(amt, 2), direct_project or "")
+        duplicate_key = (
+            voucher_no,
+            account_level_1,
+            account_level_2,
+            account_level_3,
+            account_level_4,
+            round(amt, 2),
+            direct_project or "",
+        )
         if duplicate_key in seen:
             frappe.throw(frappe._("存在重复的费用行（凭证号、科目、金额与所属项目都相同），请合并或更正。"))
         seen.add(duplicate_key)
         rows.append({
             "source_row_key": _row_key(idx, direct_project),
             "voucher_no": voucher_no,
-            "account_level_1": "研发支出",
-            "account_level_2": desc,
-            "account_level_3": desc,
-            "category": it.get("category") or "other",
+            "account_level_1": account_level_1,
+            "account_level_2": account_level_2,
+            "account_level_3": account_level_3,
+            "account_level_4": account_level_4,
+            "category": _category_for_accounts(account_level_2, account_level_3, account_level_4, it.get("category")),
             "amount": amt,
             "direct_project": direct_project,
         })
     if not rows:
-        frappe.throw(frappe._("请至少录入一条有效费用（金额需大于 0）。"))
+        frappe.throw(frappe._("请至少录入一条有效费用。"))
     return rows
 
 
@@ -103,28 +139,62 @@ def _create_import(period, year, month, rows):
     return doc
 
 
+def _value(row, fieldname, default=None):
+    if isinstance(row, dict):
+        return row.get(fieldname, default)
+    return getattr(row, fieldname, default)
+
+
+def _serialize_expense_item(item, source_period=None):
+    return {
+        "period": source_period,
+        "voucher_no": item.voucher_no,
+        "account_level_1": getattr(item, "account_level_1", None) or "\u7814\u53d1\u652f\u51fa",
+        "account_level_2": getattr(item, "account_level_2", None) or item.account_level_3,
+        "account_level_3": item.account_level_3,
+        "account_level_4": getattr(item, "account_level_4", None) or "",
+        "category": item.category,
+        "amount": item.amount,
+        "direct_project": getattr(item, "direct_project", None) or None,
+        "allocation_type": "project" if getattr(item, "direct_project", None) else "common",
+    }
+
+
+def _get_expense_year(year):
+    imports = frappe.get_all(
+        "RD Expense Import",
+        filters={"year": year, "docstatus": ["<", 2]},
+        fields=["name", "period"],
+        order_by="month asc, creation desc",
+    )
+    items = []
+    names = []
+    for row in imports:
+        name = _text(_value(row, "name"))
+        source_period = _text(_value(row, "period"))
+        if not name:
+            continue
+        names.append(name)
+        doc = frappe.get_doc("RD Expense Import", name)
+        items.extend(_serialize_expense_item(item, source_period=source_period) for item in doc.items)
+    return {"name": None, "status": "Yearly" if names else None, "scope": "year", "imports": names, "items": items}
+
+
 @frappe.whitelist()
-def get_expense(period):
+def get_expense(period, scope="month"):
     require_rd_access(RD_FINANCE_ROLES)
     year, month = parse_period(period)
+    if str(scope or "month") == "year":
+        return _get_expense_year(year)
     name = _active_import_name(year, month)
     if not name:
-        return {"name": None, "status": None, "items": []}
+        return {"name": None, "status": None, "scope": "month", "items": []}
     d = frappe.get_doc("RD Expense Import", name)
     return {
         "name": d.name,
         "status": d.status,
-        "items": [
-            {
-                "voucher_no": i.voucher_no,
-                "account_level_3": i.account_level_3,
-                "category": i.category,
-                "amount": i.amount,
-                "direct_project": getattr(i, "direct_project", None) or None,
-                "allocation_type": "project" if getattr(i, "direct_project", None) else "common",
-            }
-            for i in d.items
-        ],
+        "scope": "month",
+        "items": [_serialize_expense_item(i) for i in d.items],
     }
 
 

@@ -17,16 +17,14 @@ class RDExpenseImport(Document):
         self._ensure_hash()
         self._check_not_allocated()
         self._check_period_lock()
-        self._check_amounts()
         validate_expense_import(self)
 
     def before_submit(self):
-        # An empty / zero-total import must not be submittable: once submitted it
+        # An empty / all-zero import must not be submittable: once submitted it
         # blocks any replacement for the period (_check_unique_period), yet
         # Accounts User cannot cancel/delete it -- a permanent period squat.
-        total = sum((it.amount or 0) for it in (self.items or []))
-        if not self.items or total <= 0:
-            frappe.throw(frappe._("费用导入单没有有效的费用明细（合计需大于零），不能提交。"))
+        if not self.items or not any((it.amount or 0) != 0 for it in self.items):
+            frappe.throw(frappe._("费用导入单至少需有一条金额非零的费用明细，不能提交。"))
         # Reject duplicate GL source rows at submit using the SAME key the
         # allocator rejects, so a duplicate-laden import cannot be submitted and
         # then squat the period while allocation keeps failing.
@@ -116,8 +114,3 @@ class RDExpenseImport(Document):
                 "RD Period Lock", {"period": digits, "docstatus": 1, "lock_gl_import": 1}
             ):
                 frappe.throw(frappe._("会计期间 {0} 已锁定（费用导入），不能修改。").format(digits))
-
-    def _check_amounts(self):
-        for it in self.items or []:
-            if (it.amount or 0) < 0:
-                frappe.throw(frappe._("费用金额不能为负数。"))

@@ -113,8 +113,55 @@ def after_install():
     _ensure_spa_perms()
     ensure_rd_activity_types()
     ensure_default_projects()
+    relink_project_documents()
     ensure_notifications()
     ensure_hidden_workspaces()
+
+
+def relink_project_documents():
+    import frappe
+
+    attachment_fields = [
+        "project_initiation_report",
+        "project_completion_report",
+        "capitalization_confirmation_file",
+    ]
+    available_fields = [
+        fieldname for fieldname in attachment_fields
+        if frappe.db.has_column("Project", fieldname)
+    ]
+    if not available_fields:
+        return
+
+    files = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": "Project",
+            "attached_to_field": ["in", available_fields],
+            "is_private": 1,
+        },
+        fields=["attached_to_name", "attached_to_field", "file_url"],
+        order_by="creation desc",
+    )
+    linked = set()
+    for file_row in files:
+        project_name = file_row.get("attached_to_name")
+        fieldname = file_row.get("attached_to_field")
+        key = (project_name, fieldname)
+        if not project_name or not file_row.get("file_url") or key in linked:
+            continue
+        linked.add(key)
+        if not frappe.db.exists("Project", project_name):
+            continue
+        if frappe.db.get_value("Project", project_name, fieldname):
+            continue
+        frappe.db.set_value(
+            "Project",
+            project_name,
+            fieldname,
+            file_row.get("file_url"),
+            update_modified=False,
+        )
 
 
 

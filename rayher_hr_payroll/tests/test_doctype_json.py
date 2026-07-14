@@ -91,7 +91,7 @@ def _roles_with(doc: dict, perm: str) -> set[str]:
 
 
 RD_DOCTYPES = ["rd_cost_allocation", "rd_expense_import", "rd_period_lock",
-               "accommodation_deduction", "rd_work_ratio_snapshot"]
+               "accommodation_deduction", "rd_work_ratio_snapshot", "foreign_rd_expense"]
 
 
 def test_finance_role_can_read_and_report_every_rd_doctype():
@@ -176,6 +176,7 @@ def test_exact_permission_matrix_on_all_changed_doctypes():
         "rd_period_lock": {"System Manager": "rwcdsxaREP", "Accounts User": "rwcsR"},
         "accommodation_deduction": {"System Manager": "rwcdREPMS", "Accounts User": "rwcR", "HR User": "rwcR"},
         "rd_work_ratio_snapshot": {"System Manager": "rwcdREP", "Accounts User": "rR", "HR User": "rR"},
+        "foreign_rd_expense": {"System Manager": "rwcdREPMS", "Accounts User": "rwcREP"},
     }
     for folder, roles in flags.items():
         doc = load_doctype(folder)
@@ -188,3 +189,81 @@ def test_rd_cost_allocation_persists_skipped_labor():
     fields = {field["fieldname"]: field for field in load_doctype("rd_cost_allocation")["fields"]}
     assert "labor_skipped" in fields  # under-counted (incomplete-hours) employees recorded on the doc
     assert fields["labor_skipped"]["read_only"] == 1
+
+
+def test_oa_approval_doctypes_define_request_and_steps():
+    request = load_doctype('oa_approval_request')
+    step = load_doctype('oa_approval_step')
+    expense_line = load_doctype('oa_approval_expense_line')
+    request_fields = {field["fieldname"]: field for field in request["fields"] if "fieldname" in field}
+    step_fields = fieldnames(step)
+    line_fields = fieldnames(expense_line)
+
+    assert request['is_submittable'] == 0
+    assert {
+        'request_type', 'workflow_status', 'company', 'employee', 'department', 'supervisor', 'doc_type',
+        'urgency', 'source_type', 'source_summary', 'payment_type', 'payment_method', 'bank_name',
+        'payee_name', 'branch', 'account_no', 'paid_by', 'paid_on', 'expense_lines', 'steps'
+    }.issubset(request_fields)
+    assert request_fields['expense_lines']['options'] == 'OA Approval Expense Line'
+    assert {
+        '\u8349\u7a3f', '\u5f85\u5ba1\u6279', '\u5f85\u529e\u7406', '\u5df2\u5b8c\u6210',
+        '\u5df2\u62d2\u7edd', '\u5df2\u4ed8\u6b3e'
+    }.issubset(set(request_fields['workflow_status']['options'].split('\n')))
+    assert {'Employee', 'Department Manager', 'Accounts User', 'HR User', 'HR Manager'}.issubset(
+        {p['role'] for p in request['permissions']}
+    )
+    assert step['istable'] == 1
+    assert {'step_index', 'label', 'mode', 'approvers', 'status', 'approved_by', 'action_by', 'acted_on'}.issubset(step_fields)
+    assert expense_line['istable'] == 1
+    assert {
+        'source_consumption', 'start_date', 'end_date', 'category', 'amount',
+        'description', 'attachment_count', 'invoice_status'
+    }.issubset(line_fields)
+
+
+def test_oa_consumption_detail_doctypes_define_invoice_pushdown_model():
+    consumption = load_doctype('oa_consumption_detail')
+    invoice = load_doctype('oa_invoice_attachment')
+    consumption_fields = {field["fieldname"]: field for field in consumption["fields"] if "fieldname" in field}
+    invoice_fields = fieldnames(invoice)
+
+    assert consumption['is_submittable'] == 0
+    assert {
+        'title', 'employee', 'employee_name', 'department', 'expense_date', 'category',
+        'amount', 'description', 'status', 'linked_request', 'invoice_count', 'invoices'
+    }.issubset(consumption_fields)
+    assert consumption_fields['invoices']['options'] == 'OA Invoice Attachment'
+    assert consumption_fields['linked_request']['options'] == 'OA Approval Request'
+    assert {
+        '\u5f85\u4e0a\u4f20', '\u5df2\u4e0a\u4f20\u53d1\u7968', '\u5f85\u4e0b\u63a8',
+        '\u5df2\u4e0b\u63a8', '\u5df2\u9a73\u56de'
+    }.issubset(set(consumption_fields['status']['options'].split('\n')))
+    assert {'Employee', 'Department Manager', 'Accounts User', 'HR User', 'HR Manager'}.issubset(
+        {p['role'] for p in consumption['permissions']}
+    )
+    assert invoice['istable'] == 1
+    assert {'invoice_name', 'invoice_file', 'file_type', 'file_size', 'invoice_status', 'uploaded_on', 'remark'}.issubset(invoice_fields)
+
+
+
+def test_foreign_rd_expense_doctypes_store_total_and_hour_lines():
+    parent = load_doctype("foreign_rd_expense")
+    child = load_doctype("foreign_rd_expense_line")
+    parent_fields = {field["fieldname"]: field for field in parent["fields"]}
+    child_fields = {field["fieldname"]: field for field in child["fields"]}
+
+    assert parent["istable"] == 0
+    assert parent_fields["total_amount"]["fieldtype"] == "Currency"
+    assert parent_fields["lines"]["options"] == "Foreign RD Expense Line"
+    assert {"period", "year", "month", "total_amount", "lines"}.issubset(parent_fields)
+    assert child["istable"] == 1
+    assert {"work_date", "project", "project_code", "project_name", "activity_type", "project_stage", "hours", "ratio", "allocated_amount", "description"}.issubset(child_fields)
+
+
+
+def test_rd_cost_allocation_line_keeps_expense_account_levels_for_matrix_report():
+    fields = {field["fieldname"]: field for field in load_doctype("rd_cost_allocation_line")["fields"]}
+
+    assert fields["account_level_3"]["fieldtype"] == "Data"
+    assert fields["account_level_4"]["fieldtype"] == "Data"

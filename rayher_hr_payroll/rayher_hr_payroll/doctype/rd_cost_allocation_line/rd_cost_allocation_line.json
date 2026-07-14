@@ -17,6 +17,18 @@
       "in_list_view": 1
     },
     {
+      "fieldname": "account_level_3",
+      "label": "3?????",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "account_level_4",
+      "label": "4?????",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    },
+    {
       "fieldname": "voucher_no",
       "label": "凭证号",
       "fieldtype": "Data",

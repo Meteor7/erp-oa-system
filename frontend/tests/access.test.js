@@ -6,20 +6,24 @@ function asRoles(roles) {
   globalThis.window = { roles };
 }
 
-test("employees land on timesheet entry and cannot see HR pages", () => {
+test("employees land on timesheet entry and can see approval pages without HR pages", () => {
   asRoles(["Employee"]);
   assert.equal(canSee("/entry"), true);
   assert.equal(firstVisiblePath(), "/entry");
+  assert.equal(canSee("/approval/leave"), true);
+  assert.equal(canSee("/approval/purchase"), true);
   assert.equal(canSee("/dashboard"), false);
   assert.equal(canSee("/accommodation"), false);
   assert.equal(canSee("/expense"), false);
   assert.equal(canEditTimesheetEntry(), true);
 });
 
-test("department managers can use timesheet entry without HR access", () => {
+test("department supervisors can use timesheet entry and approval pages without HR access", () => {
   asRoles(["Employee", "Department Manager"]);
   assert.equal(canSee("/entry"), true);
   assert.equal(firstVisiblePath(), "/entry");
+  assert.equal(canSee("/approval/leave"), true);
+  assert.equal(canSee("/approval/purchase"), true);
   assert.equal(canSee("/personnel"), false);
   assert.equal(canSee("/accommodation"), false);
   assert.equal(canSee("/expense"), false);
@@ -30,9 +34,12 @@ test("finance can manage projects and fill R&D timesheets", () => {
   asRoles(["Accounts User"]);
   assert.equal(canSee("/expense"), true);
   assert.equal(canSee("/allocation"), true);
+  assert.equal(canSee("/allocation-dashboard"), true);
   assert.equal(canSee("/entry"), true);
   assert.equal(canSee("/timesheet"), true);
   assert.equal(canSee("/projects"), true);
+  assert.equal(canSee("/approval/leave"), true);
+  assert.equal(canSee("/approval/purchase"), true);
   assert.equal(canEditTimesheetEntry(), true);
 });
 
@@ -53,4 +60,27 @@ test("role labels use the highest business level", () => {
 test("the removed personnel ledger is not a visible business page", () => {
   asRoles(["HR User"]);
   assert.equal(canSee("/ledger"), false);
+});
+
+
+test("foreign commissioned R&D is finance-only", () => {
+  asRoles(["Accounts User"]);
+  assert.equal(canSee("/foreign-rd"), true);
+  asRoles(["System Manager"]);
+  assert.equal(canSee("/foreign-rd"), true);
+  asRoles(["HR User"]);
+  assert.equal(canSee("/foreign-rd"), false);
+  asRoles(["Employee"]);
+  assert.equal(canSee("/foreign-rd"), false);
+});
+
+test("allocation dashboard is finance-only", () => {
+  asRoles(["Accounts User"]);
+  assert.equal(canSee("/allocation-dashboard"), true);
+  asRoles(["System Manager"]);
+  assert.equal(canSee("/allocation-dashboard"), true);
+  asRoles(["HR User"]);
+  assert.equal(canSee("/allocation-dashboard"), false);
+  asRoles(["Employee"]);
+  assert.equal(canSee("/allocation-dashboard"), false);
 });

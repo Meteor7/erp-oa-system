@@ -10,6 +10,9 @@ from rayher_hr_payroll.rd_cost.types import ExpenseItem, ProjectHour, ProjectSta
 RD_PERSONNEL_TYPES = ("全时研发", "非全时研发", "研发辅助")
 
 
+FOREIGN_COMMISSIONED_LEVEL_2 = "\u59d4\u6258\u7814\u53d1"
+FOREIGN_COMMISSIONED_LEVEL_3 = "\u5883\u5916"
+
 def _get_frappe():
     import frappe  # type: ignore[import-not-found]
 
@@ -20,6 +23,25 @@ def _value(row: Any, fieldname: str, default: Any = None) -> Any:
     if isinstance(row, Mapping):
         return row.get(fieldname, default)
     return getattr(row, fieldname, default)
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def is_foreign_commissioned_expense(row: Any) -> bool:
+    return (
+        _clean_text(_value(row, "account_level_2")) == FOREIGN_COMMISSIONED_LEVEL_2
+        and _clean_text(_value(row, "account_level_3")) == FOREIGN_COMMISSIONED_LEVEL_3
+    )
+
+
+def foreign_commissioned_expense_rows(rows: Iterable[Any]) -> list[Any]:
+    return [row for row in rows if is_foreign_commissioned_expense(row)]
+
+
+def non_foreign_expense_rows(rows: Iterable[Any]) -> list[Any]:
+    return [row for row in rows if not is_foreign_commissioned_expense(row)]
 
 
 def _parse_date(value: Any) -> date | None:
@@ -276,12 +298,13 @@ def _expense_import_rows(expense_import: str) -> list[Any]:
 
 def get_expense_items(expense_import: str) -> list[ExpenseItem]:
     frappe = _get_frappe()
-    return expense_items_from_rows(_expense_import_rows(expense_import), on_duplicate=frappe.throw)
+    rows = non_foreign_expense_rows(_expense_import_rows(expense_import))
+    return expense_items_from_rows(rows, on_duplicate=frappe.throw)
 
 
 def get_source_expense_rows(expense_import: str) -> list[dict[str, Any]]:
     frappe = _get_frappe()
-    rows = _expense_import_rows(expense_import)
+    rows = non_foreign_expense_rows(_expense_import_rows(expense_import))
     expense_items_from_rows(rows, on_duplicate=frappe.throw)
     return source_expense_rows_from_rows(rows)
 

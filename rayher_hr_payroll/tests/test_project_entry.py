@@ -89,6 +89,11 @@ def test_save_project_creates_timesheet_enabled_project(monkeypatch):
         "rd_stage": "费用化",
         "capitalization_start_date": "2026-07-01",
         "capitalization_end_date": None,
+        "project_owner_name": None,
+        "project_owner": None,
+        "project_initiation_report": None,
+        "project_completion_report": None,
+        "capitalization_confirmation_file": None,
     }
     assert captured["insert"] == (True, "RD18")
     assert captured["committed"] is True
@@ -122,9 +127,10 @@ def test_default_project_seed_contains_screenshot_projects(monkeypatch):
 
     by_code = {item["project_code"]: item for item in mod.DEFAULT_RAYHER_PROJECTS}
     assert by_code["RD17"]["project_name"] == "EFEM-12-2LP-EG-A"
+    assert by_code["RD12"]["project_name"] == "Self-developed EFEM"
     assert by_code["RD18"] == {
         "project_code": "RD18",
-        "project_name": "无图形晶圆颗粒检测系统（KIBO 4895）",
+        "project_name": "KIBO 4895",
         "start_date": "2026-07-01",
         "end_date": "",
         "status": "Open",
@@ -132,7 +138,7 @@ def test_default_project_seed_contains_screenshot_projects(monkeypatch):
     }
     assert by_code["RD19"] == {
         "project_code": "RD19",
-        "project_name": "无图形晶圆缺陷检测系统（KIBO 4895C）",
+        "project_name": "KIBO 4895C",
         "start_date": "2026-07-01",
         "end_date": "",
         "status": "Open",
@@ -150,7 +156,7 @@ def test_list_projects_returns_rd_stage(monkeypatch):
 
     frappe.get_all = lambda *args, **kwargs: [{
         "name": "RD18",
-        "project_name": "无图形晶圆颗粒检测系统（KIBO 4895）",
+        "project_name": "KIBO 4895",
         "rd_project_code": "RD18",
         "rd_project_key": "RD18 | KIBO 4895",
         "status": "Open",
@@ -164,3 +170,100 @@ def test_list_projects_returns_rd_stage(monkeypatch):
 
     assert rows[0]["rd_stage"] == "费用化"
     assert rows[0]["rd_stage_label"] == "费用化"
+
+
+def test_save_project_keeps_owner_and_project_document_links(monkeypatch):
+    mod, frappe = _load_project_entry(monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.exists = lambda *args, **kwargs: False
+    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.db.commit = lambda: None
+    frappe.get_all = lambda *args, **kwargs: ["Rayher"]
+
+    def get_doc(arg, name=None):
+        if isinstance(arg, dict):
+            captured["doc"] = arg
+            return SimpleNamespace(name=arg["name"], insert=lambda **kwargs: None)
+        raise AssertionError(arg)
+
+    frappe.get_doc = get_doc
+
+    mod.save_project(
+        project_code="RD20",
+        project_name="OWNER PROJECT",
+        project_owner_name="演示员工107",
+        project_initiation_report="/private/files/initiation.pdf",
+        project_completion_report="/private/files/completion.pdf",
+        capitalization_confirmation_file="/private/files/capitalization.pdf",
+    )
+
+    assert captured["doc"]["project_owner_name"] == "演示员工107"
+    assert captured["doc"]["project_initiation_report"] == "/private/files/initiation.pdf"
+    assert captured["doc"]["project_completion_report"] == "/private/files/completion.pdf"
+    assert captured["doc"]["capitalization_confirmation_file"] == "/private/files/capitalization.pdf"
+
+
+def test_default_project_sync_preserves_optional_owner_and_document_fields(monkeypatch):
+    mod, frappe = _load_project_entry(monkeypatch)
+    captured = {}
+
+    frappe.db.exists = lambda *args, **kwargs: True
+    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.get_all = lambda *args, **kwargs: ["Rayher"]
+
+    class Doc:
+        name = "RD01"
+
+        def update(self, values):
+            captured["values"] = values
+
+        def save(self, **kwargs):
+            captured["saved"] = kwargs
+
+    frappe.get_doc = lambda *args, **kwargs: Doc()
+
+    mod._save_project_doc("RD01", "ACONCA 6961")
+
+    assert "project_owner_name" not in captured["values"]
+    assert "project_owner" not in captured["values"]
+    assert "project_initiation_report" not in captured["values"]
+    assert "project_completion_report" not in captured["values"]
+    assert "capitalization_confirmation_file" not in captured["values"]
+
+
+def test_list_projects_requests_owner_and_document_fields(monkeypatch):
+    mod, frappe = _load_project_entry(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+
+    def get_all(doctype, filters=None, fields=None, **kwargs):
+        captured["fields"] = fields
+        return []
+
+    frappe.get_all = get_all
+    mod.list_projects()
+
+    assert "project_owner" in captured["fields"]
+    assert "project_owner_name" in captured["fields"]
+    assert "project_initiation_report" in captured["fields"]
+    assert "project_completion_report" in captured["fields"]
+    assert "capitalization_confirmation_file" in captured["fields"]
+
+
+def test_list_project_owners_returns_enabled_system_users(monkeypatch):
+    mod, frappe = _load_project_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    captured = {}
+
+    def get_all(doctype, filters=None, fields=None, order_by=None, **kwargs):
+        captured.update({"doctype": doctype, "filters": filters, "fields": fields, "order_by": order_by})
+        return [{"name": "owner@example.com", "full_name": "Owner"}]
+
+    frappe.get_all = get_all
+    result = mod.list_project_owners()
+
+    assert result == [{"name": "owner@example.com", "full_name": "Owner"}]
+    assert captured["doctype"] == "User"
+    assert captured["filters"] == {"enabled": 1, "user_type": "System User"}

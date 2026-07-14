@@ -6,7 +6,10 @@ import pytest
 from rayher_hr_payroll.rd_cost.frappe_adapter import (
     content_row_key_for_row,
     expense_items_from_rows,
+    foreign_commissioned_expense_rows,
     historical_org_for_date,
+    is_foreign_commissioned_expense,
+    non_foreign_expense_rows,
     source_expense_rows_from_rows,
     stage_for_period,
 )
@@ -201,3 +204,32 @@ def test_content_row_key_treats_none_and_blank_optional_field_the_same():
 def test_stage_for_period_prefers_backend_rd_stage():
     assert stage_for_period({"rd_stage": "资本化"}, year=2026, month=7) == "capitalized"
     assert stage_for_period({"rd_stage": "费用化", "capitalization_start_date": "2026-01-01", "capitalization_end_date": "2026-12-31"}, year=2026, month=7) == "expensed"
+
+
+
+def _commission_row(name, level_2, level_3, amount="100", direct_project=None):
+    return SimpleNamespace(
+        name=name,
+        voucher_no=f"V-{name}",
+        account_level_1="\u7814\u53d1\u652f\u51fa",
+        account_level_2=level_2,
+        account_level_3=level_3,
+        account_level_4="Sabri\u8d39\u7528",
+        amount=amount,
+        category="other",
+        direct_project=direct_project,
+        source_row_key=f"KEY-{name}",
+    )
+
+
+def test_foreign_commissioned_expense_rows_are_classified_and_removed_from_domestic_allocation():
+    foreign_common = _commission_row("FOREIGN-COMMON", " \u59d4\u6258\u7814\u53d1 ", " \u5883\u5916 ")
+    foreign_direct = _commission_row("FOREIGN-DIRECT", "\u59d4\u6258\u7814\u53d1", "\u5883\u5916", direct_project="RD15")
+    domestic_commission = _commission_row("DOMESTIC", "\u59d4\u6258\u7814\u53d1", "\u5883\u5185")
+    other_row = _commission_row("OTHER", "\u5176\u4ed6\u76f8\u5173\u8d39\u7528", "\u5dee\u65c5\u8d39")
+    rows = [foreign_common, domestic_commission, foreign_direct, other_row]
+
+    assert is_foreign_commissioned_expense(foreign_common) is True
+    assert is_foreign_commissioned_expense(domestic_commission) is False
+    assert [row.name for row in foreign_commissioned_expense_rows(rows)] == ["FOREIGN-COMMON", "FOREIGN-DIRECT"]
+    assert [row.name for row in non_foreign_expense_rows(rows)] == ["DOMESTIC", "OTHER"]

@@ -1,0 +1,99 @@
+{
+ "doctype": "DocType",
+ "name": "Foreign RD Expense Line",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 1,
+ "issingle": 0,
+ "is_submittable": 0,
+ "editable_grid": 1,
+ "track_changes": 1,
+ "fields": [
+  {
+   "fieldname": "work_date",
+   "label": "Work Date",
+   "fieldtype": "Date",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "project",
+   "label": "Project",
+   "fieldtype": "Link",
+   "options": "Project",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "project_code",
+   "label": "Project Code",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "project_name",
+   "label": "Project Name",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "activity_type",
+   "label": "Activity Type",
+   "fieldtype": "Link",
+   "options": "Activity Type",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "project_stage",
+   "label": "R&D Stage",
+   "fieldtype": "Select",
+   "options": "capitalized\nexpensed\nunknown",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "hours",
+   "label": "Hours",
+   "fieldtype": "Float",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "ratio",
+   "label": "Allocation Ratio",
+   "fieldtype": "Percent",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "common_allocated_amount",
+   "label": "Common Allocated Amount",
+   "fieldtype": "Currency",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "direct_allocated_amount",
+   "label": "Direct Project Amount",
+   "fieldtype": "Currency",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "allocated_amount",
+   "label": "Allocated Amount",
+   "fieldtype": "Currency",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "description",
+   "label": "Description",
+   "fieldtype": "Small Text"
+  }
+ ],
+ "permissions": []
+}

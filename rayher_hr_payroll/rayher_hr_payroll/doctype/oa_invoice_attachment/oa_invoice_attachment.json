@@ -1,0 +1,37 @@
+{
+  "actions": [],
+  "allow_rename": 1,
+  "creation": "2026-07-13 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "invoice_name",
+    "invoice_file",
+    "file_type",
+    "file_size",
+    "invoice_status",
+    "uploaded_on",
+    "remark"
+  ],
+  "fields": [
+    {"fieldname": "invoice_name", "fieldtype": "Data", "in_list_view": 1, "label": "Invoice Name", "reqd": 1},
+    {"fieldname": "invoice_file", "fieldtype": "Attach", "label": "Invoice File"},
+    {"fieldname": "file_type", "fieldtype": "Data", "label": "File Type"},
+    {"fieldname": "file_size", "fieldtype": "Data", "label": "File Size"},
+    {"default": "\u5df2\u4e0a\u4f20", "fieldname": "invoice_status", "fieldtype": "Select", "in_list_view": 1, "label": "Invoice Status", "options": "\u5df2\u4e0a\u4f20\n\u5df2\u9a8c\u8bc1\n\u91cd\u590d\u53d1\u7968"},
+    {"fieldname": "uploaded_on", "fieldtype": "Datetime", "label": "Uploaded On", "read_only": 1},
+    {"fieldname": "remark", "fieldtype": "Small Text", "label": "Remark"}
+  ],
+  "istable": 1,
+  "links": [],
+  "modified": "2026-07-13 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Invoice Attachment",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": []
+}

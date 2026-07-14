@@ -80,3 +80,63 @@ def test_populate_allocation_document_writes_unknown_total():
     assert doc.expensed_total == Decimal("0.00")
     assert doc.unknown_total == Decimal("100.00")
     assert doc.lines[0]["project_stage"] == "unknown"
+
+
+
+def test_populate_allocation_document_uses_the_most_specific_expense_account_level():
+    doc = FakeDoc()
+    expenses = [
+        ExpenseItem(
+            name="ROW-PENSION",
+            amount=Decimal("100.00"),
+            account_level_3="\u793e\u4f1a\u4fdd\u9669\u8d39\u7528\uff08\u5355\u4f4d\uff09",
+            category="personnel",
+        ),
+        ExpenseItem(
+            name="ROW-TRAVEL",
+            amount=Decimal("50.00"),
+            account_level_3="\u5dee\u65c5\u8d39",
+            category="other",
+        ),
+    ]
+    project_hours = [ProjectHour(project="RD-CAP", hours=Decimal("10"), stage="capitalized")]
+    expense_rows = [
+        {
+            "expense_item": "ROW-PENSION",
+            "source_row_key": "202606|119|pension",
+            "voucher_no": "119",
+            "account_level_1": "\u7814\u53d1\u652f\u51fa",
+            "account_level_2": "\u4eba\u5458\u4eba\u5de5\u8d39\u7528",
+            "account_level_3": "\u793e\u4f1a\u4fdd\u9669\u8d39\u7528\uff08\u5355\u4f4d\uff09",
+            "account_level_4": "\u517b\u8001\u4fdd\u9669",
+            "amount": Decimal("100.00"),
+            "direct_project": None,
+        },
+        {
+            "expense_item": "ROW-TRAVEL",
+            "source_row_key": "202606|144|travel",
+            "voucher_no": "144",
+            "account_level_1": "\u7814\u53d1\u652f\u51fa",
+            "account_level_2": "\u5176\u4ed6\u76f8\u5173\u8d39\u7528",
+            "account_level_3": "\u5dee\u65c5\u8d39",
+            "account_level_4": "",
+            "amount": Decimal("50.00"),
+            "direct_project": None,
+        },
+    ]
+
+    populate_allocation_document(
+        doc,
+        expenses=expenses,
+        source_hour_rows=[],
+        source_expense_rows=expense_rows,
+        project_hours=project_hours,
+    )
+
+    by_voucher = {row["voucher_no"]: row for row in doc.lines}
+    assert by_voucher["119"]["expense_item_name"] == "\u517b\u8001\u4fdd\u9669"
+    assert by_voucher["119"]["account_level_3"] == "\u793e\u4f1a\u4fdd\u9669\u8d39\u7528\uff08\u5355\u4f4d\uff09"
+    assert by_voucher["119"]["account_level_4"] == "\u517b\u8001\u4fdd\u9669"
+    assert by_voucher["144"]["expense_item_name"] == "\u5dee\u65c5\u8d39"
+    assert by_voucher["144"]["account_level_3"] == "\u5dee\u65c5\u8d39"
+    assert by_voucher["144"]["account_level_4"] == ""

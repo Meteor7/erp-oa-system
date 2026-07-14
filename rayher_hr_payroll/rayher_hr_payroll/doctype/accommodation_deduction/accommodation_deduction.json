@@ -22,35 +22,123 @@
   },
   {
    "fieldname": "employee",
-   "label": "员工",
+   "label": "入住人",
    "fieldtype": "Link",
-   "reqd": 1,
+   "reqd": 0,
    "options": "Employee",
    "in_list_view": 1,
    "in_standard_filter": 1
   },
   {
+   "fieldname": "occupant_type",
+   "label": "入住类型",
+   "fieldtype": "Select",
+   "options": "员工\n空\n客房\n午休室",
+   "default": "员工",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "room_no",
+   "label": "房间号",
+   "fieldtype": "Data",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "expense_account_category",
+   "label": "费用科目",
+   "fieldtype": "Select",
+   "options": "\n研发费用\n管理费用\n销售费用\n生产成本",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_section",
+   "label": "总费用",
+   "fieldtype": "Section Break"
+  },
+  {
    "fieldname": "rent_amount",
-   "label": "房租",
+   "label": "房租总额",
    "fieldtype": "Currency",
    "reqd": 0,
    "in_list_view": 1
   },
   {
    "fieldname": "water_amount",
-   "label": "水费",
+   "label": "水费总额",
    "fieldtype": "Currency",
    "reqd": 0
   },
   {
    "fieldname": "electricity_amount",
-   "label": "电费",
+   "label": "电费总额",
    "fieldtype": "Currency",
    "reqd": 0
   },
   {
+   "fieldname": "personal_section",
+   "label": "个人承担费用",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "personal_rent_amount",
+   "label": "个人承担房租",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "personal_water_amount",
+   "label": "个人承担水费",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "personal_electricity_amount",
+   "label": "个人承担电费",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "personal_total_amount",
+   "label": "个人承担小计",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_section",
+   "label": "公司承担费用",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "company_rent_amount",
+   "label": "公司承担房租",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "company_water_amount",
+   "label": "公司承担水费",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "company_electricity_amount",
+   "label": "公司承担电费",
+   "fieldtype": "Currency",
+   "reqd": 0
+  },
+  {
+   "fieldname": "company_total_amount",
+   "label": "公司承担小计",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "read_only": 1
+  },
+  {
    "fieldname": "total_amount",
-   "label": "合计",
+   "label": "费用合计",
    "fieldtype": "Currency",
    "reqd": 0,
    "read_only": 1,

@@ -85,6 +85,102 @@ def test_save_expense_persists_direct_project_and_allows_same_amount_for_differe
     assert captured["committed"] is True
 
 
+def test_expense_rows_accept_negative_amounts(monkeypatch):
+    mod, _frappe = _load_expense_entry(monkeypatch)
+
+    rows = mod._expense_rows([
+        {
+            "voucher_no": "CREDIT-1",
+            "account_level_1": "\u7814\u53d1\u652f\u51fa",
+            "account_level_2": "\u5176\u4ed6\u76f8\u5173\u8d39\u7528",
+            "account_level_3": "\u5dee\u65c5\u8d39",
+            "amount": -125.50,
+            "allocation_type": "common",
+        }
+    ])
+
+    assert rows[0]["amount"] == -125.50
+
+
+def test_save_expense_persists_four_level_accounts_and_derives_category(monkeypatch):
+    mod, frappe = _load_expense_entry(monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    frappe.db.get_value = lambda doctype, filters, fieldname=None, **kwargs: None
+    frappe.db.exists = lambda doctype, name_or_filters=None: True if doctype == "Project" else False
+    frappe.db.commit = lambda: None
+
+    def get_doc(arg, name=None):
+        if isinstance(arg, dict) and arg.get("doctype") == "RD Expense Import":
+            captured["doc"] = arg
+            return SimpleNamespace(insert=lambda ignore_permissions=False: None)
+        raise AssertionError(arg)
+
+    frappe.get_doc = get_doc
+
+    mod.save_expense("2026-07", json.dumps([
+        {
+            "voucher_no": "V5",
+            "account_level_1": "研发支出",
+            "account_level_2": "人员人工费用",
+            "account_level_3": "社会保险费用（单位）",
+            "account_level_4": "养老保险",
+            "amount": 100,
+            "direct_project": "RD16",
+        }
+    ]))
+
+    row = captured["doc"]["items"][0]
+    assert row["account_level_1"] == "研发支出"
+    assert row["account_level_2"] == "人员人工费用"
+    assert row["account_level_3"] == "社会保险费用（单位）"
+    assert row["account_level_4"] == "养老保险"
+    assert row["category"] == "personnel"
+
+
+
+def test_save_expense_persists_sabri_overseas_commissioned_research_account(monkeypatch):
+    mod, frappe = _load_expense_entry(monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    frappe.db.get_value = lambda doctype, filters, fieldname=None, **kwargs: None
+    frappe.db.exists = lambda doctype, name_or_filters=None: False
+    frappe.db.commit = lambda: None
+
+    def get_doc(arg, name=None):
+        if isinstance(arg, dict) and arg.get("doctype") == "RD Expense Import":
+            captured["doc"] = arg
+            return SimpleNamespace(insert=lambda ignore_permissions=False: None)
+        raise AssertionError(arg)
+
+    frappe.get_doc = get_doc
+
+    mod.save_expense("2026-07", json.dumps([
+        {
+            "voucher_no": "V-SABRI",
+            "account_level_1": "研发支出",
+            "account_level_2": "委托研发",
+            "account_level_3": "境外",
+            "account_level_4": "Sabri费用",
+            "amount": 100,
+            "allocation_type": "common",
+        }
+    ]))
+
+    row = captured["doc"]["items"][0]
+    assert row["account_level_1"] == "研发支出"
+    assert row["account_level_2"] == "委托研发"
+    assert row["account_level_3"] == "境外"
+    assert row["account_level_4"] == "Sabri费用"
+    assert row["category"] == "other"
+
+
 def test_save_expense_reopens_allocated_import_by_canceling_allocation_and_creating_replacement(monkeypatch):
     mod, frappe = _load_expense_entry(monkeypatch)
     captured = {"canceled": []}

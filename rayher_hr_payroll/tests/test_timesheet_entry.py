@@ -20,6 +20,8 @@ PLM_ACTIVITY_TYPES = (
     "\u9879\u76ee\u4f1a\u8bae",
     "\u6280\u672f\u5206\u4eab",
     "\u8fd0\u7ef4\u652f\u6301",
+    "\u8c03\u4f11",
+    "\u8bf7\u5047",
     "\u5176\u4ed6",
 )
 
@@ -481,6 +483,58 @@ def test_get_rd_hour_summary_calculates_plm_metrics_for_selected_employee(monkey
     }
 
 
+def test_get_rd_hour_summary_for_all_employees_uses_employee_days_and_max_filled_days(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_visible_employee_names", lambda include_finance=False: None)
+
+    def sql(query, values=None, as_dict=False, **kwargs):
+        assert "ts.employee = %(employee)s" not in query
+        assert as_dict is True
+        return [
+            SimpleNamespace(employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 1), hours=8),
+            SimpleNamespace(employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 2), hours=8),
+            SimpleNamespace(employee="EMP-2", employee_name="Li Si", work_date=date(2026, 7, 1), hours=8),
+            SimpleNamespace(employee="EMP-3", employee_name="Wang Wu", work_date=date(2026, 7, 2), hours=4),
+        ]
+
+    frappe.db.sql = sql
+
+    data = mod.get_rd_hour_summary("2026-07")
+
+    assert data == {
+        "employee": None,
+        "employee_name": "",
+        "total_hours": 28.0,
+        "filled_days": 2,
+        "average_hours": 7.0,
+        "standard_hours": 32.0,
+        "standard_delta": -4.0,
+    }
+
+
+def test_list_rd_hours_accepts_employee_filter(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
+    monkeypatch.setattr(mod, "_visible_employee_names", lambda include_finance=False: None)
+
+    def sql(query, values=None, as_dict=False, **kwargs):
+        captured["query"] = query
+        captured["values"] = values
+        assert "ts.employee = %(employee)s" in query
+        assert as_dict is True
+        return [{"employee": "EMP-1"}]
+
+    frappe.db.sql = sql
+
+    data = mod.list_rd_hours("2026-07", employee="EMP-1")
+
+    assert captured["roles"] == mod.RD_TIMESHEET_VIEW_ROLES
+    assert captured["values"]["employee"] == "EMP-1"
+    assert data == [{"employee": "EMP-1"}]
 def test_get_rd_hour_summary_rejects_invisible_employee(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
 
@@ -490,3 +544,46 @@ def test_get_rd_hour_summary_rejects_invisible_employee(monkeypatch):
 
     with pytest.raises(RuleError, match="无权"):
         mod.get_rd_hour_summary("2026-07", employee="EMP-OTHER")
+def test_bulk_save_rd_hours_uses_one_transaction_and_returns_refreshed_rows(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    captured = {"saved": []}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
+    monkeypatch.setattr(mod, "list_rd_hours", lambda period: [{"period": period, "ok": True}])
+    monkeypatch.setattr(mod, "_save_rd_hours_row", lambda allow_replace=True, **kwargs: captured["saved"].append((allow_replace, kwargs)))
+    frappe.db.savepoint = lambda name: captured.setdefault("savepoint", name)
+    frappe.db.rollback = lambda save_point=None: captured.setdefault("rollback", save_point)
+    frappe.db.commit = lambda: captured.setdefault("committed", True)
+
+    result = mod.bulk_save_rd_hours("2026-07", '[{"employee":"EMP-1","work_date":"2026-07-01","project":"PROJ-1","project_code":"RD14","project_name":"ACONCA 7961","activity_type":"方案设计","hours":2,"description":"work"}]')
+
+    assert captured["roles"] == mod.RD_TIMESHEET_ENTRY_ROLES
+    assert captured["savepoint"] == "rd_bulk_timesheet"
+    assert captured["committed"] is True
+    assert captured["saved"][0][0] is False
+    assert captured["saved"][0][1]["period"] == "2026-07"
+    assert captured["saved"][0][1]["employee"] == "EMP-1"
+    assert result == [{"period": "2026-07", "ok": True}]
+
+
+def test_bulk_save_rd_hours_rolls_back_when_any_row_fails(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    captured = {"calls": 0}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    def fail_on_second(**kwargs):
+        captured["calls"] += 1
+        if captured["calls"] == 2:
+            raise RuleError("bad row")
+    monkeypatch.setattr(mod, "_save_rd_hours_row", fail_on_second)
+    monkeypatch.setattr(mod, "list_rd_hours", lambda period: (_ for _ in ()).throw(AssertionError("should not refresh after failure")))
+    frappe.db.savepoint = lambda name: captured.setdefault("savepoint", name)
+    frappe.db.rollback = lambda save_point=None: captured.setdefault("rollback", save_point)
+    frappe.db.commit = lambda: captured.setdefault("committed", True)
+
+    rows = '[{"employee":"EMP-1","work_date":"2026-07-01","project_code":"RD14","project_name":"A","hours":1},{"employee":"EMP-1","work_date":"2026-07-02","project_code":"RD14","project_name":"A","hours":1}]'
+    with pytest.raises(RuleError, match="bad row"):
+        mod.bulk_save_rd_hours("2026-07", rows)
+
+    assert captured["rollback"] == "rd_bulk_timesheet"
+    assert "committed" not in captured

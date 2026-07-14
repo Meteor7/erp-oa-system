@@ -24,6 +24,14 @@ def _source_expense_by_name(source_expense_rows: list[Any]) -> dict[str, Any]:
     return {str(_value(row, "expense_item")): row for row in source_expense_rows}
 
 
+def _most_specific_expense_item_name(source: Any, fallback: Any) -> str:
+    for fieldname in ("account_level_4", "account_level_3", "account_level_2", "account_level_1"):
+        value = str(_value(source, fieldname, "") or "").strip()
+        if value:
+            return value
+    return str(fallback)
+
+
 def _employee_project_hours(
     source_hour_rows: list[Any], project_hours: list[ProjectHour]
 ) -> dict[str, list[ProjectHour]]:
@@ -129,17 +137,23 @@ def populate_allocation_document(
     for line in result.lines:
         if str(line.expense_item).startswith(LABOR_PREFIX):
             emp = str(line.expense_item)[len(LABOR_PREFIX):]
-            item_name = "人工费-" + emp
-            voucher = "工资单:" + emp  # voucher_no is reqd; mark the Salary Slip source
+            item_name = "\u4eba\u5de5\u8d39-" + emp
+            voucher = "\u5de5\u8d44\u5355:" + emp  # voucher_no is reqd; mark the Salary Slip source
+            account_level_3 = "\u4eba\u5de5\u8d39"
+            account_level_4 = emp
         else:
             source = expense_sources.get(line.expense_item, {})
-            item_name = _value(source, "account_level_3", "") or line.expense_item
+            item_name = _most_specific_expense_item_name(source, line.expense_item)
             voucher = _value(source, "voucher_no", "")
+            account_level_3 = str(_value(source, "account_level_3", "") or "").strip() or item_name
+            account_level_4 = str(_value(source, "account_level_4", "") or "").strip()
         doc.append(
             "lines",
             {
                 "expense_item_name": item_name,
                 "voucher_no": voucher,
+                "account_level_3": account_level_3,
+                "account_level_4": account_level_4,
                 "project": line.project,
                 "project_stage": line.stage,
                 "basis_hours": float(line.basis_hours),

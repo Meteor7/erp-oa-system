@@ -7,14 +7,14 @@ from rayher_hr_payroll.api._guards import require_rd_access
 RD_PROJECT_MANAGE_ROLES = ("System Manager", "HR User", "HR Manager", "Accounts User")
 
 DEFAULT_RAYHER_PROJECTS = [
-    {"project_code": "RD19", "project_name": "无图形晶圆缺陷检测系统（KIBO 4895C）", "start_date": "2026-07-01", "end_date": "", "status": "Open", "rd_stage": "费用化"},
-    {"project_code": "RD18", "project_name": "无图形晶圆颗粒检测系统（KIBO 4895）", "start_date": "2026-07-01", "end_date": "", "status": "Open", "rd_stage": "费用化"},
+    {"project_code": "RD19", "project_name": "KIBO 4895C", "start_date": "2026-07-01", "end_date": "", "status": "Open", "rd_stage": "费用化"},
+    {"project_code": "RD18", "project_name": "KIBO 4895", "start_date": "2026-07-01", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD17", "project_name": "EFEM-12-2LP-EG-A", "start_date": "2026-05-09", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD16", "project_name": "EFEM-8-2LP-EG-A", "start_date": "2026-05-09", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD15", "project_name": "DRAKENS 4482", "start_date": "2026-05-06", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD14", "project_name": "ACONCA 7961", "start_date": "2026-01-05", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD13", "project_name": "KIBO 5895H", "start_date": "2026-01-05", "end_date": "", "status": "Open", "rd_stage": "费用化"},
-    {"project_code": "RD12", "project_name": "EFEM", "start_date": "2025-06-05", "end_date": "", "status": "Open", "rd_stage": "费用化"},
+    {"project_code": "RD12", "project_name": "Self-developed EFEM", "start_date": "2025-06-05", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD11", "project_name": "RMS", "start_date": "2025-06-01", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD10", "project_name": "NANSI 1266", "start_date": "2025-04-01", "end_date": "", "status": "Open", "rd_stage": "费用化"},
     {"project_code": "RD09", "project_name": "Result Viewer", "start_date": "2024-05-06", "end_date": "", "status": "Open", "rd_stage": "费用化"},
@@ -38,6 +38,7 @@ _STATUS_VALUES.update({key: key for key in _STATUS_LABELS})
 _STAGE_LABELS = {"资本化": "资本化", "费用化": "费用化", "未判定": "未判定"}
 _STAGE_VALUES = {key: key for key in _STAGE_LABELS}
 _STAGE_VALUES.update({"capitalized": "资本化", "expensed": "费用化", "unknown": "未判定", "Capitalized": "资本化", "Expensed": "费用化"})
+_UNSET = object()
 
 
 def _company():
@@ -77,7 +78,6 @@ def _stage_value(stage):
 
 def _serialize(row):
     data = dict(row)
-    data["english_name"] = data.get("project_name") or ""
     data["status_label"] = _STATUS_LABELS.get(data.get("status"), data.get("status") or "")
     data["rd_stage"] = _stage_value(data.get("rd_stage"))
     data["rd_stage_label"] = _STAGE_LABELS.get(data.get("rd_stage"), data.get("rd_stage") or "")
@@ -98,6 +98,8 @@ def list_projects(search=None, status=None):
         fields=[
             "name", "project_name", "rd_project_code", "rd_project_key", "status", "rd_stage",
             "allow_rd_timesheet", "capitalization_start_date", "capitalization_end_date",
+            "project_owner_name", "project_owner", "project_initiation_report", "project_completion_report",
+            "capitalization_confirmation_file",
         ],
         order_by="rd_project_code desc",
     )
@@ -109,20 +111,42 @@ def list_projects(search=None, status=None):
             if query in " ".join([
                 str(row.get("rd_project_code") or ""),
                 str(row.get("project_name") or ""),
-                str(row.get("english_name") or ""),
             ]).lower()
         ]
     return data
 
 
-def _project_values(project_code, project_name, start_date=None, end_date=None, status="Open", rd_stage="费用化"):
+@frappe.whitelist()
+def list_project_owners():
+    require_rd_access(RD_PROJECT_MANAGE_ROLES)
+    return frappe.get_all(
+        "User",
+        filters={"enabled": 1, "user_type": "System User"},
+        fields=["name", "full_name"],
+        order_by="full_name asc, name asc",
+    )
+
+
+def _project_values(
+    project_code,
+    project_name,
+    start_date=None,
+    end_date=None,
+    status="Open",
+    rd_stage="费用化",
+    project_owner_name=_UNSET,
+    project_owner=_UNSET,
+    project_initiation_report=_UNSET,
+    project_completion_report=_UNSET,
+    capitalization_confirmation_file=_UNSET,
+):
     code = _clean(project_code)
     name = _clean(project_name)
     if not code or not name:
         frappe.throw(frappe._("请填写项目编号和项目名称。"))
     status_value = _status_value(status)
     stage_value = _stage_value(rd_stage)
-    return {
+    values = {
         "project_name": name,
         "rd_project_code": code,
         "rd_project_key": _project_key(code, name),
@@ -133,12 +157,48 @@ def _project_values(project_code, project_name, start_date=None, end_date=None, 
         "capitalization_start_date": _date_or_none(start_date),
         "capitalization_end_date": _date_or_none(end_date),
     }
+    optional_values = {
+        "project_owner_name": project_owner_name,
+        "project_owner": project_owner,
+        "project_initiation_report": project_initiation_report,
+        "project_completion_report": project_completion_report,
+        "capitalization_confirmation_file": capitalization_confirmation_file,
+    }
+    for fieldname, value in optional_values.items():
+        if value is not _UNSET:
+            values[fieldname] = _clean(value) or None
+    return values
 
 
-def _save_project_doc(project_code, project_name, start_date=None, end_date=None, status="Open", name=None, rd_stage="费用化"):
+def _save_project_doc(
+    project_code,
+    project_name,
+    start_date=None,
+    end_date=None,
+    status="Open",
+    name=None,
+    rd_stage="费用化",
+    project_owner_name=_UNSET,
+    project_owner=_UNSET,
+    project_initiation_report=_UNSET,
+    project_completion_report=_UNSET,
+    capitalization_confirmation_file=_UNSET,
+):
     code = _clean(project_code)
     doc_name = _clean(name) or code
-    values = _project_values(code, project_name, start_date, end_date, status, rd_stage)
+    values = _project_values(
+        code,
+        project_name,
+        start_date,
+        end_date,
+        status,
+        rd_stage,
+        project_owner_name=project_owner_name,
+        project_owner=project_owner,
+        project_initiation_report=project_initiation_report,
+        project_completion_report=project_completion_report,
+        capitalization_confirmation_file=capitalization_confirmation_file,
+    )
     if frappe.db.exists("Project", doc_name):
         doc = frappe.get_doc("Project", doc_name)
         doc.update(values)
@@ -150,10 +210,37 @@ def _save_project_doc(project_code, project_name, start_date=None, end_date=None
 
 
 @frappe.whitelist(methods=["POST"])
-def save_project(project_code, project_name, start_date=None, end_date=None, status="Open", name=None, english_name=None, rd_stage="费用化"):
+def save_project(
+    project_code,
+    project_name,
+    start_date=None,
+    end_date=None,
+    status="Open",
+    name=None,
+    english_name=None,
+    rd_stage="费用化",
+    project_owner_name=None,
+    project_owner=None,
+    project_initiation_report=None,
+    project_completion_report=None,
+    capitalization_confirmation_file=None,
+):
     require_rd_access(RD_PROJECT_MANAGE_ROLES)
     project_name = _clean(project_name) or _clean(english_name)
-    saved = _save_project_doc(project_code, project_name, start_date, end_date, status, name=name, rd_stage=rd_stage)
+    saved = _save_project_doc(
+        project_code,
+        project_name,
+        start_date,
+        end_date,
+        status,
+        name=name,
+        rd_stage=rd_stage,
+        project_owner_name=project_owner_name,
+        project_owner=project_owner,
+        project_initiation_report=project_initiation_report,
+        project_completion_report=project_completion_report,
+        capitalization_confirmation_file=capitalization_confirmation_file,
+    )
     frappe.db.commit()
     return {"name": saved}
 

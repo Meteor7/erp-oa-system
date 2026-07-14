@@ -101,10 +101,16 @@ test("timesheet entry shows PLM style hour summary cards and employee picker", (
   assert.match(source, /summaryCards/);
   assert.ok(source.includes("总填报工时"));
   assert.ok(source.includes("填报天数"));
-  assert.ok(source.includes("日均工时"));
+  assert.ok(source.includes("人均日工时"));
   assert.ok(source.includes("与标准差值"));
   assert.ok(source.includes("查看员工"));
+  assert.ok(source.includes("全部员工"));
+  assert.ok(source.includes("chooseSummaryEmployee('')"));
+  assert.doesNotMatch(source, /summaryEmployee\.value = form\.employee \|\| items\[0\]\.name/);
   assert.match(source, /summary\.reload\(\)/);
+  assert.match(source, /fmtNumber\(data\.total_hours,\s*2\)/);
+  assert.match(source, /fmtNumber\(data\.average_hours,\s*2\)/);
+  assert.match(source, /fmtDelta\(data\.standard_delta,\s*2\)/);
 });
 
 
@@ -119,4 +125,34 @@ test("timesheet entry requires project values from project management", () => {
 test("timesheet entry blocks save when project code and name do not match", () => {
   assert.match(source, /if \(!matchedProject\)/);
   assert.ok(source.includes("项目代码和项目名称必须匹配项目管理中的可填报项目"));
+});
+test("timesheet entry supports batch paste and Excel import", () => {
+  assert.match(source, /parseTimesheetPaste/);
+  assert.match(source, /importTimesheetWorkbookFile/);
+  assert.match(source, /bulk_save_rd_hours/);
+  assert.match(source, /batchRows/);
+  assert.ok(source.includes("批量粘贴 / Excel 导入"));
+  assert.ok(source.includes("预览导入"));
+  assert.ok(source.includes("保存导入工时"));
+  assert.match(source, /JSON\.stringify\(batchRows\.value/);
+});
+test("timesheet employee picker filters detail rows and supports typed search", () => {
+  assert.match(source, /makeParams: \(\) => \(\{ period: period\.value, employee: selectedSummaryEmployee\.value, scope: periodScope\.value \}\)/);
+  assert.match(source, /const summaryEmployeeQuery = ref/);
+  assert.match(source, /const activeSummaryEmployeePicker = ref/);
+  assert.match(source, /const filteredSummaryEmployees = computed/);
+  assert.match(source, /function chooseSummaryEmployee/);
+  assert.match(source, /function openSummaryEmployeePicker/);
+  assert.match(source, /rows\.reload\(\)/);
+  assert.match(source, /@input="openSummaryEmployeePicker"/);
+  assert.doesNotMatch(source, /<select v-model="summaryEmployee"/);
+});
+
+
+test("timesheet entry can switch summary and details between month and year", () => {
+  assert.match(source, /periodScope/);
+  assert.match(source, /scope: periodScope\.value/);
+  assert.match(source, /PERIOD_SCOPES/);
+  assert.match(source, /setPeriodScope/);
+  assert.match(source, /watch\(periodScope/);
 });

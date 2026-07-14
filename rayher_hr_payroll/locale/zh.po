@@ -95,8 +95,12 @@ msgid "Exception Type"
 msgstr "异常类型"
 
 #: rayher_hr_payroll/translatable_labels.py:26
-msgid "Expense Item"
-msgstr "费用行"
+msgid "3级费用科目"
+msgstr "3级费用科目"
+
+#: rayher_hr_payroll/translatable_labels.py:27
+msgid "4级费用科目"
+msgstr "4级费用科目"
 
 #. Name of a role
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.json
@@ -736,7 +740,7 @@ msgid "本期已有已提交的分摊单，如需重算请联系系统管理员�
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:34
-msgid "本期没有费用导入单，无法分摊。请先在「财务费用导入」录入费用。"
+msgid "本期没有费用导入单，无法分摊。请先在「研发费用导入」录入费用。"
 msgstr ""
 
 #: rayher_hr_payroll/api/expense_entry.py:71
@@ -997,11 +1001,11 @@ msgid "项目"
 msgstr ""
 
 
-#: rayher_hr_payroll/translatable_labels.py:27
+#: rayher_hr_payroll/translatable_labels.py:28
 msgid "Voucher No"
 msgstr "凭证编号"
 
-#: rayher_hr_payroll/translatable_labels.py:28
+#: rayher_hr_payroll/translatable_labels.py:29
 msgid "Message"
 msgstr "信息"
 

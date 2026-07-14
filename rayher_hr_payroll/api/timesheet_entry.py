@@ -5,6 +5,7 @@ existing allocation engine (which reads tabTimesheet Detail) keeps working
 unchanged. One submitted Timesheet per employee+project+period combo (upsert /
 replace semantics); editing replaces, hours=0 deletes.
 """
+import json
 from datetime import timedelta
 
 import frappe
@@ -26,6 +27,8 @@ RD_ACTIVITY_TYPES = (
     "项目会议",
     "技术分享",
     "运维支持",
+    "调休",
+    "请假",
     "其他",
 )
 _DEFAULT_ACTIVITY = "编码开发"
@@ -222,11 +225,10 @@ def get_rd_options():
 
 
 @frappe.whitelist()
-def list_rd_hours(period):
+def list_rd_hours(period, employee=None, scope="month"):
     require_rd_access(RD_TIMESHEET_VIEW_ROLES)
     year, month = parse_period(period)
-    employee_names = _visible_employee_names(include_finance=True)
-    employee_filter = "and ts.employee in %(employees)s" if employee_names is not None else ""
+    employee_filter, selected_employee, visible_employees = _summary_employee_filter(employee)
     return frappe.db.sql(
         f"""
         select ts.name as timesheet, tsd.name as timesheet_detail,
@@ -250,13 +252,13 @@ def list_rd_hours(period):
         inner join `tabEmployee` e on e.name = ts.employee
         inner join `tabProject` p on p.name = tsd.project
         where ts.docstatus = 1
-          and month(tsd.from_time) = %(month)s and year(tsd.from_time) = %(year)s
+          {_period_filter_sql(scope)}
           and e.rd_personnel_type in %(types)s
           {employee_filter}
           and coalesce(p.allow_rd_timesheet, 0) = 1
         order by date(tsd.from_time), e.employee_name, project_name, tsd.activity_type
         """,
-        {"year": year, "month": month, "types": RD_TYPES, "employees": tuple(employee_names or ["__none__"])},
+        {"year": year, "month": month, "types": RD_TYPES, "employee": selected_employee, "employees": visible_employees or ("__none__",)},
         as_dict=True,
     )
 
@@ -265,6 +267,12 @@ def _row_value(row, fieldname, default=None):
     if isinstance(row, dict):
         return row.get(fieldname, default)
     return getattr(row, fieldname, default)
+
+
+def _period_filter_sql(scope=None):
+    if str(scope or "month") == "year":
+        return "and year(tsd.from_time) = %(year)s"
+    return "and month(tsd.from_time) = %(month)s and year(tsd.from_time) = %(year)s"
 
 
 def _summary_employee_filter(employee=None):
@@ -280,7 +288,7 @@ def _summary_employee_filter(employee=None):
 
 
 @frappe.whitelist()
-def get_rd_hour_summary(period, employee=None):
+def get_rd_hour_summary(period, employee=None, scope="month"):
     require_rd_access(RD_TIMESHEET_VIEW_ROLES)
     year, month = parse_period(period)
     employee_filter, selected_employee, visible_employees = _summary_employee_filter(employee)
@@ -292,7 +300,7 @@ def get_rd_hour_summary(period, employee=None):
         inner join `tabEmployee` e on e.name = ts.employee
         inner join `tabProject` p on p.name = tsd.project
         where ts.docstatus = 1
-          and month(tsd.from_time) = %(month)s and year(tsd.from_time) = %(year)s
+          {_period_filter_sql(scope)}
           and e.rd_personnel_type in %(types)s
           and coalesce(p.allow_rd_timesheet, 0) = 1
           {employee_filter}
@@ -307,17 +315,23 @@ def get_rd_hour_summary(period, employee=None):
         as_dict=True,
     )
     total_hours = sum(float(_row_value(row, "hours", 0) or 0) for row in rows)
-    filled_days = {str(_row_value(row, "work_date")) for row in rows if _row_value(row, "work_date")}
-    day_count = len(filled_days)
-    standard_hours = float(day_count * MAX_DAILY_HOURS)
+    employee_days = {}
+    for row in rows:
+        work_date = _row_value(row, "work_date")
+        employee_name_key = _row_value(row, "employee")
+        if work_date and employee_name_key:
+            employee_days.setdefault(employee_name_key, set()).add(str(work_date))
+    employee_day_count = sum(len(days) for days in employee_days.values())
+    day_count = len(employee_days.get(selected_employee, set())) if selected_employee else max((len(days) for days in employee_days.values()), default=0)
+    standard_hours = float(employee_day_count * MAX_DAILY_HOURS)
     first = rows[0] if rows else None
-    employee_name = _row_value(first, "employee_name") if first else ""
+    employee_name = _row_value(first, "employee_name") if selected_employee and first else ""
     return {
-        "employee": selected_employee or (_row_value(first, "employee") if first else None),
+        "employee": selected_employee or None,
         "employee_name": employee_name or "",
         "total_hours": round(total_hours, 2),
         "filled_days": day_count,
-        "average_hours": round(total_hours / day_count, 2) if day_count else 0,
+        "average_hours": round(total_hours / employee_day_count, 2) if employee_day_count else 0,
         "standard_hours": standard_hours,
         "standard_delta": round(total_hours - standard_hours, 2),
     }
@@ -342,9 +356,7 @@ def _window_for_entry(year, month, work_date=None):
     return month_start, next_month
 
 
-@frappe.whitelist(methods=["POST"])
-def save_rd_hours(period, employee, project=None, hours=None, work_date=None, activity_type=None, description=None, project_code=None, project_name=None):
-    require_rd_access(RD_TIMESHEET_ENTRY_ROLES)
+def _save_rd_hours_row(period, employee, project=None, hours=None, work_date=None, activity_type=None, description=None, project_code=None, project_name=None, allow_replace=True):
     _require_visible_employee(employee)
     year, month = parse_period(period)
     entry_date = _work_date_in_period(work_date, year, month)
@@ -374,7 +386,10 @@ def save_rd_hours(period, employee, project=None, hours=None, work_date=None, ac
         frappe.throw(frappe._("本期已存在已提交的研发费用分摊，工时已冻结；如需调整请先撤销分摊。"))
     frappe.db.get_value("Employee", employee, "name", for_update=True)  # serialize concurrent saves for this employee so the drop+insert cannot double-count
     drop_activity = activity if explicit_activity else None
-    _drop_combo(employee, project, year, month, entry_date, drop_activity)
+    if not allow_replace and _combo_timesheets(employee, project, year, month, entry_date, drop_activity):
+        frappe.throw(frappe._("系统中已存在相同员工/日期/项目/活动类型工时，请先删除后再导入。"))
+    if allow_replace:
+        _drop_combo(employee, project, year, month, entry_date, drop_activity)
     if hours > 0:
         # Place the log in the earliest free slot inside the chosen day (or month),
         # considering ALL the employee's logs (manual + SPA) so it overlaps none.
@@ -424,9 +439,61 @@ def save_rd_hours(period, employee, project=None, hours=None, work_date=None, ac
         ts.insert(ignore_permissions=True)
         ts.flags.ignore_permissions = True  # endpoint is role-gated by require_rd_access; carry the bypass into submit so HR users without native Timesheet submit can still file R&D hours
         ts.submit()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_rd_hours(period, employee, project=None, hours=None, work_date=None, activity_type=None, description=None, project_code=None, project_name=None):
+    require_rd_access(RD_TIMESHEET_ENTRY_ROLES)
+    _save_rd_hours_row(
+        period=period,
+        employee=employee,
+        project=project,
+        hours=hours,
+        work_date=work_date,
+        activity_type=activity_type,
+        description=description,
+        project_code=project_code,
+        project_name=project_name,
+        allow_replace=True,
+    )
     frappe.db.commit()
     return list_rd_hours(period)
 
+
+@frappe.whitelist(methods=["POST"])
+def bulk_save_rd_hours(period, rows):
+    require_rd_access(RD_TIMESHEET_ENTRY_ROLES)
+    if isinstance(rows, str):
+        try:
+            rows = json.loads(rows or "[]")
+        except ValueError:
+            frappe.throw(frappe._("导入工时数据格式不正确。"))
+    if not isinstance(rows, list) or not rows:
+        frappe.throw(frappe._("请导入至少一行工时。"))
+
+    frappe.db.savepoint("rd_bulk_timesheet")
+    try:
+        for row in rows:
+            if not isinstance(row, dict):
+                frappe.throw(frappe._("导入工时数据格式不正确。"))
+            _save_rd_hours_row(
+                period=period,
+                employee=row.get("employee"),
+                project=row.get("project"),
+                hours=row.get("hours"),
+                work_date=row.get("work_date"),
+                activity_type=row.get("activity_type"),
+                description=row.get("description"),
+                project_code=row.get("project_code"),
+                project_name=row.get("project_name"),
+                allow_replace=False,
+            )
+    except Exception:
+        frappe.db.rollback(save_point="rd_bulk_timesheet")
+        raise
+
+    frappe.db.commit()
+    return list_rd_hours(period)
 
 @frappe.whitelist(methods=["POST"])
 def delete_rd_hours(timesheet):

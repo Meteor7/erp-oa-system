@@ -1,7 +1,32 @@
 <script setup>
 import { ref, computed, watch } from "vue";
 import { Card, Button, Spinner, createResource } from "frappe-ui";
-import { period } from "../lib/period";
+import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel, periodYear } from "../lib/period";
+import { exportAllocationWorkbook } from "../lib/allocationExport";
+
+const TEXT = {
+  title: "\u7814\u53d1\u8d39\u7528\u53f0\u8d26",
+  subtitle: "\u6309\u5de5\u65f6\u5206\u914d\u7387\u628a\u8d39\u7528\u6c60\u644a\u5230\u5404\u9879\u76ee\uff0c\u5e76\u6309\u9879\u76ee\u8d44\u672c\u5316\u9636\u6bb5\u6c47\u603b",
+  accountingPeriod: "\u4f1a\u8ba1\u671f\u95f4",
+  viewScope: "\u53e3\u5f84",
+  recalc: "\u91cd\u7b97\u5206\u644a",
+  cancel: "\u64a4\u9500\u672c\u671f\u5206\u644a",
+  exportExcel: "\u5bfc\u51faExcel",
+  capitalized: "\u8d44\u672c\u5316\u5408\u8ba1",
+  expensed: "\u8d39\u7528\u5316\u5408\u8ba1",
+  capitalExpense: "\u8d44\u672c\u548c\u8d39\u7528\u5408\u8ba1",
+  unknown: "\u672a\u5224\u5b9a\u5408\u8ba1",
+  projectTotal: "\u9879\u76ee\u6c47\u603b",
+  noData: "\u5f53\u524d\u8303\u56f4\u6682\u65e0\u5206\u644a\u6570\u636e\u3002",
+  monthNoData: "\u672c\u671f\u6682\u65e0\u5206\u644a\u6570\u636e\uff0c\u70b9\u4e0a\u65b9\u300c\u91cd\u7b97\u5206\u644a\u300d\u751f\u6210\u3002",
+  confirmCancel: "\u786e\u5b9a\u64a4\u9500",
+};
+
+const modeOptions = [
+  { value: "all", label: "\u6c47\u603b" },
+  { value: "capitalized", label: "\u8d44\u672c\u5316" },
+  { value: "expensed", label: "\u8d39\u7528\u5316" },
+];
 
 const columns = ref([]);
 const result = ref([]);
@@ -9,84 +34,193 @@ const summary = ref(null);
 const allocName = ref(null);
 const loading = ref(false);
 const recalcing = ref(false);
+const canceling = ref(false);
+const exporting = ref(false);
 const msg = ref("");
+const allocationMode = ref("all");
 
 const allocRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.get_allocation", method: "GET" });
 const matrixRes = createResource({ url: "frappe.desk.query_report.run", method: "GET" });
 const recalcRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.recalc_allocation" });
+const cancelRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.cancel_allocation" });
 
-async function loadMatrix(name) {
-  columns.value = []; result.value = [];
-  if (!name) return;
-  const d = await matrixRes.submit({ report_name: "RD Allocation Matrix", filters: JSON.stringify({ allocation: name }) });
-  columns.value = d.columns || []; result.value = d.result || [];
+const isYearScope = computed(() => periodScope.value === "year");
+const displayPeriod = computed(() => periodScopeLabel(period.value, periodScope.value));
+const allocationModeLabel = computed(() => modeOptions.find((option) => option.value === allocationMode.value)?.label || modeOptions[0].label);
+const matrixFilters = computed(() => ({
+  ...(isYearScope.value ? { year: Number(periodYear(period.value)) } : { allocation: allocName.value }),
+  stage: allocationMode.value,
+}));
+const canExport = computed(() => Boolean(summary.value && columns.value.length && result.value.length));
+const totalRows = computed(() => result.value.filter((row) => !isTotalRow(row)).length);
+const viewSummary = computed(() => {
+  const data = summary.value || {};
+  if (allocationMode.value === "capitalized") {
+    return { ...data, expensed: 0, unknown: 0 };
+  }
+  if (allocationMode.value === "expensed") {
+    return { ...data, capitalized: 0, unknown: 0 };
+  }
+  return data;
+});
+const summaryCards = computed(() => {
+  const data = viewSummary.value;
+  const capitalized = Number(data.capitalized || 0);
+  const expensed = Number(data.expensed || 0);
+  return [
+    { key: "capitalized", label: TEXT.capitalized, value: capitalized },
+    { key: "expensed", label: TEXT.expensed, value: expensed },
+    { key: "capitalExpense", label: TEXT.capitalExpense, value: capitalized + expensed },
+    { key: "unknown", label: TEXT.unknown, value: Number(data.unknown || 0) },
+  ];
+});
+
+async function loadMatrix() {
+  columns.value = [];
+  result.value = [];
+  if (!isYearScope.value && !allocName.value) return;
+  const d = await matrixRes.submit({ report_name: "RD Allocation Matrix", filters: JSON.stringify(matrixFilters.value) });
+  columns.value = d.columns || [];
+  result.value = d.result || [];
 }
 
 async function load() {
-  loading.value = true; msg.value = "";
+  loading.value = true;
+  msg.value = "";
   try {
-    const a = await allocRes.submit({ period: period.value });
-    summary.value = a && a.name ? a : null;
+    const a = await allocRes.submit({ period: period.value, scope: periodScope.value });
+    summary.value = a && (a.name || a.scope === "year") ? a : null;
     allocName.value = a && a.name ? a.name : null;
-    await loadMatrix(allocName.value);
-  } finally { loading.value = false; }
+    await loadMatrix();
+  } finally {
+    loading.value = false;
+  }
 }
 
-async function pick(p) { period.value = p; await load(); }
-
 async function recalc() {
-  recalcing.value = true; msg.value = "";
+  if (isYearScope.value) return;
+  recalcing.value = true;
+  msg.value = "";
   try {
     const a = await recalcRes.submit({ period: period.value });
     if (recalcRes.error) {
       const er = recalcRes.error;
-      msg.value = (er.messages && er.messages.join("；")) || er.message || "重算失败";
+      msg.value = (er.messages && er.messages.join("\uff1b")) || er.message || "\u91cd\u7b97\u5931\u8d25";
       return;
     }
-    summary.value = a; allocName.value = a.name;
-    await loadMatrix(a.name);
-    msg.value = "已重算：" + period.value;
-  } catch (e) { msg.value = (e && e.message) || "重算失败"; }
-  finally { recalcing.value = false; }
+    summary.value = a;
+    allocName.value = a.name;
+    await loadMatrix();
+    msg.value = "\u5df2\u91cd\u7b97\uff1a" + period.value;
+  } catch (e) {
+    msg.value = (e && e.message) || "\u91cd\u7b97\u5931\u8d25";
+  } finally {
+    recalcing.value = false;
+  }
 }
 
-load();
+async function cancelAllocation() {
+  if (!allocName.value || isYearScope.value) return;
+  const confirmed = window.confirm(`${TEXT.confirmCancel} ${period.value} \u7684\u5206\u644a\u5417\uff1f\u64a4\u9500\u540e\u672c\u671f\u5de5\u65f6\u53ef\u4ee5\u7ee7\u7eed\u8c03\u6574\uff0c\u8c03\u6574\u540e\u9700\u8981\u91cd\u65b0\u5206\u644a\u3002`);
+  if (!confirmed) return;
+  canceling.value = true;
+  msg.value = "";
+  try {
+    await cancelRes.submit({ period: period.value });
+    if (cancelRes.error) {
+      const er = cancelRes.error;
+      msg.value = (er.messages && er.messages.join("\uff1b")) || er.message || "\u64a4\u9500\u5931\u8d25";
+      return;
+    }
+    await load();
+    msg.value = "\u5df2\u64a4\u9500\u672c\u671f\u5206\u644a\uff0c\u53ef\u7ee7\u7eed\u8c03\u6574\u5de5\u65f6";
+  } catch (e) {
+    msg.value = (e && e.message) || "\u64a4\u9500\u5931\u8d25";
+  } finally {
+    canceling.value = false;
+  }
+}
+
+async function exportCurrentAllocation() {
+  if (!canExport.value) return;
+  exporting.value = true;
+  msg.value = "";
+  try {
+    const filename = await exportAllocationWorkbook({
+      period: `${displayPeriod.value}-${allocationModeLabel.value}`,
+      summary: viewSummary.value,
+      columns: columns.value,
+      result: result.value,
+    });
+    msg.value = "\u5df2\u5bfc\u51fa\uff1a" + filename;
+  } catch (e) {
+    msg.value = (e && e.message) || "\u5bfc\u51fa\u5931\u8d25";
+  } finally {
+    exporting.value = false;
+  }
+}
+
 const fmt = (n) => (typeof n === "number" ? n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n);
 const colKey = (c) => c.fieldname || c.id;
 const colLabel = (c) => c.label || c.fieldname;
 const isCur = (c) => c.fieldtype === "Currency";
+function isTotalRow(row = {}) { return Boolean(row._is_total); }
+function cellText(row, column) {
+  const key = colKey(column);
+  if (isTotalRow(row) && key === "account_level_3") return TEXT.projectTotal;
+  const value = row[key];
+  return isCur(column) ? fmt(Number(value || 0)) : value;
+}
+
 watch(period, () => load());
+watch(periodScope, () => load());
+watch(allocationMode, () => loadMatrix());
+load();
 </script>
 
 <template>
-  <Card title="研发费用分摊表" subtitle="按工时分配率把费用池摊到各项目，并按项目资本化阶段汇总">
-    <div class="flex items-center gap-2 mb-4 flex-wrap">
-      <span class="text-sm text-gray-500">会计期间</span>
-      <input type="month" v-model="period" class="border border-gray-300 rounded px-3 py-1.5 text-sm" />
-      <Button variant="solid" :loading="recalcing" @click="recalc" class="ml-2">重算分摊</Button>
-      <span v-if="msg" class="text-xs text-green-600 ml-1">{{ msg }}</span>
+  <Card :title="TEXT.title" :subtitle="TEXT.subtitle">
+    <div class="mb-4 flex flex-wrap items-center gap-2">
+      <span class="text-sm text-gray-500">{{ TEXT.accountingPeriod }}</span>
+      <input type="month" v-model="period" class="rounded border border-gray-300 px-3 py-1.5 text-sm" />
+      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
+        <button v-for="scope in PERIOD_SCOPES" :key="scope.value" type="button" class="px-3 py-1.5 text-sm" :class="periodScope === scope.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="setPeriodScope(scope.value)">{{ scope.label }}</button>
+      </div>
+      <span class="ml-2 text-sm text-gray-500">{{ TEXT.viewScope }}</span>
+      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
+        <button v-for="option in modeOptions" :key="option.value" type="button" class="px-3 py-1.5 text-sm" :class="allocationMode === option.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="allocationMode = option.value">{{ option.label }}</button>
+      </div>
+      <Button v-if="!isYearScope" variant="solid" :loading="recalcing" @click="recalc" class="ml-2">{{ TEXT.recalc }}</Button>
+      <Button v-if="allocName && !isYearScope" variant="subtle" :loading="canceling" @click="cancelAllocation">{{ TEXT.cancel }}</Button>
+      <Button v-if="summary" variant="subtle" :loading="exporting" :disabled="!canExport" @click="exportCurrentAllocation">{{ TEXT.exportExcel }}</Button>
+      <span v-if="msg" class="ml-1 text-xs text-green-600">{{ msg }}</span>
     </div>
 
-    <div v-if="summary" class="grid grid-cols-3 gap-3 mb-4">
-      <div class="p-3 bg-gray-50 rounded-lg"><div class="text-xs text-gray-500">资本化合计</div><div class="text-lg font-semibold tabular-nums">{{ fmt(summary.capitalized) }}</div></div>
-      <div class="p-3 bg-gray-50 rounded-lg"><div class="text-xs text-gray-500">费用化合计</div><div class="text-lg font-semibold tabular-nums">{{ fmt(summary.expensed) }}</div></div>
-      <div class="p-3 bg-gray-50 rounded-lg"><div class="text-xs text-gray-500">未判定合计</div><div class="text-lg font-semibold tabular-nums">{{ fmt(summary.unknown) }}</div></div>
+    <div v-if="summary" class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div v-for="card in summaryCards" :key="card.key" class="rounded-lg bg-gray-50 p-3">
+        <div class="text-xs text-gray-500">{{ card.label }}</div>
+        <div class="text-lg font-semibold tabular-nums">{{ fmt(card.value) }}</div>
+      </div>
     </div>
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
-    <div v-else-if="!result.length" class="text-gray-500 text-sm py-6">本期暂无分摊数据，点上方「重算分摊」生成。</div>
+    <div v-else-if="!result.length" class="py-6 text-sm text-gray-500">{{ isYearScope ? TEXT.noData : TEXT.monthNoData }}</div>
     <template v-else>
-      <table class="w-full text-sm">
-        <thead class="text-gray-500 border-b"><tr>
-          <th v-for="c in columns" :key="colKey(c)" class="px-3 py-2 whitespace-nowrap" :class="isCur(c) ? 'text-right' : 'text-left'">{{ colLabel(c) }}</th>
-        </tr></thead>
-        <tbody>
-          <tr v-for="(row, i) in result" :key="i" class="border-b last:border-0 hover:bg-gray-50">
-            <td v-for="c in columns" :key="colKey(c)" class="px-3 py-2 tabular-nums" :class="isCur(c) ? 'text-right' : 'text-left'">{{ isCur(c) ? fmt(row[colKey(c)]) : row[colKey(c)] }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="text-xs text-gray-400 mt-3">分摊单 {{ allocName }} · 共 {{ result.length }} 行</p>
+      <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <table class="w-full min-w-[1280px] text-sm">
+          <thead class="border-b bg-gray-50 text-gray-500">
+            <tr>
+              <th v-for="c in columns" :key="colKey(c)" class="whitespace-nowrap px-3 py-2" :class="isCur(c) ? 'text-right' : 'text-left'">{{ colLabel(c) }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, i) in result" :key="i" class="border-b last:border-0" :class="isTotalRow(row) ? 'bg-gray-50 font-semibold text-gray-900' : 'hover:bg-gray-50'">
+              <td v-for="c in columns" :key="colKey(c)" class="whitespace-nowrap px-3 py-2 tabular-nums" :class="isCur(c) ? 'text-right' : 'text-left'">{{ cellText(row, c) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-3 text-xs text-gray-400">{{ displayPeriod }} ? {{ allocName || 'Year' }} ? {{ totalRows }} rows</p>
     </template>
   </Card>
 </template>

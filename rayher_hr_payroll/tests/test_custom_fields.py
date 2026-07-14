@@ -16,13 +16,19 @@ def test_project_capitalization_fields_exist():
     fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Project"]}
 
     assert fields["allow_rd_timesheet"]["fieldtype"] == "Check"
+    assert fields["project_owner_name"]["fieldtype"] == "Data"
+    assert fields["project_owner_name"]["label"] == "项目负责人"
     assert fields["project_owner"]["fieldtype"] == "Link"
     assert fields["project_owner"]["options"] == "User"
+    assert fields["project_owner"]["hidden"] == 1
     assert fields["capitalization_start_date"]["fieldtype"] == "Date"
     assert fields["capitalization_end_date"]["fieldtype"] == "Date"
     assert fields["rd_project_key"]["fieldtype"] == "Data"
     assert fields["rd_project_key"]["label"] == "\u9879\u76ee\u6807\u8bc6"
     assert fields["rd_project_key"]["read_only"] == 1
+    assert fields["project_initiation_report"]["fieldtype"] == "Attach"
+    assert fields["project_completion_report"]["fieldtype"] == "Attach"
+    assert fields["capitalization_confirmation_file"]["fieldtype"] == "Attach"
 
 
 def test_timesheet_review_fields_exist():
@@ -68,6 +74,20 @@ def test_custom_fields_sync_on_install_and_migrate():
     assert hooks.after_migrate == "rayher_hr_payroll.install.after_install"
 
 
+def test_project_document_links_are_repaired_after_custom_field_sync():
+    source = Path("rayher_hr_payroll/install.py").read_text(encoding="utf-8")
+    after_install = source[source.index("def after_install():"):source.index("def backfill_timesheet_detail_project_codes")]
+
+    assert "create_custom_fields(CUSTOM_FIELDS, update=True)" in after_install
+    assert "relink_project_documents()" in after_install
+    assert after_install.index("create_custom_fields") < after_install.index("relink_project_documents")
+    assert after_install.index("ensure_default_projects") < after_install.index("relink_project_documents")
+    assert "def relink_project_documents():" in source
+    assert "project_initiation_report" in source
+    assert "project_completion_report" in source
+    assert "capitalization_confirmation_file" in source
+
+
 def test_timesheet_detail_project_codes_are_backfilled_on_migrate():
     source = Path("rayher_hr_payroll/install.py").read_text(encoding="utf-8")
 
@@ -75,3 +95,12 @@ def test_timesheet_detail_project_codes_are_backfilled_on_migrate():
     assert "backfill_rd_project_keys()" in source
     assert "tsd.rd_project_code = p.rd_project_code" in source
     assert "tsd.rd_project_key" in source
+
+
+def test_employee_expense_account_category_exists():
+    fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Employee"]}
+
+    field = fields["expense_account_category"]
+    assert field["label"] == "费用科目"
+    assert field["fieldtype"] == "Select"
+    assert field["options"].splitlines() == ["", "研发费用", "管理费用", "销售费用", "生产成本"]

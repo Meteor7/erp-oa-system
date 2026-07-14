@@ -1,0 +1,41 @@
+{
+  "actions": [],
+  "allow_rename": 1,
+  "creation": "2026-07-07 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "step_index",
+    "label",
+    "mode",
+    "approvers",
+    "status",
+    "approved_by",
+    "action_by",
+    "acted_on",
+    "note"
+  ],
+  "fields": [
+    {"fieldname": "step_index", "fieldtype": "Int", "in_list_view": 1, "label": "Step Index"},
+    {"fieldname": "label", "fieldtype": "Data", "in_list_view": 1, "label": "Label"},
+    {"fieldname": "mode", "fieldtype": "Select", "in_list_view": 1, "label": "Mode", "options": "approve\nall\nhandle"},
+    {"fieldname": "approvers", "fieldtype": "Small Text", "label": "Approvers"},
+    {"fieldname": "status", "fieldtype": "Data", "in_list_view": 1, "label": "Status"},
+    {"fieldname": "approved_by", "fieldtype": "Small Text", "label": "Approved By"},
+    {"fieldname": "action_by", "fieldtype": "Data", "label": "Action By"},
+    {"fieldname": "acted_on", "fieldtype": "Datetime", "label": "Acted On"},
+    {"fieldname": "note", "fieldtype": "Small Text", "label": "Note"}
+  ],
+  "istable": 1,
+  "links": [],
+  "modified": "2026-07-07 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Approval Step",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": []
+}
