@@ -80,3 +80,8 @@ test('expense import can switch to a read-only year view', () => {
   assert.match(source, /:colspan='isYearScope \? 6 : 5'/);
   assert.match(source, /label:\s*'日期',\s*key:\s*'period'/);
 });
+
+test('expense import surfaces detailed Frappe validation messages', () => {
+  assert.match(source, /_server_messages/);
+  assert.match(source, /serverMessage\(saver\.error \|\| e, '保存失败'\)/);
+});

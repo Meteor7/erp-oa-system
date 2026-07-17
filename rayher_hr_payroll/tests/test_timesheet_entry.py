@@ -309,6 +309,29 @@ def test_timesheet_entry_roles_include_employee_and_department_manager(monkeypat
     assert "Department Manager" in mod.RD_TIMESHEET_ENTRY_ROLES
 
 
+def test_all_project_access_can_view_and_fill_every_rd_employee(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+
+    frappe.session = SimpleNamespace(user="person070@legacy.example.invalid")
+    frappe.get_roles = lambda user=None: ["Employee", "Project Owner", "All Project Access"]
+    frappe.db.get_value = lambda *args, **kwargs: "EMP-ZHANG"
+
+    assert mod._visible_employee_names() is None
+    mod._require_visible_employee("EMP-OTHER")
+
+
+def test_project_owner_without_all_project_access_remains_self_scoped(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+
+    frappe.session = SimpleNamespace(user="history.4c1029697e@legacy.example.invalid")
+    frappe.get_roles = lambda user=None: ["Employee", "Project Owner"]
+    frappe.db.get_value = lambda *args, **kwargs: "EMP-OWNER"
+
+    assert mod._visible_employee_names() == ["EMP-OWNER"]
+    with pytest.raises(RuleError):
+        mod._require_visible_employee("EMP-OTHER")
+
+
 def test_department_manager_options_are_scoped_to_self_and_direct_reports(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
     captured = {"employee_filters": []}

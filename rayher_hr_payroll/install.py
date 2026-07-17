@@ -4,7 +4,10 @@ from rayher_hr_payroll.custom_fields import CUSTOM_FIELDS
 from rayher_hr_payroll.access_control import ensure_access_control
 from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workflow_masters
 from rayher_hr_payroll.api.timesheet_entry import ensure_rd_activity_types
-from rayher_hr_payroll.api.project_entry import ensure_default_projects
+from rayher_hr_payroll.api.project_entry import (
+    backfill_project_owner_accounts,
+    ensure_default_projects,
+)
 
 RAYHER_DEFAULT_APP = "rayher_hr_payroll"
 
@@ -113,6 +116,7 @@ def after_install():
     _ensure_spa_perms()
     ensure_rd_activity_types()
     ensure_default_projects()
+    backfill_project_owner_accounts()
     relink_project_documents()
     ensure_notifications()
     ensure_hidden_workspaces()

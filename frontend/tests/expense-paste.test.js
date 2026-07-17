@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseExpensePaste, parseExpenseTableRows } from '../src/lib/expensePaste.js';
+import * as expensePaste from '../src/lib/expensePaste.js';
+
+const { parseExpensePaste, parseExpenseTableRows } = expensePaste;
 
 const projects = [
   { name: 'PROJ-0001', rd_project_code: 'RD16', project_name: 'EFEM-8-2LP-EG-A' },
@@ -103,4 +105,21 @@ test('reports expense account hierarchy mismatches before import', () => {
   assert.deepEqual(result.rows, []);
   assert.match(result.errors.join('\n'), /第 1 行：4级费用科目应为空/);
   assert.match(result.errors.join('\n'), /第 2 行：4级费用科目必须选择/);
+});
+
+test('skips rows already present while preserving repeated rows inside one new import', () => {
+  const saved = {
+    voucher_no: '60', account_level_1: 'R&D', account_level_2: 'Commissioned',
+    account_level_3: 'Overseas', account_level_4: 'Sabri', amount: 100, direct_project: 'RD10',
+  };
+  const newRow = { ...saved, voucher_no: '61' };
+
+  assert.equal(typeof expensePaste.filterNewExpenseRows, 'function');
+  const appended = expensePaste.filterNewExpenseRows([saved], [saved, newRow]);
+  assert.deepEqual(appended.rows, [newRow]);
+  assert.equal(appended.skipped, 1);
+
+  const originalDuplicates = expensePaste.filterNewExpenseRows([], [saved, { ...saved }]);
+  assert.equal(originalDuplicates.rows.length, 2);
+  assert.equal(originalDuplicates.skipped, 0);
 });

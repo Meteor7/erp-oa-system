@@ -40,6 +40,7 @@ MAX_DAILY_SECONDS = MAX_DAILY_HOURS * 60 * 60
 RD_TIMESHEET_ENTRY_ROLES = ("System Manager", "Accounts User", "HR User", "HR Manager", "Department Manager", "Employee")
 RD_TIMESHEET_VIEW_ROLES = (*RD_TIMESHEET_ENTRY_ROLES, "Accounts User")
 RD_TIMESHEET_ADMIN_ROLES = ("System Manager", "Accounts User", "HR User", "HR Manager")
+RD_TIMESHEET_ALL_EMPLOYEE_ROLES = (*RD_TIMESHEET_ADMIN_ROLES, "All Project Access")
 RD_TIMESHEET_FINANCE_VIEW_ROLES = ("Accounts User",)
 
 
@@ -67,7 +68,7 @@ def _current_employee():
 
 
 def _visible_employee_names(include_finance=False):
-    all_employee_roles = RD_TIMESHEET_ADMIN_ROLES + (RD_TIMESHEET_FINANCE_VIEW_ROLES if include_finance else ())
+    all_employee_roles = RD_TIMESHEET_ALL_EMPLOYEE_ROLES + (RD_TIMESHEET_FINANCE_VIEW_ROLES if include_finance else ())
     if _has_any_role(all_employee_roles):
         return None
     current = _current_employee()

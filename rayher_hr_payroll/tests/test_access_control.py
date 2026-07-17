@@ -6,6 +6,12 @@ def test_department_manager_role_declared():
     assert "Department Manager" in names
 
 
+def test_project_scope_roles_declared():
+    names = [r["role_name"] for r in CUSTOM_ROLES]
+    assert "Project Owner" in names
+    assert "All Project Access" in names
+
+
 def test_owner_role_profile_bundles_required_roles():
     profiles = {p["role_profile"]: p for p in ROLE_PROFILES}
     assert "总控 Owner" in profiles, "Owner role profile must exist"
@@ -24,6 +30,13 @@ def test_install_calls_ensure_access_control():
     import rayher_hr_payroll.install as install
     src = inspect.getsource(install)
     assert "ensure_access_control" in src
+
+
+def test_install_backfills_project_owner_accounts():
+    import inspect
+    import rayher_hr_payroll.install as install
+    src = inspect.getsource(install.after_install)
+    assert "backfill_project_owner_accounts" in src
 
 
 def test_role_profile_idempotent_no_save_when_roles_match(monkeypatch):

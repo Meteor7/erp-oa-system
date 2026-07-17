@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { Card, Button, createResource } from 'frappe-ui';
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from '../lib/period';
 import { clearInvalidLowerLevels, accountOptions, validateExpenseAccount } from '../lib/expenseAccounts';
-import { deriveExpenseCategory, importWorkbookFile, parseExpensePaste, resolveProjectValue } from '../lib/expensePaste';
+import { deriveExpenseCategory, filterNewExpenseRows, importWorkbookFile, parseExpensePaste, resolveProjectValue } from '../lib/expensePaste';
 import { exportTableWorkbook } from '../lib/tableExport';
 
 const ALLOCATION_TYPES = [
@@ -52,6 +52,36 @@ const total = computed(() => items.value.reduce((s, r) => s + Number(r.amount ||
 const visiblePasteErrors = computed(() => pasteErrors.value.slice(0, 5));
 const remainingPasteErrorCount = computed(() => Math.max(pasteErrors.value.length - visiblePasteErrors.value.length, 0));
 
+function parseFrappeServerMessages(raw) {
+  if (!raw) return [];
+  try {
+    const items = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(items)) return [];
+    return items.map((message) => {
+      try {
+        const parsed = typeof message === 'string' ? JSON.parse(message) : message;
+        return parsed.message || parsed.title || message;
+      } catch {
+        return message;
+      }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function cleanMessage(value) {
+  return String(value || '').replace(/<[^>]*>/g, '').trim();
+}
+
+function serverMessage(error, fallback) {
+  const messages = [
+    ...(error?.messages || []),
+    ...parseFrappeServerMessages(error?._server_messages),
+  ].map(cleanMessage).filter(Boolean);
+  if (messages.length) return messages.join('\uFF1B');
+  return cleanMessage(error?._error_message || error?.message) || fallback;
+}
 function projectLabel(project) {
   const code = project?.rd_project_code || project?.name || '';
   const name = project?.project_name || '';
@@ -116,12 +146,19 @@ function applyImportedRows(result, replace = false, source = '导入') {
   }
 
   const rows = normalizeRows(result.rows);
+  let acceptedRows = rows;
+  let skipped = 0;
   if (replace) {
     items.value = rows;
   } else {
-    items.value.push(...rows);
+    const filtered = filterNewExpenseRows(items.value, rows);
+    acceptedRows = filtered.rows;
+    skipped = filtered.skipped;
+    items.value.push(...acceptedRows);
   }
-  pasteMessage.value = source + ' ' + rows.length + ' 行，请确认后保存';
+  pasteMessage.value = source + ' ' + acceptedRows.length + ' 行'
+    + (skipped ? '，已跳过 ' + skipped + ' 条页面中已有明细' : '')
+    + '，请确认后保存';
 }
 
 function importPastedRows(replace = false) {
@@ -210,7 +247,7 @@ async function save() {
     status.value = d.status;
     items.value = normalizeRows(d.items || []);
   } catch (e) {
-    errMsg.value = (e && e.message) || '保存失败';
+    errMsg.value = serverMessage(saver.error || e, '保存失败');
   } finally {
     saving.value = false;
   }

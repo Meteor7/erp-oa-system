@@ -1046,3 +1046,7 @@ msgstr ""
 #: rayher_hr_payroll/translatable_labels.py:48
 msgid "Month"
 msgstr ""
+#. Report column label
+#: rayher_hr_payroll/translatable_labels.py
+msgid "Expense Item"
+msgstr ""

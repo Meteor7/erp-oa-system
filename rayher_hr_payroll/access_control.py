@@ -7,6 +7,8 @@ import frappe
 # scoped to the finance/R&D-manage roles (RD_MANAGE_ROLES), not Department Manager.
 CUSTOM_ROLES = [
     {"role_name": "Department Manager", "desk_access": 1},
+    {"role_name": "Project Owner", "desk_access": 1},
+    {"role_name": "All Project Access", "desk_access": 1},
 ]
 
 # 总控 (Owner) account for Serena: ONE Role Profile bundling the stock roles whose

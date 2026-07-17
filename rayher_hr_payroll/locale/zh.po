@@ -1048,3 +1048,7 @@ msgstr "年"
 #: rayher_hr_payroll/translatable_labels.py:48
 msgid "Month"
 msgstr "月"
+#. Report column label
+#: rayher_hr_payroll/translatable_labels.py
+msgid "Expense Item"
+msgstr "费用项目"

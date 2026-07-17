@@ -167,6 +167,25 @@ export function deriveExpenseCategory(row = {}) {
   return 'other';
 }
 
+function expenseRowIdentity(row = {}) {
+  const amount = Number(row.amount);
+  const amountKey = Number.isFinite(amount) ? amount.toFixed(2) : clean(row.amount);
+  return [
+    row.voucher_no,
+    row.account_level_1,
+    row.account_level_2,
+    row.account_level_3,
+    row.account_level_4,
+    amountKey,
+    row.direct_project,
+  ].map(clean).join('|');
+}
+
+export function filterNewExpenseRows(existingRows = [], incomingRows = []) {
+  const existingKeys = new Set(existingRows.map(expenseRowIdentity));
+  const rows = incomingRows.filter((row) => !existingKeys.has(expenseRowIdentity(row)));
+  return { rows, skipped: incomingRows.length - rows.length };
+}
 function parseAmount(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   const cleaned = clean(value).replace(/[￥¥,，\s]/g, '');
