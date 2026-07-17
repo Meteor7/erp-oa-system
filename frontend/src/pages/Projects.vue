@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref } from "vue";
 import { Card, Button, Badge, createResource } from "frappe-ui";
+import { canAdministerProjects } from "../lib/access";
 import { exportTableWorkbook } from "../lib/tableExport";
 
 const STATUS_OPTIONS = [
@@ -23,6 +24,11 @@ const rows = createResource({
   makeParams: () => ({ search: filters.search, status: filters.status }),
   auto: true,
 });
+const owners = createResource({
+  url: "rayher_hr_payroll.api.project_entry.list_project_owners",
+  method: "GET",
+  auto: canAdministerProjects(),
+});
 const saver = createResource({ url: "rayher_hr_payroll.api.project_entry.save_project" });
 const canceler = createResource({ url: "rayher_hr_payroll.api.project_entry.cancel_project" });
 
@@ -30,6 +36,7 @@ const blank = () => ({
   name: "",
   project_code: "",
   project_name: "",
+  project_owner: "",
   project_owner_name: "",
   start_date: "",
   end_date: "",
@@ -64,6 +71,7 @@ function edit(row) {
     name: row.name,
     project_code: row.rd_project_code || row.name,
     project_name: row.project_name || "",
+    project_owner: row.project_owner || "",
     project_owner_name: row.project_owner_name || "",
     start_date: row.start_date || row.capitalization_start_date || "",
     end_date: row.end_date || row.capitalization_end_date || "",
@@ -82,10 +90,29 @@ function cancelEdit() {
   editing.value = false;
 }
 
+function ownerLabel(ownerName, displayName = "") {
+  if (displayName) return displayName;
+  if (!ownerName) return "-";
+  const owner = (owners.data || []).find((item) => item.name === ownerName);
+  return owner?.full_name || ownerName;
+}
+
+function syncOwnerName() {
+  const owner = (owners.data || []).find((item) => item.name === form.project_owner);
+  form.project_owner_name = owner?.full_name || "";
+}
+
 function fileName(url) {
   if (!url) return "";
   const clean = String(url).split("?")[0];
   return decodeURIComponent(clean.split("/").pop() || clean);
+}
+
+function reportDownloadUrl(row, fieldname) {
+  return "/api/method/rayher_hr_payroll.api.project_entry.download_project_report?project="
+    + encodeURIComponent(row.name)
+    + "&fieldname="
+    + encodeURIComponent(fieldname);
 }
 
 async function uploadProjectFile(fieldName, event) {
@@ -157,7 +184,7 @@ async function exportCurrentProjects() {
       columns: [
         { label: "项目代码", value: (row) => row.rd_project_code || row.name, width: 14 },
         { label: "项目名称", key: "project_name", width: 28 },
-        { label: "项目负责人", key: "project_owner_name", width: 16 },
+        { label: "项目负责人", value: (row) => ownerLabel(row.project_owner, row.project_owner_name), width: 28 },
         { label: "立项时间", value: (row) => row.start_date || row.capitalization_start_date || "", width: 14 },
         { label: "结项时间", value: (row) => row.end_date || row.capitalization_end_date || "", width: 14 },
         { label: "研发阶段", value: (row) => row.rd_stage_label || row.rd_stage || "", width: 14 },
@@ -181,7 +208,7 @@ async function exportCurrentProjects() {
       <template #actions>
         <div class="flex items-center gap-2">
           <Button variant="subtle" :loading="exporting" :disabled="!(rows.data || []).length" @click="exportCurrentProjects">导出Excel</Button>
-          <Button variant="solid" @click="newProject">新增项目</Button>
+          <Button v-if="canAdministerProjects()" variant="solid" @click="newProject">新增项目</Button>
         </div>
       </template>
 
@@ -193,14 +220,14 @@ async function exportCurrentProjects() {
       </div>
 
       <div v-if="editing" class="mb-4 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-8">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">编号 *</label><input v-model="form.project_code" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col xl:col-span-2"><label class="mb-1 text-xs text-gray-500">项目名称 *</label><input v-model="form.project_name" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">项目负责人</label><input v-model="form.project_owner_name" class="rounded border border-gray-300 px-3 py-2 text-sm" placeholder="输入姓名" /></div>
+          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">项目名称 *</label><input v-model="form.project_name" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
+          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">项目负责人</label><select v-if="canAdministerProjects()" v-model="form.project_owner" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="syncOwnerName"><option value="">未指定</option><option v-for="owner in owners.data || []" :key="owner.name" :value="owner.name">{{ owner.full_name || owner.name }} · {{ owner.name }}</option></select><div v-else class="rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">{{ ownerLabel(form.project_owner, form.project_owner_name) }}</div></div>
           <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">研发阶段</label><select v-model="form.rd_stage" class="rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in STAGE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></div>
           <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">立项时间</label><input v-model="form.start_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
           <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">结项时间</label><input v-model="form.end_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">状态</label><select v-model="form.status" class="rounded border border-gray-300 px-3 py-2 text-sm"><option value="Open">进行中</option><option value="Completed">已结束</option><option value="Cancelled">已取消</option></select></div>
+          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">状态</label><select v-model="form.status" class="rounded border border-gray-300 px-3 py-2 text-sm"><option value="Open">进行中</option><option value="Completed">已结束</option><option v-if="canAdministerProjects() || form.status === 'Cancelled'" value="Cancelled">已取消</option></select></div>
         </div>
 
         <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -211,7 +238,7 @@ async function exportCurrentProjects() {
           ]" :key="fileField.key" class="rounded border border-gray-200 bg-white p-3">
             <div class="mb-2 text-xs font-medium text-gray-600">{{ fileField.label }}</div>
             <div class="flex min-h-8 flex-wrap items-center gap-2">
-              <a v-if="form[fileField.key]" :href="form[fileField.key]" target="_blank" rel="noopener" class="max-w-[220px] truncate text-xs text-blue-600 hover:underline">{{ fileName(form[fileField.key]) }}</a>
+              <a v-if="form[fileField.key]" :href="reportDownloadUrl(form, fileField.key)" target="_blank" rel="noopener" class="max-w-[220px] truncate text-xs text-blue-600 hover:underline">{{ fileName(form[fileField.key]) }}</a>
               <span v-else class="text-xs text-gray-400">未上传</span>
               <label class="cursor-pointer rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50">
                 {{ uploadingField === fileField.key ? '上传中…' : '上传' }}
@@ -228,25 +255,12 @@ async function exportCurrentProjects() {
 
       <p v-if="errMsg && !editing" class="mb-3 text-xs text-red-600">{{ errMsg }}</p>
       <div v-if="rows.loading" class="py-4 text-sm text-gray-500">加载中…</div>
-      <div v-else class="max-h-[calc(100vh-220px)] overflow-auto rounded border border-gray-200">
-        <table class="w-full min-w-[1480px] table-fixed text-sm">
-          <colgroup>
-            <col class="w-[96px]" />
-            <col class="w-[230px]" />
-            <col class="w-[120px]" />
-            <col class="w-[110px]" />
-            <col class="w-[110px]" />
-            <col class="w-[105px]" />
-            <col class="w-[100px]" />
-            <col class="w-[135px]" />
-            <col class="w-[135px]" />
-            <col class="w-[155px]" />
-            <col class="w-[120px]" />
-          </colgroup>
-          <thead class="sticky top-0 z-20 bg-gray-50 text-xs font-medium text-gray-500">
+      <div v-else class="overflow-x-auto rounded border border-gray-200">
+        <table class="w-full min-w-[1700px] text-sm">
+          <thead class="sticky top-0 bg-gray-50 text-gray-500">
             <tr>
-              <th class="sticky left-0 z-30 border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-left">编号</th>
-              <th class="sticky left-[96px] z-30 border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-left">项目名称</th>
+              <th class="px-3 py-2 text-left">编号</th>
+              <th class="px-3 py-2 text-left">项目名称</th>
               <th class="px-3 py-2 text-left">项目负责人</th>
               <th class="px-3 py-2 text-left">立项时间</th>
               <th class="px-3 py-2 text-left">结项时间</th>
@@ -255,23 +269,20 @@ async function exportCurrentProjects() {
               <th class="px-3 py-2 text-left">立项报告</th>
               <th class="px-3 py-2 text-left">结项报告</th>
               <th class="px-3 py-2 text-left">资本化确认书</th>
-              <th class="sticky right-0 z-30 border-l border-gray-200 bg-gray-50 px-3 py-2 text-right">操作</th>
+              <th class="px-3 py-2 text-right">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in rows.data || []" :key="row.name" class="group border-t border-gray-100 hover:bg-gray-50">
-              <td class="sticky left-0 z-10 whitespace-nowrap border-r border-gray-100 bg-white px-3 py-2.5 font-semibold text-gray-800 group-hover:bg-gray-50">{{ row.rd_project_code || row.name }}</td>
-              <td class="sticky left-[96px] z-10 truncate border-r border-gray-100 bg-white px-3 py-2.5 font-medium text-gray-700 group-hover:bg-gray-50" :title="row.project_name">{{ row.project_name }}</td>
-              <td class="truncate px-3 py-2.5" :title="row.project_owner_name || ''">{{ row.project_owner_name || '-' }}</td>
+            <tr v-for="row in rows.data || []" :key="row.name" class="border-t hover:bg-gray-50">
+              <td class="whitespace-nowrap px-3 py-2 font-medium">{{ row.rd_project_code || row.name }}</td>
+              <td class="min-w-[220px] px-3 py-2">{{ row.project_name }}</td>
+              <td class="min-w-[220px] px-3 py-2">{{ ownerLabel(row.project_owner, row.project_owner_name) }}</td>
               <td class="whitespace-nowrap px-3 py-2">{{ row.start_date || row.capitalization_start_date || '-' }}</td>
               <td class="whitespace-nowrap px-3 py-2">{{ row.end_date || row.capitalization_end_date || '-' }}</td>
               <td class="whitespace-nowrap px-3 py-2">{{ row.rd_stage_label || row.rd_stage || '未判定' }}</td>
               <td class="whitespace-nowrap px-3 py-2"><Badge :theme="statusTheme(row.status)">{{ row.status_label || row.status }}</Badge></td>
-              <td v-for="field in ['project_initiation_report', 'project_completion_report', 'capitalization_confirmation_file']" :key="field" class="px-3 py-2 text-center">
-                <a v-if="row[field]" :href="row[field]" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:underline" :title="fileName(row[field])"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>已上传 · 查看</a>
-                <span v-else class="inline-flex items-center gap-1.5 text-xs text-gray-400"><span class="h-1.5 w-1.5 rounded-full bg-gray-300"></span>未上传</span>
-              </td>
-              <td class="sticky right-0 z-10 whitespace-nowrap border-l border-gray-100 bg-white px-3 py-2 text-right group-hover:bg-gray-50"><button @click="edit(row)" class="mr-3 text-xs text-blue-600 hover:underline">编辑</button><button v-if="row.status !== 'Cancelled'" @click="cancelProject(row.name)" class="text-xs text-red-600 hover:underline">取消</button></td>
+              <td v-for="field in ['project_initiation_report', 'project_completion_report', 'capitalization_confirmation_file']" :key="field" class="max-w-[180px] px-3 py-2"><a v-if="row[field]" :href="reportDownloadUrl(row, field)" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600 hover:underline" :title="fileName(row[field])">查看文件</a><span v-else class="text-gray-400">-</span></td>
+              <td class="whitespace-nowrap px-3 py-2 text-right"><button @click="edit(row)" class="mr-3 text-xs text-blue-600 hover:underline">编辑</button><button v-if="canAdministerProjects() && row.status !== 'Cancelled'" @click="cancelProject(row.name)" class="text-xs text-red-600 hover:underline">取消</button></td>
             </tr>
             <tr v-if="!(rows.data || []).length"><td colspan="11" class="py-6 text-center text-gray-400">暂无项目</td></tr>
           </tbody>

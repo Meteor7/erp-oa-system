@@ -156,3 +156,11 @@ test("timesheet entry can switch summary and details between month and year", ()
   assert.match(source, /setPeriodScope/);
   assert.match(source, /watch\(periodScope/);
 });
+
+
+test("timesheet entry permits zero only for leave and comp time", () => {
+  assert.match(source, /ZERO_HOUR_ACTIVITY_TYPES/);
+  assert.match(source, /isZeroHourActivity\(form\.activity_type\)/);
+  assert.match(source, /:min="isZeroHourActivity\(form\.activity_type\) \? 0 : 0\.5"/);
+  assert.ok(source.includes("只有请假或调休的工时可以为 0"));
+});

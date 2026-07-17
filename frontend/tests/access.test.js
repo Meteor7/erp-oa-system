@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canEditTimesheetEntry, canSee, firstVisiblePath, roleLabel } from "../src/lib/access.js";
+import {
+  canAdministerProjects,
+  canEditTimesheetEntry,
+  canSee,
+  firstVisiblePath,
+  roleLabel,
+} from "../src/lib/access.js";
 
 function asRoles(roles) {
   globalThis.window = { roles };
@@ -41,6 +47,23 @@ test("finance can manage projects and fill R&D timesheets", () => {
   assert.equal(canSee("/approval/leave"), true);
   assert.equal(canSee("/approval/purchase"), true);
   assert.equal(canEditTimesheetEntry(), true);
+  assert.equal(canAdministerProjects(), true);
+});
+
+test("project owners can open project management without admin controls", () => {
+  asRoles(["Employee", "Project Owner"]);
+  assert.equal(canSee("/projects"), true);
+  assert.equal(canAdministerProjects(), false);
+  assert.equal(canSee("/personnel"), false);
+  assert.equal(canSee("/expense"), false);
+});
+
+test("all-project access widens project data without granting administration", () => {
+  asRoles(["Employee", "Project Owner", "All Project Access"]);
+  assert.equal(canSee("/projects"), true);
+  assert.equal(canAdministerProjects(), false);
+  assert.equal(canSee("/personnel"), false);
+  assert.equal(canSee("/expense"), false);
 });
 
 
@@ -53,6 +76,8 @@ test("role labels use the highest business level", () => {
   assert.equal(roleLabel(), "HR");
   asRoles(["Accounts User"]);
   assert.equal(roleLabel(), "\u8d22\u52a1");
+  asRoles(["Employee", "Project Owner"]);
+  assert.equal(roleLabel(), "\u9879\u76ee\u8d1f\u8d23\u4eba");
   asRoles(["System Manager", "HR Manager", "Accounts User"]);
   assert.equal(roleLabel(), "\u603b\u63a7");
 });
@@ -63,14 +88,17 @@ test("the removed personnel ledger is not a visible business page", () => {
 });
 
 
-test("foreign commissioned R&D is finance-only", () => {
+test("foreign commissioned R&D is finance plus the all-project account exception", () => {
   asRoles(["Accounts User"]);
   assert.equal(canSee("/foreign-rd"), true);
   asRoles(["System Manager"]);
   assert.equal(canSee("/foreign-rd"), true);
-  asRoles(["HR User"]);
+  asRoles(["Employee", "Project Owner", "All Project Access"]);
+  assert.equal(canSee("/foreign-rd"), true);
+  assert.equal(canSee("/expense"), false);
+  asRoles(["Employee", "Project Owner"]);
   assert.equal(canSee("/foreign-rd"), false);
-  asRoles(["Employee"]);
+  asRoles(["HR User"]);
   assert.equal(canSee("/foreign-rd"), false);
 });
 

@@ -3,7 +3,7 @@
 Translates {period, employee, project, hours} into a submitted Timesheet so the
 existing allocation engine (which reads tabTimesheet Detail) keeps working
 unchanged. One submitted Timesheet per employee+project+period combo (upsert /
-replace semantics); editing replaces, hours=0 deletes.
+replace semantics); editing replaces. Zero hours are retained only for leave/comp-time drafts.
 """
 import json
 from datetime import timedelta
@@ -32,6 +32,7 @@ RD_ACTIVITY_TYPES = (
     "其他",
 )
 _DEFAULT_ACTIVITY = "编码开发"
+ZERO_HOUR_ACTIVITY_TYPES = ("请假", "调休")
 MAX_DAILY_HOURS = 8
 MAX_DAILY_SECONDS = MAX_DAILY_HOURS * 60 * 60
 
@@ -127,7 +128,7 @@ def _resolve_rd_project(project_code, project_name, selected_project=None):
         frappe.throw(frappe._("请填写项目代码和项目名称。"))
     matches = frappe.get_all(
         "Project",
-        filters={"rd_project_code": code, "project_name": name, "allow_rd_timesheet": 1},
+        filters={"rd_project_code": code, "project_name": name, "allow_rd_timesheet": 1, "status": ["not in", ["Completed", "Cancelled"]]},
         pluck="name",
         limit=2,
     )
@@ -217,7 +218,7 @@ def get_rd_options():
             fields=["name", "employee_name"], order_by="employee_name",
         ),
         "projects": frappe.get_all(
-            "Project", filters={"allow_rd_timesheet": 1},
+            "Project", filters={"allow_rd_timesheet": 1, "status": ["not in", ["Completed", "Cancelled"]]},
             fields=["name", "project_name", "rd_project_code", "rd_project_key"], order_by="project_name",
         ),
         "activity_types": [{"name": activity} for activity in RD_ACTIVITY_TYPES],
@@ -251,14 +252,29 @@ def list_rd_hours(period, employee=None, scope="month"):
         inner join `tabTimesheet` ts on ts.name = tsd.parent
         inner join `tabEmployee` e on e.name = ts.employee
         inner join `tabProject` p on p.name = tsd.project
-        where ts.docstatus = 1
+        where (
+            ts.docstatus = 1
+            or (
+                ts.docstatus = 0
+                and ts.rd_spa_managed = 1
+                and tsd.hours = 0
+                and tsd.activity_type in %(zero_hour_activity_types)s
+            )
+          )
           {_period_filter_sql(scope)}
           and e.rd_personnel_type in %(types)s
           {employee_filter}
           and coalesce(p.allow_rd_timesheet, 0) = 1
         order by date(tsd.from_time), e.employee_name, project_name, tsd.activity_type
         """,
-        {"year": year, "month": month, "types": RD_TYPES, "employee": selected_employee, "employees": visible_employees or ("__none__",)},
+        {
+            "year": year,
+            "month": month,
+            "types": RD_TYPES,
+            "zero_hour_activity_types": ZERO_HOUR_ACTIVITY_TYPES,
+            "employee": selected_employee,
+            "employees": visible_employees or ("__none__",),
+        },
         as_dict=True,
     )
 
@@ -368,6 +384,8 @@ def _save_rd_hours_row(period, employee, project=None, hours=None, work_date=Non
     hours = float(hours or 0)
     if hours < 0:
         frappe.throw(frappe._("工时不能为负数。"))
+    if hours == 0 and activity not in ZERO_HOUR_ACTIVITY_TYPES:
+        frappe.throw(frappe._("只有请假或调休的工时可以为 0。"))
     if hours > MAX_DAILY_HOURS:
         frappe.throw(frappe._("单日工时不能超过 8 小时。"))
     # server-side trust boundary: the UI filters options, but validate here too
@@ -439,6 +457,26 @@ def _save_rd_hours_row(period, employee, project=None, hours=None, work_date=Non
         ts.insert(ignore_permissions=True)
         ts.flags.ignore_permissions = True  # endpoint is role-gated by require_rd_access; carry the bypass into submit so HR users without native Timesheet submit can still file R&D hours
         ts.submit()
+    else:
+        from_time, _window_end = _window_for_entry(year, month, entry_date)
+        ts = frappe.get_doc({
+            "doctype": "Timesheet",
+            "company": (frappe.db.get_value("Employee", employee, "company") or _company()),
+            "employee": employee,
+            "rd_spa_managed": 1,
+            "time_logs": [{
+                "activity_type": activity,
+                "project": project,
+                "rd_project_code": project_code,
+                "rd_project_name": project_name,
+                "rd_project_key": project_key,
+                "hours": 0,
+                "from_time": from_time,
+                "to_time": from_time,
+                "description": (description or "").strip(),
+            }],
+        })
+        ts.insert(ignore_permissions=True)
 
 
 @frappe.whitelist(methods=["POST"])

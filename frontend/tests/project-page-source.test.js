@@ -30,17 +30,27 @@ test("project management page keeps project codes tied to timesheet options", ()
 });
 
 test("project management captures owner and uploads the three project documents", () => {
-  assert.match(source, /project_owner_name/);
-  assert.match(source, /<input[^>]+v-model="form\.project_owner_name"/);
-  assert.doesNotMatch(source, /v-model="form\.project_owner"/);
-  assert.doesNotMatch(source, /list_project_owners/);
+  assert.match(source, /list_project_owners/);
+  assert.match(source, /project_owner/);
   assert.match(source, /project_initiation_report/);
   assert.match(source, /project_completion_report/);
   assert.match(source, /capitalization_confirmation_file/);
   assert.match(source, /uploadProjectFile/);
   assert.match(source, /\/api\/method\/upload_file/);
-  assert.match(source, /table-fixed/);
-  assert.match(source, /min-w-\[1480px\]/);
-  assert.match(source, /sticky left-0/);
-  assert.match(source, /sticky right-0/);
+  assert.match(source, /min-w-\[1700px\]/);
+});
+
+test("project creation, owner assignment and cancellation are admin-only controls", () => {
+  assert.match(source, /canAdministerProjects/);
+  assert.match(source, /v-if="canAdministerProjects\(\)"[^>]*variant="solid"[^>]*@click="newProject"/);
+  assert.match(source, /v-if="canAdministerProjects\(\)"[^>]*v-model="form\.project_owner"/);
+  assert.match(source, /v-if="canAdministerProjects\(\) && row\.status !== 'Cancelled'"/);
+});
+
+
+test("project reports use the scoped download endpoint instead of raw private URLs", () => {
+  assert.match(source, /download_project_report/);
+  assert.match(source, /encodeURIComponent\(row\.name\)/);
+  assert.match(source, /encodeURIComponent\(fieldname\)/);
+  assert.doesNotMatch(source, /:href="row\[field\]"/);
 });

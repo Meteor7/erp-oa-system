@@ -6,6 +6,12 @@ import { canEditTimesheetEntry } from "../lib/access";
 import { importTimesheetWorkbookFile, parseTimesheetPaste } from "../lib/timesheetImport";
 import { exportTableWorkbook } from "../lib/tableExport";
 
+const ZERO_HOUR_ACTIVITY_TYPES = new Set(["请假", "调休"]);
+
+function isZeroHourActivity(activity) {
+  return ZERO_HOUR_ACTIVITY_TYPES.has(String(activity || "").trim());
+}
+
 const options = createResource({
   url: "rayher_hr_payroll.api.timesheet_entry.get_rd_options",
   method: "GET",
@@ -407,8 +413,12 @@ async function save() {
     errMsg.value = "请填写日期、研发人员、项目代码、项目名称、活动类型、工时和工作内容";
     return;
   }
-  if (!Number.isFinite(hours) || hours <= 0 || hours > 8) {
-    errMsg.value = "工时必须大于 0，且单日不超过 8 小时";
+  if (!Number.isFinite(hours) || hours < 0 || hours > 8) {
+    errMsg.value = "工时不能为负数，且单日不超过 8 小时";
+    return;
+  }
+  if (hours === 0 && !isZeroHourActivity(form.activity_type)) {
+    errMsg.value = "只有请假或调休的工时可以为 0";
     return;
   }
   if (form.work_date < dateMin.value || form.work_date > dateMax.value) {
@@ -608,7 +618,7 @@ async function exportCurrentTimesheet() {
         </div>
         <div class="flex flex-col">
           <label class="text-xs text-gray-500 mb-1">工时(h)</label>
-          <input v-model="form.hours" type="number" min="0.5" max="8" step="0.5"
+          <input v-model="form.hours" type="number" :min="isZeroHourActivity(form.activity_type) ? 0 : 0.5" max="8" step="0.5"
             class="border border-gray-300 rounded px-3 py-2 text-sm" placeholder="8" />
         </div>
         <div class="flex flex-col md:col-span-2 xl:col-span-6">

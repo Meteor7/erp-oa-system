@@ -86,3 +86,24 @@ test('rejects duplicate imported or existing employee date project activity rows
   assert.match(result.errors.join('\n'), /第 3 行：导入内容中存在重复的员工\/日期\/项目\/活动类型/);
   assert.match(result.errors.join('\n'), /第 4 行：系统中已存在相同员工\/日期\/项目\/活动类型工时/);
 });
+
+test('accepts zero-hour leave and rejects zero-hour normal activity', () => {
+  const specialActivities = [...activityTypes, { name: '请假' }, { name: '调休' }];
+  const accepted = parseTimesheetTableRows([
+    ['日期', '研发人员', '项目代码', '项目名称', '活动类型', '工时', '工作内容'],
+    ['2026-07-05', '演示员工134', 'RD14', 'ACONCA 7961', '请假', 0, 'annual leave'],
+  ], options({ activityTypes: specialActivities }));
+
+  assert.deepEqual(accepted.errors, []);
+  assert.equal(accepted.rows.length, 1);
+  assert.equal(accepted.rows[0].activity_type, '请假');
+  assert.equal(accepted.rows[0].hours, 0);
+
+  const rejected = parseTimesheetTableRows([
+    ['日期', '研发人员', '项目代码', '项目名称', '活动类型', '工时', '工作内容'],
+    ['2026-07-06', '演示员工134', 'RD14', 'ACONCA 7961', '编码开发', 0, 'invalid zero'],
+  ], options({ activityTypes: specialActivities }));
+
+  assert.deepEqual(rejected.rows, []);
+  assert.match(rejected.errors.join('\n'), /第 2 行：只有请假或调休的工时可以为 0/);
+});

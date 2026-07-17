@@ -21,6 +21,11 @@ test('app shell exposes approval children and project management in the nav', ()
   assert.ok(source.includes('/projects'));
 });
 
+test('left navigation labels the personnel group as R and D center', () => {
+  assert.ok(source.includes("label: '\\u7814\\u53d1\\u4e2d\\u5fc3'"));
+  assert.ok(!source.includes("label: '\\u4eba\\u4e8b\\u4e2d\\u5fc3'"));
+});
+
 test('R&D ledger navigation uses the timesheet report and R&D expense import names', () => {
   assert.ok(source.includes("to: '/timesheet', step: '05', label: '\\u7814\\u53d1\\u5de5\\u65f6\\u62a5\\u8868'"));
   assert.ok(source.includes("to: '/expense', step: '06', label: '\\u7814\\u53d1\\u8d39\\u7528\\u5bfc\\u5165'"));
@@ -30,10 +35,11 @@ test('R&D ledger navigation uses the timesheet report and R&D expense import nam
 });
 
 test('app shell hides the redundant R and D personnel ledger', () => {
-  assert.doesNotMatch(source, /to: ['\"]\/ledger['\"]/);
+  assert.doesNotMatch(source, /to: ['"]\/ledger['"]/);
   assert.ok(source.includes("label: '\\u7814\\u53d1\\u5de5\\u65f6\\u586b\\u62a5'"));
   assert.ok(source.includes("step: '04', label: '\\u7814\\u53d1\\u5de5\\u65f6\\u586b\\u62a5'"));
 });
+
 test('dense finance pages get a wider workspace', () => {
   assert.match(source, /const WIDE_PAGE_PATHS =/);
   assert.match(source, /'\/projects'/);
@@ -49,18 +55,17 @@ test('personnel, accommodation and expense reimbursement use the wide workspace'
   assert.match(source, /['"]\/accommodation['"]/);
   assert.match(source, /['"]\/approval\/purchase['"]/);
 });
+
 test('app shell keeps the Rayher subtitle readable', () => {
   assert.ok(source.includes('Rayher &middot; frappe-ui'));
   assert.doesNotMatch(source, /Rayher \? frappe-ui/);
 });
-
 
 test('app shell exposes overseas commissioned R&D in the finance ledger nav', () => {
   assert.ok(source.includes("to: '/foreign-rd'"));
   assert.ok(source.includes("label: '\\u5883\\u5916\\u59d4\\u6258\\u7814\\u53d1\\u5de5\\u65f6'"));
   assert.match(source, /WIDE_PAGE_PATHS[\s\S]*['"]\/foreign-rd['"]/);
 });
-
 
 test('nav puts overseas commissioned before total allocation', () => {
   const foreignIndex = source.indexOf("to: '/foreign-rd'");
@@ -82,4 +87,17 @@ test('nav adds the allocation dashboard immediately after the allocation table',
   assert.ok(source.includes("to: '/allocation-dashboard', step: '09'"));
   assert.ok(source.includes("label: '\\u7814\\u53d1\\u8d39\\u7528\\u6c47\\u603b'"));
   assert.match(source, /WIDE_PAGE_PATHS[\s\S]*['"]\/allocation-dashboard['"]/);
+});
+
+
+test('app shell exposes a secure change-password dialog', () => {
+  assert.ok(source.includes('修改密码'));
+  assert.match(source, /frappe\.core\.doctype\.user\.user\.update_password/);
+  assert.match(source, /old_password/);
+  assert.match(source, /new_password/);
+  assert.match(source, /confirm_password/);
+  assert.match(source, /type=['"]password['"]/);
+  assert.ok(source.includes('两次输入的新密码不一致'));
+  assert.match(source, /resetPasswordForm/);
+  assert.doesNotMatch(source, /console\.(log|debug).*password/i);
 });

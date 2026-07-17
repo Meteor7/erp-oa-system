@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
+import { createResource } from 'frappe-ui';
 import { canSee, currentUser, roleLabel } from './lib/access';
 
 const groups = [
@@ -9,7 +10,7 @@ const groups = [
     { to: '/approval/leave', step: '01', label: '\u8bf7\u5047\u5ba1\u6279' },
     { to: '/approval/purchase', step: '02', label: '\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500' },
   ] },
-  { label: '\u4eba\u4e8b\u4e2d\u5fc3', items: [
+  { label: '\u7814\u53d1\u4e2d\u5fc3', items: [
     { to: '/personnel', step: '01', label: '\u4eba\u4e8b\u4fe1\u606f\u7ba1\u7406' },
     { to: '/accommodation', step: '02', label: '\u5bbf\u820d\u4f4f\u5bbf\u8d39\u7528' },
   ] },
@@ -44,6 +45,60 @@ const visibleGroups = computed(() =>
 const allowed = computed(() => canSee(route.path));
 const isWidePage = computed(() => WIDE_PAGE_PATHS.has(route.path));
 
+const showPasswordDialog = ref(false);
+const passwordForm = reactive({
+  old_password: '',
+  new_password: '',
+  confirm_password: '',
+});
+const passwordError = ref('');
+const passwordSuccess = ref('');
+const passwordUpdater = createResource({
+  url: 'frappe.core.doctype.user.user.update_password',
+});
+
+function resetPasswordForm() {
+  passwordForm.old_password = '';
+  passwordForm.new_password = '';
+  passwordForm.confirm_password = '';
+  passwordError.value = '';
+  passwordSuccess.value = '';
+}
+
+function openPasswordDialog() {
+  resetPasswordForm();
+  showPasswordDialog.value = true;
+}
+
+function closePasswordDialog() {
+  showPasswordDialog.value = false;
+  resetPasswordForm();
+}
+
+async function changePassword() {
+  passwordError.value = '';
+  passwordSuccess.value = '';
+  if (!passwordForm.old_password || !passwordForm.new_password) {
+    passwordError.value = '请输入当前密码和新密码';
+    return;
+  }
+  if (passwordForm.new_password !== passwordForm.confirm_password) {
+    passwordError.value = '两次输入的新密码不一致';
+    return;
+  }
+  try {
+    await passwordUpdater.submit({
+      old_password: passwordForm.old_password,
+      new_password: passwordForm.new_password,
+      logout_all_sessions: 1,
+    });
+    resetPasswordForm();
+    passwordSuccess.value = '密码修改成功';
+  } catch (error) {
+    passwordError.value = error?.messages?.[0] || error?.message || '密码修改失败';
+  }
+}
+
 function logout() {
   window.location.href = '/?cmd=web_logout';
 }
@@ -72,6 +127,7 @@ function logout() {
         <div class='flex items-center gap-3 text-sm'>
           <span class='inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-gray-700'>{{ roleLabel() }}</span>
           <span class='text-gray-600 max-w-[220px] truncate'>{{ currentUser() }}</span>
+          <button type='button' class='rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50' @click='openPasswordDialog'>修改密码</button>
           <button type='button' class='rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50' @click='logout'>&#x9000;&#x51fa;&#x767b;&#x5f55;</button>
         </div>
       </header>
@@ -84,5 +140,36 @@ function logout() {
         </div>
       </div>
     </main>
+
+    <div v-if='showPasswordDialog' class='fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4' @keydown.esc='closePasswordDialog'>
+      <div class='w-full max-w-md rounded-lg bg-white p-5 shadow-xl' role='dialog' aria-modal='true' aria-label='修改密码'>
+        <div class='mb-4 flex items-center justify-between'>
+          <h2 class='text-base font-semibold text-gray-900'>修改密码</h2>
+          <button type='button' class='text-xl leading-none text-gray-400 hover:text-gray-700' aria-label='关闭' @click='closePasswordDialog'>×</button>
+        </div>
+        <form class='space-y-3' @submit.prevent='changePassword'>
+          <label class='block text-sm text-gray-700'>
+            <span class='mb-1 block'>当前密码</span>
+            <input v-model='passwordForm.old_password' type='password' autocomplete='current-password' class='w-full rounded border border-gray-300 px-3 py-2' />
+          </label>
+          <label class='block text-sm text-gray-700'>
+            <span class='mb-1 block'>新密码</span>
+            <input v-model='passwordForm.new_password' type='password' autocomplete='new-password' class='w-full rounded border border-gray-300 px-3 py-2' />
+          </label>
+          <label class='block text-sm text-gray-700'>
+            <span class='mb-1 block'>确认新密码</span>
+            <input v-model='passwordForm.confirm_password' type='password' autocomplete='new-password' class='w-full rounded border border-gray-300 px-3 py-2' />
+          </label>
+          <p v-if='passwordError' class='text-sm text-red-600'>{{ passwordError }}</p>
+          <p v-if='passwordSuccess' class='text-sm text-green-600'>{{ passwordSuccess }}</p>
+          <div class='flex justify-end gap-2 pt-2'>
+            <button type='button' class='rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50' @click='closePasswordDialog'>取消</button>
+            <button type='submit' class='rounded bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800' :disabled='passwordUpdater.loading'>
+              {{ passwordUpdater.loading ? '提交中…' : '确认修改' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>

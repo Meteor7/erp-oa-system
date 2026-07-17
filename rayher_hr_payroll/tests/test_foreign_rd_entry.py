@@ -245,3 +245,8 @@ def test_get_foreign_rd_recalculates_from_imported_foreign_expenses(monkeypatch)
     assert result["combined_stage_summaries"][0]["total"] == 700.0
     assert result["combined_project_summaries"][0]["project"] == "RD06"
     assert result["combined_project_summaries"][0]["total_amount"] == 700.0
+
+
+def test_foreign_rd_allows_the_all_project_account_exception(monkeypatch):
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    assert "All Project Access" in mod.RD_FOREIGN_FINANCE_ROLES

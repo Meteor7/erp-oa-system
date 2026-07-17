@@ -129,6 +129,7 @@ def test_get_rd_options_syncs_activity_types_and_returns_project_codes(monkeypat
         if doctype == "Employee":
             return [{"name": "EMP-1", "employee_name": "Zhang San"}]
         if doctype == "Project":
+            assert filters == {"allow_rd_timesheet": 1, "status": ["not in", ["Completed", "Cancelled"]]}
             assert "rd_project_code" in fields
             assert "rd_project_key" in fields
             return [{
@@ -207,6 +208,7 @@ def test_save_rd_hours_writes_date_activity_description_and_project_code_to_time
                 "rd_project_code": "RD-001",
                 "project_name": "\u7814\u53d1\u9879\u76eeA",
                 "allow_rd_timesheet": 1,
+                "status": ["not in", ["Completed", "Cancelled"]],
             }
             assert pluck == "name"
             return ["PROJ-1"]
@@ -271,6 +273,7 @@ def test_save_rd_hours_rejects_unknown_project_code_and_name(monkeypatch):
             "rd_project_code": "003",
             "project_name": "新项目",
             "allow_rd_timesheet": 1,
+            "status": ["not in", ["Completed", "Cancelled"]],
         }:
             return []
         return []
@@ -587,3 +590,118 @@ def test_bulk_save_rd_hours_rolls_back_when_any_row_fails(monkeypatch):
 
     assert captured["rollback"] == "rd_bulk_timesheet"
     assert "committed" not in captured
+
+def test_resolve_rd_project_rejects_completed_and_cancelled_projects(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+
+    def get_all(doctype, filters=None, pluck=None, limit=None, **kwargs):
+        assert doctype == "Project"
+        assert filters == {
+            "rd_project_code": "RD20",
+            "project_name": "Active Project",
+            "allow_rd_timesheet": 1,
+            "status": ["not in", ["Completed", "Cancelled"]],
+        }
+        return ["RD20"]
+
+    frappe.get_all = get_all
+
+    assert mod._resolve_rd_project("RD20", "Active Project", "RD20") == "RD20"
+
+def _prepare_zero_hour_save(mod, frappe, monkeypatch, activity):
+    captured = {}
+    monkeypatch.setattr(mod, "_require_visible_employee", lambda employee: None)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
+    monkeypatch.setattr(mod, "_work_date_in_period", lambda value, year, month: date(2026, 7, 2))
+    monkeypatch.setattr(mod, "_ensure_activity", lambda value: activity)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mod, "_period_has_submitted_allocation", lambda *args, **kwargs: False)
+    monkeypatch.setattr(mod, "lock_period_import", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mod, "_resolve_rd_project", lambda code, name, selected_project=None: "PROJ-1")
+    monkeypatch.setattr(mod, "_drop_combo", lambda *args, **kwargs: None)
+    frappe.db.get_value = lambda doctype, target, fieldname=None, **kwargs: {
+        "rd_personnel_type": mod.RD_TYPES[0],
+        "company": "Rayher",
+        "name": target,
+    }.get(fieldname)
+
+    def get_doc(arg, name=None):
+        if isinstance(arg, dict) and arg.get("doctype") == "Timesheet":
+            captured["doc"] = arg
+            captured["timesheet"] = SimpleNamespace(
+                docstatus=0,
+                flags=SimpleNamespace(),
+                insert=lambda ignore_permissions=False: captured.setdefault("inserted", ignore_permissions),
+                submit=lambda: captured.setdefault("submitted", True),
+            )
+            return captured["timesheet"]
+        raise AssertionError(arg)
+
+    frappe.get_doc = get_doc
+    return captured
+
+
+@pytest.mark.parametrize("activity", ["请假", "调休"])
+def test_zero_hour_leave_or_comp_time_is_saved_as_draft(monkeypatch, activity):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    captured = _prepare_zero_hour_save(mod, frappe, monkeypatch, activity)
+
+    mod._save_rd_hours_row(
+        period="2026-07",
+        employee="EMP-1",
+        project="PROJ-1",
+        hours=0,
+        work_date="2026-07-02",
+        activity_type=activity,
+        description="special attendance",
+        project_code="RD04",
+        project_name="VEYMONT 2341",
+    )
+
+    assert captured["inserted"] is True
+    assert "submitted" not in captured
+    detail = captured["doc"]["time_logs"][0]
+    assert detail["hours"] == 0
+    assert detail["activity_type"] == activity
+    assert detail["from_time"] == detail["to_time"]
+
+
+def test_zero_hour_normal_activity_is_rejected(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    _prepare_zero_hour_save(mod, frappe, monkeypatch, "编码开发")
+
+    with pytest.raises(RuleError, match="请假或调休"):
+        mod._save_rd_hours_row(
+            period="2026-07",
+            employee="EMP-1",
+            project="PROJ-1",
+            hours=0,
+            work_date="2026-07-02",
+            activity_type="编码开发",
+            description="work",
+            project_code="RD04",
+            project_name="VEYMONT 2341",
+        )
+
+
+def test_list_rd_hours_includes_only_marked_zero_hour_special_drafts(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
+    monkeypatch.setattr(mod, "_summary_employee_filter", lambda employee=None: ("", None, None))
+
+    def sql(query, values=None, as_dict=False):
+        captured["query"] = query
+        captured["values"] = values
+        return []
+
+    frappe.db.sql = sql
+    mod.list_rd_hours("2026-07")
+
+    query = " ".join(captured["query"].split())
+    assert "ts.docstatus = 1" in query
+    assert "ts.docstatus = 0" in query
+    assert "ts.rd_spa_managed = 1" in query
+    assert "tsd.hours = 0" in query
+    assert set(captured["values"]["zero_hour_activity_types"]) == {"请假", "调休"}

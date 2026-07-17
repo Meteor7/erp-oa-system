@@ -10,7 +10,7 @@ from rayher_hr_payroll.rd_cost.frappe_adapter import (
     source_row_key_for_row,
 )
 
-RD_FOREIGN_FINANCE_ROLES = RD_FINANCE_ROLES
+RD_FOREIGN_FINANCE_ROLES = (*RD_FINANCE_ROLES, "All Project Access")
 MAX_DAILY_HOURS = 8
 
 STAGE_ALIASES = {

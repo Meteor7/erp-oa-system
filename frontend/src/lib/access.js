@@ -2,8 +2,10 @@
 // Expense/allocation stay finance-only; HR pages stay HR-only.
 // Employees and department supervisors can use the R&D timesheet entry and approval pages.
 const FINANCE = ['System Manager', 'Accounts User'];
+const FOREIGN_RD_ACCESS = [...FINANCE, 'All Project Access'];
 const HR = ['System Manager', 'HR User', 'HR Manager'];
 const MANAGE = ['System Manager', 'Accounts User', 'HR User', 'HR Manager'];
+const PROJECT_ACCESS = [...MANAGE, 'Project Owner'];
 const TIME_ENTRY = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
@@ -13,10 +15,10 @@ const PAGE_ROLES = {
   '/expense': FINANCE,
   '/allocation': FINANCE,
   '/allocation-dashboard': FINANCE,
-  '/foreign-rd': FINANCE,
+  '/foreign-rd': FOREIGN_RD_ACCESS,
   '/personnel': HR,
   '/accommodation': HR,
-  '/projects': MANAGE,
+  '/projects': PROJECT_ACCESS,
   '/ledger': [],
   '/entry': TIME_VIEW,
   '/oa': APPROVAL,
@@ -34,6 +36,10 @@ export function canSee(path) {
   return myRoles().some((role) => need.includes(role));
 }
 
+export function canAdministerProjects() {
+  return myRoles().some((role) => MANAGE.includes(role));
+}
+
 export function canEditTimesheetEntry() {
   return myRoles().some((role) => TIME_ENTRY.includes(role));
 }
@@ -47,6 +53,7 @@ export function roleLabel() {
   if (roles.includes('System Manager')) return '\u603b\u63a7';
   if (roles.includes('HR Manager') || roles.includes('HR User')) return 'HR';
   if (roles.includes('Accounts User')) return '\u8d22\u52a1';
+  if (roles.includes('Project Owner')) return '\u9879\u76ee\u8d1f\u8d23\u4eba';
   if (roles.includes('Department Manager')) return '\u90e8\u95e8\u4e3b\u7ba1';
   if (roles.includes('Employee')) return '\u5458\u5de5';
   return '\u666e\u901a\u8d26\u53f7';

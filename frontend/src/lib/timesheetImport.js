@@ -1,3 +1,5 @@
+const ZERO_HOUR_ACTIVITY_TYPES = new Set(["请假", "调休"]);
+
 function clean(value) {
   return String(value ?? '').trim();
 }
@@ -237,8 +239,10 @@ function normalizeRawRow(rawRow, options, lineNo, state) {
   }
 
   const hours = parseHours(rawRow.hours);
-  if (hours === null || hours <= 0 || hours > 8) {
-    rowErrors.push(`第 ${lineNo} 行：工时必须大于 0，且单日不超过 8 小时`);
+  if (hours === null || hours < 0 || hours > 8) {
+    rowErrors.push("第 " + lineNo + " 行：工时不能为负数，且单日不超过 8 小时");
+  } else if (hours === 0 && !ZERO_HOUR_ACTIVITY_TYPES.has(activity)) {
+    rowErrors.push("第 " + lineNo + " 行：只有请假或调休的工时可以为 0");
   }
 
   const description = clean(rawRow.description);
