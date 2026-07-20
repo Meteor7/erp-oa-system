@@ -7,6 +7,10 @@ from typing import Any, Protocol
 from invoice_ocr.models import OCRLine
 
 
+class OCRBackendError(RuntimeError):
+    """Stable boundary for local OCR initialization or inference failures."""
+
+
 class OCREngine(Protocol):
     def recognize(self, image_path: Path) -> list[OCRLine]: ...
 

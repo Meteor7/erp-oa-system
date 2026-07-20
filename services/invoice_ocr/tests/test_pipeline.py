@@ -226,7 +226,7 @@ def test_recognize_document_uses_unique_call_directory_and_cleans_success(tmp_pa
 
 def test_recognize_document_wraps_ocr_error_and_cleans_call_directory(tmp_path: Path):
     import pytest
-    from invoice_ocr.documents import DocumentError
+    from invoice_ocr.engine import OCRBackendError
 
     source = tmp_path / "invoice.png"
     Image.new("RGB", (20, 20), "white").save(source)
@@ -236,7 +236,7 @@ def test_recognize_document_wraps_ocr_error_and_cleans_call_directory(tmp_path: 
             raise RuntimeError("ocr exploded")
 
     work_root = tmp_path / "work"
-    with pytest.raises(DocumentError, match="OCR failed for page 1") as error:
+    with pytest.raises(OCRBackendError, match="OCR backend inference failed") as error:
         pipeline.recognize_document(source, work_root, BrokenEngine())
 
     assert isinstance(error.value.__cause__, RuntimeError)
@@ -286,7 +286,7 @@ def test_cleanup_failure_keeps_success_result_and_adds_residual_risk_warning(tmp
 
 def test_cleanup_failure_does_not_mask_processing_error(tmp_path: Path, monkeypatch):
     import pytest
-    from invoice_ocr.documents import DocumentError
+    from invoice_ocr.engine import OCRBackendError
 
     source = tmp_path / "invoice.png"
     Image.new("RGB", (20, 20), "white").save(source)
@@ -303,7 +303,7 @@ def test_cleanup_failure_does_not_mask_processing_error(tmp_path: Path, monkeypa
 
     monkeypatch.setattr(pipeline.shutil, "rmtree", failed_rmtree)
 
-    with pytest.raises(DocumentError, match="OCR failed for page 1") as error:
+    with pytest.raises(OCRBackendError, match="OCR backend inference failed") as error:
         pipeline.recognize_document(source, tmp_path / "work", BrokenEngine())
 
     assert isinstance(error.value.__cause__, RuntimeError)

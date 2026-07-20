@@ -48,11 +48,11 @@ def invoice_png() -> bytes:
 
 
 @pytest.fixture
-def override_engine():
-    api.app.dependency_overrides[api.get_engine] = lambda: FakeEngine()
+def override_engine(monkeypatch):
+    api.reset_engine()
+    monkeypatch.setattr(api, "PaddleOCREngine", FakeEngine)
     yield
-    api.app.dependency_overrides.clear()
-    api.get_engine.cache_clear()
+    api.reset_engine()
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ def test_health_does_not_initialize_ocr_engine(monkeypatch):
             initialized = True
             raise AssertionError("health must not initialize the OCR model")
 
-    api.get_engine.cache_clear()
+    api.reset_engine()
     monkeypatch.setattr(api, "PaddleOCREngine", ExplodingEngine)
 
     with TestClient(api.app, raise_server_exceptions=False) as test_client:
@@ -79,7 +79,7 @@ def test_health_does_not_initialize_ocr_engine(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "engine": "paddleocr"}
     assert initialized is False
-    api.get_engine.cache_clear()
+    api.reset_engine()
 
 
 def test_recognize_endpoint_returns_seven_fields_and_sanitized_filename(
@@ -215,22 +215,21 @@ def test_unexpected_error_returns_sanitized_500(client, invoice_png, monkeypatch
     assert "Traceback" not in response.text
 
 
-def test_engine_initialization_failure_returns_sanitized_500(invoice_png):
+def test_engine_initialization_failure_returns_sanitized_500(invoice_png, monkeypatch):
     secret = "SECRET-MODEL-PATH C:\\models\\private"
 
-    def explode():
-        raise RuntimeError(secret)
+    class ExplodingEngine:
+        def __init__(self):
+            raise RuntimeError(secret)
 
-    api.app.dependency_overrides[api.get_engine] = explode
-    try:
-        with TestClient(api.app, raise_server_exceptions=False) as test_client:
-            response = test_client.post(
-                "/v1/recognize",
-                files={"file": ("invoice.png", invoice_png, "image/png")},
-            )
-    finally:
-        api.app.dependency_overrides.clear()
-        api.get_engine.cache_clear()
+    api.reset_engine()
+    monkeypatch.setattr(api, "PaddleOCREngine", ExplodingEngine)
+    with TestClient(api.app) as test_client:
+        response = test_client.post(
+            "/v1/recognize",
+            files={"file": ("invoice.png", invoice_png, "image/png")},
+        )
+    api.reset_engine()
 
     assert response.status_code == 500
     assert response.json() == {"detail": "internal_error"}

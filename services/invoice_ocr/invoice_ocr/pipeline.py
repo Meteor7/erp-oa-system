@@ -6,7 +6,7 @@ import tempfile
 from time import perf_counter
 
 from invoice_ocr.documents import DocumentError, prepare_document
-from invoice_ocr.engine import OCREngine, text_to_lines
+from invoice_ocr.engine import OCRBackendError, OCREngine, text_to_lines
 from invoice_ocr.models import InvoiceFields, ParseOutcome, RecognitionResult
 from invoice_ocr.parser import parse_invoice
 
@@ -97,7 +97,7 @@ def recognize_document(
             except DocumentError:
                 raise
             except Exception as exc:
-                raise DocumentError(f"OCR failed for page {page_number}") from exc
+                raise OCRBackendError("OCR backend inference failed") from exc
         ocr_outcome = parse_invoice(ocr_lines)
         embedded_lines = text_to_lines(prepared.embedded_text) if prepared.use_embedded_text else []
         embedded_outcome = parse_invoice(embedded_lines) if embedded_lines else ParseOutcome()
