@@ -11,6 +11,8 @@ from invoice_ocr.models import InvoiceFields, ParseOutcome, RecognitionResult
 from invoice_ocr.parser import parse_invoice
 
 REQUIRED_FIELDS = ("invoice_category", "issue_date", "invoice_number", "amount_before_tax", "tax_amount", "total_amount")
+CLEANUP_WARNING = "temporary_files_cleanup_failed:sensitive_invoice_files_may_remain"
+CLEANUP_NOTE = "Temporary invoice cleanup failed after retry; sensitive invoice files may remain."
 
 
 def _elapsed_ms(started: float) -> int:
@@ -19,6 +21,19 @@ def _elapsed_ms(started: float) -> int:
 
 def _is_missing(field_name: str, value: object) -> bool:
     return value is None or (field_name == "project_names" and value == [])
+
+
+def _cleanup_call_root(call_root: Path) -> Exception | None:
+    cleanup_error: Exception | None = None
+    for _attempt in range(2):
+        try:
+            shutil.rmtree(call_root)
+            return None
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            cleanup_error = exc
+    return cleanup_error
 
 
 def reconcile_outcomes(ocr: ParseOutcome, embedded: ParseOutcome) -> ParseOutcome:
@@ -71,6 +86,8 @@ def recognize_document(
     started = perf_counter()
     work_root.mkdir(parents=True, exist_ok=True)
     call_root = Path(tempfile.mkdtemp(prefix="invoice-", dir=work_root))
+    result: RecognitionResult | None = None
+    processing_error: BaseException | None = None
     try:
         prepared = prepare_document(source, call_root / "rendered")
         ocr_lines = []
@@ -85,7 +102,7 @@ def recognize_document(
         embedded_lines = text_to_lines(prepared.embedded_text) if prepared.use_embedded_text else []
         embedded_outcome = parse_invoice(embedded_lines) if embedded_lines else ParseOutcome()
         outcome = reconcile_outcomes(ocr_outcome, embedded_outcome)
-        return RecognitionResult(
+        result = RecognitionResult(
             record_id=record_id,
             source_filename=source.name,
             file_sha256=prepared.source_sha256,
@@ -96,5 +113,14 @@ def recognize_document(
             ocr_lines=[*ocr_lines, *embedded_lines],
             status="needs_confirmation",
         )
+        return result
+    except BaseException as exc:
+        processing_error = exc
+        raise
     finally:
-        shutil.rmtree(call_root)
+        cleanup_error = _cleanup_call_root(call_root)
+        if cleanup_error is not None:
+            if processing_error is not None:
+                processing_error.add_note(f"{CLEANUP_NOTE} Cleanup error: {cleanup_error}")
+            elif result is not None:
+                result.warnings.append(CLEANUP_WARNING)

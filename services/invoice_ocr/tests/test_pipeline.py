@@ -241,3 +241,71 @@ def test_recognize_document_wraps_ocr_error_and_cleans_call_directory(tmp_path: 
 
     assert isinstance(error.value.__cause__, RuntimeError)
     assert list(work_root.iterdir()) == []
+
+
+def test_cleanup_retry_recovers_without_warning(tmp_path: Path, monkeypatch):
+    source = tmp_path / "invoice.png"
+    Image.new("RGB", (20, 20), "white").save(source)
+    real_rmtree = pipeline.shutil.rmtree
+    calls = 0
+
+    def flaky_rmtree(path: Path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("transient cleanup failure")
+        real_rmtree(path)
+
+    monkeypatch.setattr(pipeline.shutil, "rmtree", flaky_rmtree)
+
+    result = pipeline.recognize_document(source, tmp_path / "work", FakeEngine())
+
+    assert calls == 2
+    assert not any(warning.startswith("temporary_files_cleanup_failed") for warning in result.warnings)
+    assert list((tmp_path / "work").iterdir()) == []
+
+
+def test_cleanup_failure_keeps_success_result_and_adds_residual_risk_warning(tmp_path: Path, monkeypatch):
+    source = tmp_path / "invoice.png"
+    Image.new("RGB", (20, 20), "white").save(source)
+    calls = 0
+
+    def failed_rmtree(_path: Path):
+        nonlocal calls
+        calls += 1
+        raise OSError("cleanup is unavailable")
+
+    monkeypatch.setattr(pipeline.shutil, "rmtree", failed_rmtree)
+
+    result = pipeline.recognize_document(source, tmp_path / "work", FakeEngine())
+
+    assert result.fields.invoice_number == "00123456789012345678"
+    assert "temporary_files_cleanup_failed:sensitive_invoice_files_may_remain" in result.warnings
+    assert calls == 2
+
+
+def test_cleanup_failure_does_not_mask_processing_error(tmp_path: Path, monkeypatch):
+    import pytest
+    from invoice_ocr.documents import DocumentError
+
+    source = tmp_path / "invoice.png"
+    Image.new("RGB", (20, 20), "white").save(source)
+    calls = 0
+
+    class BrokenEngine:
+        def recognize(self, _image_path: Path) -> list[OCRLine]:
+            raise RuntimeError("ocr exploded")
+
+    def failed_rmtree(_path: Path):
+        nonlocal calls
+        calls += 1
+        raise OSError("cleanup is unavailable")
+
+    monkeypatch.setattr(pipeline.shutil, "rmtree", failed_rmtree)
+
+    with pytest.raises(DocumentError, match="OCR failed for page 1") as error:
+        pipeline.recognize_document(source, tmp_path / "work", BrokenEngine())
+
+    assert isinstance(error.value.__cause__, RuntimeError)
+    assert any("sensitive invoice files may remain" in note for note in error.value.__notes__)
+    assert calls == 2

@@ -135,3 +135,33 @@ def test_prepare_transparent_png_composites_onto_white(tmp_path: Path):
         assert normalized.mode == "RGB"
         assert normalized.getpixel((0, 0)) == (255, 255, 255)
         assert normalized.getpixel((1, 0)) == (255, 0, 0)
+
+
+def test_validate_source_wraps_decompression_bomb_error(tmp_path: Path, monkeypatch):
+    source = tmp_path / "bomb.png"
+    Image.new("RGB", (2, 2), "white").save(source)
+
+    def raise_bomb(_path):
+        raise Image.DecompressionBombError("pixel count is unsafe")
+
+    monkeypatch.setattr("invoice_ocr.documents.Image.open", raise_bomb)
+
+    with pytest.raises(DocumentError, match="image exceeds pixel safety limit") as error:
+        validate_source(source)
+
+    assert isinstance(error.value.__cause__, Image.DecompressionBombError)
+
+
+def test_prepare_image_wraps_decompression_bomb_during_conversion(tmp_path: Path, monkeypatch):
+    source = tmp_path / "bomb.png"
+    Image.new("RGB", (2, 2), "white").save(source)
+
+    def raise_bomb(_image):
+        raise Image.DecompressionBombError("conversion pixel count is unsafe")
+
+    monkeypatch.setattr("invoice_ocr.documents.ImageOps.exif_transpose", raise_bomb)
+
+    with pytest.raises(DocumentError, match="image exceeds pixel safety limit") as error:
+        prepare_document(source, tmp_path / "rendered")
+
+    assert isinstance(error.value.__cause__, Image.DecompressionBombError)

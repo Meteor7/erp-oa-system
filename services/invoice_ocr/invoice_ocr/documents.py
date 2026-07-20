@@ -60,6 +60,8 @@ def validate_source(path: Path, max_bytes: int = 10 * 1024 * 1024) -> None:
         try:
             with Image.open(path) as image:
                 image.verify()
+        except Image.DecompressionBombError as exc:
+            raise DocumentError("image exceeds pixel safety limit") from exc
         except (UnidentifiedImageError, OSError) as exc:
             raise DocumentError("image cannot be decoded") from exc
 
@@ -134,6 +136,8 @@ def _normalize_image(path: Path, output_dir: Path, digest: str) -> list[Path]:
                 image = transposed.convert("RGB")
             rendered = output_dir / f"{digest[:16]}-p1.png"
             image.save(rendered, format="PNG", optimize=True)
+    except Image.DecompressionBombError as exc:
+        raise DocumentError("image exceeds pixel safety limit") from exc
     except (UnidentifiedImageError, OSError) as exc:
         raise DocumentError("image cannot be normalized") from exc
     return [rendered]
