@@ -28,7 +28,7 @@
     {"fieldname": "temporary_token", "fieldtype": "Data", "in_standard_filter": 1, "label": "Temporary Token", "read_only": 1, "unique": 1},
     {"fieldname": "request", "fieldtype": "Link", "in_standard_filter": 1, "label": "Approval Request", "options": "OA Approval Request", "read_only": 1},
     {"fieldname": "uploaded_by", "fieldtype": "Link", "label": "Uploaded By", "options": "User", "read_only": 1},
-    {"default": "排队中", "fieldname": "batch_status", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Batch Status", "options": "排队中\n识别中\n待确认\n已确认\n疑似重复\n失败\n已排除", "read_only": 1},
+    {"default": "\u5f85\u4e0a\u4f20", "fieldname": "batch_status", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Batch Status", "options": "\u5f85\u4e0a\u4f20\n\u5904\u7406\u4e2d\n\u5f85\u786e\u8ba4\n\u5df2\u5b8c\u6210\n\u90e8\u5206\u5931\u8d25\n\u5931\u8d25\n\u5df2\u53d6\u6d88", "read_only": 1},
     {"fieldname": "counts_section", "fieldtype": "Section Break", "label": "Processing Counts"},
     {"default": "0", "fieldname": "total_count", "fieldtype": "Int", "in_list_view": 1, "label": "Total Files", "read_only": 1},
     {"default": "0", "fieldname": "queued_count", "fieldtype": "Int", "label": "Queued", "read_only": 1},
