@@ -438,13 +438,20 @@ def _assert_exact_permission(permission: dict, rights: set[str], *, if_owner: bo
 
 def test_invoice_ocr_metadata_uses_the_exact_minimum_permission_matrix():
     read_roles = ("Department Manager", "Accounts User", "HR User", "HR Manager")
-    system_rights = {"read", "write", "create", "delete", "report", "export", "print"}
-    for folder in ("oa_invoice_import_batch", "oa_invoice_record", "oa_invoice_view_log"):
+    managed_system_rights = {"read", "write", "create", "delete", "report", "export", "print"}
+    for folder in ("oa_invoice_import_batch", "oa_invoice_record"):
         by_role = _permissions_by_role(load_doctype(folder))
         _assert_exact_permission(by_role["Employee"], {"read"}, if_owner=True)
         for role in read_roles:
             _assert_exact_permission(by_role[role], {"read"})
-        _assert_exact_permission(by_role["System Manager"], system_rights)
+        _assert_exact_permission(by_role["System Manager"], managed_system_rights)
+
+    immutable_log_rights = {"read", "create", "delete", "report", "export", "print"}
+    by_role = _permissions_by_role(load_doctype("oa_invoice_view_log"))
+    _assert_exact_permission(by_role["Employee"], {"read"}, if_owner=True)
+    for role in read_roles:
+        _assert_exact_permission(by_role[role], {"read"})
+    _assert_exact_permission(by_role["System Manager"], immutable_log_rights)
 
 
 def _load_view_log_controller(
