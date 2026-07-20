@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import tempfile
 from time import perf_counter
 
-from invoice_ocr.documents import prepare_document
+from invoice_ocr.documents import DocumentError, prepare_document
 from invoice_ocr.engine import OCREngine, text_to_lines
 from invoice_ocr.models import InvoiceFields, ParseOutcome, RecognitionResult
 from invoice_ocr.parser import parse_invoice
@@ -67,20 +69,32 @@ def recognize_document(
 ) -> RecognitionResult:
     """Prepare, OCR, parse and reconcile one file; never perform business deduplication."""
     started = perf_counter()
-    prepared = prepare_document(source, work_root / "rendered")
-    ocr_lines = [line for image in prepared.page_images for line in engine.recognize(image)]
-    ocr_outcome = parse_invoice(ocr_lines)
-    embedded_lines = text_to_lines(prepared.embedded_text) if prepared.use_embedded_text else []
-    embedded_outcome = parse_invoice(embedded_lines) if embedded_lines else ParseOutcome()
-    outcome = reconcile_outcomes(ocr_outcome, embedded_outcome)
-    return RecognitionResult(
-        record_id=record_id,
-        source_filename=source.name,
-        file_sha256=prepared.source_sha256,
-        fields=outcome.fields,
-        field_confidence=outcome.field_confidence,
-        warnings=outcome.warnings,
-        processing_ms=_elapsed_ms(started),
-        ocr_lines=[*ocr_lines, *embedded_lines],
-        status="needs_confirmation",
-    )
+    work_root.mkdir(parents=True, exist_ok=True)
+    call_root = Path(tempfile.mkdtemp(prefix="invoice-", dir=work_root))
+    try:
+        prepared = prepare_document(source, call_root / "rendered")
+        ocr_lines = []
+        for page_number, image in enumerate(prepared.page_images, start=1):
+            try:
+                ocr_lines.extend(engine.recognize(image))
+            except DocumentError:
+                raise
+            except Exception as exc:
+                raise DocumentError(f"OCR failed for page {page_number}") from exc
+        ocr_outcome = parse_invoice(ocr_lines)
+        embedded_lines = text_to_lines(prepared.embedded_text) if prepared.use_embedded_text else []
+        embedded_outcome = parse_invoice(embedded_lines) if embedded_lines else ParseOutcome()
+        outcome = reconcile_outcomes(ocr_outcome, embedded_outcome)
+        return RecognitionResult(
+            record_id=record_id,
+            source_filename=source.name,
+            file_sha256=prepared.source_sha256,
+            fields=outcome.fields,
+            field_confidence=outcome.field_confidence,
+            warnings=outcome.warnings,
+            processing_ms=_elapsed_ms(started),
+            ocr_lines=[*ocr_lines, *embedded_lines],
+            status="needs_confirmation",
+        )
+    finally:
+        shutil.rmtree(call_root)

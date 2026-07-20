@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+from math import ceil
 from pathlib import Path
 import re
 
@@ -15,6 +16,9 @@ MAGIC = {
     ".jpeg": (b"\xff\xd8\xff",),
     ".png": (b"\x89PNG\r\n\x1a\n",),
 }
+DEFAULT_RENDER_SCALE = 2.0
+DEFAULT_MAX_PAGE_PIXELS = 25_000_000
+DEFAULT_MAX_DOCUMENT_PIXELS = 100_000_000
 
 
 class DocumentError(ValueError):
@@ -69,7 +73,16 @@ def embedded_text_is_reliable(text: str) -> bool:
     return replacement_ratio < 0.02
 
 
-def _render_pdf(path: Path, output_dir: Path, digest: str, max_pages: int) -> tuple[list[Path], str]:
+def _render_pdf(
+    path: Path,
+    output_dir: Path,
+    digest: str,
+    *,
+    max_pages: int | None,
+    max_page_pixels: int,
+    max_document_pixels: int,
+    render_scale: float,
+) -> tuple[list[Path], str]:
     images: list[Path] = []
     texts: list[str] = []
     try:
@@ -79,14 +92,31 @@ def _render_pdf(path: Path, output_dir: Path, digest: str, max_pages: int) -> tu
     try:
         if document.page_count < 1:
             raise DocumentError("PDF has no pages")
-        if document.page_count > max_pages:
-            raise DocumentError("PDF exceeds page limit")
+        if max_pages is not None and document.page_count > max_pages:
+            raise DocumentError("PDF exceeds configured page limit")
+
+        matrix = fitz.Matrix(render_scale, render_scale)
+        document_pixels = 0
         for index, page in enumerate(document):
-            texts.append(page.get_text("text"))
-            pixmap = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
-            rendered = output_dir / f"{digest[:16]}-p{index + 1}.png"
-            pixmap.save(rendered)
-            images.append(rendered)
+            page_number = index + 1
+            try:
+                rendered_rect = page.rect * matrix
+                page_pixels = ceil(rendered_rect.width) * ceil(rendered_rect.height)
+                if page_pixels > max_page_pixels:
+                    raise DocumentError(f"PDF page {page_number} exceeds pixel limit")
+                document_pixels += page_pixels
+                if document_pixels > max_document_pixels:
+                    raise DocumentError("PDF exceeds document pixel limit")
+
+                texts.append(page.get_text("text"))
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                rendered = output_dir / f"{digest[:16]}-p{page_number}.png"
+                pixmap.save(rendered)
+                images.append(rendered)
+            except DocumentError:
+                raise
+            except Exception as exc:
+                raise DocumentError(f"PDF page {page_number} could not be processed") from exc
     finally:
         document.close()
     return images, "\n".join(texts).strip()
@@ -95,7 +125,13 @@ def _render_pdf(path: Path, output_dir: Path, digest: str, max_pages: int) -> tu
 def _normalize_image(path: Path, output_dir: Path, digest: str) -> list[Path]:
     try:
         with Image.open(path) as source:
-            image = ImageOps.exif_transpose(source).convert("RGB")
+            transposed = ImageOps.exif_transpose(source)
+            if transposed.mode in {"RGBA", "LA"} or "transparency" in transposed.info:
+                foreground = transposed.convert("RGBA")
+                background = Image.new("RGBA", foreground.size, "white")
+                image = Image.alpha_composite(background, foreground).convert("RGB")
+            else:
+                image = transposed.convert("RGB")
             rendered = output_dir / f"{digest[:16]}-p1.png"
             image.save(rendered, format="PNG", optimize=True)
     except (UnidentifiedImageError, OSError) as exc:
@@ -103,12 +139,27 @@ def _normalize_image(path: Path, output_dir: Path, digest: str) -> list[Path]:
     return [rendered]
 
 
-def prepare_document(path: Path, output_dir: Path, max_pages: int = 5) -> PreparedDocument:
+def prepare_document(
+    path: Path,
+    output_dir: Path,
+    max_pages: int | None = None,
+    max_page_pixels: int = DEFAULT_MAX_PAGE_PIXELS,
+    max_document_pixels: int = DEFAULT_MAX_DOCUMENT_PIXELS,
+    render_scale: float = DEFAULT_RENDER_SCALE,
+) -> PreparedDocument:
     validate_source(path)
     output_dir.mkdir(parents=True, exist_ok=True)
     digest = file_sha256(path)
     if path.suffix.lower() == ".pdf":
-        images, embedded_text = _render_pdf(path, output_dir, digest, max_pages)
+        images, embedded_text = _render_pdf(
+            path,
+            output_dir,
+            digest,
+            max_pages=max_pages,
+            max_page_pixels=max_page_pixels,
+            max_document_pixels=max_document_pixels,
+            render_scale=render_scale,
+        )
     else:
         images = _normalize_image(path, output_dir, digest)
         embedded_text = ""

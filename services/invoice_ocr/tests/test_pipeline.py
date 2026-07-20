@@ -203,3 +203,41 @@ def test_reconcile_drops_stale_raw_title_missing_warning_when_other_source_has_t
 
     assert merged.fields.invoice_category == "江苏省车辆通行费通用（电子）发票"
     assert "invoice_category_raw_missing" not in merged.warnings
+
+def test_recognize_document_uses_unique_call_directory_and_cleans_success(tmp_path: Path):
+    source = tmp_path / "invoice.png"
+    Image.new("RGB", (20, 20), "white").save(source)
+    seen_paths: list[Path] = []
+
+    class RecordingEngine(FakeEngine):
+        def recognize(self, image_path: Path) -> list[OCRLine]:
+            seen_paths.append(image_path)
+            return super().recognize(image_path)
+
+    work_root = tmp_path / "work"
+    pipeline.recognize_document(source, work_root, RecordingEngine())
+    pipeline.recognize_document(source, work_root, RecordingEngine())
+
+    assert len(seen_paths) == 2
+    assert seen_paths[0].parent.parent != seen_paths[1].parent.parent
+    assert all(not path.exists() for path in seen_paths)
+    assert list(work_root.iterdir()) == []
+
+
+def test_recognize_document_wraps_ocr_error_and_cleans_call_directory(tmp_path: Path):
+    import pytest
+    from invoice_ocr.documents import DocumentError
+
+    source = tmp_path / "invoice.png"
+    Image.new("RGB", (20, 20), "white").save(source)
+
+    class BrokenEngine:
+        def recognize(self, _image_path: Path) -> list[OCRLine]:
+            raise RuntimeError("ocr exploded")
+
+    work_root = tmp_path / "work"
+    with pytest.raises(DocumentError, match="OCR failed for page 1") as error:
+        pipeline.recognize_document(source, work_root, BrokenEngine())
+
+    assert isinstance(error.value.__cause__, RuntimeError)
+    assert list(work_root.iterdir()) == []

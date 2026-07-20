@@ -6,6 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "rayher-invoice-ocr"
 version = "0.1.0"
 requires-python = ">=3.11,<3.12"
+dependencies = [
+    "PyMuPDF==1.26.4",
+    "Pillow==11.3.0",
+    "pydantic>=2,<3",
+    "paddleocr==3.7.0",
+    "paddlepaddle==3.3.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.4.1"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
