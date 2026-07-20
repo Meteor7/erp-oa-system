@@ -105,6 +105,7 @@ def test_prepare_pdf_wraps_page_processing_error_as_document_error(tmp_path: Pat
 
     class BrokenDocument:
         page_count = 1
+        needs_pass = False
         closed = False
 
         def __iter__(self):
@@ -165,3 +166,20 @@ def test_prepare_image_wraps_decompression_bomb_during_conversion(tmp_path: Path
         prepare_document(source, tmp_path / "rendered")
 
     assert isinstance(error.value.__cause__, Image.DecompressionBombError)
+
+
+def test_prepare_document_rejects_password_protected_pdf(tmp_path: Path):
+    source = tmp_path / "protected.pdf"
+    document = fitz.open()
+    document.new_page()
+    source.write_bytes(
+        document.tobytes(
+            encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-password",
+            user_pw="user-password",
+        )
+    )
+    document.close()
+
+    with pytest.raises(DocumentError, match="password protected"):
+        prepare_document(source, tmp_path / "rendered")

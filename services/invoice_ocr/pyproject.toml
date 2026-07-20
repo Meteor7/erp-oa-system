@@ -7,15 +7,22 @@ name = "rayher-invoice-ocr"
 version = "0.1.0"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "PyMuPDF==1.26.4",
-    "Pillow==11.3.0",
-    "pydantic>=2,<3",
-    "paddleocr==3.7.0",
     "paddlepaddle==3.3.1",
+    "paddleocr==3.7.0",
+    "pydantic==2.11.7",
+    "Pillow==11.3.0",
+    "PyMuPDF==1.26.4",
+    "numpy==2.2.6",
+    "fastapi==0.116.1",
+    "uvicorn==0.35.0",
+    "python-multipart==0.0.20",
 ]
 
 [project.optional-dependencies]
-test = ["pytest==8.4.1"]
+test = [
+    "pytest==8.4.1",
+    "httpx==0.28.1",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

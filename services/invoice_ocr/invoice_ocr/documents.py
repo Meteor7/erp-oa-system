@@ -92,6 +92,8 @@ def _render_pdf(
     except Exception as exc:
         raise DocumentError("PDF cannot be opened") from exc
     try:
+        if document.needs_pass:
+            raise DocumentError("PDF is password protected")
         if document.page_count < 1:
             raise DocumentError("PDF has no pages")
         if max_pages is not None and document.page_count > max_pages:
