@@ -356,6 +356,8 @@ def test_invoice_record_fields_and_status_are_exact_and_nullable():
         assert fields[name]["fieldtype"] == fieldtype, name
         assert fields[name].get("reqd") != 1, name
         assert fields[name].get("read_only") != 1, name
+        if fieldtype == "Currency":
+            assert fields[name].get("precision") in {"2", 2}, name
     assert fields["recognition_status"]["fieldtype"] == "Select"
     assert fields["recognition_status"]["options"].split("\n") == INVOICE_RECOGNITION_STATUSES
     assert fields["recognition_status"]["default"] == "\u6392\u961f\u4e2d"
@@ -424,31 +426,31 @@ def test_invoice_expense_and_request_extensions_are_exact_and_backward_compatibl
     assert request_fields["no_invoice_reason"].get("reqd") != 1
 
 
+def _assert_exact_permission(permission: dict, rights: set[str], *, if_owner: bool = False) -> None:
+    expected_keys = {"role", "permlevel", *rights}
+    if if_owner:
+        expected_keys.add("if_owner")
+    assert set(permission) == expected_keys, permission
+    assert permission["permlevel"] == 0
+    assert _permission_rights(permission) == rights
+    assert bool(permission.get("if_owner")) is if_owner
+
+
 def test_invoice_ocr_metadata_uses_the_exact_minimum_permission_matrix():
     read_roles = ("Department Manager", "Accounts User", "HR User", "HR Manager")
-    for folder in ("oa_invoice_import_batch", "oa_invoice_record"):
+    system_rights = {"read", "write", "create", "delete", "report", "export", "print"}
+    for folder in ("oa_invoice_import_batch", "oa_invoice_record", "oa_invoice_view_log"):
         by_role = _permissions_by_role(load_doctype(folder))
-        assert _permission_rights(by_role["Employee"]) == {"read", "create"}
-        assert by_role["Employee"].get("if_owner") == 1
+        _assert_exact_permission(by_role["Employee"], {"read"}, if_owner=True)
         for role in read_roles:
-            assert _permission_rights(by_role[role]) == {"read"}, (folder, role)
-        assert _permission_rights(by_role["System Manager"]) == {
-            "read", "write", "create", "delete", "report", "export", "print",
-        }
-    by_role = _permissions_by_role(load_doctype("oa_invoice_view_log"))
-    assert _permission_rights(by_role["Employee"]) == {"read", "create"}
-    assert by_role["Employee"].get("if_owner") == 1
-    for role in read_roles:
-        assert _permission_rights(by_role[role]) == {"read"}, role
-    assert _permission_rights(by_role["System Manager"]) == {
-        "read", "create", "delete", "report", "export",
-    }
-    assert all(not permission.get("write") for permission in by_role.values())
-    assert all(role == "System Manager" or not permission.get("delete")
-               for role, permission in by_role.items())
+            _assert_exact_permission(by_role[role], {"read"})
+        _assert_exact_permission(by_role["System Manager"], system_rights)
 
 
-def _load_view_log_controller(monkeypatch, *, invoice, now_value, session_user="employee@example.com"):
+def _load_view_log_controller(
+    monkeypatch, *, invoice, now_value, session_user="employee@example.com",
+    request_context=None, request_ip=None,
+):
     import importlib.util
     import sys
     from types import ModuleType, SimpleNamespace
@@ -480,6 +482,10 @@ def _load_view_log_controller(monkeypatch, *, invoice, now_value, session_user="
     frappe_module.get_doc = get_doc
     frappe_module.throw = throw
     frappe_module._ = lambda message: message
+    frappe_module.local = SimpleNamespace()
+    if request_context is not None:
+        frappe_module.local.request = request_context
+        frappe_module.local.request_ip = request_ip
     monkeypatch.setitem(sys.modules, "frappe", frappe_module)
     monkeypatch.setitem(sys.modules, "frappe.model", model_module)
     monkeypatch.setitem(sys.modules, "frappe.model.document", document_module)
@@ -492,7 +498,8 @@ def _load_view_log_controller(monkeypatch, *, invoice, now_value, session_user="
     return module.OAInvoiceViewLog, ValidationError, calls
 
 
-def test_invoice_view_log_before_insert_overwrites_untrusted_audit_and_source_snapshots(monkeypatch):
+@pytest.mark.parametrize("action", ["\u67e5\u770b", "\u4e0b\u8f7d"])
+def test_invoice_view_log_before_insert_overwrites_untrusted_request_audit(monkeypatch, action):
     from types import SimpleNamespace
 
     permission_calls = []
@@ -501,16 +508,20 @@ def test_invoice_view_log_before_insert_overwrites_untrusted_audit_and_source_sn
         check_permission=lambda permission: permission_calls.append(permission),
     )
     now_value = object()
+    request_context = SimpleNamespace(headers={"User-Agent": "Trusted Browser/1.0"})
     controller, _, get_doc_calls = _load_view_log_controller(
         monkeypatch, invoice=invoice, now_value=now_value,
+        request_context=request_context, request_ip="203.0.113.8",
     )
     log = controller()
     log.invoice_record = "OIR-2026-0000001"
-    log.action = "\u67e5\u770b"
+    log.action = action
     log.invoice_file = "/private/files/forged.pdf"
     log.request = "OA-REQ-FORGED"
     log.viewed_by = "attacker@example.com"
     log.viewed_on = "2000-01-01 00:00:00"
+    log.ip_address = "198.51.100.99"
+    log.user_agent = "Forged Browser"
     log.before_insert()
     assert get_doc_calls == [("OA Invoice Record", "OIR-2026-0000001")]
     assert permission_calls == ["read"]
@@ -518,6 +529,28 @@ def test_invoice_view_log_before_insert_overwrites_untrusted_audit_and_source_sn
     assert log.request == "OA-REQ-0001"
     assert log.viewed_by == "employee@example.com"
     assert log.viewed_on is now_value
+    assert log.ip_address == "203.0.113.8"
+    assert log.user_agent == "Trusted Browser/1.0"
+
+
+def test_invoice_view_log_before_insert_clears_network_audit_without_request_context(monkeypatch):
+    from types import SimpleNamespace
+
+    invoice = SimpleNamespace(
+        invoice_file="/private/files/trusted-invoice.pdf", request=None,
+        check_permission=lambda permission: None,
+    )
+    controller, _, _ = _load_view_log_controller(
+        monkeypatch, invoice=invoice, now_value=object(), session_user="Administrator",
+    )
+    log = controller()
+    log.invoice_record = "OIR-2026-0000001"
+    log.action = "\u67e5\u770b"
+    log.ip_address = "198.51.100.99"
+    log.user_agent = "Forged Browser"
+    log.before_insert()
+    assert log.ip_address is None
+    assert log.user_agent is None
 
 
 def test_invoice_view_log_before_insert_rejects_unknown_actions_before_loading_source(monkeypatch):
@@ -543,8 +576,7 @@ def test_invoice_view_log_before_insert_stops_when_source_read_is_denied(monkeyp
         raise PermissionError("source invoice read denied")
 
     invoice = SimpleNamespace(
-        invoice_file="/private/files/trusted-invoice.pdf",
-        request="OA-REQ-0001",
+        invoice_file="/private/files/trusted-invoice.pdf", request="OA-REQ-0001",
         check_permission=deny_read,
     )
     controller, _, get_doc_calls = _load_view_log_controller(
@@ -557,12 +589,14 @@ def test_invoice_view_log_before_insert_stops_when_source_read_is_denied(monkeyp
     log.request = "OA-REQ-FORGED"
     log.viewed_by = "attacker@example.com"
     log.viewed_on = "2000-01-01 00:00:00"
-
+    log.ip_address = "198.51.100.99"
+    log.user_agent = "Forged Browser"
     with pytest.raises(PermissionError, match="source invoice read denied"):
         log.before_insert()
-
     assert get_doc_calls == [("OA Invoice Record", "OIR-2026-0000001")]
     assert log.invoice_file == "/private/files/forged.pdf"
     assert log.request == "OA-REQ-FORGED"
     assert log.viewed_by == "attacker@example.com"
     assert log.viewed_on == "2000-01-01 00:00:00"
+    assert log.ip_address == "198.51.100.99"
+    assert log.user_agent == "Forged Browser"

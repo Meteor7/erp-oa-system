@@ -7,6 +7,16 @@ from frappe.utils import now_datetime
 ALLOWED_ACTIONS = {"\u67e5\u770b", "\u4e0b\u8f7d"}
 
 
+def _get_request_audit_values():
+    request_context = getattr(frappe.local, "request", None)
+    if request_context is None:
+        return None, None
+
+    headers = getattr(request_context, "headers", None)
+    user_agent = headers.get("User-Agent") if headers is not None else None
+    return getattr(frappe.local, "request_ip", None), user_agent
+
+
 class OAInvoiceViewLog(Document):
     def before_insert(self):
         if self.action not in ALLOWED_ACTIONS:
@@ -21,7 +31,10 @@ class OAInvoiceViewLog(Document):
 
         source = frappe.get_doc("OA Invoice Record", invoice_record)
         source.check_permission("read")
+        ip_address, user_agent = _get_request_audit_values()
         self.invoice_file = source.invoice_file
         self.request = source.request
         self.viewed_by = frappe.session.user
         self.viewed_on = now_datetime()
+        self.ip_address = ip_address
+        self.user_agent = user_agent
