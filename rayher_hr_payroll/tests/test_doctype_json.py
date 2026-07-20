@@ -267,3 +267,118 @@ def test_rd_cost_allocation_line_keeps_expense_account_levels_for_matrix_report(
 
     assert fields["account_level_3"]["fieldtype"] == "Data"
     assert fields["account_level_4"]["fieldtype"] == "Data"
+
+INVOICE_RECOGNITION_STATUSES = {
+    "排队中", "识别中", "待确认", "已确认", "疑似重复", "失败", "已排除"
+}
+
+
+def _fields_by_name(doc: dict) -> dict[str, dict]:
+    return {field["fieldname"]: field for field in doc["fields"] if "fieldname" in field}
+
+
+def _permission_rights(permission: dict) -> set[str]:
+    rights = {"read", "write", "create", "delete", "report", "export", "print", "email", "share"}
+    return {right for right in rights if permission.get(right)}
+
+
+def test_invoice_ocr_doctypes_define_auditable_records():
+    batch = load_doctype("oa_invoice_import_batch")
+    record = load_doctype("oa_invoice_record")
+    view_log = load_doctype("oa_invoice_view_log")
+    batch_fields = _fields_by_name(batch)
+    record_fields = _fields_by_name(record)
+    log_fields = _fields_by_name(view_log)
+
+    assert batch["track_changes"] == 1
+    assert {
+        "temporary_token", "request", "uploaded_by", "batch_status", "total_count",
+        "queued_count", "processing_count", "pending_confirmation_count",
+        "confirmed_count", "duplicate_count", "failed_count", "excluded_count",
+        "expires_on", "error_summary",
+    }.issubset(batch_fields)
+    assert batch_fields["request"]["options"] == "OA Approval Request"
+    assert batch_fields["uploaded_by"]["options"] == "User"
+    assert set(batch_fields["batch_status"]["options"].split("\n")) == INVOICE_RECOGNITION_STATUSES
+
+    assert record["track_changes"] == 1
+    assert {
+        "batch", "invoice_file", "original_filename", "mime_type", "file_size", "file_sha256",
+        "invoice_category", "project_name", "issue_date", "invoice_number",
+        "amount_before_tax", "tax_amount", "total_amount", "ocr_payload", "field_warnings",
+        "recognition_status", "duplicate_of", "duplicate_reason", "request", "expense_line_key",
+        "uploaded_by", "confirmed_by", "confirmed_on", "processing_error", "retry_count",
+    }.issubset(record_fields)
+    assert record_fields["batch"]["options"] == "OA Invoice Import Batch"
+    assert record_fields["invoice_file"]["fieldtype"] == "Attach"
+    assert record_fields["file_sha256"]["fieldtype"] == "Data"
+    assert record_fields["invoice_number"]["fieldtype"] == "Data"
+    assert record_fields["expense_line_key"]["fieldtype"] == "Data"
+    assert record_fields["duplicate_of"]["fieldtype"] == "Link"
+    assert record_fields["duplicate_of"]["options"] == "OA Invoice Record"
+    assert record_fields["request"]["options"] == "OA Approval Request"
+    assert record_fields["confirmed_by"]["options"] == "User"
+    assert record_fields["confirmed_on"]["fieldtype"] == "Datetime"
+    assert all(record_fields[name]["fieldtype"] == "Currency" for name in (
+        "amount_before_tax", "tax_amount", "total_amount"
+    ))
+    assert record_fields["ocr_payload"]["fieldtype"] in {"Code", "Long Text"}
+    assert record_fields["field_warnings"]["fieldtype"] in {"Code", "Long Text"}
+    assert set(record_fields["recognition_status"]["options"].split("\n")) == INVOICE_RECOGNITION_STATUSES
+    assert not any(record_fields[name].get("reqd") for name in (
+        "invoice_category", "project_name", "issue_date", "invoice_number",
+        "amount_before_tax", "tax_amount", "total_amount",
+    ))
+
+    assert view_log["track_changes"] == 1
+    assert {
+        "invoice_record", "invoice_file", "request", "action", "viewed_by", "viewed_on",
+        "ip_address", "user_agent",
+    }.issubset(log_fields)
+    assert log_fields["invoice_record"]["options"] == "OA Invoice Record"
+    assert log_fields["request"]["options"] == "OA Approval Request"
+    assert log_fields["viewed_by"]["options"] == "User"
+
+
+def test_invoice_ocr_extensions_preserve_existing_expense_and_request_models():
+    expense_line = load_doctype("oa_approval_expense_line")
+    request = load_doctype("oa_approval_request")
+    line_fields = _fields_by_name(expense_line)
+    request_fields = _fields_by_name(request)
+
+    assert expense_line["istable"] == 1
+    assert line_fields["line_key"]["fieldtype"] == "Data"
+    assert line_fields["invoice_difference_reason"]["fieldtype"] in {"Small Text", "Long Text"}
+    assert line_fields["line_key"].get("reqd") != 1
+    assert request_fields["invoice_count"]["fieldtype"] == "Int"
+    assert request_fields["invoice_count"].get("read_only") == 1
+    assert request_fields["invoice_status"].get("read_only") == 1
+    assert request_fields["no_invoice_reason"]["fieldtype"] in {"Small Text", "Long Text"}
+    assert request_fields["no_invoice_reason"].get("reqd") != 1
+
+
+def test_invoice_ocr_metadata_uses_minimum_role_permissions():
+    for folder in ("oa_invoice_import_batch", "oa_invoice_record"):
+        doc = load_doctype(folder)
+        by_role = {permission["role"]: permission for permission in doc["permissions"]}
+        assert _permission_rights(by_role["Employee"]) == {"read", "create"}
+        assert by_role["Employee"].get("if_owner") == 1
+        for role in ("Department Manager", "Accounts User", "HR User", "HR Manager"):
+            assert _permission_rights(by_role[role]) == {"read"}
+        assert by_role["System Manager"].get("delete") == 1
+        assert all(
+            permission["role"] == "System Manager" or not permission.get("delete")
+            for permission in doc["permissions"]
+        )
+
+    view_log = load_doctype("oa_invoice_view_log")
+    log_by_role = {permission["role"]: permission for permission in view_log["permissions"]}
+    assert _permission_rights(log_by_role["Employee"]) == {"read", "create"}
+    assert log_by_role["Employee"].get("if_owner") == 1
+    for role in ("Department Manager", "Accounts User", "HR User", "HR Manager"):
+        assert _permission_rights(log_by_role[role]) == {"read"}
+    assert log_by_role["System Manager"].get("delete") == 1
+    for permission in view_log["permissions"]:
+        if permission["role"] != "System Manager":
+            assert not permission.get("write")
+            assert not permission.get("delete")

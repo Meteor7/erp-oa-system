@@ -1,0 +1,53 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "autoname": "format:OIV-{YYYY}-{#######}",
+  "creation": "2026-07-20 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "invoice_record",
+    "invoice_file",
+    "request",
+    "action",
+    "viewed_by",
+    "viewed_on",
+    "request_context_section",
+    "ip_address",
+    "user_agent"
+  ],
+  "fields": [
+    {"fieldname": "invoice_record", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Invoice Record", "options": "OA Invoice Record", "read_only": 1, "reqd": 1},
+    {"fieldname": "invoice_file", "fieldtype": "Data", "label": "Invoice File Snapshot", "read_only": 1, "reqd": 1},
+    {"fieldname": "request", "fieldtype": "Link", "in_standard_filter": 1, "label": "Approval Request", "options": "OA Approval Request", "read_only": 1},
+    {"fieldname": "action", "fieldtype": "Select", "in_list_view": 1, "label": "Action", "options": "查看\n下载", "read_only": 1, "reqd": 1},
+    {"fieldname": "viewed_by", "fieldtype": "Link", "in_list_view": 1, "label": "Viewed By", "options": "User", "read_only": 1, "reqd": 1},
+    {"fieldname": "viewed_on", "fieldtype": "Datetime", "in_list_view": 1, "label": "Viewed On", "read_only": 1, "reqd": 1},
+    {"fieldname": "request_context_section", "fieldtype": "Section Break", "label": "Request Context"},
+    {"fieldname": "ip_address", "fieldtype": "Data", "label": "IP Address", "read_only": 1},
+    {"fieldname": "user_agent", "fieldtype": "Small Text", "label": "User Agent", "read_only": 1}
+  ],
+  "index_web_pages_for_search": 0,
+  "is_submittable": 0,
+  "links": [],
+  "modified": "2026-07-20 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Invoice View Log",
+  "naming_rule": "Expression",
+  "owner": "Administrator",
+  "permissions": [
+    {"role": "System Manager", "read": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+    {"role": "Employee", "read": 1, "create": 1, "if_owner": 1},
+    {"role": "Department Manager", "read": 1},
+    {"role": "Accounts User", "read": 1},
+    {"role": "HR User", "read": 1},
+    {"role": "HR Manager", "read": 1}
+  ],
+  "sort_field": "viewed_on",
+  "sort_order": "DESC",
+  "states": [],
+  "title_field": "invoice_record",
+  "track_changes": 1
+}
