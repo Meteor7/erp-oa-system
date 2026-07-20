@@ -5,6 +5,7 @@ import logging
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from threading import Lock
+from time import monotonic
 from typing import Annotated, Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -18,47 +19,66 @@ from invoice_ocr.engine import OCRBackendError, OCREngine, PaddleOCREngine
 from invoice_ocr.pipeline import recognize_document
 
 MAX_BYTES = 10 * 1024 * 1024
-# A legal 10 MiB file needs multipart boundaries and the small record_id field.
-# Cap that protocol overhead at 64 KiB so the whole request remains bounded.
-MAX_MULTIPART_OVERHEAD_BYTES = 64 * 1024
-MAX_REQUEST_BYTES = MAX_BYTES + MAX_MULTIPART_OVERHEAD_BYTES
+# Bound each untrusted multipart metadata value by its UTF-8 byte length.
+MAX_FILENAME_BYTES = 255
+MAX_RECORD_ID_BYTES = 512
+# 64 KiB covers both legal metadata maxima plus multipart headers/boundaries,
+# while keeping the complete request close to the 10 MiB file contract.
+MAX_MULTIPART_OVERHEAD = 64 * 1024
+MAX_REQUEST_BYTES = MAX_BYTES + MAX_MULTIPART_OVERHEAD
+ENGINE_INIT_FAILURE_BACKOFF_SECONDS = 5.0
 
 logger = logging.getLogger(__name__)
 _engine_instance: OCREngine | None = None
+_engine_retry_after = 0.0
 _engine_init_lock = Lock()
 _recognition_lock = Lock()
 
 
 def get_engine() -> OCREngine:
-    """Return the process-wide Paddle engine, constructing it exactly once."""
-    global _engine_instance
+    """Return the shared engine, with a short sanitized failure backoff."""
+    global _engine_instance, _engine_retry_after
     instance = _engine_instance
     if instance is not None:
         return instance
     with _engine_init_lock:
         instance = _engine_instance
-        if instance is None:
-            try:
-                instance = PaddleOCREngine()
-            except Exception as error:
-                raise OCRBackendError("OCR backend initialization failed") from error
-            _engine_instance = instance
-    return instance
+        if instance is not None:
+            return instance
+        if monotonic() < _engine_retry_after:
+            raise OCRBackendError("OCR backend temporarily unavailable")
+        try:
+            instance = PaddleOCREngine()
+        except Exception as error:
+            _engine_retry_after = monotonic() + ENGINE_INIT_FAILURE_BACKOFF_SECONDS
+            raise OCRBackendError("OCR backend initialization failed") from error
+        _engine_instance = instance
+        _engine_retry_after = 0.0
+        return instance
 
 
 def reset_engine() -> None:
-    """Discard the cached engine during a controlled idle/test lifecycle."""
-    global _engine_instance
+    """Discard cached success and failure state during an idle/test lifecycle."""
+    global _engine_instance, _engine_retry_after
     with _engine_init_lock:
         _engine_instance = None
+        _engine_retry_after = 0.0
 
 
 def _validated_suffix(filename: str | None) -> str:
-    name = PurePosixPath((filename or "").replace("\\", "/")).name
+    raw_name = filename or ""
+    if len(raw_name.encode("utf-8")) > MAX_FILENAME_BYTES:
+        raise HTTPException(status_code=422, detail="filename_too_long")
+    name = PurePosixPath(raw_name.replace("\\", "/")).name
     suffix = Path(name).suffix.lower()
     if not name or suffix not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=415, detail="unsupported_file_type")
     return suffix
+
+
+def _validate_record_id(record_id: str | None) -> None:
+    if record_id is not None and len(record_id.encode("utf-8")) > MAX_RECORD_ID_BYTES:
+        raise HTTPException(status_code=422, detail="record_id_too_long")
 
 
 def _log_internal_error(error: Exception) -> None:
@@ -176,9 +196,19 @@ class SanitizedErrorMiddleware:
         if scope["type"] != "http":
             await self.application(scope, receive, send)
             return
+        response_started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal response_started
+            await send(message)
+            if message["type"] == "http.response.start":
+                response_started = True
+
         try:
-            await self.application(scope, receive, send)
+            await self.application(scope, receive, tracking_send)
         except Exception as error:
+            if response_started:
+                raise
             _log_internal_error(error)
             await _send_json_error(send, 500, "internal_error")
 
@@ -202,6 +232,7 @@ async def recognize(
     record_id: Annotated[str | None, Form()] = None,
 ) -> Any:
     suffix = _validated_suffix(file.filename)
+    _validate_record_id(record_id)
     content = await file.read(MAX_BYTES + 1)
     if len(content) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="file_too_large")
