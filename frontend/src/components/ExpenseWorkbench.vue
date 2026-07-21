@@ -2,6 +2,9 @@
 import { Button, FeatherIcon, createResource } from 'frappe-ui';
 import { computed, reactive, ref, watch } from 'vue';
 import { exportTableWorkbook } from '../lib/tableExport';
+import InvoiceRecognitionPanel from './invoice/InvoiceRecognitionPanel.vue';
+import InvoicePreviewDrawer from './invoice/InvoicePreviewDrawer.vue';
+import { getRequestInvoices, invoiceBlockers, invoicesForLine, linkInvoice, moneyToCents, newLineKey, persistInvoiceRequest } from '../lib/invoiceOcr.js';
 
 const REQUEST_TYPE = '费用付款申请';
 const ASSET_OTHER = '其它';
@@ -53,11 +56,19 @@ const actionNote = ref('');
 const filters = reactive({ keyword: '', department: '', category: '' });
 const consumptionFilter = ref('');
 const recordFilters = reactive({ keyword: '', status: '' });
+const invoiceBatch = ref(null);
+const formInvoices = ref([]);
+const formRequestName = ref('');
+const formInvoiceBusy = ref(false);
+const detailInvoices = ref([]);
+const detailInvoiceBusy = ref(false);
+const previewInvoiceRow = ref(null);
+let detailLoadVersion = 0;
 
-const blankLine = () => ({ start_date: '', end_date: '', category: '', amount: '', description: '' });
+const blankLine = () => ({ line_key: newLineKey(), start_date: '', end_date: '', category: '', amount: '', description: '', invoice_difference_reason: '' });
 const requestForm = reactive({
   subject: '', company: '', department: '', supervisor: '', doc_type: '', urgency: '', asset_category: ASSET_OTHER,
-  payment_type: '', payment_method: '', bank_name: '', payee_name: '', branch: '', account_no: '', reason: '',
+  payment_type: '', payment_method: '', bank_name: '', payee_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
 });
 const expenseLines = ref([blankLine()]);
 const consumptionForm = reactive({ title: '', category: '', amount: '', expense_date: '', department: '', description: '' });
@@ -82,6 +93,7 @@ const invoiceAdder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.add_i
 const pusher = createResource({ url: 'rayher_hr_payroll.api.oa_entry.push_consumption_to_request' });
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
 const draftSubmitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.submit_request' });
+const draftInvoiceDetailsSaver = createResource({ url: 'rayher_hr_payroll.api.oa_entry.update_draft_invoice_details' });
 const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_paid' });
 
 const requestRows = computed(() => requests.data || []);
@@ -96,6 +108,7 @@ const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
 const routeSteps = computed(() => preview.data?.steps || []);
 const selectedRequest = computed(() => requestRows.value.find((row) => row.name === detailRequestName.value));
+const detailInvoiceBatch = computed(() => detailInvoices.value[0]?.batch || '');
 const selectedConsumption = computed(() => consumptionRows.value.find((row) => row.name === selectedConsumptionName.value) || consumptionRows.value[0]);
 const selectedInvoice = computed(() => (selectedConsumption.value?.invoices || []).find((invoice) => invoice.invoice_name === selectedInvoiceName.value));
 const requestTotal = computed(() => expenseLines.value.reduce((sum, row) => sum + Number(row.amount || 0), 0));
@@ -154,7 +167,7 @@ function modeLabel(mode) {
 const filteredRequests = computed(() => requestRows.value.filter((row) => {
   const keyword = filters.keyword.trim().toLowerCase();
   const searchable = [
-    row.name, row.subject, row.employee_name, row.department, row.reason,
+    row.name, row.subject, row.employee_name, row.department, row.reason, row.invoice_search_text,
     ...(row.expense_lines || []).flatMap((line) => [line.category, line.description]),
   ].join(' ').toLowerCase();
   if (keyword && !searchable.includes(keyword)) return false;
@@ -280,15 +293,20 @@ async function reloadAll() {
 function openNewRequest() {
   message.value = '';
   errorMessage.value = '';
+  resetRequestForm();
   showRequestForm.value = true;
   applyDefaults();
 }
 
 function resetRequestForm() {
   Object.assign(requestForm, {
-    subject: '', bank_name: '', branch: '', account_no: '', reason: '',
+    subject: '', bank_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
   });
   expenseLines.value = [blankLine()];
+  invoiceBatch.value = null;
+  formInvoices.value = [];
+  formRequestName.value = '';
+  formInvoiceBusy.value = false;
   applyDefaults();
 }
 
@@ -299,44 +317,107 @@ function addExpenseLine() {
 }
 
 function removeExpenseLine(index) {
+  const line = expenseLines.value[index];
+  if (invoicesForLine(formInvoices.value, line?.line_key).length) {
+    errorMessage.value = '该费用明细已关联发票，请先在发票 OCR 区域解绑或改绑。';
+    return;
+  }
   if (expenseLines.value.length > 1) expenseLines.value.splice(index, 1);
 }
 
+function onBatchCreated(batch) {
+  invoiceBatch.value = batch;
+}
+
+function onInvoicesChange(rows) {
+  formInvoices.value = (rows || []).map((row) => ({ ...row }));
+}
+
+function onLinkChange(change) {
+  formInvoices.value = formInvoices.value.map((row) => row.name === change.invoice ? { ...row, expense_line_key: change.expense_line_key } : row);
+}
+
+function validateInvoiceSubmission(invoices, lines, noInvoiceReason) {
+  const included = (invoices || []).filter((row) => row.recognition_status !== '已排除');
+  const blockers = invoiceBlockers(included);
+  if (blockers.length) return blockers.join('；');
+  if (!included.length) return String(noInvoiceReason || '').trim() ? '' : '未上传有效发票时，请填写无票原因。';
+  if (included.some((row) => !row.expense_line_key)) return '已确认发票必须关联到一行费用明细。';
+  try {
+    for (const line of lines) {
+      const linked = invoicesForLine(included, line.line_key);
+      const invoiceTotal = linked.reduce((sum, row) => sum + moneyToCents(row.total_amount), 0);
+      const difference = Math.abs(moneyToCents(line.amount) - invoiceTotal);
+      if ((!linked.length || difference > 2) && !String(line.invoice_difference_reason || '').trim()) {
+        return !linked.length ? '存在未关联发票的费用明细，请填写差异说明。' : '费用明细金额与发票合计不一致，请填写差异说明。';
+      }
+    }
+  } catch {
+    return '发票或费用明细金额格式无效。';
+  }
+  return '';
+}
+
 async function saveRequest(submit) {
-  errorMessage.value = '';
+  errorMessage.value = "";
   const validLines = expenseLines.value.filter((line) => line.category && Number(line.amount || 0) > 0);
   if (!requestForm.department || validLines.length !== expenseLines.value.length) {
-    errorMessage.value = '请填写申请部门、费用项目和金额。';
+    errorMessage.value = "请填写申请部门、费用项目和金额。";
     return;
   }
+  if (submit) {
+    if (formInvoiceBusy.value || (invoiceBatch.value && !formInvoices.value.length)) {
+      errorMessage.value = "发票上传或批次回填尚未完成，请等待后再提交。";
+      return;
+    }
+    const blocker = validateInvoiceSubmission(formInvoices.value, validLines, requestForm.no_invoice_reason);
+    if (blocker) {
+      errorMessage.value = blocker;
+      return;
+    }
+  }
+  const payload = {
+    request_type: REQUEST_TYPE,
+    subject: requestForm.subject.trim() || validLines[0].description || validLines[0].category,
+    department: requestForm.department,
+    supervisor: requestForm.supervisor,
+    asset_category: requestForm.asset_category,
+    amount: requestTotal.value,
+    reason: requestForm.reason,
+    submit: 0,
+    company: requestForm.company,
+    doc_type: requestForm.doc_type,
+    urgency: requestForm.urgency,
+    payment_type: requestForm.payment_type,
+    payment_method: requestForm.payment_method,
+    bank_name: requestForm.bank_name,
+    payee_name: requestForm.payee_name,
+    branch: requestForm.branch,
+    account_no: requestForm.account_no,
+    invoice_batch: typeof invoiceBatch.value === "string" ? invoiceBatch.value : invoiceBatch.value?.name || "",
+    no_invoice_reason: requestForm.no_invoice_reason.trim(),
+    expense_lines: JSON.stringify(validLines.map((line) => ({ ...line, amount: Number(line.amount || 0) }))),
+  };
   saving.value = true;
   try {
-    const row = await creator.submit({
-      request_type: REQUEST_TYPE,
-      subject: requestForm.subject.trim() || validLines[0].description || validLines[0].category,
-      department: requestForm.department,
-      supervisor: requestForm.supervisor,
-      asset_category: requestForm.asset_category,
-      amount: requestTotal.value,
-      reason: requestForm.reason,
-      submit: submit ? 1 : 0,
-      company: requestForm.company,
-      doc_type: requestForm.doc_type,
-      urgency: requestForm.urgency,
-      payment_type: requestForm.payment_type,
-      payment_method: requestForm.payment_method,
-      bank_name: requestForm.bank_name,
-      payee_name: requestForm.payee_name,
-      branch: requestForm.branch,
-      account_no: requestForm.account_no,
-      expense_lines: JSON.stringify(validLines.map((line) => ({ ...line, amount: Number(line.amount || 0) }))),
+    const result = await persistInvoiceRequest({
+      requestName: formRequestName.value,
+      payload,
+      invoices: formInvoices.value,
+      shouldSubmit: submit,
+      createDraft: (draftPayload) => creator.submit(draftPayload),
+      onDraftCreated: (row) => { formRequestName.value = row.name; },
+      link: (invoice, request, lineKey) => linkInvoice(invoice, request, lineKey),
+      submitDraft: (name) => draftSubmitter.submit({ name, no_invoice_reason: requestForm.no_invoice_reason.trim() }),
     });
+    const savedName = result.requestName;
     showRequestForm.value = false;
-    detailRequestName.value = row.name;
     resetRequestForm();
-    await reloadAll();
+    await requests.reload();
+    detailRequestName.value = savedName;
   } catch (error) {
-    errorMessage.value = apiError(error, '单据保存失败');
+    const saved = formRequestName.value ? ("草稿 " + formRequestName.value + " 已保存；") : "";
+    errorMessage.value = saved + apiError(error, "单据保存失败");
   } finally {
     saving.value = false;
   }
@@ -440,12 +521,65 @@ async function pushSelected(submit) {
   }
 }
 
-async function submitDraft(row) {
+async function loadDetailInvoices(name, showError = true) {
+  const version = ++detailLoadVersion;
+  if (!name) { detailInvoices.value = []; return []; }
   try {
-    await draftSubmitter.submit({ name: row.name });
+    const rows = await getRequestInvoices(name);
+    if (version === detailLoadVersion && detailRequestName.value === name) detailInvoices.value = (rows || []).map((row) => ({ ...row }));
+    return rows || [];
+  } catch (error) {
+    if (version === detailLoadVersion && showError) errorMessage.value = apiError(error, '发票明细加载失败');
+    throw error;
+  }
+}
+
+function onDetailInvoicesChange(rows) {
+  detailInvoices.value = (rows || []).map((row) => ({ ...row }));
+}
+
+function onDetailLinkChange(change) {
+  detailInvoices.value = detailInvoices.value.map((row) => row.name === change.invoice ? { ...row, expense_line_key: change.expense_line_key } : row);
+}
+
+function draftInvoiceDetailsPayload(row) {
+  return {
+    name: row.name,
+    no_invoice_reason: String(row.no_invoice_reason || "").trim(),
+    expense_line_reasons: JSON.stringify(Object.fromEntries((row.expense_lines || []).map((line) => [line.line_key, String(line.invoice_difference_reason || "").trim()]))),
+  };
+}
+
+async function persistDraftInvoiceDetails(row) {
+  return draftInvoiceDetailsSaver.submit(draftInvoiceDetailsPayload(row));
+}
+
+async function saveDraftInvoiceDetails(row) {
+  errorMessage.value = "";
+  try {
+    await persistDraftInvoiceDetails(row);
+    message.value = "发票说明已保存。";
     await requests.reload();
   } catch (error) {
-    errorMessage.value = apiError(error, '提交审批失败');
+    errorMessage.value = apiError(error, "发票说明保存失败");
+  }
+}
+
+async function submitDraft(row) {
+  if (detailInvoiceBusy.value) {
+    errorMessage.value = "发票上传或批次回填尚未完成，请等待后再提交。";
+    return;
+  }
+  try {
+    await persistDraftInvoiceDetails(row);
+    const invoices = await loadDetailInvoices(row.name, false);
+    const blocker = validateInvoiceSubmission(invoices, row.expense_lines || [], row.no_invoice_reason);
+    if (blocker) { errorMessage.value = blocker; return; }
+    await draftSubmitter.submit({ name: row.name, no_invoice_reason: String(row.no_invoice_reason || '').trim() });
+    await requests.reload();
+    await loadDetailInvoices(row.name, false);
+  } catch (error) {
+    errorMessage.value = apiError(error, '草稿提交失败');
   }
 }
 
@@ -482,6 +616,9 @@ async function exportRequests() {
       { label: '状态', value: (row) => statusMeta(row.kanban_status).label, width: 12 },
       { label: '当前节点', key: 'current_step_label', width: 22 },
       { label: '金额', value: (row) => Number(row.amount || 0), width: 14 },
+      { label: '发票类别', value: (row) => (row.invoice_categories || []).join('；'), width: 28 },
+      { label: '项目名称', value: (row) => (row.invoice_project_names || []).join('；'), width: 28 },
+      { label: '发票号码', value: (row) => (row.invoice_numbers || []).join('；'), width: 24 },
       { label: '付款时间', key: 'paid_on', width: 20 },
     ],
   });
@@ -505,6 +642,15 @@ watch(() => options.data, () => {
   applyDefaults();
   refreshRoute();
 }, { immediate: true });
+watch(detailRequestName, (name) => {
+  previewInvoiceRow.value = null;
+  detailInvoiceBusy.value = false;
+  if (name) loadDetailInvoices(name).catch(() => {});
+  else {
+    detailLoadVersion += 1;
+    detailInvoices.value = [];
+  }
+});
 watch(selectedConsumption, (row) => {
   if (!row) return;
   const invoices = row.invoices || [];
@@ -624,16 +770,17 @@ watch(selectedConsumption, (row) => {
       </template>
 
       <template v-else>
-        <section class="overflow-hidden rounded-md border border-gray-200 bg-white"><header class="flex flex-col gap-3 border-b px-4 py-3 md:flex-row md:items-center md:justify-between"><h3 class="text-sm font-semibold">审批记录列表</h3><div class="flex gap-2"><input v-model="recordFilters.keyword" class="rounded border border-gray-300 px-3 py-2 text-sm" placeholder="单号/申请人/节点" /><select v-model="recordFilters.status" class="rounded border border-gray-300 px-3 py-2 text-sm"><option value="">全部状态</option><option v-for="column in STATUS_COLUMNS" :key="column.key" :value="column.key">{{ column.label }}</option></select></div></header><div class="overflow-x-auto"><table class="w-full min-w-[920px] text-sm"><thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-3 text-left">单据编号</th><th class="px-3 py-3 text-left">主题</th><th class="px-3 py-3 text-left">申请人</th><th class="px-3 py-3 text-left">部门</th><th class="px-3 py-3 text-left">当前节点</th><th class="px-3 py-3 text-left">状态</th><th class="px-3 py-3 text-right">金额</th><th class="px-3 py-3 text-left">更新时间</th></tr></thead><tbody><tr v-for="row in recordRows" :key="row.name" class="cursor-pointer border-b last:border-0 hover:bg-gray-50" @click="detailRequestName = row.name"><td class="px-3 py-3 font-medium text-blue-700">{{ row.name }}</td><td class="max-w-[260px] truncate px-3 py-3">{{ row.subject }}</td><td class="px-3 py-3">{{ row.employee_name || '-' }}</td><td class="px-3 py-3">{{ row.department || '-' }}</td><td class="px-3 py-3">{{ row.current_step_label || '-' }}</td><td class="px-3 py-3"><span class="rounded px-2 py-1 text-xs" :class="statusMeta(row.kanban_status).badge">{{ statusMeta(row.kanban_status).label }}</span></td><td class="px-3 py-3 text-right font-medium">{{ fmtMoney(row.amount) }}</td><td class="px-3 py-3 text-xs text-gray-500">{{ fmtDate(row.modified) }}</td></tr><tr v-if="!recordRows.length"><td colspan="8" class="py-14 text-center text-gray-400">暂无审批记录</td></tr></tbody></table></div></section>
+        <section class="overflow-hidden rounded-md border border-gray-200 bg-white"><header class="flex flex-col gap-3 border-b px-4 py-3 md:flex-row md:items-center md:justify-between"><h3 class="text-sm font-semibold">审批记录列表</h3><div class="flex gap-2"><input v-model="recordFilters.keyword" class="rounded border border-gray-300 px-3 py-2 text-sm" placeholder="单号/申请人/节点" /><select v-model="recordFilters.status" class="rounded border border-gray-300 px-3 py-2 text-sm"><option value="">全部状态</option><option v-for="column in STATUS_COLUMNS" :key="column.key" :value="column.key">{{ column.label }}</option></select></div></header><div class="overflow-x-auto"><table class="w-full min-w-[1120px] text-sm"><thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-3 text-left">单据编号</th><th class="px-3 py-3 text-left">主题</th><th class="px-3 py-3 text-left">申请人</th><th class="px-3 py-3 text-left">部门</th><th class="px-3 py-3 text-left">当前节点</th><th class="px-3 py-3 text-left">状态</th><th class="px-3 py-3 text-right">金额</th><th class="px-3 py-3 text-left">更新时间</th></tr></thead><tbody><tr v-for="row in recordRows" :key="row.name" class="cursor-pointer border-b last:border-0 hover:bg-gray-50" @click="detailRequestName = row.name"><td class="px-3 py-3 font-medium text-blue-700">{{ row.name }}</td><td class="max-w-[260px] truncate px-3 py-3">{{ row.subject }}</td><td class="px-3 py-3">{{ row.employee_name || '-' }}</td><td class="px-3 py-3">{{ row.department || '-' }}</td><td class="px-3 py-3">{{ row.current_step_label || '-' }}</td><td class="px-3 py-3"><span class="rounded px-2 py-1 text-xs" :class="statusMeta(row.kanban_status).badge">{{ statusMeta(row.kanban_status).label }}</span></td><td class="px-3 py-3 text-right font-medium">{{ fmtMoney(row.amount) }}</td><td class="px-3 py-3 text-xs text-gray-500">{{ fmtDate(row.modified) }}</td></tr><tr v-if="!recordRows.length"><td colspan="8" class="py-14 text-center text-gray-400">暂无审批记录</td></tr></tbody></table></div></section>
       </template>
     </main>
   </div>
 
-  <div v-if="showRequestForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showRequestForm = false"><div role="dialog" aria-modal="true" class="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-white shadow-xl"><header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><h3 class="font-semibold">新建费用付款/报销单</h3><button title="关闭" @click="showRequestForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button></header><div class="flex-1 space-y-5 overflow-y-auto p-5"><section><h4 class="mb-3 text-sm font-semibold">基本信息</h4><div class="grid gap-3 md:grid-cols-3"><label class="text-xs text-gray-500">主题<input v-model="requestForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">公司<select v-model="requestForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in companies" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">申请部门<select v-model="requestForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in departments" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">部门主管<input v-model="requestForm.supervisor" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">单据类型<select v-model="requestForm.doc_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in docTypes" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">紧急程度<select v-model="requestForm.urgency" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in urgencies" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">资产类别<select v-model="requestForm.asset_category" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in assetCategories" :key="item">{{ item }}</option></select></label></div></section><section><div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">费用明细</h4><button type="button" class="flex items-center gap-1 text-sm text-blue-700" @click="addExpenseLine"><FeatherIcon name="plus" class="h-4 w-4" />添加明细</button></div><div class="overflow-x-auto"><table class="w-full min-w-[920px] text-sm"><thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-2 py-2 text-left">起始日期</th><th class="px-2 py-2 text-left">结束日期</th><th class="px-2 py-2 text-left">费用项目</th><th class="px-2 py-2 text-left">费用说明</th><th class="px-2 py-2 text-right">金额</th><th class="w-10"></th></tr></thead><tbody><tr v-for="(line, index) in expenseLines" :key="index" class="border-b"><td class="p-2"><input v-model="line.start_date" type="date" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><input v-model="line.end_date" type="date" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><select v-model="line.category" class="w-full rounded border border-gray-300 px-2 py-1.5"><option v-for="item in expenseCategories" :key="item">{{ item }}</option></select></td><td class="p-2"><input v-model="line.description" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><input v-model="line.amount" type="number" min="0" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td><td class="p-2"><button title="删除明细" :disabled="expenseLines.length === 1" class="text-red-600 disabled:text-gray-300" @click="removeExpenseLine(index)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button></td></tr></tbody><tfoot><tr><td colspan="4" class="px-2 py-3 text-right font-medium">总费用发生额</td><td class="px-2 py-3 text-right text-base font-semibold text-red-600">{{ fmtMoney(requestTotal) }}</td><td></td></tr></tfoot></table></div></section><section><h4 class="mb-3 text-sm font-semibold">付款信息</h4><div class="grid gap-3 md:grid-cols-3"><label class="text-xs text-gray-500">付款类型<select v-model="requestForm.payment_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentTypes" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">付款方式<select v-model="requestForm.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentMethods" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">收款人<input v-model="requestForm.payee_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">开户行<input v-model="requestForm.bank_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">支行<input v-model="requestForm.branch" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">收款账号<input v-model="requestForm.account_no" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500 md:col-span-3">情况说明/备注<textarea v-model="requestForm.reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label></div></section></div><footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showRequestForm = false">取消</Button><Button variant="subtle" :loading="saving" @click="saveRequest(false)">保存草稿</Button><Button variant="solid" :loading="saving" @click="saveRequest(true)">保存并提交</Button></footer></div></div>
+  <div v-if="showRequestForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showRequestForm = false"><div role="dialog" aria-modal="true" class="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-white shadow-xl"><header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><h3 class="font-semibold">新建费用付款/报销单</h3><button title="关闭" @click="showRequestForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button></header><div class="flex-1 space-y-5 overflow-y-auto p-5"><p v-if="formRequestName" class="rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">草稿 {{ formRequestName }} 已保存。基本信息和费用行已锁定，可继续处理发票后重试提交。</p><fieldset :disabled="Boolean(formRequestName)"><section><h4 class="mb-3 text-sm font-semibold">基本信息</h4><div class="grid gap-3 md:grid-cols-3"><label class="text-xs text-gray-500">主题<input v-model="requestForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">公司<select v-model="requestForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in companies" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">申请部门<select v-model="requestForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in departments" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">部门主管<input v-model="requestForm.supervisor" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">单据类型<select v-model="requestForm.doc_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in docTypes" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">紧急程度<select v-model="requestForm.urgency" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in urgencies" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">资产类别<select v-model="requestForm.asset_category" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in assetCategories" :key="item">{{ item }}</option></select></label></div></section></fieldset><InvoiceRecognitionPanel :batch="invoiceBatch" :invoices="formInvoices" :request="formRequestName" :expense-lines="expenseLines" @batch-created="onBatchCreated" @invoices-change="onInvoicesChange" @link-change="onLinkChange" v-on:busy-change="formInvoiceBusy = $event" /><fieldset :disabled="Boolean(formRequestName)"><section><div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">费用明细</h4><button type="button" class="flex items-center gap-1 text-sm text-blue-700" @click="addExpenseLine"><FeatherIcon name="plus" class="h-4 w-4" />添加明细</button></div><div class="overflow-x-auto"><table class="w-full min-w-[1120px] text-sm"><thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-2 py-2 text-left">起始日期</th><th class="px-2 py-2 text-left">结束日期</th><th class="px-2 py-2 text-left">费用项目</th><th class="px-2 py-2 text-left">费用说明</th><th class="px-2 py-2 text-left">发票差异说明</th><th class="px-2 py-2 text-right">金额</th><th class="w-10"></th></tr></thead><tbody><tr v-for="(line, index) in expenseLines" :key="line.line_key" class="border-b"><td class="p-2"><input v-model="line.start_date" type="date" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><input v-model="line.end_date" type="date" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><select v-model="line.category" class="w-full rounded border border-gray-300 px-2 py-1.5"><option v-for="item in expenseCategories" :key="item">{{ item }}</option></select></td><td class="p-2"><input v-model="line.description" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><input v-model="line.invoice_difference_reason" placeholder="无票或金额不一致时必填" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td><td class="p-2"><input v-model="line.amount" type="number" min="0" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td><td class="p-2"><button title="删除明细" :disabled="expenseLines.length === 1" class="text-red-600 disabled:text-gray-300" @click="removeExpenseLine(index)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button></td></tr></tbody><tfoot><tr><td colspan="5" class="px-2 py-3 text-right font-medium">总费用发生额</td><td class="px-2 py-3 text-right text-base font-semibold text-red-600">{{ fmtMoney(requestTotal) }}</td><td></td></tr></tfoot></table></div></section></fieldset><fieldset :disabled="Boolean(formRequestName)"><section><h4 class="mb-3 text-sm font-semibold">付款信息</h4><div class="grid gap-3 md:grid-cols-3"><label class="text-xs text-gray-500">付款类型<select v-model="requestForm.payment_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentTypes" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">付款方式<select v-model="requestForm.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentMethods" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">收款人<input v-model="requestForm.payee_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">开户行<input v-model="requestForm.bank_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">支行<input v-model="requestForm.branch" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">收款账号<input v-model="requestForm.account_no" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500 md:col-span-3">情况说明/备注<textarea v-model="requestForm.reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label><label class="text-xs text-gray-500 md:col-span-3">无票原因（未上传有效发票时必填）<textarea v-model="requestForm.no_invoice_reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label></div></section></fieldset></div><footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showRequestForm = false">取消</Button><Button variant="subtle" :loading="saving" @click="saveRequest(false)">保存草稿</Button><Button variant="solid" :loading="saving" @click="saveRequest(true)">保存并提交</Button></footer></div></div>
 
   <div v-if="showConsumptionForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showConsumptionForm = false"><div role="dialog" aria-modal="true" class="w-full max-w-2xl rounded-md bg-white shadow-xl"><header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><h3 class="font-semibold">新建消费明细</h3><button title="关闭" @click="showConsumptionForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button></header><div class="grid gap-3 p-5 md:grid-cols-2"><label class="text-xs text-gray-500 md:col-span-2">标题<input v-model="consumptionForm.title" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">费用项目<select v-model="consumptionForm.category" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in expenseCategories" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">金额<input v-model="consumptionForm.amount" type="number" min="0" step="0.01" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">日期<input v-model="consumptionForm.expense_date" type="date" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">部门<select v-model="consumptionForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in departments" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500 md:col-span-2">费用说明<textarea v-model="consumptionForm.description" rows="3" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label></div><footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showConsumptionForm = false">取消</Button><Button variant="solid" :loading="saving" @click="saveConsumption">创建</Button></footer></div></div>
 
   <div v-if="showPushForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showPushForm = false"><div role="dialog" aria-modal="true" class="w-full max-w-3xl rounded-md bg-white shadow-xl"><header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><div><h3 class="font-semibold">下推生成付款单</h3><p class="mt-1 text-xs text-gray-500">已选 {{ pushSelection.length }} 条消费明细，发票附件将自动带入。</p></div><button title="关闭" @click="showPushForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button></header><div class="grid gap-3 p-5 md:grid-cols-3"><label class="text-xs text-gray-500 md:col-span-2">主题<input v-model="pushPayment.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">公司<select v-model="pushPayment.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in companies" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">部门<select v-model="pushPayment.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in departments" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">部门主管<input v-model="pushPayment.supervisor" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">收款人<input v-model="pushPayment.payee_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label><label class="text-xs text-gray-500">付款类型<select v-model="pushPayment.payment_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentTypes" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">付款方式<select v-model="pushPayment.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentMethods" :key="item">{{ item }}</option></select></label><label class="text-xs text-gray-500">收款账号<input v-model="pushPayment.account_no" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label></div><footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showPushForm = false">取消</Button><Button variant="subtle" :loading="saving" @click="pushSelected(false)">下推生成草稿</Button><Button variant="solid" :loading="saving" @click="pushSelected(true)">下推并提交</Button></footer></div></div>
 
-  <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="detailRequestName = ''"><div role="dialog" aria-modal="true" class="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-white shadow-xl"><header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><div><h3 class="font-semibold">{{ selectedRequest.name }} - 费用付款/报销单详情</h3><p class="mt-1 text-xs text-gray-500">{{ selectedRequest.subject }}</p></div><button title="关闭" @click="detailRequestName = ''"><FeatherIcon name="x" class="h-5 w-5" /></button></header><div class="flex-1 space-y-5 overflow-y-auto p-5"><section><div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">基本信息</h4><span class="rounded px-2 py-1 text-xs font-medium" :class="statusMeta(selectedRequest.kanban_status).badge">{{ statusMeta(selectedRequest.kanban_status).label }}</span></div><dl class="grid gap-x-5 gap-y-3 text-sm md:grid-cols-3"><div><dt class="text-xs text-gray-500">公司</dt><dd class="mt-1">{{ selectedRequest.company || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请部门</dt><dd class="mt-1">{{ selectedRequest.department || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请人</dt><dd class="mt-1">{{ selectedRequest.employee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">单据类型</dt><dd class="mt-1">{{ selectedRequest.doc_type || '-' }}</dd></div><div><dt class="text-xs text-gray-500">紧急程度</dt><dd class="mt-1">{{ selectedRequest.urgency || '-' }}</dd></div><div><dt class="text-xs text-gray-500">来源</dt><dd class="mt-1">{{ selectedRequest.from_consumption ? '消费明细下推' : '手工新建' }}</dd></div></dl></section><section><h4 class="mb-3 text-sm font-semibold">费用明细</h4><div class="overflow-x-auto"><table class="w-full min-w-[820px] text-sm"><thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-2 py-2 text-left">起始日期</th><th class="px-2 py-2 text-left">结束日期</th><th class="px-2 py-2 text-left">费用项目</th><th class="px-2 py-2 text-left">说明</th><th class="px-2 py-2 text-center">附件</th><th class="px-2 py-2 text-left">发票状态</th><th class="px-2 py-2 text-right">金额</th></tr></thead><tbody><tr v-for="(line, index) in selectedRequest.expense_lines || []" :key="index" class="border-b"><td class="px-2 py-2">{{ line.start_date || '-' }}</td><td class="px-2 py-2">{{ line.end_date || '-' }}</td><td class="px-2 py-2">{{ line.category }}</td><td class="px-2 py-2">{{ line.description || '-' }}</td><td class="px-2 py-2 text-center">{{ line.attachment_count || 0 }}</td><td class="px-2 py-2">{{ line.invoice_status || '-' }}</td><td class="px-2 py-2 text-right font-medium text-red-600">{{ fmtMoney(line.amount) }}</td></tr></tbody><tfoot><tr><td colspan="6" class="px-2 py-3 text-right font-medium">总额</td><td class="px-2 py-3 text-right text-base font-semibold text-red-600">{{ fmtMoney(selectedRequest.amount) }}</td></tr></tfoot></table></div></section><section><h4 class="mb-3 text-sm font-semibold">付款信息</h4><dl class="grid gap-x-5 gap-y-3 text-sm md:grid-cols-3"><div><dt class="text-xs text-gray-500">付款类型</dt><dd class="mt-1">{{ selectedRequest.payment_type || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款方式</dt><dd class="mt-1">{{ selectedRequest.payment_method || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款人</dt><dd class="mt-1">{{ selectedRequest.payee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">开户行/支行</dt><dd class="mt-1">{{ [selectedRequest.bank_name, selectedRequest.branch].filter(Boolean).join(' / ') || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款账号</dt><dd class="mt-1">{{ selectedRequest.account_no || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款时间</dt><dd class="mt-1">{{ fmtDate(selectedRequest.paid_on) }}</dd></div></dl></section><section><h4 class="mb-4 text-sm font-semibold">审批记录</h4><div class="overflow-x-auto"><div class="flex min-w-[760px] items-start"><template v-for="(step, index) in selectedRequest.steps || []" :key="step.step_index"><div class="w-40 shrink-0 text-center"><div class="mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold" :class="step.status === '已通过' || step.status === '已办理' ? 'bg-emerald-600 text-white' : step.status === '已拒绝' ? 'bg-red-600 text-white' : step.step_index === selectedRequest.current_step_index ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-600'">{{ step.step_index }}</div><div class="mt-2 text-xs font-medium">{{ step.label }}</div><div class="mt-1 text-[11px] text-gray-500">{{ step.approvers.join(' / ') }}</div><div v-if="step.acted_on" class="mt-1 text-[10px] text-gray-400">{{ fmtDate(step.acted_on) }}</div><div v-if="step.note" class="mt-1 text-[10px] text-gray-500">{{ step.note }}</div></div><div v-if="index < selectedRequest.steps.length - 1" class="mt-4 flex-1 border-t-2 border-dashed border-gray-300"></div></template></div></div></section><section v-if="selectedRequest.reason"><h4 class="mb-2 text-sm font-semibold">备注</h4><p class="rounded bg-gray-50 p-3 text-sm text-gray-600 whitespace-pre-wrap">{{ selectedRequest.reason }}</p></section></div><footer class="flex flex-col gap-2 border-t bg-gray-50 px-5 py-3 md:flex-row md:items-center md:justify-between"><input v-model="actionNote" class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-sm" placeholder="审批/付款备注" /><div class="flex justify-end gap-2"><Button variant="subtle" @click="detailRequestName = ''">关闭</Button><Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" @click="submitDraft(selectedRequest)">提交审批</Button><Button v-if="selectedRequest.can_act && selectedRequest.current_step_mode !== 'handle'" variant="subtle" @click="act(selectedRequest, 'reject')">驳回</Button><Button v-if="selectedRequest.can_act" variant="solid" @click="act(selectedRequest, 'approve')">{{ selectedRequest.current_step_mode === 'handle' ? '办理完成' : '审批通过' }}</Button><Button v-if="selectedRequest.can_mark_paid" variant="solid" @click="markPaid(selectedRequest)">标记已付款</Button></div></footer></div></div>
+  <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="detailRequestName = ''"><div role="dialog" aria-modal="true" class="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-md bg-white shadow-xl"><header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><div><h3 class="font-semibold">{{ selectedRequest.name }} - 费用付款/报销单详情</h3><p class="mt-1 text-xs text-gray-500">{{ selectedRequest.subject }}</p></div><button title="关闭" @click="detailRequestName = ''"><FeatherIcon name="x" class="h-5 w-5" /></button></header><div class="flex-1 space-y-5 overflow-y-auto p-5"><section><div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">基本信息</h4><span class="rounded px-2 py-1 text-xs font-medium" :class="statusMeta(selectedRequest.kanban_status).badge">{{ statusMeta(selectedRequest.kanban_status).label }}</span></div><dl class="grid gap-x-5 gap-y-3 text-sm md:grid-cols-3"><div><dt class="text-xs text-gray-500">公司</dt><dd class="mt-1">{{ selectedRequest.company || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请部门</dt><dd class="mt-1">{{ selectedRequest.department || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请人</dt><dd class="mt-1">{{ selectedRequest.employee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">单据类型</dt><dd class="mt-1">{{ selectedRequest.doc_type || '-' }}</dd></div><div><dt class="text-xs text-gray-500">紧急程度</dt><dd class="mt-1">{{ selectedRequest.urgency || '-' }}</dd></div><div><dt class="text-xs text-gray-500">来源</dt><dd class="mt-1">{{ selectedRequest.from_consumption ? '消费明细下推' : '手工新建' }}</dd></div></dl></section><InvoiceRecognitionPanel v-if="selectedRequest.kanban_status === 'draft'" :batch="detailInvoiceBatch" :invoices="detailInvoices" :request="selectedRequest.name" :expense-lines="selectedRequest.expense_lines || []" v-on:invoices-change="onDetailInvoicesChange" v-on:link-change="onDetailLinkChange" v-on:busy-change="detailInvoiceBusy = $event" /><section><h4 class="mb-3 text-sm font-semibold">费用明细</h4><div class="overflow-x-auto"><table class="w-full min-w-[820px] text-sm"><thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-2 py-2 text-left">起始日期</th><th class="px-2 py-2 text-left">结束日期</th><th class="px-2 py-2 text-left">费用项目</th><th class="px-2 py-2 text-left">说明</th><th class="px-2 py-2 text-left">发票</th><th class="px-2 py-2 text-left">发票状态</th><th class="px-2 py-2 text-left">差异说明</th><th class="px-2 py-2 text-right">金额</th></tr></thead><tbody><tr v-for="line in selectedRequest.expense_lines || []" :key="line.line_key" class="border-b"><td class="px-2 py-2">{{ line.start_date || '-' }}</td><td class="px-2 py-2">{{ line.end_date || '-' }}</td><td class="px-2 py-2">{{ line.category }}</td><td class="px-2 py-2">{{ line.description || '-' }}</td><td class="px-2 py-2"><div class="flex flex-wrap gap-1"><button v-for="(invoice, invoiceIndex) in invoicesForLine(detailInvoices, line.line_key)" :key="invoice.name" type="button" class="rounded bg-blue-50 px-2 py-1 text-xs text-blue-700" v-on:click="previewInvoiceRow = invoice">查看发票 {{ invoiceIndex + 1 }}/{{ invoicesForLine(detailInvoices, line.line_key).length }}</button><span v-if="!invoicesForLine(detailInvoices, line.line_key).length" class="text-gray-400">无</span></div></td><td class="px-2 py-2">{{ line.invoice_status || '-' }}</td><td class="px-2 py-2"><input v-if="selectedRequest.kanban_status === 'draft'" v-model="line.invoice_difference_reason" class="w-48 rounded border border-gray-300 px-2 py-1 text-xs" placeholder="无票或金额不一致时必填" /><span v-else>{{ line.invoice_difference_reason || '-' }}</span></td><td class="px-2 py-2 text-right font-medium text-red-600">{{ fmtMoney(line.amount) }}</td></tr></tbody><tfoot><tr><td colspan="7" class="px-2 py-3 text-right font-medium">总额</td><td class="px-2 py-3 text-right text-base font-semibold text-red-600">{{ fmtMoney(selectedRequest.amount) }}</td></tr></tfoot></table></div></section><section><h4 class="mb-3 text-sm font-semibold">付款信息</h4><dl class="grid gap-x-5 gap-y-3 text-sm md:grid-cols-3"><div><dt class="text-xs text-gray-500">付款类型</dt><dd class="mt-1">{{ selectedRequest.payment_type || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款方式</dt><dd class="mt-1">{{ selectedRequest.payment_method || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款人</dt><dd class="mt-1">{{ selectedRequest.payee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">开户行/支行</dt><dd class="mt-1">{{ [selectedRequest.bank_name, selectedRequest.branch].filter(Boolean).join(' / ') || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款账号</dt><dd class="mt-1">{{ selectedRequest.account_no || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款时间</dt><dd class="mt-1">{{ fmtDate(selectedRequest.paid_on) }}</dd></div></dl></section><section><h4 class="mb-2 text-sm font-semibold">无票原因</h4><textarea v-if="selectedRequest.kanban_status === 'draft'" v-model="selectedRequest.no_invoice_reason" rows="2" class="w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="未上传有效发票时必填"></textarea><p v-else class="rounded bg-gray-50 p-3 text-sm text-gray-600 whitespace-pre-wrap">{{ selectedRequest.no_invoice_reason || '无' }}</p></section><section><h4 class="mb-4 text-sm font-semibold">审批记录</h4><div class="overflow-x-auto"><div class="flex min-w-[760px] items-start"><template v-for="(step, index) in selectedRequest.steps || []" :key="step.step_index"><div class="w-40 shrink-0 text-center"><div class="mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold" :class="step.status === '已通过' || step.status === '已办理' ? 'bg-emerald-600 text-white' : step.status === '已拒绝' ? 'bg-red-600 text-white' : step.step_index === selectedRequest.current_step_index ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-600'">{{ step.step_index }}</div><div class="mt-2 text-xs font-medium">{{ step.label }}</div><div class="mt-1 text-[11px] text-gray-500">{{ step.approvers.join(' / ') }}</div><div v-if="step.acted_on" class="mt-1 text-[10px] text-gray-400">{{ fmtDate(step.acted_on) }}</div><div v-if="step.note" class="mt-1 text-[10px] text-gray-500">{{ step.note }}</div></div><div v-if="index < selectedRequest.steps.length - 1" class="mt-4 flex-1 border-t-2 border-dashed border-gray-300"></div></template></div></div></section><section v-if="selectedRequest.reason"><h4 class="mb-2 text-sm font-semibold">备注</h4><p class="rounded bg-gray-50 p-3 text-sm text-gray-600 whitespace-pre-wrap">{{ selectedRequest.reason }}</p></section></div><footer class="flex flex-col gap-2 border-t bg-gray-50 px-5 py-3 md:flex-row md:items-center md:justify-between"><input v-model="actionNote" class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-sm" placeholder="审批/付款备注" /><div class="flex justify-end gap-2"><Button variant="subtle" @click="detailRequestName = ''">关闭</Button><Button v-if="selectedRequest.kanban_status === 'draft'" variant="subtle" @click="saveDraftInvoiceDetails(selectedRequest)">保存发票说明</Button><Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" @click="submitDraft(selectedRequest)">提交审批</Button><Button v-if="selectedRequest.can_act && selectedRequest.current_step_mode !== 'handle'" variant="subtle" @click="act(selectedRequest, 'reject')">驳回</Button><Button v-if="selectedRequest.can_act" variant="solid" @click="act(selectedRequest, 'approve')">{{ selectedRequest.current_step_mode === 'handle' ? '办理完成' : '审批通过' }}</Button><Button v-if="selectedRequest.can_mark_paid" variant="solid" @click="markPaid(selectedRequest)">标记已付款</Button></div></footer></div></div>
+  <InvoicePreviewDrawer :open="Boolean(previewInvoiceRow)" :invoice="previewInvoiceRow" :current-user="options.data?.context?.employee_name || '内部用户'" v-on:close="previewInvoiceRow = null" />
 </template>

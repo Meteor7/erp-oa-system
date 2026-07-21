@@ -816,6 +816,17 @@ def _decimal_money(value):
     return number.quantize(Decimal("0.01"))
 
 
+def _deduplicated_values(values):
+    parts = []
+    seen = set()
+    for value in values:
+        value = str(value or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            parts.append(value)
+    return parts
+
+
 def _deduplicated_text(values, limit=REQUEST_SEARCH_LIMIT):
     parts = []
     seen = set()
@@ -841,15 +852,18 @@ def request_invoice_summary(request_doc, *, current=False):
         status = str(_get(row, "recognition_status") or "状态异常")
         if status not in statuses:
             statuses.append(status)
-    search_values = []
-    for row in records:
-        if _get(row, "recognition_status") != "已确认":
-            continue
-        search_values.extend([_get(row, "invoice_category"), _get(row, "project_name"), _get(row, "invoice_number")])
+    confirmed = [row for row in records if _get(row, "recognition_status") == "已确认"]
+    invoice_categories = _deduplicated_values(_get(row, "invoice_category") for row in confirmed)
+    invoice_project_names = _deduplicated_values(_get(row, "project_name") for row in confirmed)
+    invoice_numbers = _deduplicated_values(_get(row, "invoice_number") for row in confirmed)
+    search_values = [*invoice_categories, *invoice_project_names, *invoice_numbers]
     return {
         "invoice_count": len(included),
         "invoice_status": "、".join(statuses) if statuses else "无发票",
         "invoice_search_text": _deduplicated_text(search_values),
+        "invoice_categories": invoice_categories,
+        "invoice_project_names": invoice_project_names,
+        "invoice_numbers": invoice_numbers,
     }
 
 
@@ -896,6 +910,8 @@ def attach_batch_to_request(batch_name, request_doc):
         batch = _require_batch(batch_name, owner_only=True, current=True)
         current_request = _current_doc(REQUEST_DOCTYPE, request_name)
         _request_permission(current_request, "edit", current=True)
+        if str(_get(current_request, "workflow_status") or "") != "草稿":
+            _throw("只有草稿状态可以继续添加发票。")
         batch_request = str(_get(batch, "request") or "")
         if batch_request and batch_request != request_name:
             _throw("\u8be5\u53d1\u7968\u6279\u6b21\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
@@ -924,6 +940,12 @@ def attach_batch_to_request(batch_name, request_doc):
         _apply_request_invoice_summary(current_request, save=True, current=True)
         return current_request
 
+
+
+def attach_batch_to_existing_request(batch_name, request_name):
+    request_name = str(request_name or "").strip()
+    attach_batch_to_request(batch_name, {"name": request_name})
+    return {"name": str(batch_name or "").strip(), "request": request_name}
 
 
 def _request_reason(request_doc):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import sys
 import types
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from decimal import Decimal
 from uuid import UUID
 
@@ -235,6 +235,9 @@ def test_summary_counts_nonexcluded_and_searches_confirmed_only(monkeypatch):
     assert summary["invoice_count"] == 3
     assert "已确认" in summary["invoice_status"] and "待确认" in summary["invoice_status"]
     assert summary["invoice_search_text"] == "电子发票（普通发票）；文具印章；000123"
+    assert summary["invoice_categories"] == ["电子发票（普通发票）"]
+    assert summary["invoice_project_names"] == ["文具印章"]
+    assert summary["invoice_numbers"] == ["000123"]
     assert "未确认" not in summary["invoice_search_text"]
     assert "禁止进入搜索" not in summary["invoice_search_text"]
     assert "RAW-SECRET" not in summary["invoice_search_text"]
@@ -765,3 +768,51 @@ def test_create_continues_with_current_request_returned_by_attach(monkeypatch, r
         oa_entry.STATUS_PENDING if requested_submit else oa_entry.STATUS_DRAFT
     )
     assert attached[0].workflow_status == expected_status
+
+
+def test_attach_batch_rejects_request_that_is_no_longer_draft_under_lock(monkeypatch):
+    batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
+    request.workflow_status = "审批中"
+    with pytest.raises(ValidationError, match="只有草稿"):
+        service.attach_batch_to_request(batch.name, {"name": request.name})
+    assert lock_order[-1] == ("request", request.name)
+    assert not batch.request and not any(record.request for record in records.values())
+    assert saves == []
+
+
+def test_update_draft_invoice_details_only_changes_reason_fields(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-1",
+            "owner": frappe_stub.session.user,
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_DRAFT,
+            "no_invoice_reason": "",
+            "expense_lines": [
+                Row(line_key="11111111-1111-4111-8111-111111111111", amount=Decimal("10.00"), invoice_difference_reason="")
+            ],
+            "steps": [],
+        },
+    )
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current: {"name": current.name})
+    result = oa_entry.update_draft_invoice_details(
+        doc.name,
+        no_invoice_reason="  无票说明  ",
+        expense_line_reasons='{"11111111-1111-4111-8111-111111111111":"  金额差异  "}',
+    )
+    assert result == {"name": doc.name}
+    assert doc.no_invoice_reason == "无票说明"
+    assert doc.expense_lines[0].invoice_difference_reason == "金额差异"
+    with pytest.raises(ValidationError, match="不属于"):
+        oa_entry.update_draft_invoice_details(
+            doc.name, expense_line_reasons='{"22222222-2222-4222-8222-222222222222":"未知行"}'
+        )
+    doc.workflow_status = oa_entry.STATUS_PENDING
+    with pytest.raises(ValidationError, match="只有草稿"):
+        oa_entry.update_draft_invoice_details(doc.name, no_invoice_reason="不能修改")

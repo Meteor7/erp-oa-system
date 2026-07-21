@@ -346,7 +346,10 @@ def _summarize_doc(doc):
         "can_mark_paid": doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_COMPLETED and _is_finance_user(),
         "invoice_count": invoice_summary["invoice_count"],
         "invoice_status": invoice_summary["invoice_status"],
-        "invoice_search_text": invoice_summary["invoice_search_text"],
+        "invoice_search_text": invoice_summary.get("invoice_search_text", ""),
+        "invoice_categories": invoice_summary.get("invoice_categories", []),
+        "invoice_project_names": invoice_summary.get("invoice_project_names", []),
+        "invoice_numbers": invoice_summary.get("invoice_numbers", []),
         "no_invoice_reason": getattr(doc, "no_invoice_reason", None) or "",
         "expense_lines": [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])],
         "steps": [_serialize_doc_step(row) for row in doc.steps],
@@ -714,6 +717,34 @@ def create_request(
         _submit_draft(doc)
     doc.save(ignore_permissions=True)
     return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reasons=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    supplied_reason = None if no_invoice_reason is None else _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
+    reasons = _parse_json(expense_line_reasons, {}) or {}
+    if not isinstance(reasons, dict):
+        frappe.throw(frappe._("费用明细差异说明格式无效。"))
+    normalized_reasons = {
+        _bounded_optional_text(key, "费用明细标识", 140): _difference_reason(value)
+        for key, value in reasons.items()
+    }
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        invoice_service._request_permission(doc, "edit", current=True)
+        if doc.workflow_status != STATUS_DRAFT:
+            frappe.throw(frappe._("只有草稿状态可以修改发票说明。"))
+        lines = {str(getattr(row, "line_key", "") or ""): row for row in list(getattr(doc, "expense_lines", []) or [])}
+        unknown = [key for key in normalized_reasons if not key or key not in lines]
+        if unknown:
+            frappe.throw(frappe._("费用明细标识不属于该报销单。"))
+        if supplied_reason is not None:
+            doc.no_invoice_reason = supplied_reason
+        for key, value in normalized_reasons.items():
+            lines[key].invoice_difference_reason = value
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])

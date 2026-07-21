@@ -24,6 +24,7 @@ test('panel and drawer expose lifecycle, field and preview protections', () => {
     assert.match(panel, new RegExp(field));
   }
   assert.match(panel, /batch-created/);
+  assert.match(panel, /busy-change/);
   assert.match(panel, /invoices-change/);
   assert.match(panel, /link-change/);
   assert.match(panel, /AbortController/);

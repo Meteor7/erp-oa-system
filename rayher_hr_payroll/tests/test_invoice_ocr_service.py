@@ -610,9 +610,9 @@ def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monk
 
 def test_api_source_whitelists_only_public_endpoints():
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 12
+    assert source.count("@frappe.whitelist") == 13
     assert "@frappe.whitelist\ndef _" not in source
-    assert source.count('methods=["POST"]') == 10
+    assert source.count('methods=["POST"]') == 11
     assert source.count('methods=["GET"]') == 0
 
 
@@ -1572,7 +1572,7 @@ def test_preview_serve_api_is_explicit_post_and_bounded(env, monkeypatch):
     api_module.serve_invoice_preview("x" * 43)
     delegated.assert_called_once_with("x" * 43)
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 12
+    assert source.count("@frappe.whitelist") == 13
     assert 'methods=["POST"]' in source
     assert 'methods=["GET"]' not in source
 

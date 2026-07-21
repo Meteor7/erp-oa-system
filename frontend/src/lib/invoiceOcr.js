@@ -98,14 +98,14 @@ export function moneyToCents(value) {
   const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(source);
   if (!match || (!match[2] && !match[3])) throw new TypeError(`Invalid money value: ${source}`);
   const negative = match[1] === '-';
-  const whole = BigInt(match[2] || '0');
+  const whole = Number(match[2] || '0');
   const fraction = (match[3] || '').padEnd(3, '0');
-  let cents = whole * 100n + BigInt(fraction.slice(0, 2) || '0');
-  if (Number(fraction[2] || '0') >= 5) cents += 1n;
+  if (!Number.isSafeInteger(whole)) throw new RangeError('Money value exceeds safe integer cents');
+  let cents = whole * 100 + Number(fraction.slice(0, 2) || '0');
+  if (Number(fraction[2] || '0') >= 5) cents += 1;
   if (negative) cents = -cents;
-  const result = Number(cents);
-  if (!Number.isSafeInteger(result)) throw new RangeError('Money value exceeds safe integer cents');
-  return result;
+  if (!Number.isSafeInteger(cents)) throw new RangeError('Money value exceeds safe integer cents');
+  return cents;
 }
 
 export function amountMismatch(invoice, expectedAmount) {
@@ -132,6 +132,8 @@ export function invoiceBlockers(invoices) {
   if (statuses.has('\u5f85\u786e\u8ba4')) blockers.push('\u5b58\u5728\u672a\u786e\u8ba4\u53d1\u7968');
   if (statuses.has('\u7591\u4f3c\u91cd\u590d')) blockers.push('\u5b58\u5728\u7591\u4f3c\u91cd\u590d\u53d1\u7968');
   if (statuses.has('\u5931\u8d25')) blockers.push('\u5b58\u5728\u8bc6\u522b\u5931\u8d25\u53d1\u7968');
+  const known = new Set(['已确认', '排队中', '识别中', '待确认', '疑似重复', '失败']);
+  if ([...statuses].some((status) => !known.has(status))) blockers.push('存在状态异常发票');
   return blockers;
 }
 
@@ -167,6 +169,14 @@ export function createInvoiceBatch(options) {
 
 export function getInvoiceBatch(batch, options) {
   return invoiceApi('get_batch', { batch }, options);
+}
+
+export function getRequestInvoices(request, options) {
+  return invoiceApi('get_request_invoices', { request }, options);
+}
+
+export function attachInvoiceBatch(batch, request, options) {
+  return invoiceApi('attach_batch', { batch, request }, options);
 }
 
 export async function uploadInvoiceFile(file, batch, { signal } = {}) {
@@ -260,4 +270,35 @@ export async function fetchInvoicePreview(invoiceName, { signal } = {}) {
     throw new Error('\u53d1\u7968\u9884\u89c8\u6587\u4ef6\u7c7b\u578b\u4e0d\u4e00\u81f4');
   }
   return { metadata, blob };
+}
+
+export async function persistInvoiceRequest({
+  requestName = '',
+  createDraft,
+  onDraftCreated,
+  link = linkInvoice,
+  submitDraft,
+  invoices = [],
+  payload = {},
+  shouldSubmit = false,
+}) {
+  let name = String(requestName || '').trim();
+  let created = false;
+  if (!name) {
+    const row = await createDraft({ ...payload, submit: 0 });
+    name = String(row?.name || '').trim();
+    if (!name) throw new Error('草稿保存后未返回单据编号');
+    created = true;
+    onDraftCreated?.(row);
+  }
+  const linked = invoices.filter((invoice) =>
+    invoice?.recognition_status === '已确认'
+    && invoice?.name
+    && invoice?.expense_line_key);
+  for (const invoice of linked) {
+    await link(invoice.name, name, invoice.expense_line_key);
+  }
+  let submitted = null;
+  if (shouldSubmit) submitted = await submitDraft(name);
+  return { requestName: name, created, submitted };
 }

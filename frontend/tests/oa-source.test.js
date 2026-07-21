@@ -99,3 +99,33 @@ test('approval API exposes expense reimbursement board and pushdown endpoints', 
   assert.match(apiSource, /doc\.workflow_status = STATUS_PAID/);
   assert.match(apiSource, /["']creation["']:\s*doc\.creation/);
 });
+
+test('expense workbench integrates invoice OCR into draft creation and detail review', () => {
+  assert.match(workbenchSource, /InvoiceRecognitionPanel/);
+  assert.match(workbenchSource, /InvoicePreviewDrawer/);
+  assert.match(workbenchSource, /newLineKey/);
+  assert.match(workbenchSource, /line_key/);
+  assert.match(workbenchSource, /invoice_difference_reason/);
+  assert.match(workbenchSource, /invoice_batch/);
+  assert.match(workbenchSource, /no_invoice_reason/);
+  assert.match(workbenchSource, /invoice_search_text/);
+  assert.match(workbenchSource, /getRequestInvoices/);
+  assert.match(workbenchSource, /invoicesForLine/);
+  assert.match(workbenchSource, /查看发票/);
+  assert.match(workbenchSource, /发票类别/);
+  assert.match(workbenchSource, /项目名称/);
+  assert.match(workbenchSource, /发票号码/);
+});
+
+test('draft detail persists no-invoice and per-line difference reasons before submission', () => {
+  assert.match(workbenchSource, /update_draft_invoice_details/);
+  assert.match(workbenchSource, /saveDraftInvoiceDetails/);
+  assert.match(apiSource, /def update_draft_invoice_details/);
+  assert.match(apiSource, /expense_line_reasons/);
+});
+
+test('invoice upload busy state blocks submit until every registered row is visible', () => {
+  assert.match(workbenchSource, /formInvoiceBusy/);
+  assert.match(workbenchSource, /detailInvoiceBusy/);
+  assert.match(workbenchSource, /发票上传或批次回填尚未完成/);
+});

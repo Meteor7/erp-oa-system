@@ -27,6 +27,15 @@ def create_batch():
 
 
 @frappe.whitelist(methods=["POST"])
+def attach_batch(batch, request):
+    _authenticated()
+    return service.attach_batch_to_existing_request(
+        _bounded(batch, "批次标识", 140),
+        _bounded(request, "报销单标识", 140),
+    )
+
+
+@frappe.whitelist(methods=["POST"])
 def register_file(batch, file_url):
     _authenticated()
     return service.register_file(

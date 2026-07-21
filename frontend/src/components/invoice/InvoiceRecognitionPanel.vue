@@ -78,6 +78,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   ACTIVE_RECOGNITION_STATUSES,
+  attachInvoiceBatch,
   INVOICE_FIELDS,
   confirmInvoice,
   createOperationContext,
@@ -101,7 +102,7 @@ const props = defineProps({
   pollInterval: { type: Number, default: 1500 },
 });
 
-const emit = defineEmits(['batch-created', 'invoices-change', 'link-change']);
+const emit = defineEmits(['batch-created', 'invoices-change', 'link-change', 'busy-change']);
 const fieldLabels = Object.freeze({
   invoice_category: '\u53d1\u7968\u7c7b\u522b', project_name: '\u9879\u76ee\u540d\u79f0', issue_date: '\u5f00\u7968\u65e5\u671f',
   invoice_number: '\u53d1\u7968\u53f7\u7801', amount_before_tax: '\u7a0e\u524d\u91d1\u989d', tax_amount: '\u7a0e\u989d', total_amount: '\u5408\u8ba1\u91d1\u989d',
@@ -224,6 +225,7 @@ async function onFilesSelected(event) {
     return;
   }
   uploading.value = true;
+  emit('busy-change', true);
   const controller = operationController();
   const operationVersion = operationContext.current();
   try {
@@ -234,6 +236,8 @@ async function onFilesSelected(event) {
       batchSummary.value = created;
       emit('batch-created', created);
     }
+    if (props.request) await attachInvoiceBatch(batchName.value, props.request, { signal: controller.signal });
+    if (!operationContext.isCurrent(operationVersion)) return;
     const results = await uploadInvoiceFiles(files, batchName.value, { signal: controller.signal });
     if (!operationContext.isCurrent(operationVersion)) return;
     uploadFailures.value = results.filter((result) => result.error);
@@ -242,7 +246,10 @@ async function onFilesSelected(event) {
     if (error?.name !== 'AbortError' && !disposed && operationContext.isCurrent(operationVersion)) errorMessage.value = error.message;
   } finally {
     finishOperation(controller);
-    if (operationContext.isCurrent(operationVersion)) uploading.value = false;
+    if (operationContext.isCurrent(operationVersion)) {
+      uploading.value = false;
+      emit('busy-change', false);
+    }
   }
 }
 

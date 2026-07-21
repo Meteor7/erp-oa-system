@@ -6,10 +6,12 @@ import {
   createOperationContext,
   editableInvoiceValues,
   fetchInvoicePreview,
+  getRequestInvoices,
   invoiceBlockers,
   invoicesForLine,
   moneyToCents,
   newLineKey,
+  persistInvoiceRequest,
   validateInvoiceFiles,
 } from '../src/lib/invoiceOcr.js';
 
@@ -98,4 +100,65 @@ test('preview rejects successful non-invoice MIME responses', async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('request invoice workflow creates a draft, links confirmed invoices, then submits', async () => {
+  const events = [];
+  const result = await persistInvoiceRequest({
+    createDraft: async () => { events.push('create'); return { name: 'REQ-1' }; },
+    link: async (invoice, request, line) => { events.push(`link:${invoice}:${request}:${line}`); },
+    submitDraft: async (name) => { events.push(`submit:${name}`); return { name }; },
+    invoices: [
+      { name: 'INV-1', recognition_status: '已确认', expense_line_key: 'LINE-1' },
+      { name: 'INV-2', recognition_status: '已排除', expense_line_key: 'LINE-1' },
+    ],
+    payload: { submit: 0 },
+    shouldSubmit: true,
+  });
+  assert.deepEqual(events, ['create', 'link:INV-1:REQ-1:LINE-1', 'submit:REQ-1']);
+  assert.equal(result.requestName, 'REQ-1');
+});
+
+test('request invoice workflow keeps the draft and never submits after a link failure', async () => {
+  const events = [];
+  let retained = '';
+  await assert.rejects(() => persistInvoiceRequest({
+    createDraft: async () => ({ name: 'REQ-2' }),
+    onDraftCreated: (row) => { retained = row.name; events.push('created'); },
+    link: async () => { events.push('link'); throw new Error('link failed'); },
+    submitDraft: async () => { events.push('submit'); },
+    invoices: [{ name: 'INV-1', recognition_status: '已确认', expense_line_key: 'LINE-1' }],
+    shouldSubmit: true,
+  }), /link failed/);
+  assert.equal(retained, 'REQ-2');
+  assert.deepEqual(events, ['created', 'link']);
+
+  await persistInvoiceRequest({
+    requestName: retained,
+    createDraft: async () => { events.push('duplicate-create'); },
+    link: async () => { events.push('retry-link'); },
+    submitDraft: async () => { events.push('retry-submit'); },
+    invoices: [{ name: 'INV-1', recognition_status: '已确认', expense_line_key: 'LINE-1' }],
+    shouldSubmit: true,
+  });
+  assert.deepEqual(events, ['created', 'link', 'retry-link', 'retry-submit']);
+});
+
+test('getRequestInvoices uses the bounded invoice endpoint', async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ message: [{ name: 'INV-1' }] }) };
+  };
+  try {
+    assert.deepEqual(await getRequestInvoices('REQ-1'), [{ name: 'INV-1' }]);
+    assert.deepEqual(body, { request: 'REQ-1' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('unknown invoice states are blocked instead of being treated as confirmed', () => {
+  assert.deepEqual(invoiceBlockers([{ recognition_status: '未知状态' }]), ['存在状态异常发票']);
 });
