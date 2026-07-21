@@ -12,7 +12,7 @@ function asRoles(roles) {
   globalThis.window = { roles };
 }
 
-test("employees land on timesheet entry and can see approval pages without HR pages", () => {
+test("employees land on timesheet entry in read-only mode and can see approval pages without HR pages", () => {
   asRoles(["Employee"]);
   assert.equal(canSee("/entry"), true);
   assert.equal(firstVisiblePath(), "/entry");
@@ -21,7 +21,7 @@ test("employees land on timesheet entry and can see approval pages without HR pa
   assert.equal(canSee("/dashboard"), false);
   assert.equal(canSee("/accommodation"), false);
   assert.equal(canSee("/expense"), false);
-  assert.equal(canEditTimesheetEntry(), true);
+  assert.equal(canEditTimesheetEntry(), false);
 });
 
 test("department supervisors can use timesheet entry and approval pages without HR access", () => {
@@ -36,7 +36,7 @@ test("department supervisors can use timesheet entry and approval pages without 
   assert.equal(canEditTimesheetEntry(), true);
 });
 
-test("finance can manage projects and fill R&D timesheets", () => {
+test("finance can manage projects and view R&D timesheets without editing them", () => {
   asRoles(["Accounts User"]);
   assert.equal(canSee("/expense"), true);
   assert.equal(canSee("/allocation"), true);
@@ -46,7 +46,7 @@ test("finance can manage projects and fill R&D timesheets", () => {
   assert.equal(canSee("/projects"), true);
   assert.equal(canSee("/approval/leave"), true);
   assert.equal(canSee("/approval/purchase"), true);
-  assert.equal(canEditTimesheetEntry(), true);
+  assert.equal(canEditTimesheetEntry(), false);
   assert.equal(canAdministerProjects(), true);
 });
 
