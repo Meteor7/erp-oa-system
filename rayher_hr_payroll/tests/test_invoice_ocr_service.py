@@ -2557,3 +2557,163 @@ def test_async_recognition_refreshes_linked_request_summary(env, monkeypatch):
     assert result["recognition_status"] == "\u5f85\u786e\u8ba4"
     assert request.invoice_count == 1
     assert request.invoice_status == "\u5f85\u786e\u8ba4"
+
+
+# --- Task 6 aggregate deadlock RED tests ---
+def test_two_batch_workers_release_each_batch_before_shared_request_phase(env, monkeypatch):
+    request = _add_request(env, status="\u8349\u7a3f")
+    batches = {
+        name: env.add_batch(name=name, request=request.name)
+        for name in ("BATCH-A", "BATCH-B")
+    }
+    events = []
+    original_commit = env.db.commit
+
+    def commit():
+        events.append("commit")
+        original_commit()
+
+    def recompute_batch(batch_name):
+        with service._transaction_lock("batch", batch_name):
+            events.append(("batch", batch_name))
+            return batches[batch_name]
+
+    def recompute_request_summary(request_name):
+        held_categories = {
+            key.split(":")[2] for key in env.active_locks
+        }
+        events.append(("request-entry", request_name, held_categories))
+        assert "batch" not in held_categories
+        with service._transaction_lock("request", request_name):
+            events.append(("request", request_name))
+        return request
+
+    monkeypatch.setattr(env.db, "commit", commit)
+    monkeypatch.setattr(service, "recompute_batch", recompute_batch)
+    monkeypatch.setattr(
+        service,
+        "recompute_request_summary",
+        recompute_request_summary,
+        raising=False,
+    )
+
+    for batch_name in batches:
+        jobs_module.recompute_invoice_batch(batch_name)
+
+    assert events == [
+        ("batch", "BATCH-A"),
+        "commit",
+        ("request-entry", request.name, set()),
+        ("request", request.name),
+        "commit",
+        ("batch", "BATCH-B"),
+        "commit",
+        ("request-entry", request.name, set()),
+        ("request", request.name),
+        "commit",
+    ]
+
+
+def test_batch_recompute_never_locks_or_refreshes_linked_request(env):
+    request = _add_request(env, status="\u8349\u7a3f")
+    request.invoice_count = 0
+    request.invoice_status = "\u65e0\u53d1\u7968"
+    first = env.add_batch(name="BATCH-A", request=request.name)
+    env.add_batch(name="BATCH-B", request=request.name)
+    env.add_record(
+        name="INV-A",
+        batch=first.name,
+        request=request.name,
+        recognition_status="\u5df2\u786e\u8ba4",
+    )
+    env.add_record(
+        name="INV-B",
+        batch="BATCH-B",
+        request=request.name,
+        recognition_status="\u5df2\u786e\u8ba4",
+    )
+
+    service.recompute_batch(first.name)
+
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories == ["batch"]
+    assert request.invoice_count == 0
+    assert request.invoice_status == "\u65e0\u53d1\u7968"
+    assert not any(
+        call[:2] == ("get_doc", service.REQUEST_DOCTYPE)
+        for call in env.current_read_calls
+    )
+
+
+def test_request_summary_phase_locks_only_request_and_uses_nonlocking_collection_reads(env):
+    request = _add_request(env, status="\u8349\u7a3f")
+    request.invoice_count = 0
+    request.invoice_status = "\u65e0\u53d1\u7968"
+    batch = env.add_batch(name="BATCH-A", request=request.name)
+    env.add_record(
+        name="INV-A",
+        batch=batch.name,
+        request=request.name,
+        recognition_status="\u5df2\u786e\u8ba4",
+    )
+    recompute_request_summary = getattr(
+        service, "recompute_request_summary", None
+    )
+    assert callable(recompute_request_summary)
+
+    recompute_request_summary(request.name)
+
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories == ["request"]
+    assert request.invoice_count == 1
+    assert request.invoice_status == "\u5df2\u786e\u8ba4"
+    assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
+    assert not any(
+        call[0] == "get_values"
+        and call[1] in {service.BATCH_DOCTYPE, service.RECORD_DOCTYPE}
+        for call in env.current_read_calls
+    )
+
+
+def test_request_summary_failure_rolls_back_only_after_batch_commit(env, monkeypatch):
+    request = _add_request(env, status="\u8349\u7a3f")
+    batch = env.add_batch(name="BATCH-A", request=request.name)
+    events = []
+    original_commit = env.db.commit
+    original_rollback = env.db.rollback
+
+    def commit():
+        events.append("commit")
+        original_commit()
+
+    def rollback():
+        events.append("rollback")
+        original_rollback()
+
+    monkeypatch.setattr(env.db, "commit", commit)
+    monkeypatch.setattr(env.db, "rollback", rollback)
+    monkeypatch.setattr(
+        service,
+        "recompute_batch",
+        lambda name: (events.append(("batch", name)) or batch),
+    )
+    monkeypatch.setattr(
+        service,
+        "recompute_request_summary",
+        lambda name: (
+            events.append(("request", name))
+            or (_ for _ in ()).throw(RuntimeError("request summary failed"))
+        ),
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="request summary failed"):
+        jobs_module.recompute_invoice_batch(batch.name)
+
+    assert events == [
+        ("batch", batch.name),
+        "commit",
+        ("request", request.name),
+        "rollback",
+    ]
+    assert env.commits == 1

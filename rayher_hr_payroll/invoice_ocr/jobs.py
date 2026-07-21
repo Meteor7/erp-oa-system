@@ -73,14 +73,26 @@ def _save_success(record, payload: dict):
 
 
 def recompute_invoice_batch(batch_name: str):
-    """Run one independently retryable aggregate transaction."""
+    """Commit batch counts, then refresh its request in a separate transaction."""
     try:
-        service.recompute_batch(str(batch_name))
+        batch = service.recompute_batch(str(batch_name))
+        request_name = str(service._get(batch, "request") or "").strip()
         frappe.db.commit()
     except Exception:
         rollback = getattr(frappe.db, "rollback", None)
         if callable(rollback):
             rollback()
+        raise
+    if not request_name:
+        return
+    try:
+        service.recompute_request_summary(request_name)
+        frappe.db.commit()
+    except Exception:
+        rollback = getattr(frappe.db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        service._log_internal("Invoice OCR request summary aggregation failed")
         raise
 
 

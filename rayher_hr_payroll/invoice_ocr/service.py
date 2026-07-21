@@ -539,13 +539,6 @@ def recompute_batch(batch_name: str):
         ]
         _set(batch, "error_summary", "\n".join(errors[:20]))
         _save(batch)
-        request_name = str(_get(batch, "request") or "").strip()
-        if request_name:
-            with _transaction_lock("request", request_name):
-                request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
-                _apply_request_invoice_summary(
-                    request_doc, save=True, current=True
-                )
         return batch
 
 
@@ -867,6 +860,17 @@ def _apply_request_invoice_summary(request_doc, *, save=False, current=False):
     if save:
         _save(request_doc)
     return summary
+
+
+def recompute_request_summary(request_name: str):
+    """Refresh one request after the batch transaction has committed."""
+    request_name = str(request_name or "").strip()
+    if not request_name:
+        return None
+    with _transaction_lock("request", request_name):
+        request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
+        _apply_request_invoice_summary(request_doc, save=True, current=False)
+        return request_doc
 
 
 def attach_batch_to_request(batch_name, request_doc):
