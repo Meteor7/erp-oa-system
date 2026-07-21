@@ -480,6 +480,8 @@ def test_link_validates_line_ownership_and_allows_many_invoices_per_line(env):
     service.link_invoice(two.name, request.name, "KEY-1")
     assert one.expense_line_key == two.expense_line_key == "KEY-1"
     assert one.request == two.request == "REQ-1"
+    assert request.invoice_count == 2
+    assert request.invoice_status == "已确认"
     with pytest.raises(ValidationError, match="不属于"):
         service.link_invoice(
             env.add_record(name="INV-3", recognition_status="已确认").name,

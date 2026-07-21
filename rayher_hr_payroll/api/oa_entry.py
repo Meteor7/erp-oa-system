@@ -1,8 +1,10 @@
 import json
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import frappe
 from frappe.utils import now_datetime
 
+from rayher_hr_payroll.invoice_ocr import service as invoice_service
 from rayher_hr_payroll.oa_approval import (
     ADMIN_ASSET,
     IT_ASSET,
@@ -40,6 +42,7 @@ CD_REJECTED = "\u5df2\u9a73\u56de"
 
 INVOICE_UPLOADED = "\u5df2\u4e0a\u4f20"
 INVOICE_VERIFIED = "\u5df2\u9a8c\u8bc1"
+INVOICE_CONFIRMED = "\u5df2\u786e\u8ba4"
 INVOICE_DUPLICATE = "\u91cd\u590d\u53d1\u7968"
 
 EXPENSE_CATEGORIES = [
@@ -95,6 +98,19 @@ COMPANIES = ["\u67d0\u67d0\u5149\u534a\u5bfc\u4f53\u79d1\u6280\u6709\u9650\u516c
 
 def _clean(value):
     return str(value or "").strip()
+
+
+def _bounded_optional_text(value, label, limit):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        frappe.throw(frappe._("{0}格式无效。").format(label))
+    value = value.strip()
+    if len(value) > limit:
+        if label == "无票原因":
+            frappe.throw(frappe._("无票原因不能超过 1000 个字符。"))
+        frappe.throw(frappe._("{0}过长。").format(label))
+    return value
 
 
 def _to_bool(value):
@@ -200,6 +216,8 @@ def _serialize_doc_step(step):
 def _serialize_expense_line(row):
     return {
         "source_consumption": getattr(row, "source_consumption", None),
+        "line_key": getattr(row, "line_key", None),
+        "invoice_difference_reason": getattr(row, "invoice_difference_reason", None),
         "start_date": getattr(row, "start_date", None),
         "end_date": getattr(row, "end_date", None),
         "category": getattr(row, "category", None),
@@ -291,6 +309,7 @@ def _kanban_status(workflow_status):
 
 def _summarize_doc(doc):
     step = _current_step(doc)
+    invoice_summary = invoice_service.request_invoice_summary(doc)
     return {
         "name": doc.name,
         "request_type": doc.request_type,
@@ -325,6 +344,10 @@ def _summarize_doc(doc):
         "current_step_mode": step.mode if step else "",
         "can_act": _can_act_on_current_step(doc),
         "can_mark_paid": doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_COMPLETED and _is_finance_user(),
+        "invoice_count": invoice_summary["invoice_count"],
+        "invoice_status": invoice_summary["invoice_status"],
+        "invoice_search_text": invoice_summary["invoice_search_text"],
+        "no_invoice_reason": getattr(doc, "no_invoice_reason", None) or "",
         "expense_lines": [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])],
         "steps": [_serialize_doc_step(row) for row in doc.steps],
         "creation": doc.creation,
@@ -332,9 +355,11 @@ def _summarize_doc(doc):
     }
 
 
-def _load_request(name):
+def _load_request(name, *, current=False):
     if not name:
         frappe.throw(frappe._("\u7f3a\u5c11\u7533\u8bf7\u5355\u53f7\u3002"))
+    if current:
+        return invoice_service._current_doc("OA Approval Request", name)
     return frappe.get_doc("OA Approval Request", name)
 
 
@@ -395,12 +420,54 @@ def _append_steps(doc, steps):
         )
 
 
+def _uuid4_text(value):
+    try:
+        parsed = UUID(str(value or ""))
+    except (ValueError, TypeError, AttributeError):
+        return ""
+    return str(parsed) if parsed.version == 4 else ""
+
+
+def _expense_line_key(row, seen):
+    supplied = row.get("line_key")
+    supplied = supplied.strip() if isinstance(supplied, str) else ""
+    source = _clean(row.get("source_consumption"))
+    if source:
+        candidate = supplied if supplied and len(supplied) <= 140 else str(
+            uuid5(NAMESPACE_URL, f"rayher:consumption:{source}")
+        )
+        if candidate not in seen:
+            seen.add(candidate)
+            return candidate
+    candidate = _uuid4_text(supplied)
+    if candidate and candidate not in seen:
+        seen.add(candidate)
+        return candidate
+    while True:
+        candidate = str(uuid4())
+        if candidate not in seen:
+            seen.add(candidate)
+            return candidate
+
+
+def _difference_reason(value):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        frappe.throw(frappe._("费用明细的发票金额差异说明格式无效。"))
+    value = value.strip()
+    if len(value) > 500:
+        frappe.throw(frappe._("费用明细的发票金额差异说明不能超过 500 个字符。"))
+    return value
+
+
 def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=None):
     rows = _parse_json(expense_lines, [])
     if not rows and _money(fallback_amount) > 0:
         rows = [{"category": fallback_subject or REQUEST_EXPENSE_PAYMENT, "amount": fallback_amount, "description": fallback_subject or ""}]
     normalized = []
     total = 0
+    seen_line_keys = set()
     for row in rows or []:
         amount = _money(row.get("amount"))
         if amount <= 0:
@@ -409,6 +476,7 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
         normalized.append(
             {
                 "source_consumption": row.get("source_consumption"),
+                "line_key": _expense_line_key(row, seen_line_keys),
                 "start_date": row.get("start_date") or row.get("expense_date"),
                 "end_date": row.get("end_date") or row.get("expense_date") or row.get("start_date"),
                 "category": category,
@@ -416,6 +484,7 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
                 "description": _clean(row.get("description") or row.get("desc")),
                 "attachment_count": int(row.get("attachment_count") or row.get("invoice_count") or 0),
                 "invoice_status": _clean(row.get("invoice_status")) or (INVOICE_UPLOADED if row.get("attachment_count") else ""),
+                "invoice_difference_reason": _difference_reason(row.get("invoice_difference_reason")),
             }
         )
         total += amount
@@ -452,6 +521,7 @@ def _build_request_doc(
     account_no=None,
     source_type=None,
     source_summary=None,
+    no_invoice_reason=None,
 ):
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
@@ -490,6 +560,9 @@ def _build_request_doc(
             "payee_name": payee_name or ctx.get("employee_name") or "",
             "branch": branch or "",
             "account_no": account_no or "",
+            "invoice_count": 0,
+            "invoice_status": "无发票",
+            "no_invoice_reason": no_invoice_reason or "",
             "reason": reason or "",
             "current_step_index": 1 if submit else 0,
             "current_step_label": steps[0]["label"] if submit else "",
@@ -504,6 +577,14 @@ def _build_request_doc(
 def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
+    if doc.request_type == REQUEST_LEAVE and (not doc.from_date or not doc.to_date):
+        frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
+    if doc.request_type == REQUEST_EXPENSE_PAYMENT and not list(getattr(doc, "expense_lines", []) or []):
+        frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
+    summary = invoice_service.validate_request_invoices(doc, submitting=True)
+    if isinstance(summary, dict):
+        doc.invoice_count = summary.get("invoice_count", 0)
+        doc.invoice_status = summary.get("invoice_status", "")
     ctx = _route_context(department=doc.department, supervisor=doc.supervisor, asset_category=doc.asset_category)
     route = preview_route(doc.request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=True)
     _append_steps(doc, route["steps"])
@@ -594,7 +675,12 @@ def create_request(
     payee_name=None,
     branch=None,
     account_no=None,
+    invoice_batch=None,
+    no_invoice_reason=None,
 ):
+    requested_submit = _to_bool(submit)
+    batch_name = _bounded_optional_text(invoice_batch, "发票批次", 140)
+    no_invoice_reason = _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
     doc = _build_request_doc(
         request_type=request_type,
         subject=subject,
@@ -605,7 +691,7 @@ def create_request(
         to_date=to_date,
         amount=amount,
         reason=reason,
-        submit=_to_bool(submit),
+        submit=False,
         expense_lines=expense_lines,
         company=company,
         doc_type=doc_type,
@@ -616,20 +702,36 @@ def create_request(
         payee_name=payee_name,
         branch=branch,
         account_no=account_no,
+        no_invoice_reason=no_invoice_reason,
     )
-    frappe.db.commit()
+    if batch_name:
+        invoice_service.attach_batch_to_request(batch_name, doc)
+    draft_summary = invoice_service.validate_request_invoices(doc, submitting=False)
+    if isinstance(draft_summary, dict):
+        doc.invoice_count = draft_summary.get("invoice_count", 0)
+        doc.invoice_status = draft_summary.get("invoice_status", "")
+    if requested_submit:
+        _submit_draft(doc)
+    doc.save(ignore_permissions=True)
     return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])
-def submit_request(name):
-    doc = _load_request(name)
-    if doc.workflow_status != STATUS_DRAFT:
-        frappe.throw(frappe._("\u53ea\u6709\u8349\u7a3f\u72b6\u6001\u53ef\u63d0\u4ea4\u3002"))
-    _submit_draft(doc)
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return _summarize_doc(doc)
+def submit_request(name, no_invoice_reason=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    supplied_reason = None
+    if no_invoice_reason is not None:
+        supplied_reason = _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        invoice_service._request_permission(doc, "edit", current=True)
+        if doc.workflow_status != STATUS_DRAFT:
+            frappe.throw(frappe._("\u53ea\u6709\u8349\u7a3f\u72b6\u6001\u53ef\u63d0\u4ea4\u3002"))
+        if supplied_reason is not None:
+            doc.no_invoice_reason = supplied_reason
+        _submit_draft(doc)
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
 
 
 @frappe.whitelist()
@@ -757,7 +859,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
             "amount": doc.amount,
             "description": doc.description or doc.title,
             "attachment_count": len(doc.invoices),
-            "invoice_status": INVOICE_VERIFIED if all(row.invoice_status == INVOICE_VERIFIED for row in doc.invoices) else INVOICE_UPLOADED,
+            "invoice_status": INVOICE_CONFIRMED if all(row.invoice_status in {INVOICE_VERIFIED, INVOICE_CONFIRMED} for row in doc.invoices) else INVOICE_UPLOADED,
         }
         for doc in docs
     ]
@@ -769,7 +871,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
         asset_category=info.get("asset_category") or OTHER_ASSET,
         amount=sum(_money(item["amount"]) for item in expense_lines),
         reason=info.get("reason") or "\u7531 {0} \u6761\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8\u751f\u6210".format(len(docs)),
-        submit=_to_bool(submit),
+        submit=False,
         expense_lines=expense_lines,
         company=info.get("company"),
         doc_type=info.get("doc_type"),
@@ -782,66 +884,69 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
         account_no=info.get("account_no"),
         source_type=SOURCE_PUSH,
         source_summary="\u3001".join(doc.name for doc in docs),
+        no_invoice_reason="由旧消费明细附件下推",
     )
+    if _to_bool(submit):
+        _submit_draft(doc)
+        doc.save(ignore_permissions=True)
     for cd in docs:
         cd.status = CD_PUSHED
         cd.linked_request = doc.name
         cd.save(ignore_permissions=True)
-    frappe.db.commit()
     return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])
 def action_request(name, action="approve", note=None):
-    doc = _load_request(name)
-    step = _current_step(doc)
-    if not step or doc.workflow_status not in ACTIVE_STATUSES:
-        frappe.throw(frappe._("\u5f53\u524d\u7533\u8bf7\u4e0d\u5728\u53ef\u5904\u7406\u72b6\u6001\u3002"))
-    matched = _matched_approvers(step)
-    if not matched:
-        frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
-    actor = sorted(_actor_names())[0]
-    if action == "reject":
-        _set_step_action(step, STATUS_REJECTED, actor, note)
-        doc.workflow_status = STATUS_REJECTED
-        doc.current_step_label = ""
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        step = _current_step(doc)
+        if not step or doc.workflow_status not in ACTIVE_STATUSES:
+            frappe.throw(frappe._("\u5f53\u524d\u7533\u8bf7\u4e0d\u5728\u53ef\u5904\u7406\u72b6\u6001\u3002"))
+        matched = _matched_approvers(step)
+        if not matched:
+            frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
+        actor = sorted(_actor_names())[0]
+        if action == "reject":
+            _set_step_action(step, STATUS_REJECTED, actor, note)
+            doc.workflow_status = STATUS_REJECTED
+            doc.current_step_label = ""
+            doc.save(ignore_permissions=True)
+            return _summarize_doc(doc)
+        if action != "approve":
+            frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
+        approved_by = set(_parse_json_list(step.approved_by))
+        approved_by.update(matched)
+        step.approved_by = _json_list(sorted(approved_by))
+        if step.mode == "all" and not set(_parse_json_list(step.approvers)).issubset(approved_by):
+            step.action_by = actor
+            step.acted_on = now_datetime()
+            if note:
+                step.note = note
+            doc.save(ignore_permissions=True)
+            return _summarize_doc(doc)
+        done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
+        _set_step_action(step, done_status, actor, note)
+        _advance_after_step(doc, step)
         doc.save(ignore_permissions=True)
-        frappe.db.commit()
         return _summarize_doc(doc)
-    if action != "approve":
-        frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
-    approved_by = set(_parse_json_list(step.approved_by))
-    approved_by.update(matched)
-    step.approved_by = _json_list(sorted(approved_by))
-    if step.mode == "all" and not set(_parse_json_list(step.approvers)).issubset(approved_by):
-        step.action_by = actor
-        step.acted_on = now_datetime()
-        if note:
-            step.note = note
-        doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        return _summarize_doc(doc)
-    done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
-    _set_step_action(step, done_status, actor, note)
-    _advance_after_step(doc, step)
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])
 def mark_paid(name, note=None):
     _require_finance_user()
-    doc = _load_request(name)
-    if doc.request_type != REQUEST_EXPENSE_PAYMENT:
-        frappe.throw(frappe._("\u53ea\u6709\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500\u5355\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
-    if doc.workflow_status != STATUS_COMPLETED:
-        frappe.throw(frappe._("\u53ea\u6709\u5ba1\u6279\u5df2\u901a\u8fc7\u7684\u5355\u636e\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
-    doc.workflow_status = STATUS_PAID
-    doc.paid_by = sorted(_actor_names())[0]
-    doc.paid_on = now_datetime()
-    if note:
-        doc.reason = ((doc.reason or "") + "\n" + "\u4ed8\u6b3e\u5907\u6ce8\uff1a" + note).strip()
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return _summarize_doc(doc)
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        if doc.request_type != REQUEST_EXPENSE_PAYMENT:
+            frappe.throw(frappe._("\u53ea\u6709\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500\u5355\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
+        if doc.workflow_status != STATUS_COMPLETED:
+            frappe.throw(frappe._("\u53ea\u6709\u5ba1\u6279\u5df2\u901a\u8fc7\u7684\u5355\u636e\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
+        doc.workflow_status = STATUS_PAID
+        doc.paid_by = sorted(_actor_names())[0]
+        doc.paid_on = now_datetime()
+        if note:
+            doc.reason = ((doc.reason or "") + "\n" + "\u4ed8\u6b3e\u5907\u6ce8\uff1a" + note).strip()
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)

@@ -5,14 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 
 import frappe
 
-from rayher_hr_payroll.invoice_ocr.domain import business_key
+from rayher_hr_payroll.invoice_ocr.domain import business_key, submission_blockers
 from rayher_hr_payroll.invoice_ocr import permissions as invoice_permissions
 from rayher_hr_payroll.invoice_ocr.permissions import can_read_invoice
 
@@ -31,6 +31,9 @@ PREVIEW_TOKEN_TTL_SECONDS = 60
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 CANONICAL_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
 EDITABLE_FIELDS = {"invoice_category", "project_name", "issue_date", "invoice_number", "amount_before_tax", "tax_amount", "total_amount"}
+REQUEST_RECORD_FIELDS = ["name", "batch", "recognition_status", "invoice_category", "project_name", "invoice_number", "total_amount", "request", "expense_line_key"]
+REQUEST_SEARCH_LIMIT = 2000
+REQUEST_REASON_LIMIT = 1000
 FINANCE_ROLES = {"System Manager", "Accounts User"}
 ACTIVE_REQUEST_STATUSES = {"草稿"}
 
@@ -758,6 +761,200 @@ def resolve_duplicate(invoice_name, reason):
         return _serialize_record(record)
 
 
+def _request_invoice_records(request_name):
+    """Read request records without taking reverse record locks."""
+    request_name = str(request_name or "").strip()
+    if not request_name:
+        return []
+    records = {}
+    for row in _get_all(RECORD_DOCTYPE, filters={"request": request_name}, fields=REQUEST_RECORD_FIELDS):
+        records[str(_get(row, "name"))] = row
+    batches = _get_all(BATCH_DOCTYPE, filters={"request": request_name}, fields=["name"])
+    for batch in batches:
+        for row in _get_all(RECORD_DOCTYPE, filters={"batch": _get(batch, "name")}, fields=REQUEST_RECORD_FIELDS):
+            records.setdefault(str(_get(row, "name")), row)
+    return list(records.values())
+
+
+def _request_name(request_doc):
+    return str(_get(request_doc, "name") or "").strip()
+
+
+def _decimal_money(value):
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not number.is_finite():
+        return None
+    return number.quantize(Decimal("0.01"))
+
+
+def _deduplicated_text(values, limit=REQUEST_SEARCH_LIMIT):
+    parts = []
+    seen = set()
+    for value in values:
+        value = str(value or "").strip()
+        if not value or value in seen:
+            continue
+        candidate = "；".join([*parts, value])
+        if len(candidate) > limit:
+            break
+        seen.add(value)
+        parts.append(value)
+    return "；".join(parts)
+
+
+def request_invoice_summary(request_doc):
+    records = _request_invoice_records(_request_name(request_doc))
+    included = [row for row in records if _get(row, "recognition_status") != "已排除"]
+    statuses = []
+    for row in included:
+        status = str(_get(row, "recognition_status") or "状态异常")
+        if status not in statuses:
+            statuses.append(status)
+    search_values = []
+    for row in records:
+        if _get(row, "recognition_status") != "已确认":
+            continue
+        search_values.extend([_get(row, "invoice_category"), _get(row, "project_name"), _get(row, "invoice_number")])
+    return {
+        "invoice_count": len(included),
+        "invoice_status": "、".join(statuses) if statuses else "无发票",
+        "invoice_search_text": _deduplicated_text(search_values),
+    }
+
+
+def _apply_request_invoice_summary(request_doc, *, save=False):
+    summary = request_invoice_summary(request_doc)
+    _set(request_doc, "invoice_count", summary["invoice_count"])
+    _set(request_doc, "invoice_status", summary["invoice_status"])
+    if save:
+        _save(request_doc)
+    return summary
+
+
+def attach_batch_to_request(batch_name, request_doc):
+    batch_name = str(batch_name or "").strip()
+    request_name = _request_name(request_doc)
+    if not batch_name:
+        _throw("缺少发票批次。")
+    if not request_name:
+        _throw("请先保存费用付款/报销单。")
+    preliminary = _get_all(
+        RECORD_DOCTYPE,
+        filters={"batch": batch_name},
+        fields=["name", "batch"],
+    )
+    record_names = sorted(
+        {str(_get(row, "name") or "") for row in preliminary if _get(row, "name")}
+    )
+    with ExitStack() as locks:
+        for record_name in record_names:
+            locks.enter_context(_transaction_lock("record", record_name))
+        locks.enter_context(_transaction_lock("batch", batch_name))
+        locks.enter_context(_transaction_lock("request", request_name))
+        batch = _require_batch(batch_name, owner_only=True, current=True)
+        current_request = _current_doc(REQUEST_DOCTYPE, request_name)
+        _request_permission(current_request, "edit", current=True)
+        batch_request = str(_get(batch, "request") or "")
+        if batch_request and batch_request != request_name:
+            _throw("该发票批次已关联到其他报销单。")
+        current_rows = _current_rows(
+            RECORD_DOCTYPE,
+            filters={"batch": batch_name},
+            fields=["name", "batch"],
+        )
+        current_names = sorted(
+            {str(_get(row, "name") or "") for row in current_rows if _get(row, "name")}
+        )
+        if current_names != record_names:
+            _throw("发票批次内容已发生变化，请刷新后重试。")
+        records = [_current_doc(RECORD_DOCTYPE, name) for name in record_names]
+        for record in records:
+            if str(_get(record, "batch") or "") != batch_name:
+                _throw("发票批次内容已发生变化，请刷新后重试。")
+            existing = str(_get(record, "request") or "")
+            if existing and existing != request_name:
+                _throw("该发票已关联到其他报销单。")
+        for record in records:
+            _set(record, "request", request_name)
+            _save(record)
+        _set(batch, "request", request_name)
+        _save(batch)
+        summary = _apply_request_invoice_summary(current_request, save=True)
+        if current_request is not request_doc:
+            _set(request_doc, "invoice_count", summary["invoice_count"])
+            _set(request_doc, "invoice_status", summary["invoice_status"])
+        return summary
+
+
+def _request_reason(request_doc):
+    value = _get(request_doc, "no_invoice_reason")
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        _throw("无票原因格式无效。")
+    value = value.strip()
+    if len(value) > REQUEST_REASON_LIMIT:
+        _throw("无票原因不能超过 1000 个字符。")
+    return value
+
+
+def validate_request_invoices(request_doc, submitting: bool):
+    summary = request_invoice_summary(request_doc)
+    if not submitting or _get(request_doc, "request_type") != "费用付款申请":
+        return summary
+    records = _request_invoice_records(_request_name(request_doc))
+    included = [row for row in records if _get(row, "recognition_status") != "已排除"]
+    blockers = submission_blockers(included, _request_reason(request_doc))
+    if blockers:
+        _throw("；".join(blockers))
+    if not included:
+        return summary
+    lines = {
+        str(_get(row, "line_key") or "").strip(): row
+        for row in list(_get(request_doc, "expense_lines") or [])
+        if str(_get(row, "line_key") or "").strip()
+    }
+    totals = {key: Decimal("0.00") for key in lines}
+    linked_counts = {key: 0 for key in lines}
+    missing_totals = set()
+    messages = []
+    for record in included:
+        line_key = str(_get(record, "expense_line_key") or "").strip()
+        if not line_key:
+            messages.append("存在未关联费用明细的发票")
+            continue
+        if line_key not in lines:
+            messages.append("发票关联的费用明细不属于该报销单")
+            continue
+        linked_counts[line_key] += 1
+        total = _decimal_money(_get(record, "total_amount"))
+        if total is None:
+            missing_totals.add(line_key)
+        else:
+            totals[line_key] += total
+    for line_key, line in lines.items():
+        reason = str(_get(line, "invoice_difference_reason") or "").strip()
+        if line_key in missing_totals and not reason:
+            messages.append("发票金额缺失，请填写费用明细差异说明")
+            continue
+        line_amount = _decimal_money(_get(line, "amount"))
+        if line_amount is None:
+            messages.append("费用明细金额无效")
+            continue
+        if linked_counts[line_key] == 0 and line_key not in missing_totals:
+            if not reason:
+                messages.append("费用明细未关联发票，请填写差异说明")
+            continue
+        if abs(line_amount - totals[line_key]) > Decimal("0.02") and not reason:
+            messages.append("费用明细金额与发票合计不一致，请填写差异说明")
+    if messages:
+        _throw("；".join(dict.fromkeys(messages)))
+    return summary
+
+
 
 def _request_permission(request_doc, ptype, *, current=False):
     user = _user()
@@ -825,6 +1022,7 @@ def link_invoice(invoice_name, request, expense_line_key):
                 if not batch_request:
                     _set(batch, "request", request_name)
                     _save(batch)
+                _apply_request_invoice_summary(request_doc, save=True)
                 return _serialize_record(record)
 
 
