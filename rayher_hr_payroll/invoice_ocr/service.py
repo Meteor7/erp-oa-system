@@ -896,22 +896,58 @@ def recompute_request_summary(request_name: str):
         return request_doc
 
 
+def _latest_committed_request_batch_names(request_name):
+    """Read committed batch links without locking batch rows.
+
+    The dedicated connection's first consistent read cannot inherit the
+    caller transaction's older REPEATABLE READ snapshot. Callers hold the
+    request Redis lock, and every batch.request writer uses that same lock,
+    so the committed result stays stable until the caller commits.
+    """
+    connection = frappe.db.get_connection()
+    cursor = None
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT `name`
+            FROM `tabOA Invoice Import Batch`
+            WHERE `request` = %s
+            ORDER BY `name`
+            """,
+            (str(request_name),),
+        )
+        return [
+            str(row[0])
+            for row in cursor.fetchall()
+            if row and str(row[0] or "").strip()
+        ]
+    finally:
+        if cursor is not None:
+            cursor.close()
+        connection.close()
+
+
 def _assert_request_single_batch_current(request_name, batch_name):
-    """Reject a second batch using a locking/current database read."""
+    """Reject a second batch without extending DB row-lock order."""
     request_name = str(request_name or "").strip()
     batch_name = str(batch_name or "").strip()
-    request_batches = _current_rows(
+    batch_names = set(
+        _latest_committed_request_batch_names(request_name)
+    )
+    # Include this transaction's own earlier blank -> request assignments.
+    # The association is write-once, so a snapshot row cannot be a stale
+    # reassignment; this read is non-locking and cannot wait on register_file.
+    for row in _get_all(
         BATCH_DOCTYPE,
         filters={"request": request_name},
-        fields=["name", "request"],
-    )
+        fields=["name"],
+    ):
+        name = str(_get(row, "name") or "").strip()
+        if name:
+            batch_names.add(name)
     other_batches = sorted(
-        {
-            str(_get(row, "name") or "")
-            for row in request_batches
-            if str(_get(row, "name") or "")
-            and str(_get(row, "name") or "") != batch_name
-        }
+        name for name in batch_names if name != batch_name
     )
     if other_batches:
         _throw(

@@ -301,7 +301,17 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
         if request_doc.owner != frappe_stub.session.user and "System Manager" not in frappe_stub.get_roles():
             service._throw("您无权访问该费用付款/报销单。")
 
+    def committed_batch_names(request_name):
+        assert request_name == request.name
+        assert lock_order[-1] == ("request", request.name)
+        return [batch.name] if batch.request == request.name else []
+
     monkeypatch.setattr(service, "_transaction_lock", transaction_lock)
+    monkeypatch.setattr(
+        service,
+        "_latest_committed_request_batch_names",
+        committed_batch_names,
+    )
     monkeypatch.setattr(service, "_require_batch", require_batch)
     monkeypatch.setattr(service, "_current_doc", current_doc)
     monkeypatch.setattr(service, "_get_all", record_rows)
@@ -832,18 +842,21 @@ def test_update_draft_invoice_details_only_changes_reason_fields(monkeypatch):
 
 # --- Task 8 independent-review executable regression tests ---
 
-def test_attach_batch_rejects_a_different_current_batch_for_the_same_request(monkeypatch):
+def test_attach_batch_rejects_a_different_committed_batch_for_the_same_request(
+    monkeypatch,
+):
     batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
 
-    def current_rows(doctype, *, filters=None, fields=None, **_kwargs):
-        if doctype == service.RECORD_DOCTYPE:
-            return [Row(name=name, batch=batch.name) for name in sorted(records)]
-        assert doctype == service.BATCH_DOCTYPE
-        assert filters == {"request": request.name}
+    def committed_batch_names(request_name):
+        assert request_name == request.name
         assert lock_order[-1] == ("request", request.name)
-        return [Row(name="BATCH-OTHER", request=request.name)]
+        return ["BATCH-OTHER"]
 
-    monkeypatch.setattr(service, "_current_rows", current_rows)
+    monkeypatch.setattr(
+        service,
+        "_latest_committed_request_batch_names",
+        committed_batch_names,
+    )
     with pytest.raises(
         ValidationError,
         match="\u5df2\u5173\u8054.*\u5176\u4ed6.*\u6279\u6b21",

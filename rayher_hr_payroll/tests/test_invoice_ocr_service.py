@@ -101,6 +101,50 @@ class FakeCache:
         return FakeLock(self.environment, key, kwargs)
 
 
+class FakeLatestCommittedCursor:
+    def __init__(self, environment):
+        self.environment = environment
+        self.rows = []
+        self.closed = False
+
+    def execute(self, query, values):
+        normalized = " ".join(str(query).split())
+        request_name = str(values[0])
+        self.environment.committed_read_calls.append(
+            (normalized, tuple(values))
+        )
+        if "FOR UPDATE" in normalized.upper():
+            raise AssertionError(
+                "latest committed batch query must not lock batch rows"
+            )
+        if self.environment.register_locked_batch_row:
+            self.environment.nonblocking_committed_reads += 1
+        self.rows = sorted(
+            (str(doc.get("name")),)
+            for doc in self.environment.docs[service.BATCH_DOCTYPE].values()
+            if str(doc.get("request") or "") == request_name
+        )
+
+    def fetchall(self):
+        return list(self.rows)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeLatestCommittedConnection:
+    def __init__(self, environment):
+        self.environment = environment
+        self.closed = False
+
+    def cursor(self):
+        return FakeLatestCommittedCursor(self.environment)
+
+    def close(self):
+        self.closed = True
+        self.environment.committed_connections_closed += 1
+
+
 class FakeDB:
     def __init__(self, environment):
         self.environment = environment
@@ -127,6 +171,9 @@ class FakeDB:
             return doc.get(fieldname)
         return None
 
+    def get_connection(self):
+        return FakeLatestCommittedConnection(self.environment)
+
     def commit(self):
         self.environment.commits += 1
 
@@ -141,6 +188,10 @@ class Environment:
         self.locks = []
         self.enqueued = []
         self.commits = 0
+        self.committed_read_calls = []
+        self.committed_connections_closed = 0
+        self.nonblocking_committed_reads = 0
+        self.register_locked_batch_row = ""
         self.roles = {"alice@example.com": ["Employee"], "finance@example.com": ["Accounts User"], "admin@example.com": ["System Manager"]}
         self.read_allowed = True
         self.permission_allowed = True
@@ -2837,7 +2888,9 @@ def _task8_add_expense_line(env, request_name, key):
     return line
 
 
-def test_link_rejects_second_request_batch_using_current_query_without_mutation(env):
+def test_link_rejects_second_request_batch_with_nonlocking_committed_read(
+    env, monkeypatch
+):
     request = _add_request(env, name="REQ-SINGLE-BATCH")
     first_batch = env.add_batch(name="BATCH-FIRST", request="")
     second_batch = env.add_batch(name="BATCH-SECOND", request="")
@@ -2851,19 +2904,86 @@ def test_link_rejects_second_request_batch_using_current_query_without_mutation(
     )
     env.begin_mvcc_snapshot()
     first_batch.request = request.name
+    env.register_locked_batch_row = first_batch.name
     saved_before = list(env.saved)
+    original_get_values = env.db.get_values
 
+    def reject_cross_batch_lock(
+        doctype, filters=None, fieldname=None, for_update=False, **kwargs
+    ):
+        if (
+            doctype == service.BATCH_DOCTYPE
+            and filters == {"request": request.name}
+            and for_update
+        ):
+            raise AssertionError("would wait for register-held batch row")
+        return original_get_values(
+            doctype,
+            filters=filters,
+            fieldname=fieldname,
+            for_update=for_update,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(env.db, "get_values", reject_cross_batch_lock)
     with pytest.raises(ValidationError, match="\u5df2\u5173\u8054.*\u5176\u4ed6"):
         service.link_invoice(record.name, request.name, line.line_key)
 
-    assert (
-        "get_values",
-        service.BATCH_DOCTYPE,
-        {"request": request.name},
-    ) in env.current_read_calls
+    assert env.committed_read_calls
+    query, values = env.committed_read_calls[-1]
+    assert "FOR UPDATE" not in query.upper()
+    assert values == (request.name,)
+    assert env.nonblocking_committed_reads == 1
+    assert env.committed_connections_closed == 1
     assert record.request == ""
     assert record.expense_line_key == ""
     assert second_batch.request == ""
+    assert env.saved == saved_before
+
+
+def test_attach_rejects_second_batch_without_waiting_for_register_row(
+    env, monkeypatch
+):
+    request = _add_request(env, name="REQ-ATTACH-SINGLE-BATCH")
+    held_batch = env.add_batch(name="BATCH-REGISTER-HELD", request=request.name)
+    target_batch = env.add_batch(name="BATCH-ATTACH-TARGET", request="")
+    record = env.add_record(
+        name="INV-ATTACH-TARGET",
+        batch=target_batch.name,
+        request="",
+    )
+    env.register_locked_batch_row = held_batch.name
+    saved_before = list(env.saved)
+    original_get_values = env.db.get_values
+
+    def reject_cross_batch_lock(
+        doctype, filters=None, fieldname=None, for_update=False, **kwargs
+    ):
+        if (
+            doctype == service.BATCH_DOCTYPE
+            and filters == {"request": request.name}
+            and for_update
+        ):
+            raise AssertionError("would wait for register-held batch row")
+        return original_get_values(
+            doctype,
+            filters=filters,
+            fieldname=fieldname,
+            for_update=for_update,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(env.db, "get_values", reject_cross_batch_lock)
+    with pytest.raises(ValidationError, match="\u5df2\u5173\u8054.*\u5176\u4ed6"):
+        service.attach_batch_to_request(target_batch.name, request)
+
+    query, values = env.committed_read_calls[-1]
+    assert "FOR UPDATE" not in query.upper()
+    assert values == (request.name,)
+    assert env.nonblocking_committed_reads == 1
+    assert env.committed_connections_closed == 1
+    assert target_batch.request == ""
+    assert record.request == ""
     assert env.saved == saved_before
 
 
