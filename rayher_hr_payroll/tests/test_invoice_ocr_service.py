@@ -2717,3 +2717,103 @@ def test_request_summary_failure_rolls_back_only_after_batch_commit(env, monkeyp
         "rollback",
     ]
     assert env.commits == 1
+
+def test_link_allows_same_draft_rebind_and_unlink_but_keeps_request_and_file(env):
+    batch = env.add_batch()
+    request = Doc(
+        env,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-REBIND",
+            "owner": "alice@example.com",
+            "employee": "EMP-ALICE",
+            "workflow_status": "\u8349\u7a3f",
+        },
+    )
+    env.docs[service.REQUEST_DOCTYPE][request.name] = request
+    for index, key in enumerate(("KEY-1", "KEY-2"), start=1):
+        line = Doc(
+            env,
+            {
+                "doctype": service.LINE_DOCTYPE,
+                "name": f"LINE-{index}",
+                "parent": request.name,
+                "parenttype": service.REQUEST_DOCTYPE,
+                "parentfield": "expense_lines",
+                "line_key": key,
+            },
+        )
+        env.docs[service.LINE_DOCTYPE][line.name] = line
+    batch.request = request.name
+    record = env.add_record(
+        name="INV-REBIND",
+        recognition_status="\u5df2\u786e\u8ba4",
+        request=request.name,
+        expense_line_key="KEY-1",
+        invoice_file="/private/files/original.pdf",
+    )
+
+    service.link_invoice(record.name, request.name, "KEY-2")
+    assert record.expense_line_key == "KEY-2"
+    service.link_invoice(record.name, request.name, "")
+    assert record.request == request.name
+    assert record.expense_line_key == ""
+    assert record.invoice_file == "/private/files/original.pdf"
+    assert request.invoice_count == 1
+    assert request.invoice_status == "\u5df2\u786e\u8ba4"
+
+    request.workflow_status = "\u5f85\u5ba1\u6279"
+    with pytest.raises(ValidationError, match="\u63d0\u4ea4\u540e"):
+        service.link_invoice(record.name, request.name, "KEY-1")
+
+
+def test_link_still_rejects_cross_request_rebind(env):
+    batch = env.add_batch()
+    first = Doc(env, {
+        "doctype": service.REQUEST_DOCTYPE,
+        "name": "REQ-FIRST",
+        "owner": "alice@example.com",
+        "employee": "EMP-ALICE",
+        "workflow_status": "\u8349\u7a3f",
+    })
+    second = Doc(env, {
+        "doctype": service.REQUEST_DOCTYPE,
+        "name": "REQ-SECOND",
+        "owner": "alice@example.com",
+        "employee": "EMP-ALICE",
+        "workflow_status": "\u8349\u7a3f",
+    })
+    env.docs[service.REQUEST_DOCTYPE][first.name] = first
+    env.docs[service.REQUEST_DOCTYPE][second.name] = second
+    line = Doc(env, {
+        "doctype": service.LINE_DOCTYPE,
+        "name": "LINE-SECOND",
+        "parent": second.name,
+        "parenttype": service.REQUEST_DOCTYPE,
+        "parentfield": "expense_lines",
+        "line_key": "KEY-SECOND",
+    })
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    batch.request = first.name
+    record = env.add_record(
+        name="INV-CROSS-REBIND",
+        recognition_status="\u5df2\u786e\u8ba4",
+        request=first.name,
+        expense_line_key="",
+    )
+
+    with pytest.raises(ValidationError, match="\u5176\u4ed6"):
+        service.link_invoice(record.name, second.name, "KEY-SECOND")
+    assert record.request == first.name
+    assert record.expense_line_key == ""
+
+
+def test_link_api_accepts_blank_line_key_for_draft_unlink(env, monkeypatch):
+    api = importlib.import_module("rayher_hr_payroll.api.invoice_entry")
+    delegated = Mock(return_value={"name": "INV-1", "expense_line_key": ""})
+    monkeypatch.setattr(api.service, "link_invoice", delegated)
+
+    result = api.link_invoice("INV-1", "REQ-1", "")
+
+    assert result["expense_line_key"] == ""
+    delegated.assert_called_once_with("INV-1", "REQ-1", "")

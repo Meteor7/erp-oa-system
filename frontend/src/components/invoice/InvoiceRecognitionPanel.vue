@@ -80,6 +80,7 @@ import {
   ACTIVE_RECOGNITION_STATUSES,
   INVOICE_FIELDS,
   confirmInvoice,
+  createOperationContext,
   createInvoiceBatch,
   excludeInvoice,
   getInvoiceBatch,
@@ -125,7 +126,7 @@ let pollTimer = null;
 let pollAbort = null;
 let requestVersion = 0;
 let disposed = false;
-const pendingControllers = new Set();
+const operationContext = createOperationContext();
 
 const visibleRows = computed(() => rows.value.filter((row) => row.recognition_status !== labels.excluded));
 
@@ -134,13 +135,11 @@ function isEditable(row) {
 }
 
 function operationController() {
-  const controller = new AbortController();
-  pendingControllers.add(controller);
-  return controller;
+  return operationContext.controller();
 }
 
 function finishOperation(controller) {
-  pendingControllers.delete(controller);
+  operationContext.finish(controller);
 }
 
 watch(() => props.invoices, (value) => {
@@ -151,10 +150,18 @@ watch(() => props.batch, (value) => {
   const nextName = typeof value === 'string' ? value : value?.name || '';
   const changed = nextName !== batchName.value;
   if (changed) {
-    batchName.value = nextName;
+    operationContext.invalidate();
     stopPolling();
+    batchName.value = nextName;
+    batchSummary.value = typeof value === 'object' ? value : null;
+    rows.value = [];
+    errorMessage.value = '';
+    uploadFailures.value = [];
+    busyNames.value = new Set();
+    uploading.value = false;
+  } else if (typeof value === 'object') {
+    batchSummary.value = value;
   }
-  batchSummary.value = typeof value === 'object' ? value : batchSummary.value;
   if (nextName && (changed || !rows.value.length)) refreshBatch(true);
 }, { immediate: true });
 
@@ -218,21 +225,24 @@ async function onFilesSelected(event) {
   }
   uploading.value = true;
   const controller = operationController();
+  const operationVersion = operationContext.current();
   try {
     if (!batchName.value) {
       const created = await createInvoiceBatch({ signal: controller.signal });
+      if (!operationContext.isCurrent(operationVersion)) return;
       batchName.value = created.name;
       batchSummary.value = created;
       emit('batch-created', created);
     }
     const results = await uploadInvoiceFiles(files, batchName.value, { signal: controller.signal });
+    if (!operationContext.isCurrent(operationVersion)) return;
     uploadFailures.value = results.filter((result) => result.error);
     await refreshBatch(true);
   } catch (error) {
-    if (error?.name !== 'AbortError' && !disposed) errorMessage.value = error.message;
+    if (error?.name !== 'AbortError' && !disposed && operationContext.isCurrent(operationVersion)) errorMessage.value = error.message;
   } finally {
     finishOperation(controller);
-    uploading.value = false;
+    if (operationContext.isCurrent(operationVersion)) uploading.value = false;
   }
 }
 
@@ -260,18 +270,22 @@ async function withBusy(row, action) {
   busyNames.value = new Set([...busyNames.value, row.name]);
   errorMessage.value = '';
   const controller = operationController();
+  const operationVersion = operationContext.current();
   try {
     const changed = await action(controller.signal);
+    if (!operationContext.isCurrent(operationVersion)) return;
     if (changed?.name) replaceRows(rows.value.map((item) => item.name === changed.name ? { ...item, ...changed } : item));
     else await refreshBatch(true);
   } catch (error) {
-    if (error?.name !== 'AbortError' && !disposed) errorMessage.value = error.message;
+    if (error?.name !== 'AbortError' && !disposed && operationContext.isCurrent(operationVersion)) errorMessage.value = error.message;
   } finally {
     finishOperation(controller);
-    const next = new Set(busyNames.value);
-    next.delete(row.name);
-    busyNames.value = next;
-    schedulePoll();
+    if (operationContext.isCurrent(operationVersion)) {
+      const next = new Set(busyNames.value);
+      next.delete(row.name);
+      busyNames.value = next;
+      schedulePoll();
+    }
   }
 }
 
@@ -303,23 +317,26 @@ async function changeLink(row, expenseLineKey) {
   const previous = row.expense_line_key || '';
   row.expense_line_key = expenseLineKey;
   const controller = operationController();
+  const operationVersion = operationContext.current();
   try {
     const result = await linkInvoice(row.name, props.request, expenseLineKey, { signal: controller.signal });
+    if (!operationContext.isCurrent(operationVersion)) return;
     emit('link-change', { invoice: row.name, expense_line_key: expenseLineKey, request: props.request, persisted: result?.persisted !== false });
     replaceRows(rows.value);
   } catch (error) {
-    row.expense_line_key = previous;
-    if (error?.name !== 'AbortError' && !disposed) errorMessage.value = error.message;
+    if (operationContext.isCurrent(operationVersion)) {
+      row.expense_line_key = previous;
+      if (error?.name !== 'AbortError' && !disposed) errorMessage.value = error.message;
+    }
   } finally {
     finishOperation(controller);
-    schedulePoll();
+    if (operationContext.isCurrent(operationVersion)) schedulePoll();
   }
 }
 
 onBeforeUnmount(() => {
   disposed = true;
   stopPolling();
-  pendingControllers.forEach((controller) => controller.abort());
-  pendingControllers.clear();
+  operationContext.invalidate();
 });
 </script>

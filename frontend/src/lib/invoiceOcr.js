@@ -11,6 +11,28 @@ export const INVOICE_FIELDS = Object.freeze([
 export const MAX_FILES = 20;
 export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 export const UPLOAD_CONCURRENCY = 3;
+export function createOperationContext() {
+  let generation = 0;
+  const controllers = new Set();
+  return {
+    current: () => generation,
+    isCurrent: (version) => version === generation,
+    controller() {
+      const controller = new AbortController();
+      controllers.add(controller);
+      return controller;
+    },
+    finish(controller) {
+      controllers.delete(controller);
+    },
+    invalidate() {
+      generation += 1;
+      controllers.forEach((controller) => controller.abort());
+      controllers.clear();
+      return generation;
+    },
+  };
+}
 export const ACCEPTED_INVOICE_EXTENSIONS = Object.freeze(['pdf', 'jpg', 'jpeg', 'png']);
 export const ACTIVE_RECOGNITION_STATUSES = Object.freeze(['\u6392\u961f\u4e2d', '\u8bc6\u522b\u4e2d']);
 
@@ -226,5 +248,16 @@ export async function fetchInvoicePreview(invoiceName, { signal } = {}) {
     signal,
   });
   if (!response.ok) throw new Error('\u53d1\u7968\u9884\u89c8\u52a0\u8f7d\u5931\u8d25');
-  return { metadata, blob: await response.blob() };
+  const blob = await response.blob();
+  const normalizeMime = (value) => String(value || '').split(';')[0].trim().toLowerCase();
+  const allowed = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+  const responseMime = normalizeMime(blob.type);
+  const metadataMime = normalizeMime(metadata.mime_type);
+  if ((responseMime && !allowed.has(responseMime)) || (!responseMime && !allowed.has(metadataMime))) {
+    throw new Error('\u53d1\u7968\u9884\u89c8\u53ea\u652f\u6301 PDF\u3001JPEG \u6216 PNG \u683c\u5f0f');
+  }
+  if (responseMime && metadataMime && responseMime !== metadataMime) {
+    throw new Error('\u53d1\u7968\u9884\u89c8\u6587\u4ef6\u7c7b\u578b\u4e0d\u4e00\u81f4');
+  }
+  return { metadata, blob };
 }

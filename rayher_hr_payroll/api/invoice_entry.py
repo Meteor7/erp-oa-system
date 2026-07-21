@@ -74,7 +74,7 @@ def link_invoice(invoice_name, request, expense_line_key):
     return service.link_invoice(
         _bounded(invoice_name, "发票标识", 140),
         _bounded(request, "报销单标识", 140),
-        _bounded(expense_line_key, "费用明细标识", 140),
+        _bounded(expense_line_key, "\u8d39\u7528\u660e\u7ec6\u6807\u8bc6", 140, required=False),
     )
 
 

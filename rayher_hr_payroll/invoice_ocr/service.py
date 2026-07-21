@@ -1006,12 +1006,11 @@ def _request_permission(request_doc, ptype, *, current=False):
     if not allowed:
         _throw("您无权访问该费用付款/报销单。")
 
+
 def link_invoice(invoice_name, request, expense_line_key):
     invoice_name = str(invoice_name)
     request_name = str(request)
     line_key = str(expense_line_key or "").strip()
-    if not line_key:
-        _throw("必须选择费用明细。")
 
     # This first read is address/authentication only. Every decision is repeated
     # as a current read after all Redis locks are acquired, so no DB row lock is
@@ -1024,35 +1023,33 @@ def link_invoice(invoice_name, request, expense_line_key):
                 record = _require_record(invoice_name, write=True, current=True)
                 batch_name = str(_get(record, "batch") or "")
                 if batch_name != preliminary_batch:
-                    _throw("发票批次已发生变化，请刷新后重试。")
+                    _throw("\u53d1\u7968\u6279\u6b21\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002")
                 batch = _current_doc(BATCH_DOCTYPE, batch_name)
                 request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
                 _request_permission(request_doc, "edit", current=True)
-                if _get(record, "recognition_status") != "已确认":
-                    _throw("只有已确认发票可以关联费用明细。")
+                if _get(record, "recognition_status") != "\u5df2\u786e\u8ba4":
+                    _throw("\u53ea\u6709\u5df2\u786e\u8ba4\u53d1\u7968\u53ef\u4ee5\u5173\u8054\u8d39\u7528\u660e\u7ec6\u3002")
                 if _get(request_doc, "workflow_status") not in ACTIVE_REQUEST_STATUSES:
-                    _throw("报销单提交后不能调整发票关联。")
-                line = _current_value(
-                    LINE_DOCTYPE,
-                    {
-                        "parent": request_name,
-                        "parenttype": REQUEST_DOCTYPE,
-                        "parentfield": "expense_lines",
-                        "line_key": line_key,
-                    },
-                    ["name", "line_key"],
-                )
-                if not line:
-                    _throw("所选费用明细不属于该报销单。")
+                    _throw("\u62a5\u9500\u5355\u63d0\u4ea4\u540e\u4e0d\u80fd\u8c03\u6574\u53d1\u7968\u5173\u8054\u3002")
+                if line_key:
+                    line = _current_value(
+                        LINE_DOCTYPE,
+                        {
+                            "parent": request_name,
+                            "parenttype": REQUEST_DOCTYPE,
+                            "parentfield": "expense_lines",
+                            "line_key": line_key,
+                        },
+                        ["name", "line_key"],
+                    )
+                    if not line:
+                        _throw("\u6240\u9009\u8d39\u7528\u660e\u7ec6\u4e0d\u5c5e\u4e8e\u8be5\u62a5\u9500\u5355\u3002")
                 existing_request = str(_get(record, "request") or "")
-                existing_line = str(_get(record, "expense_line_key") or "")
-                if existing_request and (
-                    existing_request != request_name or existing_line != line_key
-                ):
-                    _throw("该发票已关联到其他费用明细或报销单。")
+                if existing_request and existing_request != request_name:
+                    _throw("\u8be5\u53d1\u7968\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
                 batch_request = str(_get(batch, "request") or "")
                 if batch_request and batch_request != request_name:
-                    _throw("同一发票批次不能关联多张报销单。")
+                    _throw("\u540c\u4e00\u53d1\u7968\u6279\u6b21\u4e0d\u80fd\u5173\u8054\u591a\u5f20\u62a5\u9500\u5355\u3002")
                 _set(record, "request", request_name)
                 _set(record, "expense_line_key", line_key)
                 _save(record)

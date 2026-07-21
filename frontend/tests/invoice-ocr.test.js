@@ -3,7 +3,9 @@ import test from 'node:test';
 
 import {
   amountMismatch,
+  createOperationContext,
   editableInvoiceValues,
+  fetchInvoicePreview,
   invoiceBlockers,
   invoicesForLine,
   moneyToCents,
@@ -45,4 +47,55 @@ test('line keys use crypto and file validation enforces batch limits', () => {
   assert.throws(() => validateInvoiceFiles(Array.from({ length: 21 }, (_, i) => ({ name: `${i}.pdf`, size: 1 }))));
   assert.throws(() => validateInvoiceFiles([{ name: 'bad.gif', size: 1 }]));
   assert.throws(() => validateInvoiceFiles([{ name: 'big.pdf', size: 10 * 1024 * 1024 + 1 }]));
+});
+test('operation context aborts stale work and prevents late commits after batch switch', async () => {
+  const context = createOperationContext();
+  const generation = context.current();
+  const controller = context.controller();
+  let release;
+  let committed = false;
+  const delayed = new Promise((resolve) => { release = resolve; }).then(() => {
+    if (context.isCurrent(generation)) committed = true;
+  });
+
+  context.invalidate();
+  release();
+  await delayed;
+
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(context.isCurrent(generation), false);
+  assert.equal(committed, false);
+});
+
+test('preview rejects successful non-invoice MIME responses', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        ok: true,
+        json: async () => ({
+          message: {
+            preview_method: 'POST',
+            preview_url: '/api/method/rayher_hr_payroll.api.invoice_entry.serve_invoice_preview',
+            token: 'token',
+            mime_type: 'application/pdf',
+          },
+        }),
+      };
+    }
+    return {
+      ok: true,
+      blob: async () => new Blob(['not an invoice'], { type: 'text/html' }),
+    };
+  };
+  try {
+    await assert.rejects(
+      () => fetchInvoicePreview('INV-1'),
+      /PDF|JPEG|PNG|type|format/i,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
