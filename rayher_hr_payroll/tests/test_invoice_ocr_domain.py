@@ -4,6 +4,7 @@ import sys
 import types
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,21 @@ from rayher_hr_payroll.invoice_ocr.domain import (
     business_key,
     submission_blockers,
 )
+
+APP_ROOT = Path(__file__).resolve().parents[1]
+DOCTYPE_ROOT = APP_ROOT / "rayher_hr_payroll" / "doctype"
+INVOICE_DOCTYPE_FOLDERS = {
+    "OA Invoice Import Batch": "oa_invoice_import_batch",
+    "OA Invoice Record": "oa_invoice_record",
+    "OA Invoice View Log": "oa_invoice_view_log",
+}
+
+
+def _employee_permission(doctype):
+    folder = INVOICE_DOCTYPE_FOLDERS[doctype]
+    path = DOCTYPE_ROOT / folder / f"{folder}.json"
+    permissions = json.loads(path.read_text(encoding="utf-8"))["permissions"]
+    return next(permission for permission in permissions if permission["role"] == "Employee")
 
 
 class FakeDB:
@@ -69,7 +85,8 @@ def permissions_module(monkeypatch):
         "uploader@example.com": ["Employee"],
         "manager@example.com": ["Employee", "Department Manager"],
         "sales-manager@example.com": ["Employee", "Department Manager"],
-        "approver@example.com": ["Employee", "Department Manager"],
+        "approver@example.com": ["Employee"],
+        "creator@example.com": ["Employee"],
         "ordinary-rd@example.com": ["Employee"],
         "stranger@example.com": ["Employee"],
         "log-owner@example.com": ["Employee"],
@@ -81,6 +98,7 @@ def permissions_module(monkeypatch):
             "EMP-M": {"name": "EMP-M", "user_id": "manager@example.com", "employee_name": "Manager", "department": "研发部"},
             "EMP-S": {"name": "EMP-S", "user_id": "sales-manager@example.com", "employee_name": "Sales Manager", "department": "销售部"},
             "EMP-C": {"name": "EMP-C", "user_id": "approver@example.com", "employee_name": "Current Approver", "department": "销售部"},
+            "EMP-O": {"name": "EMP-O", "user_id": "creator@example.com", "employee_name": "Request Creator", "department": "市场部"},
             "EMP-R": {"name": "EMP-R", "user_id": "ordinary-rd@example.com", "employee_name": "Ordinary RD", "department": "研发部"},
             "EMP-X": {"name": "EMP-X", "user_id": "stranger@example.com", "employee_name": "Stranger", "department": "法务部"},
             "EMP-L": {"name": "EMP-L", "user_id": "log-owner@example.com", "employee_name": "Log Owner", "department": "法务部"},
@@ -112,6 +130,145 @@ def permissions_module(monkeypatch):
     sys.modules.pop("rayher_hr_payroll.invoice_ocr.permissions", None)
     module = importlib.import_module("rayher_hr_payroll.invoice_ocr.permissions")
     return module, frappe
+
+
+def _frappe_role_allows_read(permission, *, doc_owner, user):
+    """Model only Frappe's DocPerm gate, not an invoice authorization rule."""
+    if not permission.get("read"):
+        return False
+    return not permission.get("if_owner") or doc_owner == user
+
+
+def _frappe_direct_read(permission, *, doc_owner, user, controller_result):
+    """Frappe controllers can veto a DocPerm grant but cannot create one."""
+    return _frappe_role_allows_read(permission, doc_owner=doc_owner, user=user) and controller_result is not False
+
+
+def _frappe_query_parts(permission, *, table, user, hook_condition):
+    """Frappe ANDs an if-owner match condition with permission-query hooks."""
+    conditions = []
+    if permission.get("read") and permission.get("if_owner"):
+        conditions.append(f"`tab{table}`.`owner` = '{user}'")
+    if hook_condition:
+        conditions.append(hook_condition)
+    return conditions
+
+
+@pytest.mark.parametrize("doctype", INVOICE_DOCTYPE_FOLDERS)
+def test_employee_metadata_provides_base_read_for_row_level_hooks(doctype):
+    assert _employee_permission(doctype) == {"role": "Employee", "permlevel": 0, "read": 1}
+
+
+def test_if_owner_docperm_would_block_a_nonowner_before_hooks_can_authorize(permissions_module):
+    permissions, frappe = permissions_module
+    record = frappe.db.records["INV-1"]
+    user = "alice@example.com"
+    legacy_if_owner = {"role": "Employee", "permlevel": 0, "read": 1, "if_owner": 1}
+    controller_result = permissions.invoice_record_has_permission(record, "read", user)
+    query_condition = permissions.invoice_record_query(user)
+
+    assert controller_result is True
+    assert _frappe_role_allows_read(legacy_if_owner, doc_owner=record["owner"], user=user) is False
+    assert _frappe_direct_read(
+        legacy_if_owner, doc_owner=record["owner"], user=user, controller_result=controller_result
+    ) is False
+    assert _frappe_query_parts(
+        legacy_if_owner, table="OA Invoice Record", user=user, hook_condition=query_condition
+    ) == ["`tabOA Invoice Record`.`owner` = 'alice@example.com'", query_condition]
+
+
+@pytest.mark.parametrize(
+    "user, query_evidence",
+    [
+        ("uploader@example.com", "`tabOA Invoice Record`.owner = 'uploader@example.com'"),
+        ("alice@example.com", "req.employee = 'EMP-A'"),
+        ("creator@example.com", "req.owner = 'creator@example.com'"),
+        ("approver@example.com", "JSON_QUOTE('Current Approver')"),
+    ],
+)
+def test_employee_record_relationships_survive_frappe_direct_and_query_composition(
+    permissions_module, user, query_evidence
+):
+    permissions, frappe = permissions_module
+    record = frappe.db.records["INV-1"]
+    permission = _employee_permission("OA Invoice Record")
+
+    assert frappe.get_roles(user) == ["Employee"]
+    assert _frappe_role_allows_read(permission, doc_owner=record["owner"], user=user) is True
+    if user != "uploader@example.com":
+        assert record["owner"] != user
+    controller_result = permissions.invoice_record_has_permission(record, "read", user)
+    assert controller_result is True
+    assert _frappe_direct_read(
+        permission, doc_owner=record["owner"], user=user, controller_result=controller_result
+    ) is True
+
+    query_condition = permissions.invoice_record_query(user)
+    assert _frappe_query_parts(
+        permission, table="OA Invoice Record", user=user, hook_condition=query_condition
+    ) == [query_condition]
+    assert query_evidence in query_condition
+
+
+def test_view_log_nonowner_with_source_access_survives_both_frappe_gates(permissions_module):
+    permissions, frappe = permissions_module
+    user = "alice@example.com"
+    log = {
+        "doctype": "OA Invoice View Log",
+        "owner": "log-owner@example.com",
+        "invoice_record": "INV-1",
+        "request": "REQ-1",
+    }
+    permission = _employee_permission("OA Invoice View Log")
+
+    assert _frappe_role_allows_read(permission, doc_owner=log["owner"], user=user) is True
+    controller_result = permissions.invoice_view_log_has_permission(log, "read", user)
+    assert controller_result is True
+    assert _frappe_direct_read(permission, doc_owner=log["owner"], user=user, controller_result=controller_result) is True
+
+    query_condition = permissions.invoice_view_log_query(user)
+    assert _frappe_query_parts(
+        permission, table="OA Invoice View Log", user=user, hook_condition=query_condition
+    ) == [query_condition]
+    assert "`tabOA Invoice View Log`.owner" not in query_condition
+    assert "source.owner = 'alice@example.com'" in query_condition
+    assert "req.employee = 'EMP-A'" in query_condition
+
+    log_owner = "log-owner@example.com"
+    assert _frappe_role_allows_read(permission, doc_owner=log["owner"], user=log_owner) is True
+    owner_controller_result = permissions.invoice_view_log_has_permission(log, "read", log_owner)
+    assert owner_controller_result is False
+    assert _frappe_direct_read(
+        permission, doc_owner=log["owner"], user=log_owner, controller_result=owner_controller_result
+    ) is False
+
+    owner_query_condition = permissions.invoice_view_log_query(log_owner)
+    assert _frappe_query_parts(
+        permission, table="OA Invoice View Log", user=log_owner, hook_condition=owner_query_condition
+    ) == [owner_query_condition]
+    assert "`tabOA Invoice View Log`.owner" not in owner_query_condition
+
+
+def test_unrelated_employee_is_rejected_by_hooks_after_base_read(permissions_module):
+    permissions, frappe = permissions_module
+    user = "stranger@example.com"
+    record = frappe.db.records["INV-1"]
+    permission = _employee_permission("OA Invoice Record")
+
+    assert _frappe_role_allows_read(permission, doc_owner=record["owner"], user=user) is True
+    controller_result = permissions.invoice_record_has_permission(record, "read", user)
+    assert controller_result is False
+    assert _frappe_direct_read(
+        permission, doc_owner=record["owner"], user=user, controller_result=controller_result
+    ) is False
+
+    query_condition = permissions.invoice_record_query(user)
+    assert _frappe_query_parts(
+        permission, table="OA Invoice Record", user=user, hook_condition=query_condition
+    ) == [query_condition]
+    assert "`tabOA Invoice Record`.owner = 'stranger@example.com'" in query_condition
+    assert "req.owner = 'stranger@example.com'" in query_condition
+    assert "req.employee = 'EMP-X'" in query_condition
 
 
 @pytest.mark.parametrize(

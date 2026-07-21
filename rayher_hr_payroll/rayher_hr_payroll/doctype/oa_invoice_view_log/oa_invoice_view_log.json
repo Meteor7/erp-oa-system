@@ -39,7 +39,7 @@
   "owner": "Administrator",
   "permissions": [
     {"role": "System Manager", "permlevel": 0, "read": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "print": 1},
-    {"role": "Employee", "permlevel": 0, "read": 1, "if_owner": 1},
+    {"role": "Employee", "permlevel": 0, "read": 1},
     {"role": "Department Manager", "permlevel": 0, "read": 1},
     {"role": "Accounts User", "permlevel": 0, "read": 1},
     {"role": "HR User", "permlevel": 0, "read": 1},

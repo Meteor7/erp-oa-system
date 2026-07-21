@@ -441,14 +441,14 @@ def test_invoice_ocr_metadata_uses_the_exact_minimum_permission_matrix():
     managed_system_rights = {"read", "write", "create", "delete", "report", "export", "print"}
     for folder in ("oa_invoice_import_batch", "oa_invoice_record"):
         by_role = _permissions_by_role(load_doctype(folder))
-        _assert_exact_permission(by_role["Employee"], {"read"}, if_owner=True)
+        _assert_exact_permission(by_role["Employee"], {"read"})
         for role in read_roles:
             _assert_exact_permission(by_role[role], {"read"})
         _assert_exact_permission(by_role["System Manager"], managed_system_rights)
 
     immutable_log_rights = {"read", "create", "delete", "report", "export", "print"}
     by_role = _permissions_by_role(load_doctype("oa_invoice_view_log"))
-    _assert_exact_permission(by_role["Employee"], {"read"}, if_owner=True)
+    _assert_exact_permission(by_role["Employee"], {"read"})
     for role in read_roles:
         _assert_exact_permission(by_role[role], {"read"})
     _assert_exact_permission(by_role["System Manager"], immutable_log_rights)
