@@ -39,14 +39,32 @@ class FakeLock:
         self.released = True
 
 
-class FakeCache:
+class FakeCallbackQueue:
     def __init__(self):
+        self.functions = []
+
+    def add(self, function):
+        self.functions.append(function)
+
+    def run(self):
+        while self.functions:
+            self.functions.pop(0)()
+
+    def reset(self):
+        self.functions.clear()
+
+
+class FakeCache:
+    def __init__(self, env):
+        self.env = env
         self.locks = []
         self.keys = []
         self.on_lock = None
 
     def lock(self, _key, **_kwargs):
         self.keys.append(_key)
+        category = _key.split(":")[2]
+        self.env.events.append(("redis_lock", category))
         if self.on_lock:
             self.on_lock(_key)
         lock = FakeLock()
@@ -76,6 +94,13 @@ class FakeDoc(dict):
         if self.get("doctype") == FILE:
             tail = str(self.get("file_url") or "").removeprefix("/private/files/")
             self["full_path"] = str(env.private_root / tail)
+        if env.fail_late_after_commit:
+            env.fail_late_after_commit = False
+
+            def fail_after_sql_commit():
+                raise RuntimeError("injected later after_commit failure")
+
+            env.db.after_commit.add(fail_after_sql_commit)
         return self
 
 
@@ -86,6 +111,11 @@ class FakeDB:
         self.rollbacks = 0
         self.fail_once_for = None
         self.fail_commit_once = False
+        self.fail_rollback_once = False
+        self.before_commit = FakeCallbackQueue()
+        self.after_commit = FakeCallbackQueue()
+        self.before_rollback = FakeCallbackQueue()
+        self.after_rollback = FakeCallbackQueue()
         self._committed = deepcopy(env.docs)
         self._committed_artifacts = deepcopy(env.lifecycle_artifacts)
 
@@ -109,6 +139,8 @@ class FakeDB:
         return True
 
     def get_values(self, doctype, filters=None, fieldname=None, as_dict=False, **_kwargs):
+        if _kwargs.get("for_update"):
+            self.env.events.append(("db_for_update", doctype))
         rows = [row for row in self.env.docs.get(doctype, {}).values() if self._matches(row, filters)]
         fields = fieldname or ["name"]
         if as_dict:
@@ -120,16 +152,29 @@ class FakeDB:
 
     def commit(self):
         self.commits += 1
+        self.env.events.append(("db_commit", self.commits))
+        self.before_rollback.reset()
+        self.after_rollback.reset()
+        self.before_commit.run()
         if self.fail_commit_once:
             self.fail_commit_once = False
-            raise RuntimeError("injected commit failure")
+            raise RuntimeError("injected SQL commit failure")
         self._committed = deepcopy(self.env.docs)
         self._committed_artifacts = deepcopy(self.env.lifecycle_artifacts)
+        self.after_commit.run()
 
     def rollback(self, **_kwargs):
         self.rollbacks += 1
+        self.env.events.append(("db_rollback", self.rollbacks))
+        if self.fail_rollback_once:
+            self.fail_rollback_once = False
+            raise RuntimeError("injected rollback failure")
+        self.before_commit.reset()
+        self.after_commit.reset()
+        self.before_rollback.run()
         self.env.docs = deepcopy(self._committed)
         self.env.lifecycle_artifacts = deepcopy(self._committed_artifacts)
+        self.after_rollback.run()
 
 
 class FakeFrappe:
@@ -137,7 +182,7 @@ class FakeFrappe:
         self.docs = {BATCH: {}, RECORD: {}, VIEW_LOG: {}, FILE: {}}
         self.lifecycle_artifacts = set()
         self.db = FakeDB(self)
-        self._cache = FakeCache()
+        self._cache = FakeCache(self)
         self.local = types.SimpleNamespace(site="test.local")
         self.private_root = tmp_path / "sites" / "test.local" / "private" / "files"
         self.private_root.mkdir(parents=True)
@@ -146,6 +191,7 @@ class FakeFrappe:
         self.mutate_before_batch_lock = None
         self.fail_save_once_for = None
         self.fail_delete_doc_counts = {}
+        self.fail_late_after_commit = False
 
     def mark_committed(self):
         self.db._committed = deepcopy(self.docs)
@@ -156,6 +202,8 @@ class FakeFrappe:
         return [{field: row.get(field) for field in (fields or ["name"])} for row in rows]
 
     def get_doc(self, doctype, name, **kwargs):
+        if kwargs.get("for_update"):
+            self.events.append(("db_for_update", doctype))
         if doctype == BATCH and kwargs.get("for_update") and self.mutate_before_batch_lock:
             mutation = self.mutate_before_batch_lock
             self.mutate_before_batch_lock = None
@@ -175,10 +223,6 @@ class FakeFrappe:
             for other_name, other in self.docs[RECORD].items()
         ):
             raise RuntimeError("simulated Frappe LinkExistsError")
-        if doctype == FILE:
-            path = Path(row.get_full_path())
-            if path.exists():
-                path.unlink()
         del self.docs[doctype][name]
         self.lifecycle_artifacts.discard((doctype, name))
 
@@ -229,7 +273,7 @@ def _record(env, batch, suffix='1', *, status=WAITING, confirmed_on=None, reques
         is_private=1, owner="alice@example.com",
         attached_to_doctype=RECORD if file_owner else "Other",
         attached_to_name=name if file_owner else "OTHER",
-        attached_to_field="invoice_file", full_path=str(path),
+        attached_to_field="invoice_file", full_path=str(path), content_hash="",
     )
     env.lifecycle_artifacts.update({(RECORD, name), (FILE, f"FILE-{name}")})
     batch_doc = env.docs[BATCH][batch]
@@ -346,6 +390,9 @@ def test_hooks_compose_and_runbook_contracts():
     assert runbook.count("docker cp $PatchFile rayher-bench:/tmp/invoice-ocr.patch") >= 2
     assert runbook.count("Get-FileHash -Algorithm SHA256 $PatchFile") >= 2
     assert "bench rebuild" in runbook.lower()
+    assert "PatchDigestFile" in runbook
+    assert "TrustedPatchSha256" in runbook
+    assert 'cmd /d /c "echo $PatchSha256>$PatchDigestFile"' in runbook
     assert "git reset --hard" not in runbook
     assert "docker volume rm" not in runbook
 
@@ -399,6 +446,7 @@ def test_cleanup_uses_exact_file_hash_lock_and_rechecks_racing_inbound_reference
     def concurrent_registration(lock_key):
         nonlocal inserted
         if ":file-hash:" in lock_key and not inserted:
+            assert not any(event[0] == "db_for_update" for event in env.events)
             inserted = True
             _external_reference(env, target, name="REC-CONCURRENT")
             env.mark_committed()
@@ -414,6 +462,15 @@ def test_cleanup_uses_exact_file_hash_lock_and_rechecks_racing_inbound_reference
     assert original_path.exists()
     assert "BATCH-RACE-DUP" in env.docs[BATCH]
     assert "REC-CONCURRENT" in env.docs[RECORD]
+    first_db_lock = next(
+        index for index, event in enumerate(env.events)
+        if event[0] == "db_for_update"
+    )
+    redis_before_db = [
+        event[1] for event in env.events[:first_db_lock]
+        if event[0] == "redis_lock"
+    ]
+    assert redis_before_db == ["record", "batch", "file", "file-hash"]
 
 
 def test_stage_failure_rolls_back_metadata_and_atomically_restores_all_files(monkeypatch, tmp_path):
@@ -496,12 +553,12 @@ def test_process_exit_after_phase_one_is_recovered_by_next_scheduler_run(monkeyp
     env.mark_committed()
 
     cleanup = _load_module(monkeypatch, env)
-    real_purge = cleanup._purge_tombstone_file
+    real_reconcile = cleanup._reconcile_journal
 
     def exit_now(*_args, **_kwargs):
         raise SystemExit(9)
 
-    monkeypatch.setattr(cleanup, "_purge_tombstone_file", exit_now)
+    monkeypatch.setattr(cleanup, "_reconcile_journal", exit_now)
     try:
         cleanup.cleanup_orphan_invoice_batches(now=NOW)
     except SystemExit as error:
@@ -511,7 +568,7 @@ def test_process_exit_after_phase_one_is_recovered_by_next_scheduler_run(monkeyp
 
     assert "BATCH-EXIT" not in env.docs[BATCH]
     assert file_name in env.docs[FILE]
-    monkeypatch.setattr(cleanup, "_purge_tombstone_file", real_purge)
+    monkeypatch.setattr(cleanup, "_reconcile_journal", real_reconcile)
     assert cleanup.cleanup_orphan_invoice_batches(now=NOW) == []
     assert file_name not in env.docs[FILE]
 
@@ -559,3 +616,157 @@ def test_commit_failure_restores_original_file_and_all_metadata(monkeypatch, tmp
     assert record in env.docs[RECORD]
     assert f"FILE-{record}" in env.docs[FILE]
     assert not list(env.private_root.glob("__invoice_ocr_cleanup__*"))
+
+
+
+def test_late_after_commit_callback_failure_never_restores_committed_sql(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-AFTER-COMMIT")
+    record, original_path = _record(env, "BATCH-AFTER-COMMIT")
+    env.mark_committed()
+    env.fail_late_after_commit = True
+
+    cleanup = _load_module(monkeypatch, env)
+    assert cleanup.cleanup_orphan_invoice_batches(now=NOW) == ["BATCH-AFTER-COMMIT"]
+    assert "BATCH-AFTER-COMMIT" not in env.docs[BATCH]
+    assert record not in env.docs[RECORD]
+    assert f"FILE-{record}" not in env.docs[FILE]
+    assert not original_path.exists()
+    assert env.db.rollbacks == 0
+    assert not list(env.private_root.glob("__invoice_ocr_cleanup__*"))
+
+
+def test_move_then_process_kill_is_restored_from_durable_journal(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _record_name = None
+    _batch(env, "BATCH-KILL")
+    _record_name, original_path = _record(env, "BATCH-KILL")
+    env.mark_committed()
+
+    cleanup = _load_module(monkeypatch, env)
+    real_replace = cleanup.os.replace
+    killed = False
+
+    def kill_after_invoice_move(source, destination):
+        nonlocal killed
+        result = real_replace(source, destination)
+        if Path(source) == original_path and not killed:
+            killed = True
+            raise SystemExit(17)
+        return result
+
+    monkeypatch.setattr(cleanup.os, "replace", kill_after_invoice_move)
+    try:
+        cleanup.cleanup_orphan_invoice_batches(now=NOW)
+    except SystemExit as error:
+        assert error.code == 17
+    else:
+        raise AssertionError("simulated process kill must escape")
+
+    assert not original_path.exists()
+    assert list(env.private_root.glob("__invoice_ocr_cleanup_journal__*.json"))
+    monkeypatch.setattr(cleanup.os, "replace", real_replace)
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 2, 12, 0, 0)
+    ) == []
+    assert original_path.exists()
+    assert not list(env.private_root.glob("__invoice_ocr_cleanup__*"))
+
+
+def test_rollback_failure_is_fatal_and_never_processes_second_batch(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-A-FIRST")
+    first_record, first_path = _record(env, "BATCH-A-FIRST")
+    _batch(env, "BATCH-B-SECOND")
+    second_record, second_path = _record(env, "BATCH-B-SECOND")
+    env.fail_delete_doc_counts[first_record] = 1
+    env.mark_committed()
+    env.db.fail_rollback_once = True
+
+    cleanup = _load_module(monkeypatch, env)
+    try:
+        cleanup.cleanup_orphan_invoice_batches(now=NOW)
+    except RuntimeError as error:
+        assert "rollback" in str(error).lower()
+    else:
+        raise AssertionError("rollback failure must abort cleanup")
+
+    assert env.db.commits == 0
+    assert not first_path.exists()
+    assert second_path.exists()
+    assert second_record in env.docs[RECORD]
+    assert not any(
+        event[0] == "delete_doc" and event[2] == second_record
+        for event in env.events
+    )
+    assert list(env.private_root.glob("__invoice_ocr_cleanup_journal__*.json"))
+
+
+def test_explicit_unlink_does_not_depend_on_file_content_hash_lifecycle(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-HASH")
+    record, target_path = _record(env, "BATCH-HASH")
+    env.docs[FILE][f"FILE-{record}"]["content_hash"] = ""
+    shared_path = env.private_root / "shared.pdf"
+    shared_path.write_bytes(b"invoice")
+    env.docs[FILE]["FILE-SHARED"] = FakeDoc(
+        doctype=FILE, name="FILE-SHARED", file_name="shared.pdf",
+        file_url="/private/files/shared.pdf", is_private=1,
+        owner="alice@example.com", attached_to_doctype="Other",
+        attached_to_name="OTHER", attached_to_field="attachment",
+        full_path=str(shared_path), content_hash="",
+    )
+    env.mark_committed()
+
+    cleanup = _load_module(monkeypatch, env)
+    assert cleanup.cleanup_orphan_invoice_batches(now=NOW) == ["BATCH-HASH"]
+    assert f"FILE-{record}" not in env.docs[FILE]
+    assert not target_path.exists()
+    assert "FILE-SHARED" in env.docs[FILE]
+    assert shared_path.exists()
+
+
+def test_forged_cleanup_journal_is_never_processed(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    cleanup = _load_module(monkeypatch, env)
+    journal_id = "a" * 48
+    journal_path = env.private_root / (
+        f"__invoice_ocr_cleanup_journal__{journal_id}.json"
+    )
+    tombstone = env.private_root / (
+        f"__invoice_ocr_cleanup__{journal_id}.pending"
+    )
+    tombstone.write_bytes(b"user content")
+    journal_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "kind": "rayher.invoice_ocr.cleanup.v1",
+                "journal_id": journal_id,
+                "file_id": "FILE-USER-TARGET",
+                "record_id": "REC-USER",
+                "batch_id": "BATCH-USER",
+                "original_basename": "user.pdf",
+                "original_file_name": "user.pdf",
+                "original_file_url": "/private/files/user.pdf",
+                "original_owner": "alice@example.com",
+                "tombstone_basename": tombstone.name,
+                "tombstone_file_url": f"/private/files/{tombstone.name}",
+            }
+        ),
+        encoding="utf-8",
+    )
+    env.docs[FILE]["FILE-USER-JOURNAL"] = FakeDoc(
+        doctype=FILE, name="FILE-USER-JOURNAL",
+        file_name=journal_path.name,
+        file_url=f"/private/files/{journal_path.name}",
+        is_private=1, owner="alice@example.com",
+        attached_to_doctype="", attached_to_name="", attached_to_field="",
+        full_path=str(journal_path), content_hash="",
+    )
+    env.mark_committed()
+
+    assert cleanup.cleanup_orphan_invoice_batches(now=NOW) == []
+    assert journal_path.exists()
+    assert tombstone.exists()
+    assert "FILE-USER-JOURNAL" in env.docs[FILE]

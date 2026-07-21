@@ -155,12 +155,6 @@ def _log(message: str, subject: str):
         pass
 
 
-def _rollback():
-    rollback = getattr(frappe.db, "rollback", None)
-    if callable(rollback):
-        rollback()
-
-
 def _is_expired(batch, cutoff: datetime, current: datetime) -> bool:
     try:
         return (
@@ -270,70 +264,6 @@ def _private_path(file_doc, file_url: str) -> Path | None:
     return actual
 
 
-def _preliminary_file_names(records):
-    names = []
-    for record in records:
-        file_url = str(_value(record, "invoice_file") or "")
-        rows = _rows_for_update(
-            FILE_DOCTYPE,
-            {"file_url": file_url},
-            ["name"],
-        )
-        if len(rows) != 1:
-            return None
-        names.append(str(_value(rows[0], "name") or ""))
-    return names if all(names) and len(names) == len(set(names)) else None
-
-
-def _owned_files(records):
-    owned = []
-    for record in records:
-        record_name = str(_value(record, "name"))
-        file_url = str(_value(record, "invoice_file") or "")
-        file_rows = _rows_for_update(
-            FILE_DOCTYPE,
-            {"file_url": file_url},
-            _FILE_FIELDS,
-        )
-        references = _rows_for_update(
-            RECORD_DOCTYPE,
-            {"invoice_file": file_url},
-            ["name"],
-        )
-        if (
-            len(file_rows) != 1
-            or len(references) != 1
-            or str(_value(references[0], "name")) != record_name
-        ):
-            return None
-        row = file_rows[0]
-        if (
-            int(_value(row, "is_private") or 0) != 1
-            or str(_value(row, "attached_to_doctype") or "")
-            != RECORD_DOCTYPE
-            or str(_value(row, "attached_to_name") or "") != record_name
-            or str(_value(row, "attached_to_field") or "") != "invoice_file"
-        ):
-            return None
-        file_name = str(_value(row, "name") or "")
-        file_doc = frappe.get_doc(
-            FILE_DOCTYPE,
-            file_name,
-            for_update=True,
-        )
-        path = _private_path(file_doc, file_url)
-        if path is None or not path.is_file():
-            return None
-        owned.append(
-            {
-                "name": file_name,
-                "doc": file_doc,
-                "path": path,
-            }
-        )
-    return owned
-
-
 def _has_external_duplicate_reference(records) -> bool:
     targets = {str(_value(row, "name")) for row in records}
     if not targets:
@@ -346,65 +276,156 @@ def _has_external_duplicate_reference(records) -> bool:
     return any(str(_value(row, "name")) not in targets for row in inbound)
 
 
-def _new_tombstone_path() -> tuple[str, str, Path]:
-    filename = f"{_TOMBSTONE_PREFIX}{secrets.token_hex(24)}.pending"
-    file_url = f"{_PRIVATE_PREFIX}{filename}"
-    return filename, file_url, _private_root() / filename
+_JOURNAL_PREFIX = "__invoice_ocr_cleanup_journal__"
+_JOURNAL_PATTERN = re.compile(
+    rf"{re.escape(_JOURNAL_PREFIX)}(?P<journal_id>[0-9a-f]{{48}})\.json"
+)
+_JOURNAL_KIND = "rayher.invoice_ocr.cleanup.v1"
+_JOURNAL_VERSION = 1
+_JOURNAL_MAX_BYTES = 16 * 1024
+_JOURNAL_KEYS = {
+    "version", "kind", "journal_id", "file_id", "record_id", "batch_id",
+    "original_basename", "original_file_name", "original_file_url",
+    "original_owner", "tombstone_basename", "tombstone_file_url",
+}
 
 
-def _stage_files(owned_files, staged):
-    for owned in owned_files:
-        original_path = owned["path"]
-        filename, file_url, tombstone_path = _new_tombstone_path()
-        os.replace(original_path, tombstone_path)
-        staged_item = {
-            "name": owned["name"],
-            "original_path": original_path,
-            "tombstone_path": tombstone_path,
-        }
-        staged.append(staged_item)
-        file_doc = owned["doc"]
-        _set_value(file_doc, "file_name", filename)
-        _set_value(file_doc, "file_url", file_url)
-        _set_value(file_doc, "is_private", 1)
-        _set_value(file_doc, "owner", "Administrator")
-        _set_value(file_doc, "attached_to_doctype", "")
-        _set_value(file_doc, "attached_to_name", "")
-        _set_value(file_doc, "attached_to_field", "")
-        file_doc.save(ignore_permissions=True)
-    return staged
+class CleanupFatalError(RuntimeError):
+    """Stop cleanup when the database transaction state is unknown."""
 
 
-def _restore_staged_files(staged, subject: str):
-    failures = []
-    for item in reversed(staged):
-        tombstone = item["tombstone_path"]
-        original = item["original_path"]
-        if not tombstone.exists():
-            continue
-        restored = False
-        for _attempt in range(3):
-            try:
-                os.replace(tombstone, original)
-                restored = True
-                break
-            except OSError:
-                continue
-        if not restored:
-            failures.append(item["name"])
-    if failures:
-        _log(
-            "rollback could not restore staged files: " + ",".join(failures),
-            subject,
+def _rollback_or_fatal(subject: str):
+    rollback = getattr(frappe.db, "rollback", None)
+    if not callable(rollback):
+        raise CleanupFatalError(
+            f"invoice cleanup rollback unavailable for {subject}"
         )
-        raise RuntimeError("invoice cleanup rollback restore failed")
+    try:
+        rollback()
+    except Exception as error:
+        _log(f"database rollback failed ({type(error).__name__})", subject)
+        raise CleanupFatalError(
+            f"invoice cleanup rollback failed for {subject}"
+        ) from error
+
+
+def _install_commit_sentinel():
+    state = {"sql_committed": False}
+    callbacks = getattr(frappe.db, "after_commit", None)
+    add = getattr(callbacks, "add", None)
+    if not callable(add):
+        raise CleanupFatalError("Frappe after_commit callback queue unavailable")
+
+    def mark_sql_committed():
+        state["sql_committed"] = True
+
+    add(mark_sql_committed)
+    return state
+
+
+def _record_signature(records):
+    return sorted(
+        (
+            str(_value(row, "name") or ""),
+            str(_value(row, "invoice_file") or ""),
+            str(_value(row, "file_sha256") or ""),
+        )
+        for row in records
+    )
+
+
+def _preliminary_snapshot(batch_name: str):
+    records = list(
+        frappe.get_all(
+            RECORD_DOCTYPE,
+            filters={"batch": batch_name},
+            fields=["name", "invoice_file", "file_sha256"],
+            order_by="name asc",
+        )
+        or []
+    )
+    signature = _record_signature(records)
+    record_names = [name for name, _url, _digest in signature]
+    if len(record_names) != len(set(record_names)):
+        return None
+    file_names = []
+    for _record_name, file_url, digest in signature:
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return None
+        file_rows = list(
+            frappe.get_all(
+                FILE_DOCTYPE,
+                filters={"file_url": file_url},
+                fields=["name"],
+                order_by="name asc",
+            )
+            or []
+        )
+        if len(file_rows) != 1:
+            return None
+        file_names.append(str(_value(file_rows[0], "name") or ""))
+    if not all(file_names) or len(file_names) != len(set(file_names)):
+        return None
+    return {
+        "signature": signature,
+        "record_names": sorted(record_names),
+        "file_names": sorted(file_names),
+        "digests": sorted({digest for _name, _url, digest in signature}),
+    }
+
+
+def _owned_files(records, expected_file_names):
+    owned = []
+    actual_file_names = []
+    for record in records:
+        record_name = str(_value(record, "name") or "")
+        file_url = str(_value(record, "invoice_file") or "")
+        file_rows = _rows_for_update(
+            FILE_DOCTYPE, {"file_url": file_url}, _FILE_FIELDS,
+        )
+        references = _rows_for_update(
+            RECORD_DOCTYPE, {"invoice_file": file_url}, ["name"],
+        )
+        if (
+            len(file_rows) != 1
+            or len(references) != 1
+            or str(_value(references[0], "name")) != record_name
+        ):
+            return None
+        row = file_rows[0]
+        file_id = str(_value(row, "name") or "")
+        actual_file_names.append(file_id)
+        if (
+            int(_value(row, "is_private") or 0) != 1
+            or str(_value(row, "attached_to_doctype") or "")
+            != RECORD_DOCTYPE
+            or str(_value(row, "attached_to_name") or "") != record_name
+            or str(_value(row, "attached_to_field") or "") != "invoice_file"
+        ):
+            return None
+        file_doc = frappe.get_doc(FILE_DOCTYPE, file_id, for_update=True)
+        path = _private_path(file_doc, file_url)
+        if path is None or not path.is_file():
+            return None
+        owned.append(
+            {
+                "file_id": file_id,
+                "file_doc": file_doc,
+                "record_id": record_name,
+                "original_path": path,
+                "original_basename": path.name,
+                "original_file_name": str(_value(row, "file_name") or ""),
+                "original_file_url": file_url,
+                "original_owner": str(_value(row, "owner") or ""),
+            }
+        )
+    if sorted(actual_file_names) != sorted(expected_file_names):
+        return None
+    return owned
 
 
 def _record_deletion_order(records):
-    remaining = {
-        str(_value(record, "name")): record
-        for record in records
-    }
+    remaining = {str(_value(record, "name")): record for record in records}
     ordered = []
     while remaining:
         inbound_targets = {
@@ -436,82 +457,359 @@ def _delete_business_docs(batch_name: str, records):
     )
 
 
-def _is_strict_tombstone(file_doc) -> bool:
-    filename = str(_value(file_doc, "file_name") or "")
-    file_url = str(_value(file_doc, "file_url") or "")
+def _fsync_directory(directory: Path):
+    if os.name == "nt":
+        return
+    descriptor = os.open(
+        str(directory), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _valid_identifier(value, maximum=200) -> bool:
+    text = str(value or "")
     return bool(
-        _TOMBSTONE_PATTERN.fullmatch(filename)
-        and file_url == f"{_PRIVATE_PREFIX}{filename}"
+        text and len(text) <= maximum and text == text.strip()
+        and "\x00" not in text and "/" not in text and "\\" not in text
+    )
+
+
+def _journal_payload(owned, batch_name: str):
+    journal_id = secrets.token_hex(24)
+    tombstone_basename = f"{_TOMBSTONE_PREFIX}{journal_id}.pending"
+    payload = {
+        "version": _JOURNAL_VERSION,
+        "kind": _JOURNAL_KIND,
+        "journal_id": journal_id,
+        "file_id": owned["file_id"],
+        "record_id": owned["record_id"],
+        "batch_id": batch_name,
+        "original_basename": owned["original_basename"],
+        "original_file_name": owned["original_file_name"],
+        "original_file_url": owned["original_file_url"],
+        "original_owner": owned["original_owner"],
+        "tombstone_basename": tombstone_basename,
+        "tombstone_file_url": f"{_PRIVATE_PREFIX}{tombstone_basename}",
+    }
+    journal_path = _private_root() / (
+        f"{_JOURNAL_PREFIX}{journal_id}.json"
+    )
+    return payload, journal_path
+
+
+def _write_journal(payload, journal_path: Path):
+    root = _private_root()
+    if journal_path.parent.resolve() != root:
+        raise RuntimeError("invalid invoice cleanup journal path")
+    serialized = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if len(serialized) > _JOURNAL_MAX_BYTES:
+        raise RuntimeError("invoice cleanup journal is too large")
+    temporary = root / f".{journal_path.name}.{secrets.token_hex(12)}.tmp"
+    descriptor = None
+    try:
+        descriptor = os.open(
+            str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, journal_path)
+        _fsync_directory(root)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            if temporary.exists():
+                temporary.unlink()
+        except OSError:
+            pass
+
+
+def _stage_files(owned_files, batch_name: str, journal_paths):
+    root = _private_root()
+    for owned in owned_files:
+        payload, journal_path = _journal_payload(owned, batch_name)
+        _write_journal(payload, journal_path)
+        journal_paths.append(journal_path)
+        tombstone_path = root / payload["tombstone_basename"]
+        os.replace(owned["original_path"], tombstone_path)
+        _fsync_directory(root)
+        file_doc = owned["file_doc"]
+        _set_value(file_doc, "file_name", payload["tombstone_basename"])
+        _set_value(file_doc, "file_url", payload["tombstone_file_url"])
+        _set_value(file_doc, "is_private", 1)
+        _set_value(file_doc, "owner", "Administrator")
+        _set_value(file_doc, "attached_to_doctype", "")
+        _set_value(file_doc, "attached_to_name", "")
+        _set_value(file_doc, "attached_to_field", "")
+        file_doc.save(ignore_permissions=True)
+
+def _validated_journal(journal_path: Path):
+    root = _private_root()
+    try:
+        if journal_path.is_symlink():
+            return None
+        resolved = journal_path.resolve()
+        match = _JOURNAL_PATTERN.fullmatch(journal_path.name)
+        if resolved.parent != root or not match or not journal_path.is_file():
+            return None
+        raw = journal_path.read_bytes()
+        if not raw or len(raw) > _JOURNAL_MAX_BYTES:
+            return None
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or set(payload) != _JOURNAL_KEYS:
+        return None
+    journal_id = str(payload.get("journal_id") or "")
+    if (
+        payload.get("version") != _JOURNAL_VERSION
+        or payload.get("kind") != _JOURNAL_KIND
+        or journal_id != match.group("journal_id")
+    ):
+        return None
+    if not all(
+        _valid_identifier(payload.get(field))
+        for field in (
+            "file_id", "record_id", "batch_id",
+            "original_basename", "original_file_name",
+        )
+    ):
+        return None
+    owner = str(payload.get("original_owner") or "")
+    if (
+        not owner or len(owner) > 200 or "\x00" in owner
+        or owner != owner.strip()
+    ):
+        return None
+    original_basename = str(payload["original_basename"])
+    tombstone_basename = str(payload["tombstone_basename"])
+    if (
+        PurePosixPath(original_basename).name != original_basename
+        or tombstone_basename
+        != f"{_TOMBSTONE_PREFIX}{journal_id}.pending"
+        or not _TOMBSTONE_PATTERN.fullmatch(tombstone_basename)
+        or payload.get("original_file_url")
+        != f"{_PRIVATE_PREFIX}{original_basename}"
+        or payload.get("tombstone_file_url")
+        != f"{_PRIVATE_PREFIX}{tombstone_basename}"
+    ):
+        return None
+    original_path = (root / original_basename).resolve()
+    tombstone_path = (root / tombstone_basename).resolve()
+    if (
+        original_path.parent != root or tombstone_path.parent != root
+        or original_path == tombstone_path
+    ):
+        return None
+    return {
+        **payload,
+        "journal_path": journal_path,
+        "original_path": original_path,
+        "tombstone_path": tombstone_path,
+    }
+
+
+def _matches_original_file(file_doc, journal) -> bool:
+    return bool(
+        str(_value(file_doc, "name") or "") == journal["file_id"]
+        and str(_value(file_doc, "file_name") or "")
+        == journal["original_file_name"]
+        and str(_value(file_doc, "file_url") or "")
+        == journal["original_file_url"]
+        and int(_value(file_doc, "is_private") or 0) == 1
+        and str(_value(file_doc, "owner") or "")
+        == journal["original_owner"]
+        and str(_value(file_doc, "attached_to_doctype") or "")
+        == RECORD_DOCTYPE
+        and str(_value(file_doc, "attached_to_name") or "")
+        == journal["record_id"]
+        and str(_value(file_doc, "attached_to_field") or "")
+        == "invoice_file"
+        and _private_path(file_doc, journal["original_file_url"])
+        == journal["original_path"]
+    )
+
+
+def _matches_tombstone_file(file_doc, journal) -> bool:
+    return bool(
+        str(_value(file_doc, "name") or "") == journal["file_id"]
+        and str(_value(file_doc, "file_name") or "")
+        == journal["tombstone_basename"]
+        and str(_value(file_doc, "file_url") or "")
+        == journal["tombstone_file_url"]
         and int(_value(file_doc, "is_private") or 0) == 1
         and str(_value(file_doc, "owner") or "") == "Administrator"
         and not str(_value(file_doc, "attached_to_doctype") or "")
         and not str(_value(file_doc, "attached_to_name") or "")
         and not str(_value(file_doc, "attached_to_field") or "")
-        and _private_path(file_doc, file_url) is not None
+        and _private_path(file_doc, journal["tombstone_file_url"])
+        == journal["tombstone_path"]
     )
 
 
-def _purge_tombstone_file(file_name: str, subject: str | None = None) -> bool:
-    label = subject or file_name
+def _remove_journal(journal_path: Path):
+    journal_path.unlink()
+    _fsync_directory(journal_path.parent)
+
+
+def _unlink_tombstone(journal) -> bool:
+    path = journal["tombstone_path"]
     try:
-        with _lease("file", file_name):
-            file_doc = frappe.get_doc(
-                FILE_DOCTYPE,
-                file_name,
-                for_update=True,
-            )
-            if not _is_strict_tombstone(file_doc):
-                _rollback()
-                return False
-            frappe.delete_doc(
-                FILE_DOCTYPE,
-                file_name,
-                ignore_permissions=True,
-                delete_permanently=True,
-            )
-            frappe.db.commit()
-            return True
-    except Exception as error:
-        try:
-            _rollback()
-        except Exception:
-            pass
+        if path.exists():
+            path.unlink()
+            _fsync_directory(path.parent)
+        return True
+    except OSError as error:
         _log(
-            f"tombstone deletion will be retried ({type(error).__name__})",
-            label,
+            f"tombstone unlink will be retried ({type(error).__name__})",
+            journal["file_id"],
         )
         return False
 
 
-def _purge_tombstones():
-    rows = frappe.get_all(
-        FILE_DOCTYPE,
-        filters={
-            "is_private": 1,
-            "file_url": ["like", f"{_PRIVATE_PREFIX}{_TOMBSTONE_PREFIX}%"],
-        },
-        fields=["name"],
-        order_by="name asc",
-    )
-    for row in rows:
-        file_name = str(_value(row, "name") or "")
-        if file_name:
-            _purge_tombstone_file(file_name)
+def _finish_journal(journal) -> bool:
+    if not _unlink_tombstone(journal):
+        return False
+    try:
+        _remove_journal(journal["journal_path"])
+    except OSError as error:
+        _log(
+            f"journal removal will be retried ({type(error).__name__})",
+            journal["file_id"],
+        )
+        return False
+    return True
 
+
+def _current_file_doc(file_id: str):
+    rows = _rows_for_update(FILE_DOCTYPE, {"name": file_id}, ["name"])
+    if len(rows) > 1:
+        raise CleanupFatalError("duplicate File primary key during cleanup")
+    if not rows:
+        return None
+    return frappe.get_doc(FILE_DOCTYPE, file_id, for_update=True)
+
+
+def _reconcile_journal(journal_path: Path) -> bool:
+    journal = _validated_journal(journal_path)
+    if journal is None:
+        _log("invalid cleanup journal ignored", journal_path.name)
+        return False
+    file_id = journal["file_id"]
+    with _lease("file", file_id):
+        journal_file_rows = _rows_for_update(
+            FILE_DOCTYPE,
+            {"file_url": f"{_PRIVATE_PREFIX}{journal_path.name}"},
+            ["name", "owner"],
+        )
+        if journal_file_rows:
+            _rollback_or_fatal(file_id)
+            _log("user-tracked cleanup journal ignored", file_id)
+            return False
+        try:
+            file_doc = _current_file_doc(file_id)
+        except CleanupFatalError:
+            raise
+        except Exception as error:
+            _rollback_or_fatal(file_id)
+            _log(type(error).__name__, file_id)
+            return False
+
+        if file_doc is None:
+            tombstone_rows = _rows_for_update(
+                FILE_DOCTYPE,
+                {"file_url": journal["tombstone_file_url"]},
+                ["name"],
+            )
+            if tombstone_rows:
+                _rollback_or_fatal(file_id)
+                _log("tombstone is referenced by another File row", file_id)
+                return False
+            _rollback_or_fatal(file_id)
+            return _finish_journal(journal)
+
+        if _matches_original_file(file_doc, journal):
+            original = journal["original_path"]
+            tombstone = journal["tombstone_path"]
+            if original.exists() and tombstone.exists():
+                _rollback_or_fatal(file_id)
+                _log("ambiguous original and tombstone paths", file_id)
+                return False
+            try:
+                if tombstone.exists():
+                    os.replace(tombstone, original)
+                    _fsync_directory(original.parent)
+                elif not original.exists():
+                    _rollback_or_fatal(file_id)
+                    _log("both original and tombstone paths are missing", file_id)
+                    return False
+            except OSError as error:
+                _rollback_or_fatal(file_id)
+                _log(
+                    f"original path restore will be retried "
+                    f"({type(error).__name__})",
+                    file_id,
+                )
+                return False
+            _rollback_or_fatal(file_id)
+            try:
+                _remove_journal(journal_path)
+            except OSError as error:
+                _log(
+                    f"journal removal will be retried "
+                    f"({type(error).__name__})",
+                    file_id,
+                )
+                return False
+            return True
+
+        if not _matches_tombstone_file(file_doc, journal):
+            _rollback_or_fatal(file_id)
+            _log("File state does not match cleanup journal", file_id)
+            return False
+
+        try:
+            frappe.delete_doc(
+                FILE_DOCTYPE,
+                file_id,
+                ignore_permissions=True,
+                delete_permanently=True,
+            )
+            frappe.db.commit()
+        except Exception as error:
+            _rollback_or_fatal(file_id)
+            _log(
+                f"File metadata deletion will be retried "
+                f"({type(error).__name__})",
+                file_id,
+            )
+            return False
+        return _finish_journal(journal)
+
+
+def _reconcile_journals():
+    root = _private_root()
+    for journal_path in sorted(
+        root.glob(f"{_JOURNAL_PREFIX}*.json"),
+        key=lambda path: path.name,
+    ):
+        _reconcile_journal(journal_path)
 
 def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
-    """Delete only expired, unaudited, unconfirmed and unlinked OCR batches.
+    """Clean expired invoice batches with locks and durable file journals.
 
-    Lock order is Record -> Batch -> File -> file-hash.  The file-hash lock is
-    exactly the lock used by register_file, so no new exact-file duplicate can
-    appear between the inbound duplicate_of check and the phase-one commit.
-    A business-key lock is unnecessary: business duplicate targets are always
-    confirmed records, while this cleanup refuses every confirmed record.
-
-    Physical files are atomically staged under strict private tombstone names.
-    Their File rows remain as persistent retry indexes until Frappe's real
-    delete_doc lifecycle commits.  A phase-one rollback restores every staged
-    path; a process exit after phase one is recovered by the next scheduler run.
+    Redis locks are acquired Record -> Batch -> File -> file-hash before any
+    target row is selected FOR UPDATE. A business-key lock is unnecessary:
+    business duplicate targets are confirmed, and confirmed records are never
+    eligible for cleanup.
     """
     if (
         isinstance(retention_days, bool)
@@ -521,8 +819,7 @@ def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
         raise ValueError("retention_days must be a non-negative integer")
     current = _now(now)
     cutoff = current - timedelta(days=retention_days)
-
-    _purge_tombstones()
+    _reconcile_journals()
 
     candidates = frappe.get_all(
         BATCH_DOCTYPE,
@@ -535,42 +832,38 @@ def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
         batch_name = str(_value(candidate, "name") or "")
         if not batch_name:
             continue
-        staged = []
+        preliminary = _preliminary_snapshot(batch_name)
+        if preliminary is None:
+            _rollback_or_fatal(batch_name)
+            _log("preliminary file ownership is not exclusive", batch_name)
+            continue
+
+        journal_paths = []
         phase_one_committed = False
+        commit_state = None
         try:
-            preliminary = frappe.get_all(
-                RECORD_DOCTYPE,
-                filters={"batch": batch_name},
-                fields=["name"],
-                order_by="name asc",
-            )
-            preliminary_names = sorted(
-                str(_value(row, "name"))
-                for row in preliminary
-            )
             with ExitStack() as locks:
-                for record_name in preliminary_names:
+                for record_name in preliminary["record_names"]:
                     locks.enter_context(_lease("record", record_name))
                 locks.enter_context(_lease("batch", batch_name))
+                for file_id in preliminary["file_names"]:
+                    locks.enter_context(_lease("file", file_id))
+                for digest in preliminary["digests"]:
+                    locks.enter_context(_lease("file-hash", digest))
 
                 batch = frappe.get_doc(
-                    BATCH_DOCTYPE,
-                    batch_name,
-                    for_update=True,
+                    BATCH_DOCTYPE, batch_name, for_update=True,
                 )
                 records = _rows_for_update(
                     RECORD_DOCTYPE,
                     {"batch": batch_name},
                     _RECORD_FIELDS,
                 )
-                if (
-                    sorted(str(_value(row, "name")) for row in records)
-                    != preliminary_names
-                ):
+                if _record_signature(records) != preliminary["signature"]:
                     raise RuntimeError("record set changed during cleanup")
                 if not _record_set_is_safe(batch, records, cutoff, current):
                     inconsistent = not _aggregate_is_consistent(batch, records)
-                    _rollback()
+                    _rollback_or_fatal(batch_name)
                     if inconsistent:
                         _log(
                             "batch status or aggregate counts are inconsistent",
@@ -578,61 +871,59 @@ def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
                         )
                     continue
                 if _has_view_audit(records):
-                    _rollback()
+                    _rollback_or_fatal(batch_name)
                     _log("view audit exists", batch_name)
                     continue
-
-                file_names = _preliminary_file_names(records)
-                if file_names is None:
-                    _rollback()
-                    _log("private file ownership is not exclusive", batch_name)
-                    continue
-                for file_name in sorted(file_names):
-                    locks.enter_context(_lease("file", file_name))
-
-                digests = sorted(
-                    {str(_value(row, "file_sha256")) for row in records}
-                )
-                for digest in digests:
-                    locks.enter_context(_lease("file-hash", digest))
-
                 if _has_external_duplicate_reference(records):
-                    _rollback()
+                    _rollback_or_fatal(batch_name)
                     _log("external duplicate reference exists", batch_name)
                     continue
-
-                owned_files = _owned_files(records)
+                owned_files = _owned_files(
+                    records, preliminary["file_names"],
+                )
                 if owned_files is None:
-                    _rollback()
+                    _rollback_or_fatal(batch_name)
                     _log("private file ownership is not exclusive", batch_name)
                     continue
 
-                _stage_files(owned_files, staged)
+                # This is intentionally the first callback registered by the
+                # mutation phase. Frappe runs after_commit FIFO after SQL COMMIT.
+                commit_state = _install_commit_sentinel()
+                _stage_files(owned_files, batch_name, journal_paths)
                 _delete_business_docs(batch_name, records)
-                frappe.db.commit()
-                phase_one_committed = True
+                try:
+                    frappe.db.commit()
+                except Exception as commit_error:
+                    if commit_state["sql_committed"]:
+                        phase_one_committed = True
+                        _log(
+                            "SQL committed before after_commit callback failed "
+                            f"({type(commit_error).__name__})",
+                            batch_name,
+                        )
+                    else:
+                        raise
+                else:
+                    phase_one_committed = True
+        except CleanupFatalError:
+            raise
         except Exception as error:
-            restore_error = None
+            if commit_state and commit_state["sql_committed"]:
+                phase_one_committed = True
             if not phase_one_committed:
-                try:
-                    _rollback()
-                except Exception as rollback_error:
-                    _log(
-                        f"database rollback failed ({type(rollback_error).__name__})",
-                        batch_name,
-                    )
-                try:
-                    _restore_staged_files(staged, batch_name)
-                except Exception as recovery_error:
-                    restore_error = recovery_error
-            _log(type(error).__name__, batch_name)
-            if restore_error is not None:
-                raise restore_error
-            continue
+                _rollback_or_fatal(batch_name)
+                for journal_path in journal_paths:
+                    _reconcile_journal(journal_path)
+                _log(type(error).__name__, batch_name)
+                continue
 
+        if not phase_one_committed:
+            raise CleanupFatalError(
+                f"invoice cleanup commit state unknown for {batch_name}"
+            )
         removed.append(batch_name)
-        for item in staged:
-            _purge_tombstone_file(item["name"], batch_name)
+        for journal_path in journal_paths:
+            _reconcile_journal(journal_path)
 
-    _purge_tombstones()
+    _reconcile_journals()
     return removed

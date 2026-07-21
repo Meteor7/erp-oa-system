@@ -86,6 +86,11 @@ cmd /d /c "git -C $InvoiceOcrSource diff --binary 11c018f $AcceptedSha -- fronte
 $PatchLength = (Get-Item -LiteralPath $PatchFile).Length
 if ($PatchLength -le 0) { throw "invoice OCR patch is empty" }
 $PatchSha256 = (Get-FileHash -Algorithm SHA256 $PatchFile).Hash.ToLowerInvariant()
+$PatchDigestFile = Join-Path $InvoiceOcrBackup "invoice-ocr-$AcceptedSha.patch.sha256"
+cmd /d /c "echo $PatchSha256>$PatchDigestFile"
+if ((Get-Item -LiteralPath $PatchDigestFile).Length -le 0) { throw "patch digest file is empty" }
+$RecordedPatchSha256 = (Get-Content -Raw -LiteralPath $PatchDigestFile).Trim().ToLowerInvariant()
+if ($RecordedPatchSha256 -ne $PatchSha256) { throw "recorded patch digest mismatch" }
 Write-Host "Patch bytes=$PatchLength SHA256=$PatchSha256"
 docker cp $PatchFile rayher-bench:/tmp/invoice-ocr.patch
 $ContainerPatchSha256 = ((docker exec rayher-bench sha256sum /tmp/invoice-ocr.patch) -split '\s+')[0].ToLowerInvariant()
@@ -128,7 +133,7 @@ docker exec rayher-bench curl --max-time 110 -fsS http://invoice-ocr:8080/ready
 
 ## 8. 日常运维
 
-每日 scheduler 调用 cleanup_orphan_invoice_batches(retention_days=7)。它只清理过期、无申请单、所有记录未确认且未关联、状态一致、无查看审计、File 严格独占且无外部 duplicate_of 引用的批次。物理文件先原子移入 private/files 系统墓碑，再由 Frappe delete_doc 生命周期删除记录和批次；事务失败恢复原路径。提交后的 File 墓碑是持久重试索引，scheduler 每次运行前后都会重试，并严格排除普通用户的同名前缀上传。
+每日 scheduler 调用 cleanup_orphan_invoice_batches(retention_days=7)。它只清理过期、无申请单、所有记录未确认且未关联、状态一致、无查看审计、File 严格独占且无外部 duplicate_of 引用的批次。每个文件移动前先在 private/files 原子写入并 fsync 严格随机 cleanup journal，再原子移入系统墓碑；事务未提交时 journal 恢复原路径，已提交时它驱动 Frappe delete_doc 清理 File 元数据并在提交后精确 unlink 墓碑。journal 完成前始终保留，scheduler 每次运行前后都会 reconcile，并严格排除普通用户跟踪的伪装 journal 或同名前缀上传。
 
 ```powershell
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench --site rayher.localhost execute rayher_hr_payroll.maintenance.invoice_ocr_cleanup.cleanup_orphan_invoice_batches"
@@ -146,11 +151,16 @@ docker compose -p rayher -f $InvoiceOcrMainCompose -f $InvoiceOcrCompose stop in
 if (!(Test-Path -LiteralPath $PatchFile)) { throw "host patch file is missing" }
 $RollbackPatchLength = (Get-Item -LiteralPath $PatchFile).Length
 if ($RollbackPatchLength -le 0) { throw "host patch file is empty" }
-$RollbackPatchSha256 = (Get-FileHash -Algorithm SHA256 $PatchFile).Hash.ToLowerInvariant()
-Write-Host "Rollback patch bytes=$RollbackPatchLength SHA256=$RollbackPatchSha256"
+$PatchDigestFile = Join-Path $InvoiceOcrBackup "invoice-ocr-$AcceptedSha.patch.sha256"
+if (!(Test-Path -LiteralPath $PatchDigestFile)) { throw "trusted patch digest file is missing" }
+$TrustedPatchSha256 = (Get-Content -Raw -LiteralPath $PatchDigestFile).Trim().ToLowerInvariant()
+if ($TrustedPatchSha256 -notmatch '^[0-9a-f]{64}$') { throw "trusted patch digest is invalid" }
+$RollbackHostPatchSha256 = (Get-FileHash -Algorithm SHA256 $PatchFile).Hash.ToLowerInvariant()
+if ($RollbackHostPatchSha256 -ne $TrustedPatchSha256) { throw "host patch differs from deployment digest" }
+Write-Host "Rollback patch bytes=$RollbackPatchLength trusted SHA256=$TrustedPatchSha256"
 docker cp $PatchFile rayher-bench:/tmp/invoice-ocr.patch
 $RollbackContainerSha256 = ((docker exec rayher-bench sha256sum /tmp/invoice-ocr.patch) -split '\s+')[0].ToLowerInvariant()
-if ($RollbackContainerSha256 -ne $RollbackPatchSha256) { throw "rollback patch hash mismatch" }
+if ($RollbackContainerSha256 -ne $TrustedPatchSha256) { throw "container patch differs from deployment digest" }
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/rayher_hr_payroll && git apply --reverse --check /tmp/invoice-ocr.patch"
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/rayher_hr_payroll && git apply --reverse /tmp/invoice-ocr.patch"
 docker cp (Join-Path $InvoiceOcrBackup "site_config.json") "rayher-bench:/workspace/development/frappe-bench/sites/rayher.localhost/site_config.json"
