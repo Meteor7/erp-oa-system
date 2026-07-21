@@ -2394,3 +2394,84 @@ def _run_queued_batch_recomputes(env):
             continue
         seen.add(batch_name)
         jobs_module.recompute_invoice_batch(batch_name)
+
+
+def _current_permission_doctypes(calls):
+    ordered = []
+    for call in calls:
+        if call[0] != "get_value":
+            continue
+        if call[1] in {
+            service.REQUEST_DOCTYPE,
+            "Employee",
+            "User",
+            "OA Approval Step",
+        }:
+            ordered.append(call[1])
+    return ordered
+
+
+def test_shared_request_preview_and_edit_use_one_current_permission_lock_order(env, monkeypatch):
+    _add_authorization_identity(env)
+    request = _authorization_request(env, employee="EMP-ALICE")
+    step = Doc(
+        env,
+        {
+            "doctype": "OA Approval Step",
+            "name": "STEP-LOCK-ORDER",
+            "parent": request.name,
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "steps",
+            "step_index": 1,
+            "approvers": "[]",
+        },
+    )
+    env.docs.setdefault("OA Approval Step", {})[step.name] = step
+    batch = env.add_batch(owner="other@example.com", request=request.name)
+    file_doc = env.add_file(filename="permission-order.pdf", batch=batch.name)
+    preview_record = env.add_record(
+        name="INV-ORDER-PREVIEW",
+        owner="other@example.com",
+        batch=batch.name,
+        request=request.name,
+        invoice_file=file_doc.file_url,
+        original_filename=file_doc.file_name,
+        file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(),
+        recognition_status="\u5f85\u786e\u8ba4",
+    )
+    file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+    file_doc.attached_to_name = preview_record.name
+    edit_record = env.add_record(
+        name="INV-ORDER-EDIT",
+        owner="other@example.com",
+        batch=batch.name,
+        request=request.name,
+        recognition_status="\u5f85\u786e\u8ba4",
+    )
+    monkeypatch.setattr(service, "can_read_invoice", service.invoice_permissions.can_read_invoice)
+
+    env.current_read_calls.clear()
+    service.preview_invoice(preview_record.name)
+    preview_order = _current_permission_doctypes(env.current_read_calls)
+
+    env.current_read_calls.clear()
+    service.update_invoice(edit_record.name, {"project_name": "lock-order"})
+    edit_order = _current_permission_doctypes(env.current_read_calls)
+    env.db.commit()
+
+    expected = [
+        service.REQUEST_DOCTYPE,
+        "Employee",
+        "User",
+        "OA Approval Step",
+    ]
+    assert (preview_order, edit_order) == (expected, expected)
+
+    # An unlinked current owner is decided from the already-current Record and
+    # must not acquire identity locks before a later Request lookup.
+    edit_record.owner = "alice@example.com"
+    edit_record.request = ""
+    batch.request = ""
+    env.current_read_calls.clear()
+    service._require_record(edit_record.name, current=True)
+    assert _current_permission_doctypes(env.current_read_calls) == []

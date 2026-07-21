@@ -89,14 +89,32 @@ def _current_approvers(request_name, step_index, *, current=False):
     return {str(item).strip() for item in parsed if str(item or "").strip()}
 
 
-def _can_read_request(request_name, user, roles=None, identity=None, *, current=False):
+def _request_access_context(request, user, *, current=False):
+    request_doc = (
+        _request_row(request, current=current)
+        if isinstance(request, str)
+        else request
+    )
+    if not request_doc:
+        return None, None, set()
+    identity = _identity(user, current=current)
+    approvers = _current_approvers(
+        _get(request_doc, "name"),
+        _get(request_doc, "current_step_index"),
+        current=current,
+    )
+    return request_doc, identity, approvers
+
+
+def _can_read_request(request_name, user, roles=None, *, current=False):
     roles = roles if roles is not None else _roles(user)
     if _is_high_privilege(user, roles):
         return True
-    request = _request_row(request_name, current=current)
+    request, identity, approvers = _request_access_context(
+        request_name, user, current=current
+    )
     if not request:
         return False
-    identity = identity or _identity(user, current=current)
     if _get(request, "owner") == user:
         return True
     if identity.get("employee") and _get(request, "employee") == identity["employee"]:
@@ -107,9 +125,6 @@ def _can_read_request(request_name, user, roles=None, identity=None, *, current=
         and _get(request, "department") == identity["department"]
     ):
         return True
-    approvers = _current_approvers(
-        request_name, _get(request, "current_step_index"), current=current
-    )
     return bool(identity["actors"] & approvers)
 
 
@@ -167,7 +182,6 @@ def can_read_invoice(doc, user=None, *, current=False):
             request_name,
             user,
             roles=roles,
-            identity=_identity(user, current=current),
             current=current,
         )
     )
@@ -308,12 +322,11 @@ def can_edit_request(request, user=None, *, current=False):
     roles = _roles(user)
     if user == "Administrator" or "System Manager" in roles:
         return True
-    request_doc = (
-        request if not isinstance(request, str) else _request_row(request, current=current)
+    request_doc, identity, _approvers = _request_access_context(
+        request, user, current=current
     )
     if not request_doc:
         return False
     if _get(request_doc, "owner") == user:
         return True
-    identity = _identity(user, current=current)
     return bool(identity.get("employee") and _get(request_doc, "employee") == identity["employee"])
