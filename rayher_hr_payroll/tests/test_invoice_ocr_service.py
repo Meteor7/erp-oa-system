@@ -3042,3 +3042,66 @@ def test_get_request_invoices_checks_request_permission_before_collection_query(
         service.get_request_invoices(request.name)
 
     assert calls == []
+
+
+# --- Real Frappe File auto-relink regression ---
+
+def test_register_reloads_file_after_insert_auto_relink_without_stale_save(
+    env, monkeypatch
+):
+    env.add_batch(name="BATCH-AUTO-RELINK")
+    stale_file = env.add_file(
+        filename="auto-relink.pdf",
+        content=b"%PDF-auto-relink",
+        batch="BATCH-AUTO-RELINK",
+    )
+    stale_file.modified = "2026-07-21 10:00:00.000001"
+    original_insert = Doc.insert
+    original_save = Doc.save
+    fresh_holder = {}
+
+    class TimestampMismatchError(Exception):
+        pass
+
+    def insert_with_frappe_relink(self, ignore_permissions=False):
+        result = original_insert(
+            self, ignore_permissions=ignore_permissions
+        )
+        if self.get("doctype") == service.RECORD_DOCTYPE:
+            fresh_file = Doc(env, dict(stale_file))
+            fresh_file.modified = "2026-07-21 10:00:00.000002"
+            fresh_file.attached_to_doctype = service.RECORD_DOCTYPE
+            fresh_file.attached_to_name = self.name
+            fresh_file.attached_to_field = "invoice_file"
+            env.docs["File"][stale_file.name] = fresh_file
+            fresh_holder["file"] = fresh_file
+        return result
+
+    def reject_stale_file_save(self, ignore_permissions=False):
+        if self.get("doctype") == "File":
+            current = env.docs["File"][self.name]
+            if self.get("modified") != current.get("modified"):
+                raise TimestampMismatchError(self.name)
+        return original_save(
+            self, ignore_permissions=ignore_permissions
+        )
+
+    monkeypatch.setattr(Doc, "insert", insert_with_frappe_relink)
+    monkeypatch.setattr(Doc, "save", reject_stale_file_save)
+
+    result = service.register_file(
+        "BATCH-AUTO-RELINK", stale_file.file_url
+    )
+
+    record = env.docs[service.RECORD_DOCTYPE][result["name"]]
+    fresh_file = fresh_holder["file"]
+    assert fresh_file is env.docs["File"][stale_file.name]
+    assert fresh_file.attached_to_doctype == service.RECORD_DOCTYPE
+    assert fresh_file.attached_to_name == record.name
+    assert fresh_file.attached_to_field == "invoice_file"
+    assert stale_file.attached_to_doctype == service.BATCH_DOCTYPE
+    assert stale_file not in env.saved
+    assert fresh_file not in env.saved
+    assert env.current_read_calls.count(
+        ("get_doc", "File", stale_file.name)
+    ) >= 2

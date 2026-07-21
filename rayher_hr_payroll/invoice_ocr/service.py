@@ -348,14 +348,56 @@ def _trusted_file_controller_values():
         restore()
 
 
-def _attach_file(file_doc, record, trusted_size):
-    _set(file_doc, "is_private", 1)
-    _set(file_doc, "file_size", trusted_size)
-    _set(file_doc, "attached_to_doctype", RECORD_DOCTYPE)
-    _set(file_doc, "attached_to_name", _get(record, "name"))
-    _set(file_doc, "attached_to_field", "invoice_file")
+def _attach_file(file_guard, record, trusted_size):
+    """Idempotently attach the latest locked File document."""
+    file_name = str(file_guard.get("name") or "").strip()
+    expected_url = str(file_guard.get("file_url") or "")
+    expected_owner = str(file_guard.get("owner") or "")
+    if not file_name:
+        _throw("\u53d1\u7968\u6587\u4ef6\u5173\u8054\u5df2\u5931\u6548\u3002")
+    file_doc = _current_doc("File", file_name)
+    if (
+        str(_get(file_doc, "name") or "") != file_name
+        or str(_get(file_doc, "file_url") or "") != expected_url
+    ):
+        _throw("\u53d1\u7968\u6587\u4ef6\u5173\u8054\u5df2\u5931\u6548\u3002")
+    if (
+        int(file_guard.get("is_private") or 0) != 1
+        or int(_get(file_doc, "is_private") or 0) != 1
+    ):
+        _throw("\u53d1\u7968\u6587\u4ef6\u5fc5\u987b\u4e3a\u79c1\u6709\u6587\u4ef6\u3002")
+    if str(_get(file_doc, "owner") or "") != expected_owner:
+        _throw("\u53d1\u7968\u6587\u4ef6\u6240\u6709\u8005\u5df2\u53d1\u751f\u53d8\u5316\u3002")
+
+    record_name = str(_get(record, "name") or "")
+    record_batch = str(_get(record, "batch") or "")
+    current_attachment = (
+        str(_get(file_doc, "attached_to_doctype") or ""),
+        str(_get(file_doc, "attached_to_name") or ""),
+    )
+    allowed_attachments = {
+        ("", ""),
+        (BATCH_DOCTYPE, record_batch),
+        (RECORD_DOCTYPE, record_name),
+    }
+    if current_attachment not in allowed_attachments:
+        _throw(
+            "\u8be5\u6587\u4ef6\u5df2\u9644\u52a0\u5230\u5176\u4ed6\u4e1a\u52a1\u8bb0\u5f55\u3002"
+        )
+
+    desired = {
+        "file_size": trusted_size,
+        "attached_to_doctype": RECORD_DOCTYPE,
+        "attached_to_name": record_name,
+        "attached_to_field": "invoice_file",
+    }
+    if all(_get(file_doc, field) == value for field, value in desired.items()):
+        return file_doc
+    for field, value in desired.items():
+        _set(file_doc, field, value)
     with _trusted_file_controller_values():
         _save(file_doc)
+    return file_doc
 
 ENQUEUE_FAILURE_MESSAGE = "发票识别任务入队失败，请重试。"
 
@@ -474,6 +516,12 @@ def register_file(batch, file_url):
             registration_locks.enter_context(_transaction_lock("file", file_name))
             file_doc = _current_doc("File", file_name)
             file_doc, content, server_name, server_mime = _validated_file(batch_doc, file_doc, file_url)
+            file_guard = {
+                "name": str(_get(file_doc, "name") or ""),
+                "file_url": str(_get(file_doc, "file_url") or ""),
+                "is_private": int(_get(file_doc, "is_private") or 0),
+                "owner": str(_get(file_doc, "owner") or ""),
+            }
             digest = hashlib.sha256(content).hexdigest()
             with _transaction_lock("file-hash", digest):
                 count = len(_current_rows(RECORD_DOCTYPE, filters={"batch": batch_name}, fields=["name"]))
@@ -491,7 +539,7 @@ def register_file(batch, file_url):
                     "duplicate_reason": "\u6587\u4ef6\u5185\u5bb9\u4e0e\u5df2\u6709\u53d1\u7968\u5b8c\u5168\u76f8\u540c" if duplicate else "", "retry_count": 0,
                 })
                 record.insert(ignore_permissions=True)
-                _attach_file(file_doc, record, len(content))
+                _attach_file(file_guard, record, len(content))
                 _recompute_batch_after_commit(batch_name)
                 if not duplicate:
                     _enqueue_recognition_after_commit(_get(record, "name"))
