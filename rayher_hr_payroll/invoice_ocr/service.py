@@ -774,7 +774,7 @@ def resolve_duplicate(invoice_name, reason):
 
 
 def _request_invoice_records(request_name, *, current=False):
-    """Read request records without taking reverse record Redis locks."""
+    """Read the complete, deduplicated request invoice collection."""
     request_name = str(request_name or "").strip()
     if not request_name:
         return []
@@ -785,20 +785,29 @@ def _request_invoice_records(request_name, *, current=False):
         filters={"request": request_name},
         fields=REQUEST_RECORD_FIELDS,
     ):
-        records[str(_get(row, "name"))] = row
+        record_name = str(_get(row, "name") or "").strip()
+        if record_name:
+            records[record_name] = row
     batches = read_rows(
         BATCH_DOCTYPE,
         filters={"request": request_name},
         fields=["name"],
     )
-    for batch in batches:
+    for batch in sorted(
+        batches, key=lambda row: str(_get(row, "name") or "")
+    ):
+        batch_name = str(_get(batch, "name") or "").strip()
+        if not batch_name:
+            continue
         for row in read_rows(
             RECORD_DOCTYPE,
-            filters={"batch": _get(batch, "name")},
+            filters={"batch": batch_name},
             fields=REQUEST_RECORD_FIELDS,
         ):
-            records.setdefault(str(_get(row, "name")), row)
-    return list(records.values())
+            record_name = str(_get(row, "name") or "").strip()
+            if record_name:
+                records.setdefault(record_name, row)
+    return [records[name] for name in sorted(records)]
 
 
 
@@ -887,6 +896,29 @@ def recompute_request_summary(request_name: str):
         return request_doc
 
 
+def _assert_request_single_batch_current(request_name, batch_name):
+    """Reject a second batch using a locking/current database read."""
+    request_name = str(request_name or "").strip()
+    batch_name = str(batch_name or "").strip()
+    request_batches = _current_rows(
+        BATCH_DOCTYPE,
+        filters={"request": request_name},
+        fields=["name", "request"],
+    )
+    other_batches = sorted(
+        {
+            str(_get(row, "name") or "")
+            for row in request_batches
+            if str(_get(row, "name") or "")
+            and str(_get(row, "name") or "") != batch_name
+        }
+    )
+    if other_batches:
+        _throw(
+            "\u8be5\u62a5\u9500\u5355\u5df2\u5173\u8054\u5176\u4ed6\u53d1\u7968\u6279\u6b21\u3002"
+        )
+
+
 def attach_batch_to_request(batch_name, request_doc):
     batch_name = str(batch_name or "").strip()
     request_name = _request_name(request_doc)
@@ -915,23 +947,7 @@ def attach_batch_to_request(batch_name, request_doc):
         batch_request = str(_get(batch, "request") or "")
         if batch_request and batch_request != request_name:
             _throw("\u8be5\u53d1\u7968\u6279\u6b21\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
-        request_batches = _current_rows(
-            BATCH_DOCTYPE,
-            filters={"request": request_name},
-            fields=["name", "request"],
-        )
-        other_batches = sorted(
-            {
-                str(_get(row, "name") or "")
-                for row in request_batches
-                if str(_get(row, "name") or "")
-                and str(_get(row, "name") or "") != batch_name
-            }
-        )
-        if other_batches:
-            _throw(
-                "\u8be5\u62a5\u9500\u5355\u5df2\u5173\u8054\u5176\u4ed6\u53d1\u7968\u6279\u6b21\u3002"
-            )
+        _assert_request_single_batch_current(request_name, batch_name)
         current_rows = _current_rows(
             RECORD_DOCTYPE,
             filters={"batch": batch_name},
@@ -1089,6 +1105,7 @@ def link_invoice(invoice_name, request, expense_line_key):
                 batch_request = str(_get(batch, "request") or "")
                 if batch_request and batch_request != request_name:
                     _throw("\u540c\u4e00\u53d1\u7968\u6279\u6b21\u4e0d\u80fd\u5173\u8054\u591a\u5f20\u62a5\u9500\u5355\u3002")
+                _assert_request_single_batch_current(request_name, batch_name)
                 _set(record, "request", request_name)
                 _set(record, "expense_line_key", line_key)
                 _save(record)
@@ -1122,11 +1139,14 @@ def get_batch(batch):
 
 
 def get_request_invoices(request):
-    _user()
-    request_doc = frappe.get_doc(REQUEST_DOCTYPE, str(request)); _request_permission(request_doc, "read"); result = []
-    for row in _get_all(RECORD_DOCTYPE, filters={"request": _get(request_doc, "name")}, fields=["name"]):
+    user = _user()
+    request_doc = frappe.get_doc(REQUEST_DOCTYPE, str(request))
+    _request_permission(request_doc, "read")
+    result = []
+    for row in _request_invoice_records(_get(request_doc, "name")):
         record = frappe.get_doc(RECORD_DOCTYPE, _get(row, "name"))
-        if can_read_invoice(record, _user()): result.append(_serialize_record(record))
+        if can_read_invoice(record, user):
+            result.append(_serialize_record(record))
     return result
 
 

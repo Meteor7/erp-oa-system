@@ -2817,3 +2817,108 @@ def test_link_api_accepts_blank_line_key_for_draft_unlink(env, monkeypatch):
 
     assert result["expense_line_key"] == ""
     delegated.assert_called_once_with("INV-1", "REQ-1", "")
+
+
+# --- Task 8 single-batch and request collection regression tests ---
+
+def _task8_add_expense_line(env, request_name, key):
+    line = Doc(
+        env,
+        {
+            "doctype": service.LINE_DOCTYPE,
+            "name": f"LINE-{key}",
+            "parent": request_name,
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "expense_lines",
+            "line_key": key,
+        },
+    )
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    return line
+
+
+def test_link_rejects_second_request_batch_using_current_query_without_mutation(env):
+    request = _add_request(env, name="REQ-SINGLE-BATCH")
+    first_batch = env.add_batch(name="BATCH-FIRST", request="")
+    second_batch = env.add_batch(name="BATCH-SECOND", request="")
+    line = _task8_add_expense_line(env, request.name, "KEY-SECOND")
+    record = env.add_record(
+        name="INV-SECOND",
+        batch=second_batch.name,
+        recognition_status="\u5df2\u786e\u8ba4",
+        request="",
+        expense_line_key="",
+    )
+    env.begin_mvcc_snapshot()
+    first_batch.request = request.name
+    saved_before = list(env.saved)
+
+    with pytest.raises(ValidationError, match="\u5df2\u5173\u8054.*\u5176\u4ed6"):
+        service.link_invoice(record.name, request.name, line.line_key)
+
+    assert (
+        "get_values",
+        service.BATCH_DOCTYPE,
+        {"request": request.name},
+    ) in env.current_read_calls
+    assert record.request == ""
+    assert record.expense_line_key == ""
+    assert second_batch.request == ""
+    assert env.saved == saved_before
+
+
+def test_get_request_invoices_includes_batch_only_records_dedupes_and_orders(env):
+    request = _add_request(env, name="REQ-HISTORICAL-BATCHES")
+    first_batch = env.add_batch(name="BATCH-A", request=request.name)
+    second_batch = env.add_batch(name="BATCH-B", request=request.name)
+    env.add_record(
+        name="INV-Z",
+        batch=first_batch.name,
+        request="",
+        recognition_status="\u5df2\u786e\u8ba4",
+    )
+    env.add_record(
+        name="INV-A",
+        batch=first_batch.name,
+        request=request.name,
+        recognition_status="\u5df2\u786e\u8ba4",
+    )
+    env.add_record(
+        name="INV-M",
+        batch=second_batch.name,
+        request="",
+        recognition_status="\u5df2\u786e\u8ba4",
+    )
+
+    result = service.get_request_invoices(request.name)
+
+    assert [row["name"] for row in result] == ["INV-A", "INV-M", "INV-Z"]
+    assert [row["name"] for row in result].count("INV-A") == 1
+    assert {row["batch"] for row in result} == {
+        first_batch.name,
+        second_batch.name,
+    }
+
+
+def test_get_request_invoices_checks_request_permission_before_collection_query(env, monkeypatch):
+    env.roles["bob@example.com"] = ["Employee"]
+    request = _add_request(
+        env,
+        name="REQ-PERMISSION-FIRST",
+        owner="alice@example.com",
+        employee="EMP-ALICE",
+    )
+    calls = []
+    original = service._request_invoice_records
+
+    def tracked(request_name, **kwargs):
+        calls.append((request_name, kwargs))
+        return original(request_name, **kwargs)
+
+    monkeypatch.setattr(service, "_request_invoice_records", tracked)
+    frappe_stub_module.session.user = "bob@example.com"
+
+    with pytest.raises(ValidationError, match="\u65e0\u6743"):
+        service.get_request_invoices(request.name)
+
+    assert calls == []
