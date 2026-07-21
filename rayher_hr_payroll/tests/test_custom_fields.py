@@ -38,6 +38,19 @@ def test_timesheet_review_fields_exist():
     assert fields["rd_reviewer"]["options"] == "User"
 
 
+def test_timesheet_monthly_entry_fields_exist():
+    fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Timesheet"]}
+
+    assert fields["rd_monthly_entry_id"]["fieldtype"] == "Data"
+    assert fields["rd_monthly_entry_id"]["unique"] == 1
+    assert fields["rd_entry_period"]["fieldtype"] == "Data"
+    assert fields["rd_occurrence_days"]["fieldtype"] == "Float"
+    assert fields["rd_occurrence_days"]["precision"] == 2
+    assert fields["rd_calculated_hours"]["fieldtype"] == "Float"
+    assert fields["rd_calculated_hours"]["precision"] == 2
+    assert fields["rd_system_generated"]["fieldtype"] == "Check"
+
+
 def test_timesheet_detail_project_code_field_exists():
     fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Timesheet Detail"]}
 
