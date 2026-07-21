@@ -89,6 +89,7 @@ def _install_fake_frappe(monkeypatch):
     frappe.utils.get_datetime = _get_datetime
     frappe.utils.add_to_date = _add_to_date
     frappe.db = SimpleNamespace()
+    frappe.db.exists = lambda *args, **kwargs: False
 
     monkeypatch.setitem(sys.modules, "frappe", frappe)
     monkeypatch.setitem(sys.modules, "frappe.utils", frappe.utils)
@@ -302,11 +303,14 @@ def test_install_syncs_rd_activity_types_on_migrate():
 
 
 
-def test_timesheet_entry_roles_include_employee_and_department_manager(monkeypatch):
+def test_timesheet_entry_write_roles_are_manager_only_while_employee_and_finance_can_view(monkeypatch):
     mod, _frappe = _load_timesheet_entry(monkeypatch)
 
-    assert "Employee" in mod.RD_TIMESHEET_ENTRY_ROLES
     assert "Department Manager" in mod.RD_TIMESHEET_ENTRY_ROLES
+    assert "Employee" not in mod.RD_TIMESHEET_ENTRY_ROLES
+    assert "Accounts User" not in mod.RD_TIMESHEET_ENTRY_ROLES
+    assert "Employee" in mod.RD_TIMESHEET_VIEW_ROLES
+    assert "Accounts User" in mod.RD_TIMESHEET_VIEW_ROLES
 
 
 def test_all_project_access_can_view_and_fill_every_rd_employee(monkeypatch):
@@ -407,6 +411,26 @@ def test_save_rd_hours_stays_edit_role_gated(monkeypatch):
         mod.save_rd_hours(period="2026-07", employee="EMP-1", project_code="001", project_name="RD")
 
     assert captured["roles"] == mod.RD_TIMESHEET_ENTRY_ROLES
+
+
+def test_daily_save_rejects_employee_month_with_monthly_entries(monkeypatch):
+    mod, _frappe = _load_timesheet_entry(monkeypatch)
+
+    monkeypatch.setattr(mod, "_require_visible_employee", lambda employee: None)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
+    monkeypatch.setattr(mod, "_work_date_in_period", lambda value, year, month: date(2026, 7, 1))
+    monkeypatch.setattr(mod, "_month_has_monthly_entries", lambda *args: True, raising=False)
+
+    with pytest.raises(RuleError, match="按月工时"):
+        mod._save_rd_hours_row(
+            period="2026-07",
+            employee="EMP-1",
+            project="PROJ-1",
+            project_code="RD14",
+            project_name="ACONCA 7961",
+            hours=8,
+            work_date="2026-07-01",
+        )
 
 def test_save_rd_hours_rejects_employee_daily_total_over_eight_hours(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)

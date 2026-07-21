@@ -37,8 +37,8 @@ MAX_DAILY_HOURS = 8
 MAX_DAILY_SECONDS = MAX_DAILY_HOURS * 60 * 60
 
 
-RD_TIMESHEET_ENTRY_ROLES = ("System Manager", "Accounts User", "HR User", "HR Manager", "Department Manager", "Employee")
-RD_TIMESHEET_VIEW_ROLES = (*RD_TIMESHEET_ENTRY_ROLES, "Accounts User")
+RD_TIMESHEET_ENTRY_ROLES = ("System Manager", "HR User", "HR Manager", "Department Manager")
+RD_TIMESHEET_VIEW_ROLES = (*RD_TIMESHEET_ENTRY_ROLES, "Accounts User", "Employee")
 RD_TIMESHEET_ADMIN_ROLES = ("System Manager", "Accounts User", "HR User", "HR Manager")
 RD_TIMESHEET_ALL_EMPLOYEE_ROLES = (*RD_TIMESHEET_ADMIN_ROLES, "All Project Access")
 RD_TIMESHEET_FINANCE_VIEW_ROLES = ("Accounts User",)
@@ -50,6 +50,20 @@ def _period_has_submitted_allocation(year, month):
     submitted allocation (which only a System Manager can supersede), so hour mutations
     are blocked until that allocation is cancelled."""
     return bool(frappe.db.exists("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1}))
+
+
+def _month_has_monthly_entries(employee, year, month):
+    return bool(
+        frappe.db.exists(
+            "Timesheet",
+            {
+                "employee": employee,
+                "rd_system_generated": 1,
+                "rd_entry_period": f"{int(year):04d}-{int(month):02d}",
+                "docstatus": ["<", 2],
+            },
+        )
+    )
 
 
 def _has_any_role(roles):
@@ -377,6 +391,8 @@ def _save_rd_hours_row(period, employee, project=None, hours=None, work_date=Non
     _require_visible_employee(employee)
     year, month = parse_period(period)
     entry_date = _work_date_in_period(work_date, year, month)
+    if _month_has_monthly_entries(employee, year, month):
+        frappe.throw(frappe._("该员工本月已有按月工时，不能与按日工时混用。"))
     explicit_activity = (activity_type or "").strip()
     activity = _ensure_activity(explicit_activity or _DEFAULT_ACTIVITY)
     ensure_not_locked(period, "lock_timesheets", "工时")
