@@ -24,15 +24,22 @@ def _is_high_privilege(user, roles=None):
     return user == "Administrator" or bool((roles if roles is not None else _roles(user)) & _HIGH_PRIVILEGE_ROLES)
 
 
-def _identity(user):
+def _locking_kwargs(current):
+    return {"for_update": True} if current else {}
+
+
+def _identity(user, *, current=False):
     row = frappe.db.get_value(
         "Employee",
         {"user_id": user},
         ["name", "employee_name", "department"],
         as_dict=True,
+        **_locking_kwargs(current),
     )
     employee = dict(row) if row else {}
-    full_name = frappe.db.get_value("User", user, "full_name")
+    full_name = frappe.db.get_value(
+        "User", user, "full_name", **_locking_kwargs(current)
+    )
     actors = {user}
     for value in (employee.get("name"), employee.get("employee_name"), full_name):
         if str(value or "").strip():
@@ -45,7 +52,7 @@ def _identity(user):
     }
 
 
-def _request_row(request_name):
+def _request_row(request_name, *, current=False):
     if not request_name:
         return None
     return frappe.db.get_value(
@@ -53,10 +60,11 @@ def _request_row(request_name):
         request_name,
         ["name", "owner", "employee", "department", "current_step_index"],
         as_dict=True,
+        **_locking_kwargs(current),
     )
 
 
-def _current_approvers(request_name, step_index):
+def _current_approvers(request_name, step_index, *, current=False):
     if not request_name or not step_index:
         return set()
     value = frappe.db.get_value(
@@ -68,6 +76,7 @@ def _current_approvers(request_name, step_index):
             "step_index": int(step_index),
         },
         "approvers",
+        **_locking_kwargs(current),
     )
     if not value:
         return set()
@@ -80,14 +89,14 @@ def _current_approvers(request_name, step_index):
     return {str(item).strip() for item in parsed if str(item or "").strip()}
 
 
-def _can_read_request(request_name, user, roles=None, identity=None):
+def _can_read_request(request_name, user, roles=None, identity=None, *, current=False):
     roles = roles if roles is not None else _roles(user)
     if _is_high_privilege(user, roles):
         return True
-    request = _request_row(request_name)
+    request = _request_row(request_name, current=current)
     if not request:
         return False
-    identity = identity or _identity(user)
+    identity = identity or _identity(user, current=current)
     if _get(request, "owner") == user:
         return True
     if identity.get("employee") and _get(request, "employee") == identity["employee"]:
@@ -98,26 +107,33 @@ def _can_read_request(request_name, user, roles=None, identity=None):
         and _get(request, "department") == identity["department"]
     ):
         return True
-    approvers = _current_approvers(request_name, _get(request, "current_step_index"))
+    approvers = _current_approvers(
+        request_name, _get(request, "current_step_index"), current=current
+    )
     return bool(identity["actors"] & approvers)
 
 
-def _effective_request(doc, doctype):
+def _effective_request(doc, doctype, *, current=False):
     request_name = str(_get(doc, "request") or "").strip()
     if request_name or doctype != _RECORD:
         return request_name
     batch = _get(doc, "batch")
     if not batch:
         return ""
-    return str(frappe.db.get_value(_BATCH, batch, "request") or "").strip()
+    return str(
+        frappe.db.get_value(
+            _BATCH, batch, "request", **_locking_kwargs(current)
+        ) or ""
+    ).strip()
 
 
-def _record_doc(name):
+def _record_doc(name, *, current=False):
     row = frappe.db.get_value(
         _RECORD,
         name,
         ["name", "owner", "request", "batch"],
         as_dict=True,
+        **_locking_kwargs(current),
     )
     if not row:
         return None
@@ -126,7 +142,7 @@ def _record_doc(name):
     return result
 
 
-def can_read_invoice(doc, user=None):
+def can_read_invoice(doc, user=None, *, current=False):
     """Return whether ``user`` can read one batch, record, or immutable view log."""
     user = user or frappe.session.user
     if not user or user == "Guest":
@@ -134,8 +150,8 @@ def can_read_invoice(doc, user=None):
     doctype = _get(doc, "doctype")
     if doctype == _VIEW_LOG:
         source_name = _get(doc, "invoice_record")
-        source = _record_doc(source_name) if source_name else None
-        return bool(source and can_read_invoice(source, user))
+        source = _record_doc(source_name, current=current) if source_name else None
+        return bool(source and can_read_invoice(source, user, current=current))
     if doctype not in {_BATCH, _RECORD}:
         return False
 
@@ -144,8 +160,17 @@ def can_read_invoice(doc, user=None):
         return True
     if _get(doc, "owner") == user:
         return True
-    request_name = _effective_request(doc, doctype)
-    return bool(request_name and _can_read_request(request_name, user, roles=roles, identity=_identity(user)))
+    request_name = _effective_request(doc, doctype, current=current)
+    return bool(
+        request_name
+        and _can_read_request(
+            request_name,
+            user,
+            roles=roles,
+            identity=_identity(user, current=current),
+            current=current,
+        )
+    )
 
 
 def _escaped(value):
@@ -266,16 +291,16 @@ def invoice_view_log_has_permission(doc, ptype=None, user=None):
     return _has_permission(_VIEW_LOG, doc, ptype, user)
 
 
-def can_read_request(request, user=None):
+def can_read_request(request, user=None, *, current=False):
     """Apply the same row scope used by invoice permission hooks to one OA request."""
     user = user or frappe.session.user
     if not user or user == "Guest":
         return False
     request_name = _get(request, "name") if not isinstance(request, str) else request
-    return _can_read_request(str(request_name or ""), user)
+    return _can_read_request(str(request_name or ""), user, current=current)
 
 
-def can_edit_request(request, user=None):
+def can_edit_request(request, user=None, *, current=False):
     """Only the request applicant/owner or a System Manager may edit invoice data."""
     user = user or frappe.session.user
     if not user or user == "Guest":
@@ -283,10 +308,12 @@ def can_edit_request(request, user=None):
     roles = _roles(user)
     if user == "Administrator" or "System Manager" in roles:
         return True
-    request_doc = request if not isinstance(request, str) else _request_row(request)
+    request_doc = (
+        request if not isinstance(request, str) else _request_row(request, current=current)
+    )
     if not request_doc:
         return False
     if _get(request_doc, "owner") == user:
         return True
-    identity = _identity(user)
+    identity = _identity(user, current=current)
     return bool(identity.get("employee") and _get(request_doc, "employee") == identity["employee"])

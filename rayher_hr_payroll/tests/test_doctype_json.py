@@ -615,3 +615,13 @@ def test_invoice_record_tracks_processing_claim_timestamp():
     assert fields["processing_started_on"]["fieldtype"] == "Datetime"
     assert fields["processing_started_on"]["read_only"] == 1
     assert invoice["field_order"].index("processing_started_on") < invoice["field_order"].index("processing_error")
+
+
+def test_invoice_record_has_read_only_worker_claim_fence():
+    invoice = load_doctype("oa_invoice_record")
+    fields = {field["fieldname"]: field for field in invoice["fields"]}
+    claim = fields["processing_claim_id"]
+    assert claim["fieldtype"] == "Data"
+    assert claim["read_only"] == 1
+    assert invoice["field_order"].index("processing_started_on") < invoice["field_order"].index("processing_claim_id")
+    assert invoice["field_order"].index("processing_claim_id") < invoice["field_order"].index("processing_error")

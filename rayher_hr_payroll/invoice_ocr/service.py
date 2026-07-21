@@ -154,35 +154,51 @@ def _transaction_lock(category: str, *parts, timeout=600, blocking_timeout=15):
     state = {"lock": lock, "released": False}
     held[key] = state
     release = lambda: _release_transaction_lock(key, state)
-    frappe.db.after_commit.add(release)
-    frappe.db.after_rollback.add(release)
     try:
-        yield lock
+        frappe.db.after_commit.add(release)
+        frappe.db.after_rollback.add(release)
     except BaseException:
         release()
         raise
+    yield lock
 
 
-def _can_write_record(record, user=None) -> bool:
+def _can_write_record(record, user=None, *, current=False) -> bool:
     user = user or _user()
     roles = _roles(user)
     if user == "Administrator" or "System Manager" in roles or _get(record, "owner") == user:
         return True
+    batch = None
     batch_name = str(_get(record, "batch") or "")
     if batch_name:
         try:
-            batch = frappe.get_doc(BATCH_DOCTYPE, batch_name)
+            batch = (
+                _current_doc(BATCH_DOCTYPE, batch_name)
+                if current
+                else frappe.get_doc(BATCH_DOCTYPE, batch_name)
+            )
         except Exception:
             batch = None
         if batch and _get(batch, "owner") == user:
             return True
     request_name = str(_get(record, "request") or "")
-    return bool(request_name and invoice_permissions.can_edit_request(request_name, user))
+    if not request_name and batch:
+        request_name = str(_get(batch, "request") or "")
+    return bool(
+        request_name
+        and invoice_permissions.can_edit_request(
+            request_name, user, current=current
+        )
+    )
 
 def _require_record(name: str, *, write=False, current=False):
     user = _user()
     record = _current_doc(RECORD_DOCTYPE, name) if current else frappe.get_doc(RECORD_DOCTYPE, name)
-    allowed = _can_write_record(record, user) if write else can_read_invoice(record, user)
+    allowed = (
+        _can_write_record(record, user, current=current)
+        if write
+        else can_read_invoice(record, user, current=current)
+    )
     if not allowed:
         _throw("您无权访问该发票记录。")
     return record
@@ -194,7 +210,7 @@ def _require_batch(name: str, *, owner_only=False, current=False):
     if owner_only:
         allowed = _get(batch, "owner") == user or user == "Administrator" or "System Manager" in _roles(user)
     else:
-        allowed = can_read_invoice(batch, user)
+        allowed = can_read_invoice(batch, user, current=current)
     if not allowed:
         _throw("您无权访问该发票批次。")
     if _get(batch, "batch_status") == "已取消":
@@ -233,7 +249,10 @@ def _safe_file_url(file_url) -> str:
 
 
 def _file_doc(file_url: str, *, current=False):
-    name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+    lookup_kwargs = {"for_update": True} if current else {}
+    name = frappe.db.get_value(
+        "File", {"file_url": file_url}, "name", **lookup_kwargs
+    )
     if not name:
         _throw("找不到已上传的发票文件。")
     file_doc = _current_doc("File", name) if current else frappe.get_doc("File", name)
@@ -368,11 +387,12 @@ def _lease_lock(category: str, *parts, timeout=600, blocking_timeout=15):
 def _mark_enqueue_failure(invoice_name):
     try:
         with _transaction_lock("record", invoice_name):
-            record = frappe.get_doc(RECORD_DOCTYPE, invoice_name)
+            record = _current_doc(RECORD_DOCTYPE, invoice_name)
             if _get(record, "recognition_status") == "排队中":
                 _set(record, "recognition_status", "失败")
                 _set(record, "processing_error", ENQUEUE_FAILURE_MESSAGE)
                 _set(record, "processing_started_on", None)
+                _set(record, "processing_claim_id", "")
                 _save(record)
                 _recompute_record_batch(record)
         frappe.db.commit()
@@ -408,26 +428,20 @@ def _recompute_batch_after_commit(batch_name):
         return
     pending.add(batch_name)
 
-    def run():
+    def enqueue_recompute():
         pending.discard(batch_name)
         try:
-            recompute_batch(batch_name)
-            frappe.db.commit()
+            frappe.enqueue(
+                "rayher_hr_payroll.invoice_ocr.jobs.recompute_invoice_batch",
+                batch_name=batch_name,
+                queue="short",
+                enqueue_after_commit=False,
+            )
         except Exception:
-            rollback = getattr(frappe.db, "rollback", None)
-            if callable(rollback):
-                rollback()
-            _log_internal("Invoice OCR batch aggregation failed")
-            try:
-                frappe.enqueue(
-                    "rayher_hr_payroll.invoice_ocr.jobs.recompute_invoice_batch",
-                    batch_name=batch_name,
-                    queue="short",
-                )
-            except Exception:
-                _log_internal("Invoice OCR batch aggregation retry enqueue failed")
+            _log_internal("Invoice OCR batch aggregation enqueue failed")
 
-    frappe.db.after_commit.add(run)
+    frappe.db.after_commit.add(enqueue_recompute)
+    frappe.db.after_rollback.add(lambda: pending.discard(batch_name))
 
 
 def _recompute_record_batch(record):
@@ -629,6 +643,7 @@ def _confirm(record):
     _set(record, "confirmed_on", _now())
     _set(record, "processing_error", "")
     _set(record, "processing_started_on", None)
+    _set(record, "processing_claim_id", "")
     _save(record)
 
 
@@ -689,10 +704,11 @@ def retry_invoice(invoice_name):
         status = _get(record, "recognition_status")
         if status != "失败" and not (status == "识别中" and _processing_claim_is_stale(record)):
             _throw("只有识别失败或识别超时的发票可以重试。")
-        _read_private_record(record)
+        _read_private_record(record, current=True)
         _set(record, "recognition_status", "排队中")
         _set(record, "processing_error", "")
         _set(record, "processing_started_on", None)
+        _set(record, "processing_claim_id", "")
         _save(record)
         _recompute_record_batch(record)
         _enqueue_recognition_after_commit(_get(record, "name"))
@@ -713,6 +729,7 @@ def exclude_invoice(invoice_name, reason):
         _set(record, "recognition_status", "已排除")
         _set(record, "duplicate_reason", f"排除：{reason}")
         _set(record, "processing_started_on", None)
+        _set(record, "processing_claim_id", "")
         _save(record)
         _recompute_record_batch(record)
         return _serialize_record(record)
@@ -735,18 +752,23 @@ def resolve_duplicate(invoice_name, reason):
         key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _get(record, "total_amount"))
         _set(record, "recognition_status", "待确认")
         _set(record, "duplicate_reason", f"{_resolution_prefix(key)}{reason}")
+        _set(record, "processing_claim_id", "")
         _save(record)
         _recompute_record_batch(record)
         return _serialize_record(record)
 
 
 
-def _request_permission(request_doc, ptype):
+def _request_permission(request_doc, ptype, *, current=False):
     user = _user()
     if ptype == "edit":
-        allowed = invoice_permissions.can_edit_request(request_doc, user)
+        allowed = invoice_permissions.can_edit_request(
+            request_doc, user, current=current
+        )
     else:
-        allowed = invoice_permissions.can_read_request(request_doc, user)
+        allowed = invoice_permissions.can_read_request(
+            request_doc, user, current=current
+        )
     if not allowed:
         _throw("您无权访问该费用付款/报销单。")
 
@@ -771,7 +793,7 @@ def link_invoice(invoice_name, request, expense_line_key):
                     _throw("发票批次已发生变化，请刷新后重试。")
                 batch = _current_doc(BATCH_DOCTYPE, batch_name)
                 request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
-                _request_permission(request_doc, "edit")
+                _request_permission(request_doc, "edit", current=True)
                 if _get(record, "recognition_status") != "已确认":
                     _throw("只有已确认发票可以关联费用明细。")
                 if _get(request_doc, "workflow_status") not in ACTIVE_REQUEST_STATUSES:
@@ -842,8 +864,8 @@ def _preview_cache_key(token):
 
 
 def preview_invoice(invoice_name):
-    record = _require_record(str(invoice_name))
-    _file_doc_value, _content = _read_private_record(record)
+    record = _require_record(str(invoice_name), current=True)
+    _file_doc_value, _content = _read_private_record(record, current=True)
     token = secrets.token_urlsafe(32)
     payload = json.dumps(
         {"user": _user(), "invoice": _get(record, "name")},

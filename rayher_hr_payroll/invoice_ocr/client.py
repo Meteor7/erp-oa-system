@@ -184,8 +184,6 @@ def _read_response(response) -> bytes:
 def recognize_document(content: bytes, filename: str, record_id: str) -> dict:
     """Send one server-read private file to one verified private endpoint."""
     base_url, headers = _configured_endpoint()
-    session = requests.Session()
-    session.trust_env = False
     request_kwargs = {
         "files": {"file": (filename, content, "application/octet-stream")},
         "data": {"record_id": record_id},
@@ -196,10 +194,12 @@ def recognize_document(content: bytes, filename: str, record_id: str) -> dict:
     if headers:
         request_kwargs["headers"] = headers
     try:
-        with session.post(f"{base_url}/v1/recognize", **request_kwargs) as response:
-            if response.status_code != 200:
-                raise OCRServiceError(_status_message(response.status_code))
-            raw = _read_response(response)
+        with requests.Session() as session:
+            session.trust_env = False
+            with session.post(f"{base_url}/v1/recognize", **request_kwargs) as response:
+                if response.status_code != 200:
+                    raise OCRServiceError(_status_message(response.status_code))
+                raw = _read_response(response)
     except OCRServiceError:
         raise
     except requests.RequestException as error:

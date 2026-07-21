@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 import frappe
 
 from rayher_hr_payroll.invoice_ocr import client, service
+
+_QUEUED = "\u6392\u961f\u4e2d"
+_PROCESSING = "\u8bc6\u522b\u4e2d"
+_FAILED = "\u5931\u8d25"
 
 
 def _safe_error(error: Exception) -> str:
@@ -44,6 +49,7 @@ def _save_success(record, payload: dict):
     )
     service._set(record, "processing_error", "")
     service._set(record, "processing_started_on", None)
+    service._set(record, "processing_claim_id", "")
     service._set(record, "duplicate_of", "")
     service._set(record, "duplicate_reason", "")
     key, _duplicate = service._business_duplicate(record)
@@ -88,46 +94,90 @@ def _recompute_safely(record):
         service._log_internal("Invoice OCR batch aggregation failed")
 
 
+def _claim_is_current(record, claim_id: str) -> bool:
+    return (
+        service._get(record, "recognition_status") == _PROCESSING
+        and service._get(record, "processing_claim_id") == claim_id
+    )
+
+
+def _read_claimed_private_file(record, claim_id: str):
+    file_url = service._safe_file_url(service._get(record, "invoice_file"))
+    preliminary_file = service._file_doc(file_url)
+    file_name = str(service._get(preliminary_file, "name") or "")
+    with service._transaction_lock("file", file_name):
+        current = service._current_doc(service.RECORD_DOCTYPE, service._get(record, "name"))
+        if not _claim_is_current(current, claim_id):
+            return current, None
+        _file_doc, content = service._read_private_record(current, current=True)
+        return current, content
+
+
+def _save_failure(record, error: Exception):
+    service._set(record, "recognition_status", _FAILED)
+    service._set(record, "processing_error", _safe_error(error))
+    service._set(record, "processing_started_on", None)
+    service._set(record, "processing_claim_id", "")
+    service._set(
+        record,
+        "retry_count",
+        int(service._get(record, "retry_count") or 0) + 1,
+    )
+    service._save(record)
+
+
 def recognize_invoice(invoice_name: str):
-    """Recognize one queued record under a long site-scoped record lease."""
+    """Recognize one queued record and fence late workers by a durable claim ID."""
     name = str(invoice_name)
     with service._lease_lock("record", name, timeout=600, blocking_timeout=15):
         record = service._current_doc(service.RECORD_DOCTYPE, name)
-        if service._get(record, "recognition_status") != "排队中":
+        if service._get(record, "recognition_status") != _QUEUED:
             return service._serialize_record(record)
 
-        service._set(record, "recognition_status", "识别中")
+        claim_id = uuid.uuid4().hex
+        service._set(record, "recognition_status", _PROCESSING)
         service._set(record, "processing_error", "")
         service._set(record, "processing_started_on", service._now())
+        service._set(record, "processing_claim_id", claim_id)
         service._save(record)
-        # This is a top-level worker transaction boundary. It makes the claim
-        # recoverable before a slow/OOM-prone OCR call while the Redis lease
-        # remains held independently across the network operation.
+        # Persist the claim before the slow sidecar call. The Redis lease is only
+        # an optimization; processing_claim_id is the durable fencing token.
         frappe.db.commit()
         _recompute_safely(record)
 
+        payload = None
+        outcome_error = None
         try:
-            _file_doc, content = service._read_private_record(record)
+            current, content = _read_claimed_private_file(record, claim_id)
+            # Release the File/current-read transaction lock before OCR. A late
+            # result is still fenced by the durable claim below.
+            frappe.db.commit()
+            if content is None:
+                return service._serialize_record(current)
             payload = client.recognize_document(
                 content,
-                service._get(record, "original_filename"),
-                service._get(record, "name"),
+                service._get(current, "original_filename"),
+                service._get(current, "name"),
             )
-            _save_success(record, payload)
         except Exception as error:
-            service._set(record, "recognition_status", "失败")
-            service._set(record, "processing_error", _safe_error(error))
-            service._set(record, "processing_started_on", None)
-            service._set(
-                record,
-                "retry_count",
-                int(service._get(record, "retry_count") or 0) + 1,
-            )
-            service._save(record)
+            outcome_error = error
 
-        # A background worker owns this top-level transaction boundary. Commit
-        # the terminal record/business-key reservation before recomputing the
-        # aggregate from committed rows in a separate transaction.
+        # SELECT ... FOR UPDATE is the final record lock. A retry/new worker may
+        # have replaced the claim after this worker's Redis lease expired.
+        current = service._current_doc(service.RECORD_DOCTYPE, name)
+        if not _claim_is_current(current, claim_id):
+            frappe.db.commit()
+            return service._serialize_record(current)
+
+        if outcome_error is not None:
+            _save_failure(current, outcome_error)
+        else:
+            try:
+                _save_success(current, payload)
+            except Exception as error:
+                _save_failure(current, error)
+
+        # Commit the fenced terminal state before recomputing from committed rows.
         frappe.db.commit()
-        _recompute_safely(record)
-        return service._serialize_record(record)
+        _recompute_safely(current)
+        return service._serialize_record(current)
