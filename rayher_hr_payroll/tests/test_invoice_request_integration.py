@@ -208,6 +208,20 @@ def test_amount_mismatch_requires_per_line_reason(monkeypatch):
     )
 
 
+def test_database_zero_for_missing_ocr_total_still_requires_difference_reason(monkeypatch):
+    record = _invoice(
+        total="0.00",
+        ocr_payload=json.dumps({"fields": {"total_amount": None}}),
+    )
+    _install_records(monkeypatch, [record])
+    with pytest.raises(ValidationError, match="\u91d1\u989d\u7f3a\u5931"):
+        service.validate_request_invoices(_request(amount="100.00"), submitting=True)
+    service.validate_request_invoices(
+        _request(amount="100.00", difference_reason="OCR did not read a total"),
+        submitting=True,
+    )
+
+
 def test_uninvoiced_line_requires_difference_reason_when_other_lines_have_invoices(monkeypatch):
     request = _request(amount="100.00")
     request.expense_lines.append(

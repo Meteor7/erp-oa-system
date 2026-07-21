@@ -31,7 +31,9 @@ PREVIEW_TOKEN_TTL_SECONDS = 60
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 CANONICAL_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
 EDITABLE_FIELDS = {"invoice_category", "project_name", "issue_date", "invoice_number", "amount_before_tax", "tax_amount", "total_amount"}
-REQUEST_RECORD_FIELDS = ["name", "batch", "recognition_status", "invoice_category", "project_name", "invoice_number", "total_amount", "request", "expense_line_key"]
+MONEY_FIELDS = {"amount_before_tax", "tax_amount", "total_amount"}
+_MANUAL_PRESENCE_PREFIX = "manual-field-presence:"
+REQUEST_RECORD_FIELDS = ["name", "batch", "recognition_status", "invoice_category", "project_name", "invoice_number", "total_amount", "ocr_payload", "field_warnings", "request", "expense_line_key"]
 REQUEST_SEARCH_LIMIT = 2000
 REQUEST_REASON_LIMIT = 1000
 FINANCE_ROLES = {"System Manager", "Accounts User"}
@@ -659,11 +661,69 @@ def _parse_values(values, *, controlled_message="只能修改七项发票字段�
     return dict(values)
 
 
+def _warning_entries(record):
+    try:
+        warnings = json.loads(_get(record, "field_warnings") or "[]")
+    except (TypeError, ValueError):
+        return []
+    return warnings if isinstance(warnings, list) else []
+
+
+def _has_supplied_value(value):
+    return value is not None and str(value).strip() != ""
+
+
+def _set_money_presence_markers(record, supplied):
+    touched = MONEY_FIELDS.intersection(supplied)
+    if not touched:
+        return
+    warnings = []
+    for warning in _warning_entries(record):
+        if not isinstance(warning, str) or not warning.startswith(_MANUAL_PRESENCE_PREFIX):
+            warnings.append(warning)
+            continue
+        marker = warning[len(_MANUAL_PRESENCE_PREFIX):].split(":", 1)
+        if not marker or marker[0] not in touched:
+            warnings.append(warning)
+    for field in sorted(touched):
+        state = "present" if _has_supplied_value(supplied[field]) else "blank"
+        warnings.append(f"{_MANUAL_PRESENCE_PREFIX}{field}:{state}")
+    _set(record, "field_warnings", json.dumps(warnings, ensure_ascii=False, separators=(",", ":")))
+
+
+def _money_presence(record, field):
+    prefix = f"{_MANUAL_PRESENCE_PREFIX}{field}:"
+    for warning in reversed(_warning_entries(record)):
+        if isinstance(warning, str) and warning.startswith(prefix):
+            return warning == f"{prefix}present"
+    try:
+        payload = json.loads(_get(record, "ocr_payload") or "{}")
+    except (TypeError, ValueError):
+        return None
+    fields = payload.get("fields") if isinstance(payload, dict) else None
+    if not isinstance(fields, dict) or field not in fields:
+        return None
+    return _has_supplied_value(fields.get(field))
+
+
+def _record_money(record, field):
+    return None if _money_presence(record, field) is False else _get(record, field)
+
+
+def _public_field_warnings(record):
+    warnings = [
+        warning for warning in _warning_entries(record)
+        if not (isinstance(warning, str) and warning.startswith(_MANUAL_PRESENCE_PREFIX))
+    ]
+    return json.dumps(warnings, ensure_ascii=False, separators=(",", ":"))
+
+
 def _apply_supplied_fields(record, supplied):
     current = {field: _get(record, field) for field in EDITABLE_FIELDS}
     current.update(supplied)
     for field, value in _normalized_fields(current).items():
         _set(record, field, value)
+    _set_money_presence_markers(record, supplied)
 
 
 def update_invoice(invoice_name, values):
@@ -688,13 +748,14 @@ def _resolution_applies(record, key):
 
 
 def _business_duplicate(record, *, current=False):
-    key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _get(record, "total_amount"))
+    total_amount = _record_money(record, "total_amount")
+    key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), total_amount)
     if not key:
         return None, None
     filters = {
         "invoice_number": str(_get(record, "invoice_number") or "").strip(),
         "issue_date": _get(record, "issue_date"),
-        "total_amount": _get(record, "total_amount"),
+        "total_amount": total_amount,
         "recognition_status": "已确认",
     }
     return key, _first_duplicate(filters, exclude=_get(record, "name"), current=current)
@@ -812,7 +873,7 @@ def resolve_duplicate(invoice_name, reason):
         record = _current_doc(RECORD_DOCTYPE, name)
         if _get(record, "recognition_status") != "疑似重复":
             _throw("该发票当前不是疑似重复状态。")
-        key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _get(record, "total_amount"))
+        key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _record_money(record, "total_amount"))
         _set(record, "recognition_status", "待确认")
         _set(record, "duplicate_reason", f"{_resolution_prefix(key)}{reason}")
         _set(record, "processing_claim_id", "")
@@ -1106,7 +1167,7 @@ def validate_request_invoices(request_doc, submitting: bool):
             messages.append("发票关联的费用明细不属于该报销单")
             continue
         linked_counts[line_key] += 1
-        total = _decimal_money(_get(record, "total_amount"))
+        total = _decimal_money(_record_money(record, "total_amount"))
         if total is None:
             missing_totals.add(line_key)
         else:
@@ -1375,8 +1436,8 @@ def _serialize_record(record):
         "name": _get(record, "name"), "batch": _get(record, "batch"), "original_filename": _get(record, "original_filename"),
         "mime_type": _get(record, "mime_type"), "file_size": int(_get(record, "file_size") or 0), "recognition_status": _get(record, "recognition_status"),
         "invoice_category": _get(record, "invoice_category") or "", "project_name": _get(record, "project_name") or "", "issue_date": _get(record, "issue_date"),
-        "invoice_number": _get(record, "invoice_number") or "", "amount_before_tax": _get(record, "amount_before_tax"), "tax_amount": _get(record, "tax_amount"),
-        "total_amount": _get(record, "total_amount"), "field_warnings": _get(record, "field_warnings") or "[]", "is_duplicate": bool(_get(record, "duplicate_of")),
+        "invoice_number": _get(record, "invoice_number") or "", "amount_before_tax": _record_money(record, "amount_before_tax"), "tax_amount": _record_money(record, "tax_amount"),
+        "total_amount": _record_money(record, "total_amount"), "field_warnings": _public_field_warnings(record), "is_duplicate": bool(_get(record, "duplicate_of")),
         "duplicate_reason": _get(record, "duplicate_reason") or "", "request": _get(record, "request") or "", "expense_line_key": _get(record, "expense_line_key") or "",
         "processing_started_on": _get(record, "processing_started_on"), "processing_error": _get(record, "processing_error") or "",
         "retry_count": int(_get(record, "retry_count") or 0),

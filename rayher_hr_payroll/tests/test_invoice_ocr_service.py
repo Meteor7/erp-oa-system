@@ -431,6 +431,64 @@ def test_update_only_seven_fields_and_normalizes_money_date(env):
         service.update_invoice(record.name, {"owner": "attacker@example.com"})
 
 
+def test_serialized_money_preserves_ocr_blank_without_hiding_real_zero(env):
+    env.add_batch()
+    record = env.add_record(
+        amount_before_tax=Decimal("0.00"),
+        tax_amount=Decimal("0.00"),
+        total_amount=Decimal("0.00"),
+        ocr_payload=json.dumps({"fields": {
+            "amount_before_tax": None,
+            "tax_amount": "0.00",
+            "total_amount": None,
+        }}),
+        field_warnings=json.dumps(["required_fields_missing"]),
+    )
+    result = service._serialize_record(record)
+    assert result["amount_before_tax"] is None
+    assert result["tax_amount"] == Decimal("0.00")
+    assert result["total_amount"] is None
+    assert json.loads(result["field_warnings"]) == ["required_fields_missing"]
+
+
+def test_manual_money_presence_overrides_ocr_presence_and_stays_internal(env):
+    env.add_batch()
+    record = env.add_record(
+        total_amount=Decimal("0.00"),
+        ocr_payload=json.dumps({"fields": {"total_amount": None}}),
+        field_warnings=json.dumps(["required_fields_missing"]),
+    )
+    entered = service.update_invoice(record.name, {"total_amount": "0.00"})
+    assert entered["total_amount"] == Decimal("0.00")
+    assert json.loads(entered["field_warnings"]) == ["required_fields_missing"]
+    assert "manual-field-presence:total_amount:present" in json.loads(record.field_warnings)
+
+    cleared = service.update_invoice(record.name, {"total_amount": ""})
+    assert cleared["total_amount"] is None
+    assert "manual-field-presence:total_amount:blank" in json.loads(record.field_warnings)
+    assert all("manual-field-presence:" not in item for item in json.loads(cleared["field_warnings"]))
+
+
+def test_missing_ocr_total_does_not_create_zero_value_duplicate_key(env):
+    env.add_batch()
+    env.add_record(
+        name="INV-OLD-ZERO",
+        recognition_status="\u5df2\u786e\u8ba4",
+        invoice_number="000123",
+        issue_date="2026-07-14",
+        total_amount=Decimal("0.00"),
+        ocr_payload=json.dumps({"fields": {"total_amount": "0.00"}}),
+    )
+    record = env.add_record(
+        name="INV-MISSING-TOTAL",
+        invoice_number="000123",
+        issue_date="2026-07-14",
+        total_amount=Decimal("0.00"),
+        ocr_payload=json.dumps({"fields": {"total_amount": None}}),
+    )
+    assert service._business_duplicate(record) == (None, None)
+
+
 def test_confirm_allows_missing_fields_but_stamps_server_audit(env):
     env.add_batch(); record = env.add_record(invoice_number="", issue_date=None, total_amount=None)
     result = service.confirm_invoice(record.name, {"invoice_category": "电子发票（普通发票）"})
