@@ -1,6 +1,6 @@
 # Monthly R&D Timesheet Entry Design
 
-**Date:** 2026-07-21  
+**Date:** 2026-07-21
 **Status:** Approved in conversation and delegated to the main task
 
 ## Goal

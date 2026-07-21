@@ -46,7 +46,7 @@ def test_timesheet_monthly_entry_fields_exist():
 
 - [ ] **Step 2: Run the test and verify RED**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_custom_fields.py::test_timesheet_monthly_entry_fields_exist -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_custom_fields.py::test_timesheet_monthly_entry_fields_exist -q`
 Expected: FAIL because `rd_monthly_entry_id` is absent.
 
 - [ ] **Step 3: Add the five hidden/read-only fields**
@@ -55,7 +55,7 @@ Add the field definitions after `rd_spa_managed`, with precision 2 for days/hour
 
 - [ ] **Step 4: Run the custom-field suite and verify GREEN**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_custom_fields.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_custom_fields.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -98,7 +98,7 @@ def test_days_cannot_exceed_calendar_month(fake_frappe):
 
 - [ ] **Step 2: Run the tests and verify RED**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_monthly_timesheet_entry.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_monthly_timesheet_entry.py -q`
 Expected: collection/import failure because the module does not exist.
 
 - [ ] **Step 3: Implement the pure Decimal helpers**
@@ -107,7 +107,7 @@ Use `Decimal`, `InvalidOperation`, `ROUND_HALF_UP`, and `calendar.monthrange`. R
 
 - [ ] **Step 4: Run the domain tests and verify GREEN**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_monthly_timesheet_entry.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_monthly_timesheet_entry.py -q`
 Expected: PASS for the pure helper tests.
 
 - [ ] **Step 5: Commit**
@@ -179,7 +179,7 @@ Remove Employee and Accounts User from the write tuple, retain them in the view 
 
 - [ ] **Step 8: Run focused backend suites**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_monthly_timesheet_entry.py rayher_hr_payroll/tests/test_timesheet_entry.py rayher_hr_payroll/tests/test_timesheet_controls.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_monthly_timesheet_entry.py rayher_hr_payroll/tests/test_timesheet_entry.py rayher_hr_payroll/tests/test_timesheet_controls.py -q`
 Expected: PASS.
 
 - [ ] **Step 9: Commit**
@@ -302,17 +302,17 @@ Keep monthly missing-timesheet and dashboard totals based on hours; do not conve
 
 - [ ] **Step 4: Run the complete backend suite**
 
-Run: `python -m pytest -q`  
+Run: `python -m pytest -q`
 Expected: all tests PASS.
 
 - [ ] **Step 5: Run the complete frontend suite**
 
-Run all `frontend/tests/*.test.js` with the bundled Node executable.  
+Run all `frontend/tests/*.test.js` with the bundled Node executable.
 Expected: all tests PASS.
 
 - [ ] **Step 6: Build the frontend**
 
-Run Vite production build from `frontend`.  
+Run Vite production build from `frontend`.
 Expected: build succeeds and outputs updated assets under `rayher_hr_payroll/public/frontend`.
 
 - [ ] **Step 7: Verify plaintext and Git diff**
