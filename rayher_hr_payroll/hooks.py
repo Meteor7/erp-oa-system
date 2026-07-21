@@ -80,6 +80,9 @@ permission_query_conditions = {
     "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_query",
     "Compensatory Leave Request": "rayher_hr_payroll.request_visibility.compensatory_leave_query",
     "Salary Slip": "rayher_hr_payroll.request_visibility.salary_slip_query",
+    "OA Invoice Import Batch": "rayher_hr_payroll.invoice_ocr.permissions.invoice_batch_query",
+    "OA Invoice Record": "rayher_hr_payroll.invoice_ocr.permissions.invoice_record_query",
+    "OA Invoice View Log": "rayher_hr_payroll.invoice_ocr.permissions.invoice_view_log_query",
 }
 
 has_permission = {
@@ -88,4 +91,7 @@ has_permission = {
     "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_has_permission",
     "Compensatory Leave Request": "rayher_hr_payroll.request_visibility.compensatory_leave_has_permission",
     "Salary Slip": "rayher_hr_payroll.request_visibility.salary_slip_has_permission",
+    "OA Invoice Import Batch": "rayher_hr_payroll.invoice_ocr.permissions.invoice_batch_has_permission",
+    "OA Invoice Record": "rayher_hr_payroll.invoice_ocr.permissions.invoice_record_has_permission",
+    "OA Invoice View Log": "rayher_hr_payroll.invoice_ocr.permissions.invoice_view_log_has_permission",
 }
