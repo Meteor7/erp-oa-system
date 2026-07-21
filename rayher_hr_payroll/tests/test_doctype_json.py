@@ -607,3 +607,11 @@ def test_invoice_view_log_before_insert_stops_when_source_read_is_denied(monkeyp
     assert log.viewed_on == "2000-01-01 00:00:00"
     assert log.ip_address == "198.51.100.99"
     assert log.user_agent == "Forged Browser"
+
+
+def test_invoice_record_tracks_processing_claim_timestamp():
+    invoice = load_doctype("oa_invoice_record")
+    fields = {field["fieldname"]: field for field in invoice["fields"]}
+    assert fields["processing_started_on"]["fieldtype"] == "Datetime"
+    assert fields["processing_started_on"]["read_only"] == 1
+    assert invoice["field_order"].index("processing_started_on") < invoice["field_order"].index("processing_error")

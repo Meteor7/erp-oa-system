@@ -219,6 +219,7 @@ def env(tmp_path, monkeypatch):
     frappe_stub_module.has_permission = lambda *args, **kwargs: environment.permission_allowed
     frappe_stub_module.conf = types.SimpleNamespace(invoice_ocr_url="http://invoice-ocr:8080")
     frappe_stub_module.local = types.SimpleNamespace(request=None)
+    frappe_stub_module.form_dict = types.SimpleNamespace()
     monkeypatch.setattr(service, "can_read_invoice", lambda doc, user=None: environment.read_allowed and (doc.get("owner") == (user or frappe_stub_module.session.user) or bool(set(environment.roles.get(user or frappe_stub_module.session.user, [])) & {"System Manager", "Accounts User"}) or bool(doc.get("request"))))
     return environment
 
@@ -280,16 +281,28 @@ def test_create_batch_uses_only_server_owned_audit_and_random_token(env):
 
 
 def test_register_file_uses_real_server_metadata_forces_private_and_queues_after_commit(env):
-    env.add_batch(); file_doc = env.add_file(filename="server.pdf", content=b"%PDF-1.7\nreal")
-    result = service.register_file("BATCH-1", file_doc.file_url, original_filename="spoof.png", mime_type="image/png", file_size=1)
+    env.add_batch()
+    file_doc = env.add_file(filename="server.pdf", content=b"%PDF-1.7\nreal")
+    result = service.register_file("BATCH-1", file_doc.file_url)
     assert result["recognition_status"] == "排队中"
     record = env.docs[service.RECORD_DOCTYPE][result["name"]]
-    assert record.original_filename == "server.pdf" and record.mime_type == "application/pdf" and record.file_size == len(b"%PDF-1.7\nreal")
+    assert record.original_filename == "server.pdf"
+    assert record.mime_type == "application/pdf"
+    assert record.file_size == len(b"%PDF-1.7\nreal")
     assert record.file_sha256 == hashlib.sha256(b"%PDF-1.7\nreal").hexdigest()
-    assert file_doc.is_private == 1 and file_doc.attached_to_doctype == service.RECORD_DOCTYPE and file_doc.attached_to_name == record.name
-    assert env.enqueued == [("rayher_hr_payroll.invoice_ocr.jobs.recognize_invoice", {"invoice_name": record.name, "queue": "long", "enqueue_after_commit": True})]
-    assert env.locks[0][0] == "invoice:batch:BATCH-1"
-    assert any(key == f"invoice:file:{record.file_sha256}" for key, _kwargs in env.locks)
+    assert file_doc.is_private == 1
+    assert file_doc.attached_to_doctype == service.RECORD_DOCTYPE
+    assert file_doc.attached_to_name == record.name
+    assert env.enqueued == []
+    env.db.commit()
+    assert env.enqueued == [
+        (
+            "rayher_hr_payroll.invoice_ocr.jobs.recognize_invoice",
+            {"invoice_name": record.name, "queue": "long"},
+        )
+    ]
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories[:3] == ["batch", "file", "file-hash"]
 
 
 @pytest.mark.parametrize("url", ["/files/public.pdf", "/private/files/../secret.pdf", "/private/files/a.pdf?x=1", "/private/files/%2Fsecret.pdf"])
@@ -364,12 +377,28 @@ def test_confirm_allows_missing_fields_but_stamps_server_audit(env):
 
 
 def test_confirm_detects_business_duplicate_under_lock(env):
-    env.add_batch(); prior = env.add_record(name="INV-OLD", recognition_status="已确认", invoice_number="0001", issue_date="2026-07-14", total_amount=Decimal("35.98"))
-    current = env.add_record(name="INV-NEW", invoice_number="0001", issue_date="2026-07-14", total_amount=Decimal("35.98"))
-    with pytest.raises(ValidationError, match="疑似重复"):
-        service.confirm_invoice(current.name)
-    assert current.recognition_status == "疑似重复" and current.duplicate_of == prior.name
-    assert env.locks[-1][0] == "invoice:business:0001|2026-07-14|35.98"
+    env.add_batch()
+    prior = env.add_record(
+        name="INV-OLD",
+        recognition_status="已确认",
+        invoice_number="0001",
+        issue_date="2026-07-14",
+        total_amount=Decimal("35.98"),
+    )
+    current = env.add_record(
+        name="INV-NEW",
+        invoice_number="0001",
+        issue_date="2026-07-14",
+        total_amount=Decimal("35.98"),
+    )
+    result = service.confirm_invoice(current.name)
+    assert result["recognition_status"] == "疑似重复"
+    assert result["conflict"]["duplicate_of"] == prior.name
+    assert current.duplicate_of == prior.name
+    assert any(
+        key == service._lock_key("business", "0001|2026-07-14|35.98")
+        for key, _kwargs in env.locks
+    )
 
 
 def test_resolve_duplicate_requires_finance_and_reason_and_preserves_reference(env):
@@ -384,33 +413,81 @@ def test_resolve_duplicate_requires_finance_and_reason_and_preserves_reference(e
 
 
 def test_retry_and_exclude_have_explicit_state_rules(env):
-    env.add_batch(); file_doc = env.add_file(); failed = env.add_record(recognition_status="失败", processing_error="safe", invoice_file=file_doc.file_url, file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest())
-    file_doc.attached_to_doctype = service.RECORD_DOCTYPE; file_doc.attached_to_name = failed.name
+    env.add_batch()
+    file_doc = env.add_file()
+    failed = env.add_record(
+        recognition_status="失败",
+        processing_error="safe",
+        invoice_file=file_doc.file_url,
+        file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(),
+    )
+    file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+    file_doc.attached_to_name = failed.name
     service.retry_invoice(failed.name)
-    assert failed.recognition_status == "排队中" and failed.processing_error == "" and env.enqueued[-1][1]["enqueue_after_commit"] is True
+    assert failed.recognition_status == "排队中"
+    assert failed.processing_error == ""
+    assert env.enqueued == []
+    env.db.commit()
+    assert env.enqueued[-1][1] == {"invoice_name": failed.name, "queue": "long"}
     pending = env.add_record(name="INV-P", recognition_status="待确认")
-    with pytest.raises(ValidationError, match="原因"): service.exclude_invoice(pending.name, "")
+    with pytest.raises(ValidationError, match="原因"):
+        service.exclude_invoice(pending.name, "")
     service.exclude_invoice(pending.name, "个人消费")
     assert pending.recognition_status == "已排除" and pending.invoice_file
 
 
 def test_link_validates_line_ownership_and_allows_many_invoices_per_line(env):
-    env.add_batch(); request = Doc(env, dict(doctype=service.REQUEST_DOCTYPE, name="REQ-1", workflow_status="草稿")); env.docs[service.REQUEST_DOCTYPE][request.name] = request
-    line = Doc(env, dict(doctype=service.LINE_DOCTYPE, name="LINE-1", parent="REQ-1", parenttype=service.REQUEST_DOCTYPE, parentfield="expense_lines", line_key="KEY-1")); env.docs[service.LINE_DOCTYPE][line.name] = line
-    one = env.add_record(name="INV-1", recognition_status="已确认"); two = env.add_record(name="INV-2", recognition_status="已确认")
-    service.link_invoice(one.name, request.name, "KEY-1"); service.link_invoice(two.name, request.name, "KEY-1")
-    assert one.expense_line_key == two.expense_line_key == "KEY-1" and one.request == two.request == "REQ-1"
+    env.add_batch()
+    request = Doc(
+        env,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-1",
+            "owner": "alice@example.com",
+            "employee": "EMP-ALICE",
+            "workflow_status": "草稿",
+        },
+    )
+    env.docs[service.REQUEST_DOCTYPE][request.name] = request
+    line = Doc(
+        env,
+        {
+            "doctype": service.LINE_DOCTYPE,
+            "name": "LINE-1",
+            "parent": "REQ-1",
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "expense_lines",
+            "line_key": "KEY-1",
+        },
+    )
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    one = env.add_record(name="INV-1", recognition_status="已确认")
+    two = env.add_record(name="INV-2", recognition_status="已确认")
+    service.link_invoice(one.name, request.name, "KEY-1")
+    service.link_invoice(two.name, request.name, "KEY-1")
+    assert one.expense_line_key == two.expense_line_key == "KEY-1"
+    assert one.request == two.request == "REQ-1"
     with pytest.raises(ValidationError, match="不属于"):
-        service.link_invoice(env.add_record(name="INV-3", recognition_status="已确认").name, request.name, "OTHER")
+        service.link_invoice(
+            env.add_record(name="INV-3", recognition_status="已确认").name,
+            request.name,
+            "OTHER",
+        )
 
 
 def test_preview_logs_view_and_never_returns_disk_path(env):
-    env.add_batch(); file_doc = env.add_file(); record = env.add_record(invoice_file=file_doc.file_url, file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest())
-    file_doc.attached_to_doctype = service.RECORD_DOCTYPE; file_doc.attached_to_name = record.name
+    env.add_batch()
+    file_doc = env.add_file()
+    record = env.add_record(
+        invoice_file=file_doc.file_url,
+        file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(),
+    )
+    file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+    file_doc.attached_to_name = record.name
     result = service.preview_invoice(record.name)
-    assert result["file_url"] == "/private/files/invoice.pdf" and "full_path" not in result and "download" not in result
-    log = env.inserted[-1]
-    assert log.doctype == service.VIEW_LOG_DOCTYPE and log.invoice_record == record.name and log.action == "查看"
+    assert "file_url" not in result and "full_path" not in result
+    assert "/private/files/" not in result["preview_url"]
+    assert not env.docs[service.VIEW_LOG_DOCTYPE]
 
 
 def test_guest_is_rejected_before_any_insert(env):
@@ -446,22 +523,39 @@ def test_job_saves_complete_payload_and_seven_candidates_without_trusting_source
     assert result["recognition_status"] == "待确认"
     assert record.invoice_category == "电子发票（普通发票）"
     assert record.project_name == "文具；服务"
-    assert record.invoice_number == "000123" and record.total_amount == Decimal("106.00")
+    assert record.invoice_number == "000123"
+    assert record.total_amount == Decimal("106.00")
     assert json.loads(record.ocr_payload)["source_filename"] == "sidecar-name.pdf"
-    assert record.original_filename == "invoice.pdf" and record.file_sha256 == hashlib.sha256(b"%PDF-1.7\n").hexdigest()
+    assert record.original_filename == "invoice.pdf"
+    assert record.file_sha256 == hashlib.sha256(b"%PDF-1.7\n").hexdigest()
     assert record.field_warnings == "[]" and record.processing_error == ""
-    assert env.commits >= 2 and (f"invoice:record:{record.name}", {"timeout": 60, "blocking_timeout": 15}) in env.locks
+    assert env.commits >= 2
+    assert (
+        service._lock_key("record", record.name),
+        {"timeout": 600, "blocking_timeout": 15},
+    ) in env.locks
 
 
 def test_job_business_duplicate_is_marked_under_business_lock(env, monkeypatch):
     jobs = importlib.import_module("rayher_hr_payroll.invoice_ocr.jobs")
     record, _file = _queued_record_with_file(env, name="INV-NEW")
-    env.add_record(name="INV-OLD", recognition_status="已确认", invoice_number="000123", issue_date="2026-07-14", total_amount=Decimal("106.00"))
-    payload = _valid_payload(record.name); payload["file_sha256"] = record.file_sha256
+    env.add_record(
+        name="INV-OLD",
+        recognition_status="已确认",
+        invoice_number="000123",
+        issue_date="2026-07-14",
+        total_amount=Decimal("106.00"),
+    )
+    payload = _valid_payload(record.name)
+    payload["file_sha256"] = record.file_sha256
     monkeypatch.setattr(jobs.client, "recognize_document", Mock(return_value=payload))
     result = jobs.recognize_invoice(record.name)
-    assert result["recognition_status"] == "疑似重复" and record.duplicate_of == "INV-OLD"
-    assert any(key == "invoice:business:000123|2026-07-14|106.00" for key, _kwargs in env.locks)
+    assert result["recognition_status"] == "疑似重复"
+    assert record.duplicate_of == "INV-OLD"
+    assert any(
+        key == service._lock_key("business", "000123|2026-07-14|106.00")
+        for key, _kwargs in env.locks
+    )
 
 
 def test_job_failure_is_per_record_sanitized_and_increments_retry(env, monkeypatch):
@@ -498,24 +592,37 @@ def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monk
 
 
 def test_api_source_whitelists_only_public_endpoints():
-    from pathlib import Path
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 11
+    assert source.count("@frappe.whitelist") == 12
     assert "@frappe.whitelist\ndef _" not in source
     assert source.count('methods=["POST"]') == 9
+    assert source.count('methods=["GET"]') == 1
 
-def test_register_commits_record_visibility_before_releasing_duplicate_lock(env):
-    env.add_batch(); file_doc = env.add_file(content=b"%PDF-concurrent")
+
+def test_register_holds_reservations_for_top_level_auto_commit(env):
+    env.add_batch()
+    file_doc = env.add_file(content=b"%PDF-concurrent")
     service.register_file("BATCH-1", file_doc.file_url)
-    assert env.commits == 1
+    assert env.commits == 0
+    assert service._lock_key("batch", "BATCH-1") in env.active_locks
+    env.db.commit()
+    assert service._lock_key("batch", "BATCH-1") not in env.active_locks
 
 
-def test_confirm_commits_inside_business_lock_to_close_concurrent_confirm_race(env):
-    env.add_batch(); record = env.add_record(invoice_number="0009", issue_date="2026-07-14", total_amount=Decimal("9.00"))
+def test_confirm_holds_business_lock_for_top_level_auto_commit(env):
+    env.add_batch()
+    record = env.add_record(
+        invoice_number="0009",
+        issue_date="2026-07-14",
+        total_amount=Decimal("9.00"),
+    )
     service.confirm_invoice(record.name)
     assert record.recognition_status == "已确认"
-    assert env.commits == 1
-    assert any(key == "invoice:business:0009|2026-07-14|9.00" for key, _kwargs in env.locks)
+    assert env.commits == 0
+    key = service._lock_key("business", "0009|2026-07-14|9.00")
+    assert key in env.active_locks
+    env.db.commit()
+    assert key not in env.active_locks
 
 
 def test_get_batch_hides_temporary_token_from_nonowner_request_reader(env):
@@ -535,16 +642,44 @@ def test_job_record_state_survives_batch_aggregation_failure(env, monkeypatch):
 
 def test_duplicate_resolution_is_bound_to_reviewed_business_key(env):
     env.add_batch()
-    env.add_record(name="INV-A", recognition_status="已确认", invoice_number="A-1", issue_date="2026-07-14", total_amount=Decimal("10.00"))
-    prior_b = env.add_record(name="INV-B", recognition_status="已确认", invoice_number="B-1", issue_date="2026-07-15", total_amount=Decimal("20.00"))
-    current = env.add_record(name="INV-C", recognition_status="疑似重复", duplicate_of="INV-A", invoice_number="A-1", issue_date="2026-07-14", total_amount=Decimal("10.00"))
+    env.add_record(
+        name="INV-A",
+        recognition_status="已确认",
+        invoice_number="A-1",
+        issue_date="2026-07-14",
+        total_amount=Decimal("10.00"),
+    )
+    prior_b = env.add_record(
+        name="INV-B",
+        recognition_status="已确认",
+        invoice_number="B-1",
+        issue_date="2026-07-15",
+        total_amount=Decimal("20.00"),
+    )
+    current = env.add_record(
+        name="INV-C",
+        recognition_status="疑似重复",
+        duplicate_of="INV-A",
+        invoice_number="A-1",
+        issue_date="2026-07-14",
+        total_amount=Decimal("10.00"),
+    )
     frappe_stub_module.session.user = "finance@example.com"
     service.resolve_duplicate(current.name, "已核对A票")
     frappe_stub_module.session.user = "alice@example.com"
-    service.update_invoice(current.name, {"invoice_number": "B-1", "issue_date": "2026-07-15", "total_amount": "20.00"})
-    with pytest.raises(ValidationError, match="疑似重复"):
-        service.confirm_invoice(current.name)
-    assert current.recognition_status == "疑似重复" and current.duplicate_of == prior_b.name
+    service.update_invoice(
+        current.name,
+        {
+            "invoice_number": "B-1",
+            "issue_date": "2026-07-15",
+            "total_amount": "20.00",
+        },
+    )
+    result = service.confirm_invoice(current.name)
+    assert result["recognition_status"] == "疑似重复"
+    assert result["conflict"]["duplicate_of"] == prior_b.name
+    assert current.duplicate_of == prior_b.name
+
 
 def test_every_whitelisted_api_rejects_guest_before_delegation(env, monkeypatch):
     api = importlib.import_module("rayher_hr_payroll.api.invoice_entry")
@@ -604,3 +739,889 @@ def test_job_rejects_sidecar_hash_tampering_without_overwriting_server_hash(env,
     result = jobs.recognize_invoice(record.name)
     assert result["recognition_status"] == "失败"
     assert record.file_sha256 == original_hash
+
+# --- Task 5 security/concurrency review RED tests ---
+
+def _response_enter(self):
+    return self
+
+
+def _response_exit(self, *_args):
+    self.closed = True
+    return False
+
+
+def _response_iter_content(self, chunk_size=64 * 1024):
+    for offset in range(0, len(self.content), chunk_size):
+        yield self.content[offset : offset + chunk_size]
+
+
+Response.__enter__ = _response_enter
+Response.__exit__ = _response_exit
+Response.iter_content = _response_iter_content
+Response.close = lambda self: setattr(self, "closed", True)
+Response.headers = {}
+
+
+def _add_request(env, name="REQ-1", *, owner="alice@example.com", employee="EMP-ALICE", status="草稿"):
+    doc = Doc(
+        env,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": name,
+            "owner": owner,
+            "employee": employee,
+            "workflow_status": status,
+        },
+    )
+    env.docs[service.REQUEST_DOCTYPE][name] = doc
+    return doc
+
+
+def test_employee_knowing_foreign_record_name_cannot_update_or_confirm(env):
+    env.roles["bob@example.com"] = ["Employee"]
+    env.add_batch(owner="alice@example.com")
+    _add_request(env, owner="alice@example.com", employee="EMP-ALICE")
+    record = env.add_record(owner="alice@example.com", request="REQ-1")
+    frappe_stub_module.session.user = "bob@example.com"
+    with pytest.raises(ValidationError, match="无权"):
+        service.update_invoice(record.name, {"project_name": "blocked"})
+    with pytest.raises(ValidationError, match="无权"):
+        service.confirm_invoice(record.name)
+
+
+def test_accounts_user_cannot_edit_applicant_invoice_fields(env):
+    env.add_batch()
+    record = env.add_record(owner="alice@example.com")
+    frappe_stub_module.session.user = "finance@example.com"
+    with pytest.raises(ValidationError, match="无权"):
+        service.update_invoice(record.name, {"project_name": "blocked"})
+
+
+def test_request_owner_or_employee_user_may_edit_but_approver_only_reads(env, monkeypatch):
+    env.roles.update(
+        {
+            "owner@example.com": ["Employee"],
+            "applicant@example.com": ["Employee"],
+            "manager@example.com": ["Employee", "Department Manager"],
+        }
+    )
+    env.add_batch(owner="uploader@example.com")
+    request = _add_request(env, owner="owner@example.com", employee="EMP-APP")
+    request.department = "Sales"
+    record = env.add_record(owner="uploader@example.com", request=request.name)
+    original_get_value = env.db.get_value
+
+    def get_value(doctype, filters, fieldname, as_dict=False, **kwargs):
+        if doctype == "Employee" and isinstance(filters, dict) and filters.get("user_id") in {"applicant@example.com", "manager@example.com"}:
+            row = {"name": "EMP-APP" if filters.get("user_id") == "applicant@example.com" else "EMP-MGR", "employee_name": "Applicant", "department": "Sales"}
+            return row if as_dict else row.get(fieldname)
+        return original_get_value(doctype, filters, fieldname, as_dict=as_dict, **kwargs)
+
+    monkeypatch.setattr(env.db, "get_value", get_value)
+    frappe_stub_module.session.user = "owner@example.com"
+    assert service.update_invoice(record.name, {"project_name": "owner"})["project_name"] == "owner"
+    frappe_stub_module.session.user = "applicant@example.com"
+    assert service.update_invoice(record.name, {"project_name": "employee"})["project_name"] == "employee"
+    frappe_stub_module.session.user = "manager@example.com"
+    assert service.get_request_invoices(request.name)
+    with pytest.raises(ValidationError, match="无权"):
+        service.update_invoice(record.name, {"project_name": "manager"})
+
+
+def test_link_rejects_foreign_draft_even_when_generic_doctype_write_allows(env):
+    env.add_batch()
+    record = env.add_record(recognition_status="已确认")
+    request = _add_request(env, name="REQ-FOREIGN", owner="bob@example.com", employee="EMP-BOB")
+    line = Doc(
+        env,
+        {
+            "doctype": service.LINE_DOCTYPE,
+            "name": "LINE-1",
+            "parent": request.name,
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "expense_lines",
+            "line_key": "KEY-1",
+        },
+    )
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    env.permission_allowed = True
+    with pytest.raises(ValidationError, match="无权"):
+        service.link_invoice(record.name, request.name, "KEY-1")
+
+
+def test_get_request_invoices_rejects_unrelated_employee(env):
+    env.roles["bob@example.com"] = ["Employee"]
+    request = _add_request(env, owner="alice@example.com", employee="EMP-ALICE")
+    env.add_record(request=request.name)
+    frappe_stub_module.session.user = "bob@example.com"
+    with pytest.raises(ValidationError, match="无权"):
+        service.get_request_invoices(request.name)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://8.8.8.8:8080",
+        "http://169.254.169.254/latest",
+        "http://224.0.0.1:8080",
+        "http://0.0.0.0:8080",
+        "http://user:pass@203.0.113.73:8080",
+        "http://203.0.113.73:8080/?secret=1",
+    ],
+)
+def test_client_rejects_public_metadata_and_ambiguous_roots(env, monkeypatch, url):
+    frappe_stub_module.conf.invoice_ocr_url = url
+    post = Mock()
+    monkeypatch.setattr(client.requests, "post", post)
+    with pytest.raises(client.OCRServiceError, match="配置无效"):
+        client.recognize_document(b"x", "a.pdf", "INV-1")
+    post.assert_not_called()
+
+
+def test_client_rejects_hostname_if_any_dns_answer_is_public(env, monkeypatch):
+    frappe_stub_module.conf.invoice_ocr_url = "http://mixed.internal:8080"
+    monkeypatch.setattr(
+        client.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (2, 1, 6, "", ("203.0.113.73", 8080)),
+            (2, 1, 6, "", ("8.8.8.8", 8080)),
+        ],
+    )
+    with pytest.raises(client.OCRServiceError, match="配置无效"):
+        client.recognize_document(b"x", "a.pdf", "INV-1")
+
+
+def test_client_streams_closes_disables_redirects_and_limits_content_length(env, monkeypatch):
+    response = Response(payload=_valid_payload())
+    response.headers = {"Content-Length": str(client.MAX_RESPONSE_BYTES + 1)}
+    response.closed = False
+    post = Mock(return_value=response)
+    monkeypatch.setattr(client.requests, "post", post)
+    with pytest.raises(client.OCRServiceError, match="无效结果"):
+        client.recognize_document(b"%PDF", "invoice.pdf", "INV-1")
+    assert response.closed is True
+    assert post.call_args.kwargs["stream"] is True
+    assert post.call_args.kwargs["allow_redirects"] is False
+
+
+def test_client_aborts_oversized_chunked_body_at_max_plus_one(env, monkeypatch):
+    response = Response(payload={})
+    response.headers = {}
+    response.closed = False
+    response.iter_content = lambda chunk_size=65536: iter(
+        [b"x" * client.MAX_RESPONSE_BYTES, b"x"]
+    )
+    monkeypatch.setattr(client.requests, "post", Mock(return_value=response))
+    with pytest.raises(client.OCRServiceError, match="无效结果"):
+        client.recognize_document(b"%PDF", "invoice.pdf", "INV-1")
+    assert response.closed is True
+
+
+def test_client_does_not_follow_redirect_or_resend_multipart(env, monkeypatch):
+    response = Response(status=307, raw=b"redirect")
+    response.headers = {"Location": "http://169.254.169.254/latest"}
+    post = Mock(return_value=response)
+    monkeypatch.setattr(client.requests, "post", post)
+    with pytest.raises(client.OCRServiceError, match="拒绝|不可用"):
+        client.recognize_document(b"SECRET", "invoice.pdf", "INV-1")
+    assert post.call_count == 1
+    assert post.call_args.kwargs["allow_redirects"] is False
+
+
+def test_register_api_accepts_only_batch_and_file_url(env):
+    import inspect
+
+    signature = inspect.signature(api_module.register_file)
+    assert list(signature.parameters) == ["batch", "file_url"]
+
+
+
+def test_client_allowlist_never_overrides_public_dns_answer(env, monkeypatch):
+    frappe_stub_module.conf.invoice_ocr_url = "http://public.example:8080"
+    frappe_stub_module.conf.invoice_ocr_allowed_hosts = ["public.example"]
+    monkeypatch.setattr(
+        client.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("8.8.8.8", 8080))],
+    )
+    post = Mock()
+    monkeypatch.setattr(client.requests, "post", post)
+    with pytest.raises(client.OCRServiceError, match="配置无效"):
+        client.recognize_document(b"x", "a.pdf", "INV-1")
+    post.assert_not_called()
+
+
+
+# Faithful Frappe transaction/Redis/File-controller test double used by hardening tests.
+class CallbackQueue:
+    def __init__(self):
+        self.functions = []
+
+    def add(self, function):
+        self.functions.append(function)
+
+    def run(self):
+        while self.functions:
+            self.functions.pop(0)()
+
+    def reset(self):
+        self.functions.clear()
+
+
+class LockNotOwnedError(Exception):
+    pass
+
+
+class LeaseLock:
+    def __init__(self, environment, key, kwargs):
+        self.environment = environment
+        self.key = key
+        self.kwargs = kwargs
+        self.token = object()
+        self.owned = False
+
+    def acquire(self, blocking=True, blocking_timeout=None):
+        active = self.environment.active_locks.get(self.key)
+        if active and active["expires_at"] > self.environment.clock:
+            return False
+        timeout = int(self.kwargs.get("timeout") or 0)
+        self.environment.active_locks[self.key] = {
+            "token": self.token,
+            "expires_at": self.environment.clock + timeout,
+        }
+        self.environment.locks.append((self.key, self.kwargs))
+        self.owned = True
+        hook = self.environment.lock_hooks.pop(self.key, None)
+        if hook:
+            hook()
+        return True
+
+    def release(self):
+        active = self.environment.active_locks.get(self.key)
+        if not self.owned or not active or active["token"] is not self.token:
+            raise LockNotOwnedError(self.key)
+        del self.environment.active_locks[self.key]
+        self.owned = False
+
+    def __enter__(self):
+        if not self.acquire(blocking=True, blocking_timeout=self.kwargs.get("blocking_timeout")):
+            raise TimeoutError(self.key)
+        return self
+
+    def __exit__(self, *_args):
+        self.release()
+        return False
+
+
+_original_environment_init = Environment.__init__
+
+
+def _faithful_environment_init(self, root):
+    _original_environment_init(self, root)
+    self.active_locks = {}
+    self.lock_hooks = {}
+    self.clock = 0
+
+
+Environment.__init__ = _faithful_environment_init
+
+
+def _faithful_cache_lock(self, key, **kwargs):
+    return LeaseLock(self.environment, key, kwargs)
+
+
+FakeCache.lock = _faithful_cache_lock
+
+_original_db_init = FakeDB.__init__
+
+
+def _faithful_db_init(self, environment):
+    _original_db_init(self, environment)
+    self.after_commit = CallbackQueue()
+    self.after_rollback = CallbackQueue()
+
+
+FakeDB.__init__ = _faithful_db_init
+
+
+def _faithful_commit(self):
+    self.environment.commits += 1
+    self.after_rollback.reset()
+    self.after_commit.run()
+
+
+def _faithful_rollback(self):
+    self.after_commit.reset()
+    self.after_rollback.run()
+
+
+FakeDB.commit = _faithful_commit
+FakeDB.rollback = _faithful_rollback
+
+_original_enqueue = Environment.enqueue
+
+
+def _faithful_enqueue(self, method, **kwargs):
+    if kwargs.get("enqueue_after_commit"):
+        self.db.after_commit.add(lambda: self.enqueued.append((method, kwargs)))
+    else:
+        _original_enqueue(self, method, **kwargs)
+
+
+Environment.enqueue = _faithful_enqueue
+
+_original_doc_save = Doc.save
+
+
+def _file_controller_save(self, ignore_permissions=False):
+    if self.get("doctype") == "File":
+        form_dict = getattr(frappe_stub_module, "form_dict", None)
+        supplied = getattr(form_dict, "file_size", None) if form_dict is not None else None
+        if supplied not in (None, ""):
+            self.file_size = supplied
+    return _original_doc_save(self, ignore_permissions=ignore_permissions)
+
+
+Doc.save = _file_controller_save
+
+
+def test_transaction_lock_is_site_prefixed_and_released_only_after_commit(env):
+    frappe_stub_module.local.site = "site:one"
+    key = service._lock_key("record", "INV:1")
+    assert key.startswith("invoice:")
+    assert "site:one" not in key and "INV:1" not in key
+    with service._transaction_lock("record", "INV:1"):
+        assert key in env.active_locks
+    assert key in env.active_locks
+    env.db.commit()
+    assert key not in env.active_locks
+
+
+def test_transaction_lock_releases_on_rollback_and_expired_lease_can_be_recovered(env):
+    frappe_stub_module.local.site = "site-one"
+    with service._transaction_lock("record", "INV-1", timeout=600):
+        key = service._lock_key("record", "INV-1")
+        assert key in env.active_locks
+    env.clock = 601
+    second = env.cache().lock(key, timeout=600, blocking_timeout=1)
+    assert second.acquire(blocking=True, blocking_timeout=1) is True
+    env.db.rollback()
+    assert service._lock_key("record", "INV-1") not in getattr(frappe_stub_module.local, "invoice_transaction_locks", {})
+
+
+def test_register_file_reloads_under_file_lock_and_never_reattaches_stale_file(env):
+    env.add_batch(name="BATCH-1")
+    env.add_batch(name="BATCH-2")
+    file_doc = env.add_file(batch="BATCH-1")
+    file_key = service._lock_key("file", file_doc.name)
+
+    def concurrent_attach():
+        file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+        file_doc.attached_to_name = "INV-CONCURRENT"
+
+    env.lock_hooks[file_key] = concurrent_attach
+    with pytest.raises(ValidationError, match="其他业务记录"):
+        service.register_file("BATCH-2", file_doc.file_url)
+    assert file_doc.attached_to_name == "INV-CONCURRENT"
+    assert not env.docs[service.RECORD_DOCTYPE]
+
+
+def test_register_ignores_form_dict_file_size_and_has_no_hidden_commit(env):
+    env.add_batch()
+    file_doc = env.add_file(content=b"%PDF-real-bytes")
+    frappe_stub_module.form_dict = types.SimpleNamespace(file_size=1)
+    before = env.commits
+    result = service.register_file("BATCH-1", file_doc.file_url)
+    assert result["file_size"] == len(b"%PDF-real-bytes")
+    assert file_doc.file_size == len(b"%PDF-real-bytes")
+    assert env.commits == before
+    assert env.enqueued == []
+    env.db.commit()
+    assert len(env.enqueued) == 1
+
+
+
+@pytest.mark.parametrize("operation", ["update", "confirm", "retry", "exclude", "resolve"])
+def test_manual_transition_reloads_state_under_one_record_lock(env, operation):
+    env.add_batch()
+    status = "失败" if operation == "retry" else "疑似重复" if operation == "resolve" else "待确认"
+    record = env.add_record(recognition_status=status)
+    if operation == "retry":
+        file_doc = env.add_file()
+        file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+        file_doc.attached_to_name = record.name
+        record.invoice_file = file_doc.file_url
+    if operation == "resolve":
+        frappe_stub_module.session.user = "finance@example.com"
+    key = service._lock_key("record", record.name)
+    env.lock_hooks[key] = lambda: record.__setitem__("recognition_status", "已确认")
+    with pytest.raises(ValidationError, match="状态|疑似重复|失败"):
+        if operation == "update":
+            service.update_invoice(record.name, {"project_name": "stale"})
+        elif operation == "confirm":
+            service.confirm_invoice(record.name)
+        elif operation == "retry":
+            service.retry_invoice(record.name)
+        elif operation == "exclude":
+            service.exclude_invoice(record.name, "reason")
+        else:
+            service.resolve_duplicate(record.name, "reviewed")
+    assert record.recognition_status == "已确认"
+
+
+def test_confirm_duplicate_returns_structured_conflict_without_hidden_commit(env):
+    env.add_batch()
+    env.add_record(
+        name="INV-OLD",
+        recognition_status="已确认",
+        invoice_number="0001",
+        issue_date="2026-07-14",
+        total_amount=Decimal("35.98"),
+    )
+    record = env.add_record(
+        name="INV-NEW",
+        invoice_number="0001",
+        issue_date="2026-07-14",
+        total_amount=Decimal("35.98"),
+    )
+    before = env.commits
+    result = service.confirm_invoice(record.name)
+    assert result["recognition_status"] == "疑似重复"
+    assert result["conflict"]["code"] == "duplicate"
+    assert result["conflict"]["duplicate_of"] == "INV-OLD"
+    assert env.commits == before
+    assert service._lock_key("record", record.name) in env.active_locks
+    env.db.commit()
+
+
+def test_duplicate_override_uses_full_sha256_marker(env):
+    key = "0001|2026-07-14|35.98"
+    prefix = service._resolution_prefix(key)
+    assert hashlib.sha256(key.encode("utf-8")).hexdigest() in prefix
+    assert prefix.startswith("duplicate-override:v1:")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"project_name": ["not", "scalar"]},
+        {"project_name": {"nested": "not scalar"}},
+        {"project_name": "x" * (32 * 1024 + 1)},
+    ],
+)
+def test_dict_payload_is_bounded_and_scalar_only(env, values):
+    env.add_batch()
+    record = env.add_record()
+    with pytest.raises(ValidationError, match="格式|过长"):
+        service.update_invoice(record.name, values)
+
+
+def test_retry_recovers_only_timed_out_processing_claim(env):
+    env.add_batch()
+    file_doc = env.add_file()
+    stale = env.add_record(
+        name="INV-STALE",
+        recognition_status="识别中",
+        processing_started_on=datetime(2026, 7, 21, 8, 0, 0),
+        invoice_file=file_doc.file_url,
+    )
+    file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+    file_doc.attached_to_name = stale.name
+    result = service.retry_invoice(stale.name)
+    assert result["recognition_status"] == "排队中"
+    assert result["processing_started_on"] is None
+    env.db.commit()
+    fresh = env.add_record(
+        name="INV-FRESH",
+        recognition_status="识别中",
+        processing_started_on=datetime(2026, 7, 21, 8, 59, 0),
+    )
+    with pytest.raises(ValidationError, match="超时|失败"):
+        service.retry_invoice(fresh.name)
+
+
+
+_original_faithful_enqueue = Environment.enqueue
+
+
+def _enqueue_with_failure(self, method, **kwargs):
+    if getattr(self, "raise_enqueue", False) and not kwargs.get("enqueue_after_commit"):
+        raise RuntimeError("queue unavailable SECRET")
+    return _original_faithful_enqueue(self, method, **kwargs)
+
+
+Environment.enqueue = _enqueue_with_failure
+
+
+
+def test_enqueue_after_commit_failure_marks_record_recoverably_failed(env):
+    env.add_batch()
+    file_doc = env.add_file()
+    env.raise_enqueue = True
+    result = service.register_file("BATCH-1", file_doc.file_url)
+    record = env.docs[service.RECORD_DOCTYPE][result["name"]]
+    assert record.recognition_status == "排队中"
+    env.db.commit()
+    assert record.recognition_status == "失败"
+    assert record.processing_error == service.ENQUEUE_FAILURE_MESSAGE
+    assert env.commits >= 2
+
+
+def test_enqueue_dispatch_runs_only_after_commit_and_uses_no_nested_after_commit(env):
+    env.add_batch()
+    file_doc = env.add_file()
+    result = service.register_file("BATCH-1", file_doc.file_url)
+    assert env.enqueued == []
+    env.db.commit()
+    assert env.enqueued == [
+        (
+            "rayher_hr_payroll.invoice_ocr.jobs.recognize_invoice",
+            {"invoice_name": result["name"], "queue": "long"},
+        )
+    ]
+
+
+def test_job_claim_timestamp_and_record_lease_cover_network_call(env, monkeypatch):
+    jobs = importlib.import_module("rayher_hr_payroll.invoice_ocr.jobs")
+    record, _file = _queued_record_with_file(env)
+    payload = _valid_payload(record.name)
+    payload["file_sha256"] = record.file_sha256
+    observed = {}
+
+    def recognize(*_args):
+        observed["status"] = record.recognition_status
+        observed["started"] = record.processing_started_on
+        key = service._lock_key("record", record.name)
+        observed["lease"] = env.active_locks[key]
+        return payload
+
+    monkeypatch.setattr(jobs.client, "recognize_document", recognize)
+    result = jobs.recognize_invoice(record.name)
+    assert observed["status"] == "识别中"
+    assert observed["started"] == datetime(2026, 7, 21, 9, 0, 0)
+    assert observed["lease"]["expires_at"] >= 600
+    assert result["recognition_status"] == "待确认"
+    assert record.processing_started_on is None
+
+
+def test_worker_kill_leaves_recoverable_claim_and_retry_requeues_when_stale(env, monkeypatch):
+    jobs = importlib.import_module("rayher_hr_payroll.invoice_ocr.jobs")
+    record, _file = _queued_record_with_file(env)
+    monkeypatch.setattr(jobs.client, "recognize_document", Mock(side_effect=SystemExit("worker killed")))
+    with pytest.raises(SystemExit):
+        jobs.recognize_invoice(record.name)
+    assert record.recognition_status == "识别中"
+    assert record.processing_started_on == datetime(2026, 7, 21, 9, 0, 0)
+    record.processing_started_on = datetime(2026, 7, 21, 8, 0, 0)
+    result = service.retry_invoice(record.name)
+    assert result["recognition_status"] == "排队中"
+
+
+def test_expired_job_lease_release_never_overwrites_business_result(env, monkeypatch):
+    jobs = importlib.import_module("rayher_hr_payroll.invoice_ocr.jobs")
+    record, _file = _queued_record_with_file(env)
+    payload = _valid_payload(record.name)
+    payload["file_sha256"] = record.file_sha256
+
+    def recognize(*_args):
+        key = service._lock_key("record", record.name)
+        env.active_locks[key]["token"] = object()
+        return payload
+
+    monkeypatch.setattr(jobs.client, "recognize_document", recognize)
+    result = jobs.recognize_invoice(record.name)
+    assert result["recognition_status"] == "待确认"
+
+
+
+def test_link_holds_record_batch_request_in_order_and_reloads_submitted_request(env):
+    env.add_batch()
+    record = env.add_record(recognition_status="已确认")
+    request = _add_request(env)
+    line = Doc(
+        env,
+        {
+            "doctype": service.LINE_DOCTYPE,
+            "name": "LINE-1",
+            "parent": request.name,
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "expense_lines",
+            "line_key": "KEY-1",
+        },
+    )
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    env.lock_hooks[service._lock_key("request", request.name)] = lambda: request.__setitem__(
+        "workflow_status", "待审批"
+    )
+    with pytest.raises(ValidationError, match="提交后"):
+        service.link_invoice(record.name, request.name, "KEY-1")
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories[:3] == ["record", "batch", "request"]
+    assert not record.request
+
+
+def test_link_rechecks_record_and_batch_relationships_inside_locks(env):
+    batch = env.add_batch()
+    record = env.add_record(recognition_status="已确认")
+    request = _add_request(env)
+    line = Doc(
+        env,
+        {
+            "doctype": service.LINE_DOCTYPE,
+            "name": "LINE-1",
+            "parent": request.name,
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "expense_lines",
+            "line_key": "KEY-1",
+        },
+    )
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    env.lock_hooks[service._lock_key("batch", batch.name)] = lambda: batch.__setitem__(
+        "request", "REQ-OTHER"
+    )
+    with pytest.raises(ValidationError, match="不能关联多张"):
+        service.link_invoice(record.name, request.name, "KEY-1")
+    assert not record.request
+
+
+def test_recompute_batch_owns_site_scoped_batch_lock_until_commit(env):
+    batch = env.add_batch()
+    env.add_record(recognition_status="已确认")
+    service.recompute_batch(batch.name)
+    key = service._lock_key("batch", batch.name)
+    assert key in env.active_locks
+    assert batch.confirmed_count == 1
+    env.db.commit()
+    assert key not in env.active_locks
+
+
+def test_batch_recompute_observes_record_change_before_locked_query(env):
+    batch = env.add_batch()
+    first = env.add_record(name="INV-1", recognition_status="待确认")
+    second = env.add_record(name="INV-2", recognition_status="待确认")
+    key = service._lock_key("batch", batch.name)
+    env.lock_hooks[key] = lambda: second.__setitem__("recognition_status", "已确认")
+    result = service.confirm_invoice(first.name)
+    assert result["recognition_status"] == "已确认"
+    assert batch.confirmed_count == 2
+    assert batch.pending_confirmation_count == 0
+
+
+
+def test_enqueue_failure_recovery_never_overwrites_newer_nonqueued_state(env):
+    env.add_batch()
+    file_doc = env.add_file()
+    env.raise_enqueue = True
+    result = service.register_file("BATCH-1", file_doc.file_url)
+    record = env.docs[service.RECORD_DOCTYPE][result["name"]]
+    record.recognition_status = "已排除"
+    env.db.commit()
+    assert record.recognition_status == "已排除"
+    assert record.get("processing_error") != service.ENQUEUE_FAILURE_MESSAGE
+
+
+
+class ResponseDict(dict):
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+
+
+_previous_environment_init_for_cache = Environment.__init__
+
+
+def _cache_environment_init(self, root):
+    _previous_environment_init_for_cache(self, root)
+    self.cache_values = {}
+
+
+Environment.__init__ = _cache_environment_init
+
+
+def _cache_set_value(self, key, value, expires_in_sec=None, **_kwargs):
+    self.environment.cache_values[key] = {
+        "value": value,
+        "expires_at": self.environment.clock + int(expires_in_sec or 0),
+    }
+
+
+def _cache_get_value(self, key, **_kwargs):
+    item = self.environment.cache_values.get(key)
+    if not item:
+        return None
+    if item["expires_at"] and item["expires_at"] <= self.environment.clock:
+        self.environment.cache_values.pop(key, None)
+        return None
+    return item["value"]
+
+
+def _cache_delete_value(self, key, **_kwargs):
+    self.environment.cache_values.pop(key, None)
+
+
+FakeCache.set_value = _cache_set_value
+FakeCache.get_value = _cache_get_value
+FakeCache.delete_value = _cache_delete_value
+
+
+def _preview_record(env):
+    env.add_batch()
+    file_doc = env.add_file()
+    record = env.add_record(
+        invoice_file=file_doc.file_url,
+        file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(),
+    )
+    file_doc.attached_to_doctype = service.RECORD_DOCTYPE
+    file_doc.attached_to_name = record.name
+    return record, file_doc
+
+
+def test_preview_issues_only_controlled_short_lived_url_without_view_log(env):
+    record, _file = _preview_record(env)
+    result = service.preview_invoice(record.name)
+    assert result["preview_url"].startswith(
+        "/api/method/rayher_hr_payroll.api.invoice_entry.serve_invoice_preview?token="
+    )
+    assert "/private/files/" not in json.dumps(result)
+    assert "file_url" not in result and "full_path" not in result
+    assert result["mime_type"] == "application/pdf"
+    assert not env.docs[service.VIEW_LOG_DOCTYPE]
+
+
+def test_preview_serve_is_one_time_user_bound_inline_and_logs_actual_view(env):
+    record, _file = _preview_record(env)
+    issued = service.preview_invoice(record.name)
+    token = issued["token"]
+    frappe_stub_module.local.response = ResponseDict()
+    service.serve_invoice_preview(token)
+    response = frappe_stub_module.local.response
+    assert response.type == "binary"
+    assert response.display_content_as == "inline"
+    assert response.content_type == "application/pdf"
+    assert response.filecontent == b"%PDF-1.7\n"
+    assert response.filename == "invoice.pdf"
+    log = env.inserted[-1]
+    assert log.doctype == service.VIEW_LOG_DOCTYPE
+    assert log.invoice_record == record.name and log.action == "查看"
+    with pytest.raises(ValidationError, match="失效|过期"):
+        service.serve_invoice_preview(token)
+
+
+def test_preview_token_rejects_cross_user_but_remains_for_owner(env):
+    record, _file = _preview_record(env)
+    token = service.preview_invoice(record.name)["token"]
+    env.roles["bob@example.com"] = ["Employee"]
+    frappe_stub_module.session.user = "bob@example.com"
+    with pytest.raises(ValidationError, match="无权"):
+        service.serve_invoice_preview(token)
+    frappe_stub_module.session.user = "alice@example.com"
+    frappe_stub_module.local.response = ResponseDict()
+    service.serve_invoice_preview(token)
+    assert frappe_stub_module.local.response.type == "binary"
+
+
+def test_preview_token_expiry_and_guest_are_rejected(env):
+    record, _file = _preview_record(env)
+    token = service.preview_invoice(record.name)["token"]
+    env.clock = service.PREVIEW_TOKEN_TTL_SECONDS + 1
+    with pytest.raises(ValidationError, match="失效|过期"):
+        service.serve_invoice_preview(token)
+    frappe_stub_module.session.user = "Guest"
+    with pytest.raises(ValidationError, match="登录"):
+        service.serve_invoice_preview("x" * 43)
+
+
+def test_preview_serve_api_is_explicit_get_and_bounded(env, monkeypatch):
+    import inspect
+
+    assert list(inspect.signature(api_module.serve_invoice_preview).parameters) == ["token"]
+    delegated = Mock()
+    monkeypatch.setattr(api_module.service, "serve_invoice_preview", delegated)
+    api_module.serve_invoice_preview("x" * 43)
+    delegated.assert_called_once_with("x" * 43)
+    source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
+    assert source.count("@frappe.whitelist") == 12
+    assert 'methods=["GET"]' in source
+
+
+
+class TransactionalStore:
+    """Small MVCC-like double: transactions never share mutable document objects."""
+
+    def __init__(self, documents):
+        self.committed = {key: dict(value) for key, value in documents.items()}
+        self.pending = {}
+
+    def load(self, transaction, key):
+        source = self.pending.get(transaction, {}).get(key, self.committed[key])
+        return dict(source)
+
+    def save(self, transaction, key, document):
+        self.pending.setdefault(transaction, {})[key] = dict(document)
+
+    def read_committed(self, key):
+        return dict(self.committed[key])
+
+    def commit(self, transaction):
+        for key, document in self.pending.pop(transaction, {}).items():
+            self.committed[key] = dict(document)
+
+    def rollback(self, transaction):
+        self.pending.pop(transaction, None)
+
+
+def test_transaction_double_hides_mutation_and_save_until_commit():
+    store = TransactionalStore({"INV-1": {"status": "待确认"}})
+    first = store.load("tx-a", "INV-1")
+    first["status"] = "已确认"
+    assert store.load("tx-b", "INV-1")["status"] == "待确认"
+    store.save("tx-a", "INV-1", first)
+    assert store.load("tx-a", "INV-1")["status"] == "已确认"
+    assert store.load("tx-b", "INV-1")["status"] == "待确认"
+    store.commit("tx-a")
+    assert store.load("tx-c", "INV-1")["status"] == "已确认"
+
+
+def test_after_commit_and_after_rollback_callbacks_have_real_order(env):
+    events = []
+    env.db.after_commit.add(lambda: events.append("commit-1"))
+    env.db.after_commit.add(lambda: events.append("commit-2"))
+    env.db.after_rollback.add(lambda: events.append("rollback"))
+    env.db.commit()
+    assert events == ["commit-1", "commit-2"]
+    env.db.after_commit.add(lambda: events.append("must-not-run"))
+    env.db.after_rollback.add(lambda: events.append("rollback-2"))
+    env.db.rollback()
+    assert events == ["commit-1", "commit-2", "rollback-2"]
+
+
+def test_lease_double_is_mutually_exclusive_until_expiry(env):
+    key = service._lock_key("record", "INV-1")
+    first = env.cache().lock(key, timeout=600, blocking_timeout=1)
+    second = env.cache().lock(key, timeout=600, blocking_timeout=1)
+    assert first.acquire(blocking=True, blocking_timeout=1) is True
+    assert second.acquire(blocking=True, blocking_timeout=1) is False
+    env.clock = 601
+    assert second.acquire(blocking=True, blocking_timeout=1) is True
+
+
+def test_service_authorization_never_uses_generic_oa_doctype_write_permission():
+    source = Path("rayher_hr_payroll/invoice_ocr/service.py").read_text(encoding="utf-8")
+    assert "frappe.has_permission" not in source
+    assert "invoice_permissions.can_edit_request" in source
+    assert "invoice_permissions.can_read_request" in source
+
+
+@pytest.mark.parametrize("address", ["192.0.0.1", "198.18.0.1", "203.0.113.10", "fc00::1"])
+def test_client_rejects_non_rfc1918_non_loopback_special_ranges(env, monkeypatch, address):
+    frappe_stub_module.conf.invoice_ocr_url = f"http://[{address}]:8080" if ":" in address else f"http://{address}:8080"
+    post = Mock()
+    monkeypatch.setattr(client.requests, "post", post)
+    with pytest.raises(client.OCRServiceError, match="配置无效"):
+        client.recognize_document(b"x", "a.pdf", "INV-1")
+    post.assert_not_called()
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "203.0.113.73", "203.0.113.154", "203.0.113.11"])
+def test_client_keeps_loopback_and_exact_rfc1918_addresses_available(address):
+    assert client._safe_internal_address(address) is True

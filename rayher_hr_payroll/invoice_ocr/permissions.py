@@ -264,3 +264,29 @@ def invoice_record_has_permission(doc, ptype=None, user=None):
 
 def invoice_view_log_has_permission(doc, ptype=None, user=None):
     return _has_permission(_VIEW_LOG, doc, ptype, user)
+
+
+def can_read_request(request, user=None):
+    """Apply the same row scope used by invoice permission hooks to one OA request."""
+    user = user or frappe.session.user
+    if not user or user == "Guest":
+        return False
+    request_name = _get(request, "name") if not isinstance(request, str) else request
+    return _can_read_request(str(request_name or ""), user)
+
+
+def can_edit_request(request, user=None):
+    """Only the request applicant/owner or a System Manager may edit invoice data."""
+    user = user or frappe.session.user
+    if not user or user == "Guest":
+        return False
+    roles = _roles(user)
+    if user == "Administrator" or "System Manager" in roles:
+        return True
+    request_doc = request if not isinstance(request, str) else _request_row(request)
+    if not request_doc:
+        return False
+    if _get(request_doc, "owner") == user:
+        return True
+    identity = _identity(user)
+    return bool(identity.get("employee") and _get(request_doc, "employee") == identity["employee"])

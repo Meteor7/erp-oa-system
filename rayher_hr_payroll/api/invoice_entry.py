@@ -27,14 +27,11 @@ def create_batch():
 
 
 @frappe.whitelist(methods=["POST"])
-def register_file(batch, file_url, original_filename=None, mime_type=None, file_size=None):
+def register_file(batch, file_url):
     _authenticated()
     return service.register_file(
         _bounded(batch, "批次标识", 140),
         _bounded(file_url, "文件地址", 500),
-        original_filename=_bounded(original_filename, "文件名", 255, required=False),
-        mime_type=_bounded(mime_type, "文件类型", 100, required=False),
-        file_size=file_size,
     )
 
 
@@ -100,3 +97,9 @@ def get_request_invoices(request):
 def preview_invoice(invoice_name):
     _authenticated()
     return service.preview_invoice(_bounded(invoice_name, "发票标识", 140))
+
+
+@frappe.whitelist(methods=["GET"])
+def serve_invoice_preview(token):
+    _authenticated()
+    return service.serve_invoice_preview(_bounded(token, "预览凭证", 200))

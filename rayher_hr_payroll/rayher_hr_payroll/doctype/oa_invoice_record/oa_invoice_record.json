@@ -35,6 +35,7 @@
     "confirmation_section",
     "confirmed_by",
     "confirmed_on",
+    "processing_started_on",
     "processing_error",
     "retry_count"
   ],
@@ -67,6 +68,7 @@
     {"fieldname": "confirmation_section", "fieldtype": "Section Break", "label": "Confirmation and Processing Audit"},
     {"fieldname": "confirmed_by", "fieldtype": "Link", "label": "Confirmed By", "options": "User", "read_only": 1},
     {"fieldname": "confirmed_on", "fieldtype": "Datetime", "label": "Confirmed On", "read_only": 1},
+    {"fieldname": "processing_started_on", "fieldtype": "Datetime", "label": "Processing Started On", "read_only": 1},
     {"fieldname": "processing_error", "fieldtype": "Long Text", "label": "Processing Error", "read_only": 1},
     {"default": "0", "fieldname": "retry_count", "fieldtype": "Int", "label": "Retry Count", "read_only": 1}
   ],
