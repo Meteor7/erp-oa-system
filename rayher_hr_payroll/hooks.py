@@ -95,3 +95,9 @@ has_permission = {
     "OA Invoice Record": "rayher_hr_payroll.invoice_ocr.permissions.invoice_record_has_permission",
     "OA Invoice View Log": "rayher_hr_payroll.invoice_ocr.permissions.invoice_view_log_has_permission",
 }
+
+scheduler_events = {
+    "daily": [
+        "rayher_hr_payroll.maintenance.invoice_ocr_cleanup.cleanup_orphan_invoice_batches",
+    ],
+}
