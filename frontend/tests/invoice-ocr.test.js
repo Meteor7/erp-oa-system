@@ -3,11 +3,15 @@ import test from 'node:test';
 
 import {
   amountMismatch,
+  createGenerationBusyTracker,
+  createInvoiceRequestLoadContext,
   createOperationContext,
   editableInvoiceValues,
   fetchInvoicePreview,
   getRequestInvoices,
+  hasRegisteredInvoiceUpload,
   invoiceBlockers,
+  invoiceSaveGuard,
   invoicesForLine,
   moneyToCents,
   newLineKey,
@@ -161,4 +165,69 @@ test('getRequestInvoices uses the bounded invoice endpoint', async () => {
 
 test('unknown invoice states are blocked instead of being treated as confirmed', () => {
   assert.deepEqual(invoiceBlockers([{ recognition_status: '未知状态' }]), ['存在状态异常发票']);
+});
+
+test('save guard blocks every save during upload or an unresolved empty batch but permits queued draft rows', () => {
+  assert.ok(invoiceSaveGuard({ busy: true, batch: '', invoices: [] }));
+  assert.ok(invoiceSaveGuard({ busy: false, batch: { name: 'BATCH-1' }, invoices: [] }));
+  assert.equal(invoiceSaveGuard({
+    busy: false,
+    batch: 'BATCH-1',
+    invoices: [{ name: 'INV-1', recognition_status: '\u6392\u961f\u4e2d' }],
+  }), '');
+  assert.equal(invoiceSaveGuard({ busy: false, batch: '', invoices: [] }), '');
+});
+
+test('generation busy tracker balances invalidation and prevents stale work clearing newer busy state', () => {
+  const changes = [];
+  const tracker = createGenerationBusyTracker((busy) => changes.push(busy));
+  const stale = tracker.begin();
+  tracker.invalidate();
+  const current = tracker.begin();
+  assert.equal(tracker.finish(stale), false);
+  assert.equal(tracker.isBusy(), true);
+  assert.equal(tracker.finish(current), true);
+  assert.equal(tracker.isBusy(), false);
+  assert.deepEqual(changes, [true, false, true, false]);
+});
+
+test('request invoice load context clears on switch, ignores stale completion, and preserves multi-batch rows as an error', () => {
+  const states = [];
+  const context = createInvoiceRequestLoadContext((state) => states.push(state));
+  const first = context.begin('REQ-1');
+  const second = context.begin('REQ-2');
+  assert.equal(context.resolve(first, [{ name: 'OLD', batch: 'BATCH-OLD' }]).applied, false);
+  assert.equal(context.snapshot().request, 'REQ-2');
+  assert.equal(context.snapshot().status, 'loading');
+  assert.deepEqual(context.snapshot().rows, []);
+
+  const multi = context.resolve(second, [
+    { name: 'INV-1', batch: 'BATCH-1' },
+    { name: 'INV-2', batch: 'BATCH-2' },
+  ]);
+  assert.equal(multi.applied, true);
+  assert.equal(multi.state.status, 'error');
+  assert.ok(multi.state.error);
+  assert.equal(multi.state.batch, '');
+  assert.deepEqual(multi.state.rows.map((row) => row.name), ['INV-1', 'INV-2']);
+
+  const retry = context.begin('REQ-2');
+  assert.deepEqual(context.snapshot().rows, []);
+  context.reject(retry, new Error('network failed'));
+  assert.equal(context.snapshot().status, 'error');
+  assert.match(context.snapshot().error, /network failed/);
+
+  const success = context.begin('REQ-2');
+  const loaded = context.resolve(success, [{ name: 'INV-3', batch: 'BATCH-3' }]);
+  assert.equal(loaded.state.status, 'loaded');
+  assert.equal(loaded.state.batch, 'BATCH-3');
+  assert.ok(states.some((state) => state.status === 'loading' && state.rows.length === 0));
+});
+
+test('only a successfully registered upload may trigger draft batch attachment', () => {
+  assert.equal(hasRegisteredInvoiceUpload([{ file: { name: 'bad.pdf' }, error: new Error('failed') }]), false);
+  assert.equal(hasRegisteredInvoiceUpload([
+    { file: { name: 'bad.pdf' }, error: new Error('failed') },
+    { file: { name: 'ok.pdf' }, value: { name: 'INV-1' } },
+  ]), true);
 });

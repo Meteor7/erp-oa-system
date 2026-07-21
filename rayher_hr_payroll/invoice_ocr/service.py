@@ -915,6 +915,23 @@ def attach_batch_to_request(batch_name, request_doc):
         batch_request = str(_get(batch, "request") or "")
         if batch_request and batch_request != request_name:
             _throw("\u8be5\u53d1\u7968\u6279\u6b21\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
+        request_batches = _current_rows(
+            BATCH_DOCTYPE,
+            filters={"request": request_name},
+            fields=["name", "request"],
+        )
+        other_batches = sorted(
+            {
+                str(_get(row, "name") or "")
+                for row in request_batches
+                if str(_get(row, "name") or "")
+                and str(_get(row, "name") or "") != batch_name
+            }
+        )
+        if other_batches:
+            _throw(
+                "\u8be5\u62a5\u9500\u5355\u5df2\u5173\u8054\u5176\u4ed6\u53d1\u7968\u6279\u6b21\u3002"
+            )
         current_rows = _current_rows(
             RECORD_DOCTYPE,
             filters={"batch": batch_name},

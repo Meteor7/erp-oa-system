@@ -83,8 +83,10 @@ import {
   confirmInvoice,
   createOperationContext,
   createInvoiceBatch,
+  createGenerationBusyTracker,
   excludeInvoice,
   getInvoiceBatch,
+  hasRegisteredInvoiceUpload,
   linkInvoice,
   resolveDuplicate,
   retryInvoice,
@@ -128,6 +130,8 @@ let pollAbort = null;
 let requestVersion = 0;
 let disposed = false;
 const operationContext = createOperationContext();
+const mutationBusy = createGenerationBusyTracker((busy) => emit("busy-change", busy));
+let batchAnnounced = Boolean(batchName.value);
 
 const visibleRows = computed(() => rows.value.filter((row) => row.recognition_status !== labels.excluded));
 
@@ -147,13 +151,32 @@ watch(() => props.invoices, (value) => {
   rows.value = value.map((row) => ({ ...row }));
 }, { deep: true });
 
+watch(() => props.request, (value, previous) => {
+  if (value === previous) return;
+  mutationBusy.invalidate();
+  operationContext.invalidate();
+  stopPolling();
+  const nextName = typeof props.batch === 'string' ? props.batch : props.batch?.name || '';
+  batchName.value = nextName;
+  batchAnnounced = Boolean(nextName);
+  batchSummary.value = typeof props.batch === 'object' ? props.batch : null;
+  rows.value = props.invoices.map((row) => ({ ...row }));
+  errorMessage.value = '';
+  uploadFailures.value = [];
+  busyNames.value = new Set();
+  uploading.value = false;
+  if (nextName) refreshBatch(true);
+});
+
 watch(() => props.batch, (value) => {
   const nextName = typeof value === 'string' ? value : value?.name || '';
   const changed = nextName !== batchName.value;
   if (changed) {
+    mutationBusy.invalidate();
     operationContext.invalidate();
     stopPolling();
     batchName.value = nextName;
+    batchAnnounced = Boolean(nextName);
     batchSummary.value = typeof value === 'object' ? value : null;
     rows.value = [];
     errorMessage.value = '';
@@ -225,7 +248,7 @@ async function onFilesSelected(event) {
     return;
   }
   uploading.value = true;
-  emit('busy-change', true);
+  const busyToken = mutationBusy.begin();
   const controller = operationController();
   const operationVersion = operationContext.current();
   try {
@@ -234,25 +257,30 @@ async function onFilesSelected(event) {
       if (!operationContext.isCurrent(operationVersion)) return;
       batchName.value = created.name;
       batchSummary.value = created;
-      emit('batch-created', created);
+      batchAnnounced = false;
     }
-    if (props.request) await attachInvoiceBatch(batchName.value, props.request, { signal: controller.signal });
-    if (!operationContext.isCurrent(operationVersion)) return;
     const results = await uploadInvoiceFiles(files, batchName.value, { signal: controller.signal });
     if (!operationContext.isCurrent(operationVersion)) return;
     uploadFailures.value = results.filter((result) => result.error);
+    if (hasRegisteredInvoiceUpload(results)) {
+      if (props.request) {
+        await attachInvoiceBatch(batchName.value, props.request, { signal: controller.signal });
+        if (!operationContext.isCurrent(operationVersion)) return;
+      }
+      if (!batchAnnounced) {
+        emit('batch-created', batchSummary.value || { name: batchName.value });
+        batchAnnounced = true;
+      }
+    }
     await refreshBatch(true);
   } catch (error) {
     if (error?.name !== 'AbortError' && !disposed && operationContext.isCurrent(operationVersion)) errorMessage.value = error.message;
   } finally {
     finishOperation(controller);
-    if (operationContext.isCurrent(operationVersion)) {
-      uploading.value = false;
-      emit('busy-change', false);
-    }
+    mutationBusy.finish(busyToken);
+    if (operationContext.isCurrent(operationVersion)) uploading.value = false;
   }
 }
-
 function warningFields(row) {
   try {
     const warnings = typeof row.field_warnings === 'string' ? JSON.parse(row.field_warnings) : row.field_warnings;
@@ -276,6 +304,7 @@ async function withBusy(row, action) {
   stopPolling();
   busyNames.value = new Set([...busyNames.value, row.name]);
   errorMessage.value = '';
+  const busyToken = mutationBusy.begin();
   const controller = operationController();
   const operationVersion = operationContext.current();
   try {
@@ -287,6 +316,7 @@ async function withBusy(row, action) {
     if (error?.name !== 'AbortError' && !disposed && operationContext.isCurrent(operationVersion)) errorMessage.value = error.message;
   } finally {
     finishOperation(controller);
+    mutationBusy.finish(busyToken);
     if (operationContext.isCurrent(operationVersion)) {
       const next = new Set(busyNames.value);
       next.delete(row.name);
@@ -295,7 +325,6 @@ async function withBusy(row, action) {
     }
   }
 }
-
 function saveField(row, field) {
   if (!INVOICE_FIELDS.includes(field) || !isEditable(row)) return;
   withBusy(row, (signal) => updateInvoice(row.name, { [field]: row[field] }, { signal }));
@@ -323,6 +352,7 @@ async function changeLink(row, expenseLineKey) {
   stopPolling();
   const previous = row.expense_line_key || '';
   row.expense_line_key = expenseLineKey;
+  const busyToken = mutationBusy.begin();
   const controller = operationController();
   const operationVersion = operationContext.current();
   try {
@@ -337,13 +367,14 @@ async function changeLink(row, expenseLineKey) {
     }
   } finally {
     finishOperation(controller);
+    mutationBusy.finish(busyToken);
     if (operationContext.isCurrent(operationVersion)) schedulePoll();
   }
 }
-
 onBeforeUnmount(() => {
   disposed = true;
   stopPolling();
+  mutationBusy.invalidate();
   operationContext.invalidate();
 });
 </script>

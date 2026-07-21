@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 
 import importlib
 import sys
@@ -280,9 +281,20 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
     def current_doc(doctype, name):
         return docs[(doctype, name)]
 
-    def record_rows(_doctype, *, filters=None, fields=None, **_kwargs):
-        assert filters == {"batch": "BATCH-1"}
-        return [Row(name=name, batch="BATCH-1") for name in sorted(records)]
+    def record_rows(doctype, *, filters=None, fields=None, **_kwargs):
+        if doctype == service.RECORD_DOCTYPE:
+            assert filters == {"batch": "BATCH-1"}
+            return [
+                Row(name=name, batch="BATCH-1")
+                for name in sorted(records)
+            ]
+        assert doctype == service.BATCH_DOCTYPE
+        assert filters == {"request": request.name}
+        return (
+            [Row(name=batch.name, request=request.name)]
+            if batch.request == request.name
+            else []
+        )
 
     def permission(request_doc, ptype, current=False):
         assert ptype == "edit"
@@ -816,3 +828,149 @@ def test_update_draft_invoice_details_only_changes_reason_fields(monkeypatch):
     doc.workflow_status = oa_entry.STATUS_PENDING
     with pytest.raises(ValidationError, match="只有草稿"):
         oa_entry.update_draft_invoice_details(doc.name, no_invoice_reason="不能修改")
+
+
+# --- Task 8 independent-review executable regression tests ---
+
+def test_attach_batch_rejects_a_different_current_batch_for_the_same_request(monkeypatch):
+    batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
+
+    def current_rows(doctype, *, filters=None, fields=None, **_kwargs):
+        if doctype == service.RECORD_DOCTYPE:
+            return [Row(name=name, batch=batch.name) for name in sorted(records)]
+        assert doctype == service.BATCH_DOCTYPE
+        assert filters == {"request": request.name}
+        assert lock_order[-1] == ("request", request.name)
+        return [Row(name="BATCH-OTHER", request=request.name)]
+
+    monkeypatch.setattr(service, "_current_rows", current_rows)
+    with pytest.raises(
+        ValidationError,
+        match="\u5df2\u5173\u8054.*\u5176\u4ed6.*\u6279\u6b21",
+    ):
+        service.attach_batch_to_request(batch.name, request)
+    assert not batch.request and not any(record.request for record in records.values())
+    assert saves == []
+
+
+def _install_draft_reason_doc(monkeypatch, line_count=1):
+    environment = _install_request_environment(monkeypatch)
+    lines = [
+        Row(
+            line_key=f"{index + 1:08d}-1111-4111-8111-{index + 1:012d}",
+            amount=Decimal("10.00"),
+            invoice_difference_reason="",
+        )
+        for index in range(line_count)
+    ]
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-STRICT",
+            "owner": frappe_stub.session.user,
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_DRAFT,
+            "no_invoice_reason": "",
+            "expense_lines": lines,
+            "steps": [],
+        },
+    )
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current: {"name": current.name})
+    return environment, doc
+
+
+@pytest.mark.parametrize("payload", ["{", "[]", '"not-an-object"', "{\"key\": NaN}"])
+def test_update_draft_invoice_details_rejects_malformed_or_non_object_json(monkeypatch, payload):
+    _install_draft_reason_doc(monkeypatch)
+    with pytest.raises(ValidationError, match="JSON"):
+        oa_entry.update_draft_invoice_details("REQ-STRICT", expense_line_reasons=payload)
+
+
+def test_update_draft_invoice_details_rejects_duplicate_raw_and_trimmed_keys(monkeypatch):
+    _environment, doc = _install_draft_reason_doc(monkeypatch)
+    key = doc.expense_lines[0].line_key
+    with pytest.raises(ValidationError, match="\u91cd\u590d"):
+        oa_entry.update_draft_invoice_details(
+            doc.name,
+            expense_line_reasons=f'{{"{key}":"one","{key}":"two"}}',
+        )
+    with pytest.raises(ValidationError, match="\u91cd\u590d"):
+        oa_entry.update_draft_invoice_details(
+            doc.name,
+            expense_line_reasons={f" {key}": "one", f"{key} ": "two"},
+        )
+
+
+def test_update_draft_invoice_details_rejects_oversized_payload_before_lock(monkeypatch):
+    entered = []
+
+    @contextmanager
+    def transaction_lock(*_args, **_kwargs):
+        entered.append(True)
+        yield
+
+    monkeypatch.setattr(service, "_transaction_lock", transaction_lock)
+    payload = json.dumps({"line": "x" * (64 * 1024)}, ensure_ascii=False)
+    loads = []
+    monkeypatch.setattr(oa_entry.json, "loads", lambda *_args, **_kwargs: loads.append(True))
+    with pytest.raises(ValidationError, match="64KB"):
+        oa_entry.update_draft_invoice_details("REQ-STRICT", expense_line_reasons=payload)
+    assert entered == []
+    assert loads == []
+
+
+def test_update_draft_invoice_details_bounds_reason_count_by_request_and_hard_limit(monkeypatch):
+    _environment, doc = _install_draft_reason_doc(monkeypatch, line_count=1)
+    reasons = {
+        doc.expense_lines[0].line_key: "one",
+        "22222222-2222-4222-8222-222222222222": "two",
+    }
+    with pytest.raises(
+        ValidationError,
+        match="\u6570\u91cf.*\u8d39\u7528\u660e\u7ec6",
+    ):
+        oa_entry.update_draft_invoice_details(doc.name, expense_line_reasons=reasons)
+
+    _environment, many = _install_draft_reason_doc(monkeypatch, line_count=101)
+    too_many = {line.line_key: "reason" for line in many.expense_lines}
+    with pytest.raises(ValidationError, match="100"):
+        oa_entry.update_draft_invoice_details(many.name, expense_line_reasons=too_many)
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"x" * 141: "reason"}, "\u6807\u8bc6.*\u8fc7\u957f"),
+        ({"11111111-1111-4111-8111-000000000001": "x" * 501}, "500"),
+        ({"11111111-1111-4111-8111-000000000001": {"nested": "bad"}}, "\u683c\u5f0f\u65e0\u6548"),
+    ],
+)
+def test_update_draft_invoice_details_bounds_dict_keys_and_values(monkeypatch, payload, message):
+    _install_draft_reason_doc(monkeypatch)
+    with pytest.raises(ValidationError, match=message):
+        oa_entry.update_draft_invoice_details("REQ-STRICT", expense_line_reasons=payload)
+
+
+
+def test_update_draft_invoice_details_uses_current_read_and_permission_before_value_validation(monkeypatch):
+    environment, doc = _install_draft_reason_doc(monkeypatch)
+    calls = []
+
+    def deny(current_doc, ptype, current=False):
+        calls.append((current_doc.name, ptype, current))
+        raise ValidationError("permission denied")
+
+    monkeypatch.setattr(service, "_request_permission", deny)
+    with pytest.raises(ValidationError, match="permission denied"):
+        oa_entry.update_draft_invoice_details(
+            doc.name,
+            expense_line_reasons={
+                doc.expense_lines[0].line_key: {"nested": "invalid"}
+            },
+        )
+    assert environment.current_reads == [(service.REQUEST_DOCTYPE, doc.name)]
+    assert calls == [(doc.name, "edit", True)]

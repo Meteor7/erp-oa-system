@@ -153,6 +153,92 @@ def _parse_json(value, default=None):
         return default
 
 
+DRAFT_REASON_JSON_MAX_BYTES = 64 * 1024
+DRAFT_REASON_MAX_ITEMS = 100
+
+
+class _JSONObjectPairs(list):
+    pass
+
+
+class _DuplicateJSONKey(ValueError):
+    pass
+
+
+def _reason_json_error():
+    frappe.throw(
+        frappe._(
+            "\u8d39\u7528\u660e\u7ec6\u5dee\u5f02\u8bf4\u660e\u5fc5\u987b\u662f\u6709\u6548\u7684 JSON \u5bf9\u8c61\u3002"
+        )
+    )
+
+
+def _check_reason_json_size(raw):
+    if len(raw) > DRAFT_REASON_JSON_MAX_BYTES:
+        frappe.throw(
+            frappe._(
+                "\u8d39\u7528\u660e\u7ec6\u5dee\u5f02\u8bf4\u660e JSON \u4e0d\u80fd\u8d85\u8fc7 64KB\u3002"
+            )
+        )
+
+
+def _reject_json_constant(_value):
+    raise ValueError
+
+
+def _json_object_pairs(pairs):
+    seen = set()
+    result = _JSONObjectPairs()
+    for key, value in pairs:
+        if key in seen:
+            raise _DuplicateJSONKey
+        seen.add(key)
+        result.append((key, value))
+    return result
+
+
+def _strict_reason_pairs(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, dict):
+        try:
+            raw = json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError):
+            _reason_json_error()
+        _check_reason_json_size(raw)
+        pairs = list(value.items())
+    elif isinstance(value, str):
+        try:
+            raw = value.encode("utf-8")
+        except UnicodeEncodeError:
+            _reason_json_error()
+        _check_reason_json_size(raw)
+        try:
+            parsed = json.loads(
+                value,
+                object_pairs_hook=_json_object_pairs,
+                parse_constant=_reject_json_constant,
+            )
+        except _DuplicateJSONKey:
+            frappe.throw(
+                frappe._(
+                    "\u8d39\u7528\u660e\u7ec6\u5dee\u5f02\u8bf4\u660e\u4e0d\u80fd\u5305\u542b\u91cd\u590d\u952e\u3002"
+                )
+            )
+        except (TypeError, ValueError):
+            _reason_json_error()
+        if not isinstance(parsed, _JSONObjectPairs):
+            _reason_json_error()
+        pairs = list(parsed)
+    else:
+        _reason_json_error()
+    return pairs
+
+
 def _employee_context(user=None):
     user = user or frappe.session.user
     if user == "Guest":
@@ -721,24 +807,63 @@ def create_request(
 
 @frappe.whitelist(methods=["POST"])
 def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reasons=None):
-    request_name = _bounded_optional_text(name, "申请单号", 140)
-    supplied_reason = None if no_invoice_reason is None else _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
-    reasons = _parse_json(expense_line_reasons, {}) or {}
-    if not isinstance(reasons, dict):
-        frappe.throw(frappe._("费用明细差异说明格式无效。"))
-    normalized_reasons = {
-        _bounded_optional_text(key, "费用明细标识", 140): _difference_reason(value)
-        for key, value in reasons.items()
-    }
+    request_name = _bounded_optional_text(name, "\u7533\u8bf7\u5355\u53f7", 140)
+    supplied_reason = (
+        None
+        if no_invoice_reason is None
+        else _bounded_optional_text(
+            no_invoice_reason,
+            "\u65e0\u7968\u539f\u56e0",
+            1000,
+        )
+    )
+    reason_pairs = _strict_reason_pairs(expense_line_reasons)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         invoice_service._request_permission(doc, "edit", current=True)
         if doc.workflow_status != STATUS_DRAFT:
-            frappe.throw(frappe._("只有草稿状态可以修改发票说明。"))
-        lines = {str(getattr(row, "line_key", "") or ""): row for row in list(getattr(doc, "expense_lines", []) or [])}
+            frappe.throw(
+                frappe._(
+                    "\u53ea\u6709\u8349\u7a3f\u72b6\u6001\u53ef\u4ee5\u4fee\u6539\u53d1\u7968\u8bf4\u660e\u3002"
+                )
+            )
+        lines = {
+            str(getattr(row, "line_key", "") or ""): row
+            for row in list(getattr(doc, "expense_lines", []) or [])
+        }
+        if len(reason_pairs) > DRAFT_REASON_MAX_ITEMS:
+            frappe.throw(
+                frappe._(
+                    "\u8d39\u7528\u660e\u7ec6\u5dee\u5f02\u8bf4\u660e\u6700\u591a\u5141\u8bb8 100 \u9879\u3002"
+                )
+            )
+        normalized_reasons = {}
+        for raw_key, raw_value in reason_pairs:
+            key = _bounded_optional_text(
+                raw_key,
+                "\u8d39\u7528\u660e\u7ec6\u6807\u8bc6",
+                140,
+            )
+            if key in normalized_reasons:
+                frappe.throw(
+                    frappe._(
+                        "\u8d39\u7528\u660e\u7ec6\u5dee\u5f02\u8bf4\u660e\u4e0d\u80fd\u5305\u542b\u91cd\u590d\u952e\u3002"
+                    )
+                )
+            normalized_reasons[key] = _difference_reason(raw_value)
+        if len(normalized_reasons) > len(lines):
+            frappe.throw(
+                frappe._(
+                    "\u8d39\u7528\u660e\u7ec6\u5dee\u5f02\u8bf4\u660e\u6570\u91cf\u4e0d\u80fd\u8d85\u8fc7\u8be5\u7533\u8bf7\u7684\u8d39\u7528\u660e\u7ec6\u6570\u91cf\u3002"
+                )
+            )
         unknown = [key for key in normalized_reasons if not key or key not in lines]
         if unknown:
-            frappe.throw(frappe._("费用明细标识不属于该报销单。"))
+            frappe.throw(
+                frappe._(
+                    "\u8d39\u7528\u660e\u7ec6\u6807\u8bc6\u4e0d\u5c5e\u4e8e\u8be5\u62a5\u9500\u5355\u3002"
+                )
+            )
         if supplied_reason is not None:
             doc.no_invoice_reason = supplied_reason
         for key, value in normalized_reasons.items():

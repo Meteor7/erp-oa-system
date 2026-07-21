@@ -302,3 +302,150 @@ export async function persistInvoiceRequest({
   if (shouldSubmit) submitted = await submitDraft(name);
   return { requestName: name, created, submitted };
 }
+
+
+export function invoiceSaveGuard({ busy = false, batch = '', invoices = [] } = {}) {
+  const batchName = typeof batch === 'string' ? batch.trim() : String(batch?.name || '').trim();
+  if (busy || (batchName && (!Array.isArray(invoices) || invoices.length === 0))) {
+    return '\u53d1\u7968\u4e0a\u4f20\u6216\u6279\u6b21\u56de\u586b\u5c1a\u672a\u5b8c\u6210\uff0c\u8bf7\u7b49\u5f85\u540e\u518d\u4fdd\u5b58\u3002';
+  }
+  return '';
+}
+
+export function hasRegisteredInvoiceUpload(results) {
+  return Array.isArray(results) && results.some((result) => !result?.error && result?.value?.name);
+}
+
+export function createGenerationBusyTracker(onChange = () => {}) {
+  let generation = 0;
+  let nextId = 0;
+  let busy = false;
+  const active = new Set();
+
+  function publish(value) {
+    if (busy === value) return;
+    busy = value;
+    onChange(value);
+  }
+
+  return {
+    begin() {
+      const token = Object.freeze({ generation, id: ++nextId });
+      active.add(token.id);
+      publish(true);
+      return token;
+    },
+    finish(token) {
+      if (!token || token.generation !== generation || !active.delete(token.id)) return false;
+      if (active.size === 0) publish(false);
+      return true;
+    },
+    invalidate() {
+      generation += 1;
+      active.clear();
+      publish(false);
+      return generation;
+    },
+    isBusy: () => busy,
+  };
+}
+
+function cloneInvoiceLoadState(state) {
+  return {
+    ...state,
+    rows: state.rows.map((row) => ({ ...row })),
+  };
+}
+
+
+export function inspectRequestInvoiceRows(records) {
+  const rows = (Array.isArray(records) ? records : []).map((row) => ({ ...row }));
+  const batches = [...new Set(rows.map((row) => String(row?.batch || '').trim()).filter(Boolean))];
+  const multipleBatches = batches.length > 1;
+  return {
+    rows,
+    batch: multipleBatches ? '' : (batches[0] || ''),
+    error: multipleBatches
+      ? '\u8be5\u62a5\u9500\u5355\u5b58\u5728\u591a\u4e2a\u53d1\u7968\u6279\u6b21\uff0c\u5df2\u505c\u6b62\u4e0a\u4f20\u548c\u63d0\u4ea4\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u5904\u7406\u5386\u53f2\u6570\u636e\u3002'
+      : '',
+    multipleBatches,
+  };
+}
+
+export function createInvoiceRequestLoadContext(onChange = () => {}) {
+  let generation = 0;
+  let state = {
+    request: '',
+    status: 'idle',
+    rows: [],
+    batch: '',
+    error: '',
+    multipleBatches: false,
+  };
+
+  function publish(next) {
+    state = next;
+    const result = cloneInvoiceLoadState(state);
+    onChange(result);
+    return result;
+  }
+
+  function matches(token) {
+    return Boolean(token)
+      && token.generation === generation
+      && token.request === state.request;
+  }
+
+  return {
+    begin(request) {
+      generation += 1;
+      const requestName = String(request || '').trim();
+      publish({
+        request: requestName,
+        status: requestName ? 'loading' : 'idle',
+        rows: [],
+        batch: '',
+        error: '',
+        multipleBatches: false,
+      });
+      return Object.freeze({ generation, request: requestName });
+    },
+    resolve(token, records) {
+      if (!matches(token)) return { applied: false, state: cloneInvoiceLoadState(state) };
+      const inspected = inspectRequestInvoiceRows(records);
+      const next = publish({
+        request: state.request,
+        status: inspected.error ? 'error' : 'loaded',
+        rows: inspected.rows,
+        batch: inspected.batch,
+        error: inspected.error,
+        multipleBatches: inspected.multipleBatches,
+      });
+      return { applied: true, state: next };
+    },
+    reject(token, error) {
+      if (!matches(token)) return { applied: false, state: cloneInvoiceLoadState(state) };
+      const next = publish({
+        request: state.request,
+        status: 'error',
+        rows: [],
+        batch: '',
+        error: String(error?.message || error || '\u53d1\u7968\u660e\u7ec6\u52a0\u8f7d\u5931\u8d25\u3002'),
+        multipleBatches: false,
+      });
+      return { applied: true, state: next };
+    },
+    invalidate() {
+      generation += 1;
+      return publish({
+        request: '',
+        status: 'idle',
+        rows: [],
+        batch: '',
+        error: '',
+        multipleBatches: false,
+      });
+    },
+    snapshot: () => cloneInvoiceLoadState(state),
+  };
+}
