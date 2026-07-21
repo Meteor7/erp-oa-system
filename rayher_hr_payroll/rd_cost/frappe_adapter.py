@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -211,6 +212,7 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
                e.designation as fallback_designation,
                tsd.project,
                date(tsd.from_time) as posting_date,
+               coalesce(ts.rd_system_generated, 0) as rd_system_generated,
                tsd.hours
           from `tabTimesheet Detail` tsd
           inner join `tabTimesheet` ts on ts.name = tsd.parent
@@ -228,9 +230,14 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
 
     snapshot_rows = []
     for row in rows:
+        posting_date = (
+            date(year, month, monthrange(year, month)[1])
+            if _value(row, "rd_system_generated", 0)
+            else row.posting_date
+        )
         org = historical_org_for_date(
             _employee_history_rows(row.employee),
-            row.posting_date,
+            posting_date,
             fallback_department=row.fallback_department,
             fallback_designation=row.fallback_designation,
         )
@@ -242,7 +249,7 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
                 "employee_department": org["employee_department"],
                 "employee_designation": org["employee_designation"],
                 "project": row.project,
-                "posting_date": row.posting_date,
+                "posting_date": posting_date,
                 "hours": row.hours,
             }
         )

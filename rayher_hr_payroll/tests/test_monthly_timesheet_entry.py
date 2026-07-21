@@ -224,6 +224,15 @@ def _install_save_dependencies(monkeypatch, mod, frappe):
 def test_save_monthly_entries_commits_one_atomic_replacement(monthly_module, monkeypatch):
     mod, frappe = monthly_module
     _install_save_dependencies(monkeypatch, mod, frappe)
+    original_get_value = frappe.db.get_value
+
+    def employee_value(*args, **kwargs):
+        original_get_value(*args, **kwargs)
+        if len(args) >= 3 and args[0] == "Employee" and args[2] == "company":
+            return "Employee Company"
+        return None
+
+    frappe.db.get_value = employee_value
     replaced = []
     monkeypatch.setattr(mod, "_legacy_daily_exists", lambda *args: False, raising=False)
     monkeypatch.setattr(
@@ -247,6 +256,7 @@ def test_save_monthly_entries_commits_one_atomic_replacement(monthly_module, mon
 
     assert result["total_days"] == 2.35
     assert len(replaced) == 1
+    assert replaced[0]["company"] == "Employee Company"
     assert replaced[0]["rows"][0]["calculated_hours"] == Decimal("18.80")
     assert frappe.db.events[0][0] == "get_value"
     assert ("savepoint", "rd_monthly_timesheet") in frappe.db.events

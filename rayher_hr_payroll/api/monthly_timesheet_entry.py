@@ -383,6 +383,7 @@ def save_monthly_entries(period, employee, rows):
     frappe.db.get_value("Employee", employee, "name", for_update=True)
     if _legacy_daily_exists(employee, year, month):
         frappe.throw(frappe._("该员工本月已有按日工时，不能与按月工时混用。"))
+    company = frappe.db.get_value("Employee", employee, "company") or daily._company()
 
     frappe.db.savepoint(MONTHLY_SAVEPOINT)
     try:
@@ -392,7 +393,7 @@ def save_monthly_entries(period, employee, rows):
             year=year,
             month=month,
             rows=prepared,
-            company=daily._company(),
+            company=company,
         )
     except Exception:
         frappe.db.rollback(save_point=MONTHLY_SAVEPOINT)

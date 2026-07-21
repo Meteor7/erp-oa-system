@@ -432,6 +432,27 @@ def test_daily_save_rejects_employee_month_with_monthly_entries(monkeypatch):
             work_date="2026-07-01",
         )
 
+
+def test_daily_save_rechecks_monthly_entries_after_employee_lock(monkeypatch):
+    mod, frappe = _load_timesheet_entry(monkeypatch)
+    captured = _prepare_zero_hour_save(mod, frappe, monkeypatch, "请假")
+    checks = iter([False, True])
+    monkeypatch.setattr(mod, "_month_has_monthly_entries", lambda *args: next(checks), raising=False)
+
+    with pytest.raises(RuleError, match="按月工时"):
+        mod._save_rd_hours_row(
+            period="2026-07",
+            employee="EMP-1",
+            project="PROJ-1",
+            project_code="RD14",
+            project_name="ACONCA 7961",
+            hours=0,
+            work_date="2026-07-01",
+            activity_type="请假",
+        )
+
+    assert "doc" not in captured
+
 def test_save_rd_hours_rejects_employee_daily_total_over_eight_hours(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
     captured = {}
@@ -511,9 +532,10 @@ def test_get_rd_hour_summary_calculates_plm_metrics_for_selected_employee(monkey
         assert "ts.employee = %(employee)s" in query
         assert as_dict is True
         return [
-            SimpleNamespace(employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 1), hours=4),
-            SimpleNamespace(employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 1), hours=2),
-            SimpleNamespace(employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 2), hours=8),
+            SimpleNamespace(timesheet="TS-D1", employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 1), hours=4, rd_system_generated=0, rd_occurrence_days=0),
+            SimpleNamespace(timesheet="TS-D2", employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 1), hours=2, rd_system_generated=0, rd_occurrence_days=0),
+            SimpleNamespace(timesheet="TS-M1", employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 2), hours=8, rd_system_generated=1, rd_occurrence_days=1.25),
+            SimpleNamespace(timesheet="TS-M1", employee="EMP-1", employee_name="Zhang Jun", work_date=date(2026, 7, 3), hours=2, rd_system_generated=1, rd_occurrence_days=1.25),
         ]
 
     frappe.db.sql = sql
@@ -525,10 +547,10 @@ def test_get_rd_hour_summary_calculates_plm_metrics_for_selected_employee(monkey
     assert data == {
         "employee": "EMP-1",
         "employee_name": "Zhang Jun",
-        "total_hours": 14.0,
-        "filled_days": 2,
-        "average_hours": 7.0,
-        "standard_hours": 16.0,
+        "total_hours": 16.0,
+        "filled_days": 2.25,
+        "average_hours": 7.11,
+        "standard_hours": 18.0,
         "standard_delta": -2.0,
     }
 

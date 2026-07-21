@@ -325,7 +325,10 @@ def get_rd_hour_summary(period, employee=None, scope="month"):
     employee_filter, selected_employee, visible_employees = _summary_employee_filter(employee)
     rows = frappe.db.sql(
         f"""
-        select ts.employee, e.employee_name, date(tsd.from_time) as work_date, tsd.hours
+        select ts.name as timesheet, ts.employee, e.employee_name,
+               date(tsd.from_time) as work_date, tsd.hours,
+               coalesce(ts.rd_system_generated, 0) as rd_system_generated,
+               coalesce(ts.rd_occurrence_days, 0) as rd_occurrence_days
         from `tabTimesheet Detail` tsd
         inner join `tabTimesheet` ts on ts.name = tsd.parent
         inner join `tabEmployee` e on e.name = ts.employee
@@ -346,15 +349,35 @@ def get_rd_hour_summary(period, employee=None, scope="month"):
         as_dict=True,
     )
     total_hours = sum(float(_row_value(row, "hours", 0) or 0) for row in rows)
-    employee_days = {}
+    employee_daily_dates = {}
+    employee_monthly_days = {}
     for row in rows:
-        work_date = _row_value(row, "work_date")
         employee_name_key = _row_value(row, "employee")
-        if work_date and employee_name_key:
-            employee_days.setdefault(employee_name_key, set()).add(str(work_date))
-    employee_day_count = sum(len(days) for days in employee_days.values())
-    day_count = len(employee_days.get(selected_employee, set())) if selected_employee else max((len(days) for days in employee_days.values()), default=0)
-    standard_hours = float(employee_day_count * MAX_DAILY_HOURS)
+        if not employee_name_key:
+            continue
+        if _row_value(row, "rd_system_generated", 0):
+            timesheet = str(_row_value(row, "timesheet") or "")
+            if timesheet:
+                employee_monthly_days.setdefault(employee_name_key, {})[timesheet] = float(
+                    _row_value(row, "rd_occurrence_days", 0) or 0
+                )
+            continue
+        work_date = _row_value(row, "work_date")
+        if work_date:
+            employee_daily_dates.setdefault(employee_name_key, set()).add(str(work_date))
+
+    employees_with_days = set(employee_daily_dates) | set(employee_monthly_days)
+    occurrence_days = {
+        employee_key: round(
+            len(employee_daily_dates.get(employee_key, set()))
+            + sum(employee_monthly_days.get(employee_key, {}).values()),
+            2,
+        )
+        for employee_key in employees_with_days
+    }
+    employee_day_count = round(sum(occurrence_days.values()), 2)
+    day_count = occurrence_days.get(selected_employee, 0) if selected_employee else max(occurrence_days.values(), default=0)
+    standard_hours = round(float(employee_day_count * MAX_DAILY_HOURS), 2)
     first = rows[0] if rows else None
     employee_name = _row_value(first, "employee_name") if selected_employee and first else ""
     return {
@@ -420,6 +443,8 @@ def _save_rd_hours_row(period, employee, project=None, hours=None, work_date=Non
     if lock_period_import(year, month) and _period_has_submitted_allocation(year, month):
         frappe.throw(frappe._("本期已存在已提交的研发费用分摊，工时已冻结；如需调整请先撤销分摊。"))
     frappe.db.get_value("Employee", employee, "name", for_update=True)  # serialize concurrent saves for this employee so the drop+insert cannot double-count
+    if _month_has_monthly_entries(employee, year, month):
+        frappe.throw(frappe._("该员工本月已有按月工时，不能与按日工时混用。"))
     drop_activity = activity if explicit_activity else None
     if not allow_replace and _combo_timesheets(employee, project, year, month, entry_date, drop_activity):
         frappe.throw(frappe._("系统中已存在相同员工/日期/项目/活动类型工时，请先删除后再导入。"))
