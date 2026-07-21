@@ -235,3 +235,44 @@ def test_engine_initialization_failure_returns_sanitized_500(invoice_png, monkey
     assert response.json() == {"detail": "internal_error"}
     assert secret not in response.text
     assert "Traceback" not in response.text
+
+
+def test_ready_initializes_engine_in_threadpool(monkeypatch):
+    import threading
+
+    initialized_on = []
+    api.reset_engine()
+
+    class ReadyEngine:
+        def __init__(self):
+            initialized_on.append(threading.get_ident())
+
+    monkeypatch.setattr(api, "PaddleOCREngine", ReadyEngine)
+    caller_thread = threading.get_ident()
+    with TestClient(api.app, raise_server_exceptions=False) as test_client:
+        response = test_client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "engine": "paddleocr"}
+    assert len(initialized_on) == 1
+    assert initialized_on[0] != caller_thread
+    api.reset_engine()
+
+
+def test_ready_returns_sanitized_503_when_model_is_unavailable(monkeypatch):
+    secret = r"SECRET-MODEL C:\models\private"
+    api.reset_engine()
+
+    class ExplodingEngine:
+        def __init__(self):
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(api, "PaddleOCREngine", ExplodingEngine)
+    with TestClient(api.app, raise_server_exceptions=False) as test_client:
+        response = test_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "not_ready"}
+    assert secret not in response.text
+    assert "Traceback" not in response.text
+    api.reset_engine()

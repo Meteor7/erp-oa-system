@@ -22,11 +22,11 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=110).read()"
       interval: 30s
-      timeout: 5s
+      timeout: 120s
       retries: 3
-      start_period: 20s
+      start_period: 180s
 
 networks:
   rayher-ocr-internal:

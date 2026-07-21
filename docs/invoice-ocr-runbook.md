@@ -41,15 +41,16 @@ docker run --rm --network none --mount type=volume,source=rayher-invoice-ocr-mod
 
 模型卷是可复用缓存。失败时保留它供排查，不要把模型或样本复制到 Git。
 
-## 3. 正式内网启动与 health 检查
+## 3. 正式内网启动、liveness 与 readiness 检查
 
 ```powershell
 docker compose -p rayher -f $InvoiceOcrMainCompose -f $InvoiceOcrCompose up -d invoice-ocr
 docker compose -p rayher -f $InvoiceOcrMainCompose -f $InvoiceOcrCompose ps invoice-ocr
 docker run --rm --network rayher-ocr-internal rayher/invoice-ocr:0.1.0 python -c "import urllib.request; print(urllib.request.urlopen('http://invoice-ocr:8080/health', timeout=3).read().decode())"
+docker run --rm --network rayher-ocr-internal rayher/invoice-ocr:0.1.0 python -c "import urllib.request; print(urllib.request.urlopen('http://invoice-ocr:8080/ready', timeout=110).read().decode())"
 ```
 
-预期 health 返回 `{"status":"ok","engine":"paddleocr"}`。确认 `docker compose ps` 中 sidecar 没有已发布端口；完成下一节备份后，第 6 节才会把 `rayher-bench` 同时接入原业务网络和 `rayher-ocr-internal`。
+/health 只是进程 liveness，不加载模型；预期返回 status=ok、engine=paddleocr。/ready 在线程池中实际初始化 PaddleOCR，只有模型可用时才返回 status=ready、engine=paddleocr；失败返回不含内部路径的 503。Compose 使用 /ready，首次离线加载允许 180 秒启动宽限和最长 120 秒单次检查。确认 sidecar 没有发布主机端口。
 
 ## 4. 正式变更前备份
 
@@ -82,7 +83,13 @@ Get-FileHash -Algorithm SHA256 (Join-Path $InvoiceOcrBackup "*")
 ```powershell
 $PatchFile = Join-Path $InvoiceOcrBackup "invoice-ocr-$AcceptedSha.patch"
 cmd /d /c "git -C $InvoiceOcrSource diff --binary 11c018f $AcceptedSha -- frontend rayher_hr_payroll > $PatchFile"
+$PatchLength = (Get-Item -LiteralPath $PatchFile).Length
+if ($PatchLength -le 0) { throw "invoice OCR patch is empty" }
+$PatchSha256 = (Get-FileHash -Algorithm SHA256 $PatchFile).Hash.ToLowerInvariant()
+Write-Host "Patch bytes=$PatchLength SHA256=$PatchSha256"
 docker cp $PatchFile rayher-bench:/tmp/invoice-ocr.patch
+$ContainerPatchSha256 = ((docker exec rayher-bench sha256sum /tmp/invoice-ocr.patch) -split '\s+')[0].ToLowerInvariant()
+if ($ContainerPatchSha256 -ne $PatchSha256) { throw "container patch hash mismatch" }
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/rayher_hr_payroll && git apply --check /tmp/invoice-ocr.patch"
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/rayher_hr_payroll && git apply /tmp/invoice-ocr.patch"
 ```
@@ -99,6 +106,7 @@ docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && ben
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench --site rayher.localhost clear-cache && bench --site rayher.localhost clear-website-cache"
 docker restart rayher-bench
 docker exec rayher-bench curl -fsS http://invoice-ocr:8080/health
+docker exec rayher-bench curl --max-time 110 -fsS http://invoice-ocr:8080/ready
 ```
 
 必须逐条执行；任一命令失败都停止，不继续执行后续写操作。`invoice_ocr_url` 只使用容器内地址，不配置外部 OCR 接口。
@@ -120,7 +128,7 @@ docker exec rayher-bench curl -fsS http://invoice-ocr:8080/health
 
 ## 8. 日常运维
 
-每日 scheduler 调用 `cleanup_orphan_invoice_batches(retention_days=7)`。它只清理过期、无申请单、所有记录未确认且未关联、状态一致、没有查看审计、File 严格独占的批次。状态变化、共享文件、审计记录或异常都会安全跳过并写错误日志。
+每日 scheduler 调用 cleanup_orphan_invoice_batches(retention_days=7)。它只清理过期、无申请单、所有记录未确认且未关联、状态一致、无查看审计、File 严格独占且无外部 duplicate_of 引用的批次。物理文件先原子移入 private/files 系统墓碑，再由 Frappe delete_doc 生命周期删除记录和批次；事务失败恢复原路径。提交后的 File 墓碑是持久重试索引，scheduler 每次运行前后都会重试，并严格排除普通用户的同名前缀上传。
 
 ```powershell
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench --site rayher.localhost execute rayher_hr_payroll.maintenance.invoice_ocr_cleanup.cleanup_orphan_invoice_batches"
@@ -135,6 +143,14 @@ docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && ben
 
 ```powershell
 docker compose -p rayher -f $InvoiceOcrMainCompose -f $InvoiceOcrCompose stop invoice-ocr
+if (!(Test-Path -LiteralPath $PatchFile)) { throw "host patch file is missing" }
+$RollbackPatchLength = (Get-Item -LiteralPath $PatchFile).Length
+if ($RollbackPatchLength -le 0) { throw "host patch file is empty" }
+$RollbackPatchSha256 = (Get-FileHash -Algorithm SHA256 $PatchFile).Hash.ToLowerInvariant()
+Write-Host "Rollback patch bytes=$RollbackPatchLength SHA256=$RollbackPatchSha256"
+docker cp $PatchFile rayher-bench:/tmp/invoice-ocr.patch
+$RollbackContainerSha256 = ((docker exec rayher-bench sha256sum /tmp/invoice-ocr.patch) -split '\s+')[0].ToLowerInvariant()
+if ($RollbackContainerSha256 -ne $RollbackPatchSha256) { throw "rollback patch hash mismatch" }
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/rayher_hr_payroll && git apply --reverse --check /tmp/invoice-ocr.patch"
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/rayher_hr_payroll && git apply --reverse /tmp/invoice-ocr.patch"
 docker cp (Join-Path $InvoiceOcrBackup "site_config.json") "rayher-bench:/workspace/development/frappe-bench/sites/rayher.localhost/site_config.json"
@@ -145,5 +161,7 @@ docker exec rayher-bench curl -fsS -H "Host: rayher.localhost" http://127.0.0.1:
 ```
 
 如果迁移已经写入业务数据库且必须恢复快照，应先停止平台写入，从 `site-backups.tgz` 解出本次精确的数据库与文件备份，再使用 `bench --site rayher.localhost restore <精确数据库备份路径>`；随后从 `private-files.tgz` 恢复对应 private files。数据库恢复会覆盖备份时间之后的数据，必须由负责人确认维护窗口和精确备份文件后执行。
+
+bench rebuild、容器重建或替换后 /tmp 会丢失；回滚必须始终从 host 的 $PatchFile 重新 docker cp，并重新核对非零长度与两端 SHA256，不能信任容器遗留文件。
 
 反向补丁检查失败时不要强行覆盖。保留现场，使用 `rayher-app.tgz` 与 SHA256 记录进行人工比对后再恢复。回滚完成后重复平台 ping、登录、历史报销查看和主流程冒烟，确认原平台恢复。

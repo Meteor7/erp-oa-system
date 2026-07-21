@@ -226,6 +226,16 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "engine": "paddleocr"}
 
 
+@api.get("/ready")
+async def ready() -> Any:
+    try:
+        await run_in_threadpool(get_engine)
+    except Exception as error:
+        _log_internal_error(error)
+        return JSONResponse(status_code=503, content={"detail": "not_ready"})
+    return {"status": "ready", "engine": "paddleocr"}
+
+
 @api.post("/v1/recognize")
 async def recognize(
     file: Annotated[UploadFile, File()],
