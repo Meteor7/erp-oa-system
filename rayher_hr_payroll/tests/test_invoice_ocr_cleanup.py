@@ -999,3 +999,48 @@ def test_authenticated_managed_path_symlinks_fail_closed(monkeypatch, tmp_path):
     assert journal_path.is_symlink()
     assert journal_copy.exists()
     assert outside.read_bytes() == b"outside target"
+
+
+def test_missing_file_metadata_never_discards_live_business_document_file(
+    monkeypatch, tmp_path,
+):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-FILE-METADATA-LOST")
+    record, original_path = _record(
+        env, "BATCH-FILE-METADATA-LOST",
+    )
+    file_id = f"FILE-{record}"
+    original_file_doc = deepcopy(env.docs[FILE][file_id])
+    env.mark_committed()
+    cleanup = _load_module(monkeypatch, env)
+    journal_path = _interrupt_after_invoice_move(
+        monkeypatch, cleanup, original_path,
+    )
+    _envelope, payload = _authenticated_journal_parts(journal_path)
+    tombstone_path = env.private_root / payload["tombstone_basename"]
+
+    del env.docs[FILE][file_id]
+    env.mark_committed()
+    assert cleanup.cleanup_orphan_invoice_batches(now=NOW) == []
+
+    assert "BATCH-FILE-METADATA-LOST" in env.docs[BATCH]
+    assert record in env.docs[RECORD]
+    assert file_id not in env.docs[FILE]
+    assert not original_path.exists()
+    assert tombstone_path.exists()
+    assert journal_path.exists()
+    assert any(
+        "business documents still exist" in message
+        for message, _title in env.logs
+    )
+
+    # An operator can repair the missing metadata; the durable journal then
+    # restores the original file instead of losing the only invoice copy.
+    env.docs[FILE][file_id] = original_file_doc
+    env.mark_committed()
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 2, 12, 0, 0)
+    ) == []
+    assert original_path.exists()
+    assert not tombstone_path.exists()
+    assert not journal_path.exists()

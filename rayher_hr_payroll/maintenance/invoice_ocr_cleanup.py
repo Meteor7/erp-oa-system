@@ -868,6 +868,24 @@ def _reconcile_journal(journal_path: Path) -> bool:
                 _rollback_or_fatal(file_id)
                 _log("tombstone is referenced by another File row", file_id)
                 return False
+            record_rows = _rows_for_update(
+                RECORD_DOCTYPE,
+                {"name": journal["record_id"]},
+                ["name", "batch", "invoice_file"],
+            )
+            batch_rows = _rows_for_update(
+                BATCH_DOCTYPE,
+                {"name": journal["batch_id"]},
+                ["name"],
+            )
+            if record_rows or batch_rows:
+                _rollback_or_fatal(file_id)
+                _log(
+                    "business documents still exist while File metadata "
+                    "is missing",
+                    file_id,
+                )
+                return False
             _rollback_or_fatal(file_id)
             return _finish_journal(journal)
 
