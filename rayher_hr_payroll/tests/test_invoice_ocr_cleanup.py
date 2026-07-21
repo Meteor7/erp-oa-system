@@ -213,6 +213,7 @@ def test_cleanup_deletes_only_expired_unconfirmed_unlinked_consistent_batches(mo
     assert "BATCH-EXPIRED" not in env.docs[BATCH]
     assert all(row.get("batch") != "BATCH-EXPIRED" for row in env.docs[RECORD].values())
     assert not removed_path.exists()
+    assert any('inconsistent' in message for message, _title in env.logs)
     for preserved in ('BATCH-CONFIRMED', 'BATCH-LINKED', 'BATCH-ACTIVE', 'BATCH-MISMATCH', 'BATCH-COUNT-MISMATCH', 'BATCH-RECENT'):
         assert preserved in env.docs[BATCH]
 

@@ -152,6 +152,14 @@ def _expected_batch_status(records) -> str:
         return _COMPLETE
     return _PROCESSING
 
+def _aggregate_is_consistent(batch, records) -> bool:
+    counts = _record_counts(records)
+    return (
+        all(int(_value(batch, field) or 0) == count for field, count in counts.items())
+        and str(_value(batch, "batch_status") or "") == _expected_batch_status(records)
+    )
+
+
 def _record_set_is_safe(batch, records, cutoff: datetime, current: datetime) -> bool:
     if not _is_expired(batch, cutoff, current):
         return False
@@ -163,10 +171,7 @@ def _record_set_is_safe(batch, records, cutoff: datetime, current: datetime) -> 
         for row in records
     ):
         return False
-    counts = _record_counts(records)
-    if any(int(_value(batch, field) or 0) != count for field, count in counts.items()):
-        return False
-    return str(_value(batch, "batch_status") or "") == _expected_batch_status(records)
+    return _aggregate_is_consistent(batch, records)
 
 
 def _has_view_audit(records) -> bool:
@@ -285,7 +290,10 @@ def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
                 if sorted(str(_value(row, "name")) for row in records) != preliminary_names:
                     raise RuntimeError("record set changed during cleanup")
                 if not _record_set_is_safe(batch, records, cutoff, current):
+                    inconsistent = not _aggregate_is_consistent(batch, records)
                     frappe.db.rollback()
+                    if inconsistent:
+                        _log("batch status or aggregate counts are inconsistent", batch_name)
                     continue
                 if _has_view_audit(records):
                     frappe.db.rollback()
