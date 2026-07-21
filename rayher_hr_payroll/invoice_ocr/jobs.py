@@ -49,7 +49,7 @@ def _save_success(record, payload: dict):
     key, _duplicate = service._business_duplicate(record)
     if key:
         with service._transaction_lock("business", key):
-            _, duplicate = service._business_duplicate(record)
+            _, duplicate = service._business_duplicate(record, current=True)
             if duplicate:
                 service._set(record, "recognition_status", "疑似重复")
                 service._set(record, "duplicate_of", service._get(duplicate, "name"))
@@ -66,18 +66,25 @@ def _save_success(record, payload: dict):
         service._save(record)
 
 
-def _recompute_safely(record):
-    batch_name = str(service._get(record, "batch") or "")
-    if not batch_name:
-        return
+def recompute_invoice_batch(batch_name: str):
+    """Run one independently retryable aggregate transaction."""
     try:
-        with service._transaction_lock("batch", batch_name):
-            service.recompute_batch(batch_name)
+        service.recompute_batch(str(batch_name))
         frappe.db.commit()
     except Exception:
         rollback = getattr(frappe.db, "rollback", None)
         if callable(rollback):
             rollback()
+        raise
+
+
+def _recompute_safely(record):
+    batch_name = str(service._get(record, "batch") or "")
+    if not batch_name:
+        return
+    try:
+        recompute_invoice_batch(batch_name)
+    except Exception:
         service._log_internal("Invoice OCR batch aggregation failed")
 
 
@@ -85,7 +92,7 @@ def recognize_invoice(invoice_name: str):
     """Recognize one queued record under a long site-scoped record lease."""
     name = str(invoice_name)
     with service._lease_lock("record", name, timeout=600, blocking_timeout=15):
-        record = frappe.get_doc(service.RECORD_DOCTYPE, name)
+        record = service._current_doc(service.RECORD_DOCTYPE, name)
         if service._get(record, "recognition_status") != "排队中":
             return service._serialize_record(record)
 

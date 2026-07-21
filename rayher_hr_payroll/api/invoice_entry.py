@@ -99,7 +99,7 @@ def preview_invoice(invoice_name):
     return service.preview_invoice(_bounded(invoice_name, "发票标识", 140))
 
 
-@frappe.whitelist(methods=["GET"])
+@frappe.whitelist(methods=["POST"])
 def serve_invoice_preview(token):
     _authenticated()
     return service.serve_invoice_preview(_bounded(token, "预览凭证", 200))

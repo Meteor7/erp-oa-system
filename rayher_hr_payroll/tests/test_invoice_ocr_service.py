@@ -218,6 +218,11 @@ def env(tmp_path, monkeypatch):
     frappe_stub_module.get_roles = lambda user=None: environment.roles.get(user or frappe_stub_module.session.user, [])
     frappe_stub_module.has_permission = lambda *args, **kwargs: environment.permission_allowed
     frappe_stub_module.conf = types.SimpleNamespace(invoice_ocr_url="http://invoice-ocr:8080")
+    monkeypatch.setattr(
+        client.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("203.0.113.136", 8080))],
+    )
     frappe_stub_module.local = types.SimpleNamespace(request=None)
     frappe_stub_module.form_dict = types.SimpleNamespace()
     monkeypatch.setattr(service, "can_read_invoice", lambda doc, user=None: environment.read_allowed and (doc.get("owner") == (user or frappe_stub_module.session.user) or bool(set(environment.roles.get(user or frappe_stub_module.session.user, [])) & {"System Manager", "Accounts User"}) or bool(doc.get("request"))))
@@ -246,7 +251,8 @@ def test_client_uses_internal_multipart_contract_and_timeouts(env, monkeypatch):
     result = client.recognize_document(b"%PDF-1.7", "invoice.pdf", "INV-1")
     assert result["fields"]["invoice_number"] == "000123"
     args, kwargs = post.call_args
-    assert args == ("http://invoice-ocr:8080/v1/recognize",)
+    assert args == ("http://203.0.113.136:8080/v1/recognize",)
+    assert kwargs["headers"] == {"Host": "invoice-ocr:8080"}
     assert kwargs["data"] == {"record_id": "INV-1"}
     assert kwargs["files"]["file"][:2] == ("invoice.pdf", b"%PDF-1.7")
     assert kwargs["timeout"] == (3.05, 120)
@@ -595,8 +601,8 @@ def test_api_source_whitelists_only_public_endpoints():
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
     assert source.count("@frappe.whitelist") == 12
     assert "@frappe.whitelist\ndef _" not in source
-    assert source.count('methods=["POST"]') == 9
-    assert source.count('methods=["GET"]') == 1
+    assert source.count('methods=["POST"]') == 10
+    assert source.count('methods=["GET"]') == 0
 
 
 def test_register_holds_reservations_for_top_level_auto_commit(env):
@@ -718,6 +724,8 @@ def test_exact_ten_megabytes_and_twentieth_record_are_allowed(env):
     file_doc = env.add_file(filename="boundary.pdf", content=content)
     result = service.register_file("BATCH-1", file_doc.file_url)
     assert result["file_size"] == service.MAX_FILE_BYTES
+    assert env.docs[service.BATCH_DOCTYPE]["BATCH-1"].total_count == 0
+    env.db.commit()
     assert env.docs[service.BATCH_DOCTYPE]["BATCH-1"].total_count == 20
 
 
@@ -1405,6 +1413,8 @@ def test_batch_recompute_observes_record_change_before_locked_query(env):
     env.lock_hooks[key] = lambda: second.__setitem__("recognition_status", "已确认")
     result = service.confirm_invoice(first.name)
     assert result["recognition_status"] == "已确认"
+    assert batch.confirmed_count == 0
+    env.db.commit()
     assert batch.confirmed_count == 2
     assert batch.pending_confirmation_count == 0
 
@@ -1480,9 +1490,10 @@ def _preview_record(env):
 def test_preview_issues_only_controlled_short_lived_url_without_view_log(env):
     record, _file = _preview_record(env)
     result = service.preview_invoice(record.name)
-    assert result["preview_url"].startswith(
-        "/api/method/rayher_hr_payroll.api.invoice_entry.serve_invoice_preview?token="
+    assert result["preview_url"] == (
+        "/api/method/rayher_hr_payroll.api.invoice_entry.serve_invoice_preview"
     )
+    assert result["preview_method"] == "POST"
     assert "/private/files/" not in json.dumps(result)
     assert "file_url" not in result and "full_path" not in result
     assert result["mime_type"] == "application/pdf"
@@ -1496,7 +1507,7 @@ def test_preview_serve_is_one_time_user_bound_inline_and_logs_actual_view(env):
     frappe_stub_module.local.response = ResponseDict()
     service.serve_invoice_preview(token)
     response = frappe_stub_module.local.response
-    assert response.type == "binary"
+    assert response.type == "download"
     assert response.display_content_as == "inline"
     assert response.content_type == "application/pdf"
     assert response.filecontent == b"%PDF-1.7\n"
@@ -1504,6 +1515,7 @@ def test_preview_serve_is_one_time_user_bound_inline_and_logs_actual_view(env):
     log = env.inserted[-1]
     assert log.doctype == service.VIEW_LOG_DOCTYPE
     assert log.invoice_record == record.name and log.action == "查看"
+    env.db.commit()
     with pytest.raises(ValidationError, match="失效|过期"):
         service.serve_invoice_preview(token)
 
@@ -1518,7 +1530,7 @@ def test_preview_token_rejects_cross_user_but_remains_for_owner(env):
     frappe_stub_module.session.user = "alice@example.com"
     frappe_stub_module.local.response = ResponseDict()
     service.serve_invoice_preview(token)
-    assert frappe_stub_module.local.response.type == "binary"
+    assert frappe_stub_module.local.response.type == "download"
 
 
 def test_preview_token_expiry_and_guest_are_rejected(env):
@@ -1532,7 +1544,7 @@ def test_preview_token_expiry_and_guest_are_rejected(env):
         service.serve_invoice_preview("x" * 43)
 
 
-def test_preview_serve_api_is_explicit_get_and_bounded(env, monkeypatch):
+def test_preview_serve_api_is_explicit_post_and_bounded(env, monkeypatch):
     import inspect
 
     assert list(inspect.signature(api_module.serve_invoice_preview).parameters) == ["token"]
@@ -1542,7 +1554,8 @@ def test_preview_serve_api_is_explicit_get_and_bounded(env, monkeypatch):
     delegated.assert_called_once_with("x" * 43)
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
     assert source.count("@frappe.whitelist") == 12
-    assert 'methods=["GET"]' in source
+    assert 'methods=["POST"]' in source
+    assert 'methods=["GET"]' not in source
 
 
 
@@ -1625,3 +1638,447 @@ def test_client_rejects_non_rfc1918_non_loopback_special_ranges(env, monkeypatch
 @pytest.mark.parametrize("address", ["127.0.0.1", "203.0.113.73", "203.0.113.154", "203.0.113.11"])
 def test_client_keeps_loopback_and_exact_rfc1918_addresses_available(address):
     assert client._safe_internal_address(address) is True
+
+# --- Task 5 round-two MVCC/current-read RED test infrastructure ---
+_previous_mvcc_environment_init = Environment.__init__
+
+
+def _mvcc_environment_init(self, root):
+    _previous_mvcc_environment_init(self, root)
+    self.mvcc_snapshot = None
+    self.current_read_calls = []
+
+
+Environment.__init__ = _mvcc_environment_init
+
+
+def _begin_mvcc_snapshot(self):
+    self.mvcc_snapshot = {
+        doctype: {name: dict(doc) for name, doc in documents.items()}
+        for doctype, documents in self.docs.items()
+    }
+
+
+Environment.begin_mvcc_snapshot = _begin_mvcc_snapshot
+
+
+def _mvcc_documents(environment, doctype, for_update):
+    if for_update or environment.mvcc_snapshot is None:
+        return environment.docs.get(doctype, {})
+    return environment.mvcc_snapshot.get(doctype, {})
+
+
+def _mvcc_get_doc(self, doctype_or_values, name=None, for_update=False, **_kwargs):
+    if isinstance(doctype_or_values, dict):
+        return Doc(self, dict(doctype_or_values))
+    if for_update:
+        self.current_read_calls.append(("get_doc", doctype_or_values, name))
+    documents = _mvcc_documents(self, doctype_or_values, for_update)
+    try:
+        document = documents[name]
+    except KeyError as error:
+        raise ValidationError("not found") from error
+    if for_update or self.mvcc_snapshot is None:
+        return document
+    return Doc(self, dict(document))
+
+
+Environment.get_doc = _mvcc_get_doc
+
+
+def _matches_filters(document, filters):
+    if isinstance(filters, str):
+        return document.get("name") == filters
+    for key, wanted in (filters or {}).items():
+        actual = document.get(key)
+        if isinstance(wanted, (list, tuple)) and wanted and wanted[0] == "!=":
+            matched = actual != wanted[1]
+        else:
+            matched = actual == wanted
+        if not matched:
+            return False
+    return True
+
+
+def _project_db_row(document, fieldname, as_dict):
+    if fieldname == "*":
+        return dict(document)
+    fields = list(fieldname) if isinstance(fieldname, (list, tuple)) else [fieldname]
+    values = {field: document.get(field) for field in fields}
+    if as_dict:
+        return values
+    if len(fields) == 1:
+        return values[fields[0]]
+    return tuple(values.values())
+
+
+def _mvcc_db_get_value(
+    self,
+    doctype,
+    filters=None,
+    fieldname="name",
+    as_dict=False,
+    for_update=False,
+    **_kwargs,
+):
+    if for_update:
+        self.environment.current_read_calls.append(("get_value", doctype, filters))
+    documents = _mvcc_documents(self.environment, doctype, for_update)
+    for document in documents.values():
+        if _matches_filters(document, filters):
+            return _project_db_row(document, fieldname, as_dict)
+    return None
+
+
+def _mvcc_db_get_values(
+    self,
+    doctype,
+    filters=None,
+    fieldname="name",
+    as_dict=False,
+    for_update=False,
+    order_by=None,
+    limit=None,
+    limit_page_length=None,
+    **_kwargs,
+):
+    if for_update:
+        self.environment.current_read_calls.append(("get_values", doctype, filters))
+    documents = _mvcc_documents(self.environment, doctype, for_update)
+    rows = [
+        _project_db_row(document, fieldname, as_dict)
+        for document in documents.values()
+        if _matches_filters(document, filters)
+    ]
+    row_limit = limit if limit is not None else limit_page_length
+    return rows if row_limit is None else rows[:row_limit]
+
+
+FakeDB.get_value = _mvcc_db_get_value
+FakeDB.get_values = _mvcc_db_get_values
+
+
+def _mvcc_get_all(self, doctype, filters=None, fields=None, order_by=None, limit_page_length=None, **_kwargs):
+    documents = _mvcc_documents(self, doctype, False)
+    rows = [
+        {field: document.get(field) for field in (fields or ["name"])}
+        for document in documents.values()
+        if _matches_filters(document, filters)
+    ]
+    return rows if limit_page_length is None else rows[:limit_page_length]
+
+
+Environment.get_all = _mvcc_get_all
+
+
+def test_manual_state_transition_uses_for_update_current_read(env):
+    env.add_batch()
+    record = env.add_record(recognition_status="待确认")
+    env.begin_mvcc_snapshot()
+    record.recognition_status = "已确认"
+
+    with pytest.raises(ValidationError, match="状态"):
+        service.update_invoice(record.name, {"project_name": "must-not-write-stale"})
+
+    assert ("get_doc", service.RECORD_DOCTYPE, record.name) in env.current_read_calls
+    assert record.project_name == ""
+
+
+def test_confirm_duplicate_query_is_current_read_under_business_lock(env):
+    env.add_batch()
+    current = env.add_record(
+        name="INV-CURRENT",
+        recognition_status="待确认",
+        invoice_number="A-100",
+        issue_date="2026-07-20",
+        total_amount=Decimal("100.00"),
+    )
+    env.begin_mvcc_snapshot()
+    env.add_record(
+        name="INV-COMMITTED-LATER",
+        recognition_status="已确认",
+        invoice_number="A-100",
+        issue_date="2026-07-20",
+        total_amount=Decimal("100.00"),
+    )
+
+    result = service.confirm_invoice(current.name)
+
+    assert result["recognition_status"] == "疑似重复"
+    assert result["conflict"]["duplicate_of"] == "INV-COMMITTED-LATER"
+    assert any(call[:2] == ("get_values", service.RECORD_DOCTYPE) for call in env.current_read_calls)
+
+
+def test_link_acquires_all_redis_locks_then_current_reads_submitted_request(env):
+    batch = env.add_batch()
+    record = env.add_record(recognition_status="已确认")
+    request = _add_request(env)
+    line = Doc(
+        env,
+        {
+            "doctype": service.LINE_DOCTYPE,
+            "name": "LINE-MVCC",
+            "parent": request.name,
+            "parenttype": service.REQUEST_DOCTYPE,
+            "parentfield": "expense_lines",
+            "line_key": "KEY-MVCC",
+        },
+    )
+    env.docs[service.LINE_DOCTYPE][line.name] = line
+    env.begin_mvcc_snapshot()
+    request.workflow_status = "待审批"
+
+    with pytest.raises(ValidationError, match="提交后"):
+        service.link_invoice(record.name, request.name, line.line_key)
+
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories[:3] == ["record", "batch", "request"]
+    assert ("get_doc", service.RECORD_DOCTYPE, record.name) in env.current_read_calls
+    assert ("get_doc", service.BATCH_DOCTYPE, batch.name) in env.current_read_calls
+    assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
+    assert record.request == ""
+
+    request.workflow_status = "草稿"
+    env.docs[service.LINE_DOCTYPE].pop(line.name)
+    with pytest.raises(ValidationError, match="不属于"):
+        service.link_invoice(record.name, request.name, line.line_key)
+    assert any(call[:2] == ("get_value", service.LINE_DOCTYPE) for call in env.current_read_calls)
+
+
+def test_register_file_decisions_use_current_batch_file_count_and_sha_reads(env):
+    batch = env.add_batch()
+    file_doc = env.add_file(attached=True, batch=batch.name)
+    for index in range(19):
+        env.add_record(name=f"INV-EXISTING-{index}")
+    env.begin_mvcc_snapshot()
+    env.add_record(name="INV-TWENTIETH-COMMITTED")
+
+    with pytest.raises(ValidationError, match="最多上传 20"):
+        service.register_file(batch.name, file_doc.file_url)
+
+    assert ("get_doc", service.BATCH_DOCTYPE, batch.name) in env.current_read_calls
+    assert ("get_doc", "File", file_doc.name) in env.current_read_calls
+    assert any(call[:2] == ("get_values", service.RECORD_DOCTYPE) for call in env.current_read_calls)
+    assert len(env.docs[service.RECORD_DOCTYPE]) == 20
+
+
+def test_web_terminal_state_defers_batch_aggregate_until_record_commit(env):
+    batch = env.add_batch()
+    record = env.add_record(recognition_status="待确认")
+
+    result = service.confirm_invoice(record.name)
+
+    assert result["recognition_status"] == "已确认"
+    assert batch.confirmed_count == 0
+    assert not any(call[:2] == ("get_values", service.RECORD_DOCTYPE) for call in env.current_read_calls)
+    env.db.commit()
+    assert batch.confirmed_count == 1
+    assert batch.pending_confirmation_count == 0
+    assert env.commits >= 2
+    assert any(call[:2] == ("get_values", service.RECORD_DOCTYPE) for call in env.current_read_calls)
+
+
+def test_two_record_after_commit_aggregates_converge_to_final_counts(env):
+    batch = env.add_batch()
+    first = env.add_record(name="INV-FIRST", recognition_status="待确认")
+    second = env.add_record(name="INV-SECOND", recognition_status="待确认")
+
+    service.confirm_invoice(first.name)
+    service.exclude_invoice(second.name, "不报销")
+    assert batch.confirmed_count == 0 and batch.excluded_count == 0
+
+    env.db.commit()
+
+    assert batch.total_count == 2
+    assert batch.confirmed_count == 1
+    assert batch.excluded_count == 1
+    assert batch.batch_status == "已完成"
+
+
+def test_worker_claim_uses_current_record_read_after_mvcc_snapshot(env, monkeypatch):
+    record, _file = _queued_record_with_file(env)
+    env.begin_mvcc_snapshot()
+    record.recognition_status = "已排除"
+    recognize = Mock(side_effect=AssertionError("OCR must not run for current nonqueued state"))
+    monkeypatch.setattr(jobs_module.client, "recognize_document", recognize)
+
+    result = jobs_module.recognize_invoice(record.name)
+
+    assert result["recognition_status"] == "已排除"
+    assert ("get_doc", service.RECORD_DOCTYPE, record.name) in env.current_read_calls
+    recognize.assert_not_called()
+
+
+def test_after_commit_aggregate_failure_enqueues_retry_job(env, monkeypatch):
+    batch = env.add_batch()
+    record = env.add_record(recognition_status="待确认")
+    service.confirm_invoice(record.name)
+    monkeypatch.setattr(service, "recompute_batch", Mock(side_effect=RuntimeError("database busy")))
+
+    env.db.commit()
+
+    assert (
+        "rayher_hr_payroll.invoice_ocr.jobs.recompute_invoice_batch",
+        {"batch_name": batch.name, "queue": "short"},
+    ) in env.enqueued
+
+
+def test_recompute_batch_retry_job_runs_independent_current_transaction(env):
+    batch = env.add_batch()
+    env.add_record(name="INV-RETRY-AGG", recognition_status="已确认")
+
+    jobs_module.recompute_invoice_batch(batch.name)
+
+    assert batch.total_count == 1
+    assert batch.confirmed_count == 1
+    assert env.commits >= 1
+    assert ("get_doc", service.BATCH_DOCTYPE, batch.name) in env.current_read_calls
+
+# --- Task 5 round-two preview and DNS pinning RED tests ---
+class DelegatingSession:
+    def __init__(self):
+        self.trust_env = True
+
+    def post(self, *args, **kwargs):
+        return requests_stub_module.post(*args, **kwargs)
+
+
+requests_stub_module.Session = DelegatingSession
+
+
+class RecordingSession:
+    def __init__(self, response):
+        self.trust_env = True
+        self.response = response
+        self.calls = []
+
+    def post(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self.response
+
+
+def test_client_http_hostname_is_resolved_once_pinned_and_proxy_free(env, monkeypatch):
+    frappe_stub_module.conf.invoice_ocr_url = "http://ocr.internal:8080"
+    payload = _valid_payload()
+    response = Response(payload=payload)
+    session = RecordingSession(response)
+    monkeypatch.setattr(client.requests, "Session", lambda: session)
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        Mock(side_effect=AssertionError("module-level requests.post must not be used")),
+    )
+    dns_calls = []
+
+    def two_phase_dns(*_args, **_kwargs):
+        dns_calls.append(True)
+        address = "203.0.113.177" if len(dns_calls) == 1 else "8.8.8.8"
+        return [(2, 1, 6, "", (address, 8080))]
+
+    monkeypatch.setattr(client.socket, "getaddrinfo", two_phase_dns)
+
+    result = client.recognize_document(b"%PDF", "invoice.pdf", "INV-1")
+
+    assert result["record_id"] == "INV-1"
+    assert len(dns_calls) == 1
+    assert session.trust_env is False
+    assert session.calls[0][0] == ("http://203.0.113.177:8080/v1/recognize",)
+    assert session.calls[0][1]["headers"] == {"Host": "ocr.internal:8080"}
+
+
+def test_client_default_docker_hostname_public_dns_is_rejected(env, monkeypatch):
+    frappe_stub_module.conf.invoice_ocr_url = "http://invoice-ocr:8080"
+    monkeypatch.setattr(
+        client.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("8.8.8.8", 8080))],
+    )
+    session_factory = Mock()
+    monkeypatch.setattr(client.requests, "Session", session_factory)
+
+    with pytest.raises(client.OCRServiceError, match="配置无效"):
+        client.recognize_document(b"x", "a.pdf", "INV-1")
+
+    session_factory.assert_not_called()
+
+
+def test_client_https_dns_hostname_is_explicitly_rejected(env, monkeypatch):
+    frappe_stub_module.conf.invoice_ocr_url = "https://ocr.internal:8443"
+    dns = Mock(return_value=[(2, 1, 6, "", ("203.0.113.177", 8443))])
+    monkeypatch.setattr(client.socket, "getaddrinfo", dns)
+    session_factory = Mock()
+    monkeypatch.setattr(client.requests, "Session", session_factory)
+
+    with pytest.raises(client.OCRServiceError, match="配置无效"):
+        client.recognize_document(b"x", "a.pdf", "INV-1")
+
+    dns.assert_not_called()
+    session_factory.assert_not_called()
+
+
+def test_client_https_private_literal_keeps_tls_verification_and_no_proxy(env, monkeypatch):
+    frappe_stub_module.conf.invoice_ocr_url = "https://203.0.113.177:8443"
+    response = Response(payload=_valid_payload())
+    session = RecordingSession(response)
+    monkeypatch.setattr(client.requests, "Session", lambda: session)
+
+    client.recognize_document(b"%PDF", "invoice.pdf", "INV-1")
+
+    assert session.trust_env is False
+    assert session.calls[0][0] == ("https://203.0.113.177:8443/v1/recognize",)
+    assert "verify" not in session.calls[0][1]
+    assert "headers" not in session.calls[0][1]
+
+
+def test_preview_contract_is_post_blob_without_token_in_url(env):
+    record, _file = _preview_record(env)
+
+    result = service.preview_invoice(record.name)
+
+    assert result["preview_method"] == "POST"
+    assert result["preview_url"].endswith("serve_invoice_preview")
+    assert "?" not in result["preview_url"] and result["token"] not in result["preview_url"]
+    api_source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
+    serve_block = api_source[api_source.index("def serve_invoice_preview") - 50 :]
+    assert 'methods=["POST"]' in serve_block
+    assert 'methods=["GET"]' not in serve_block
+
+
+def test_preview_serve_uses_frappe_v15_as_raw_inline_fields(env):
+    record, _file = _preview_record(env)
+    token = service.preview_invoice(record.name)["token"]
+    frappe_stub_module.local.response = ResponseDict()
+
+    service.serve_invoice_preview(token)
+
+    response = frappe_stub_module.local.response
+    assert response.type == "download"
+    assert response.content_type == "application/pdf"
+    assert response.display_content_as == "inline"
+    assert response.filename == "invoice.pdf"
+    assert response.filecontent.startswith(b"%PDF-")
+
+
+def test_preview_token_and_log_are_consistent_across_commit_and_rollback(env):
+    record, _file = _preview_record(env)
+    token = service.preview_invoice(record.name)["token"]
+    cache_key = service._preview_cache_key(token)
+    original = env.cache_values[cache_key]["value"]
+    frappe_stub_module.local.response = ResponseDict()
+
+    service.serve_invoice_preview(token)
+
+    lock_key = service._lock_key("preview-consume", token)
+    assert lock_key in env.active_locks
+    assert cache_key in env.cache_values
+    env.db.rollback()
+    assert env.cache_values[cache_key]["value"] == original
+    assert lock_key not in env.active_locks
+
+    frappe_stub_module.local.response = ResponseDict()
+    service.serve_invoice_preview(token)
+    env.db.commit()
+    assert cache_key not in env.cache_values
+    assert lock_key not in env.active_locks
+    with pytest.raises(ValidationError, match="失效|过期"):
+        service.serve_invoice_preview(token)

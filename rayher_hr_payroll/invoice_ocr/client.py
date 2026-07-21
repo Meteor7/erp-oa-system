@@ -12,7 +12,6 @@ import frappe
 import requests
 
 DEFAULT_OCR_URL = "http://invoice-ocr:8080"
-DEFAULT_DOCKER_HOST = "invoice-ocr"
 CONNECT_TIMEOUT_SECONDS = 3.05
 READ_TIMEOUT_SECONDS = 120
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -43,15 +42,6 @@ def _config_value(name, default=None):
     return default if value is None else value
 
 
-def _explicit_allowed_hosts() -> set[str]:
-    configured = _config_value("invoice_ocr_allowed_hosts", ())
-    if isinstance(configured, str):
-        configured = configured.split(",")
-    if not isinstance(configured, (list, tuple, set)):
-        return set()
-    return {str(item).strip().lower().rstrip(".") for item in configured if str(item or "").strip()}
-
-
 def _safe_internal_address(value: str) -> bool:
     try:
         address = ipaddress.ip_address(value)
@@ -64,31 +54,43 @@ def _safe_internal_address(value: str) -> bool:
     )
 
 
-def _host_is_internal(hostname: str, port: int | None) -> bool:
-    normalized = hostname.lower().rstrip(".")
-    if normalized == DEFAULT_DOCKER_HOST:
-        return True
-    explicitly_allowed = normalized in _explicit_allowed_hosts()
-    try:
-        literal = ipaddress.ip_address(normalized)
-    except ValueError:
-        literal = None
-    if literal is not None:
-        return _safe_internal_address(str(literal))
-    try:
-        answers = socket.getaddrinfo(normalized, port or 80, type=socket.SOCK_STREAM)
-    except (OSError, socket.gaierror):
-        return explicitly_allowed
-    addresses = {str(answer[4][0]) for answer in answers if answer and answer[4]}
-    return bool(addresses) and all(_safe_internal_address(address) for address in addresses)
+def _configuration_error(error=None):
+    failure = OCRServiceError("OCR 服务配置无效，请联系管理员。")
+    if error is None:
+        raise failure
+    raise failure from error
 
-def _configured_url() -> str:
-    base = str(_config_value("invoice_ocr_url", DEFAULT_OCR_URL) or DEFAULT_OCR_URL).strip().rstrip("/")
-    parsed = urlsplit(base)
+
+def _resolved_private_addresses(hostname: str, port: int) -> list[ipaddress._BaseAddress]:
     try:
-        port = parsed.port
+        answers = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except (OSError, socket.gaierror) as error:
+        _configuration_error(error)
+    addresses = {
+        str(answer[4][0])
+        for answer in answers
+        if answer and len(answer) > 4 and answer[4]
+    }
+    if not addresses or not all(_safe_internal_address(address) for address in addresses):
+        _configuration_error()
+    return sorted(
+        (ipaddress.ip_address(address) for address in addresses),
+        key=lambda address: (address.version, int(address)),
+    )
+
+
+def _pinned_netloc(address: ipaddress._BaseAddress, explicit_port: int | None) -> str:
+    host = f"[{address}]" if isinstance(address, ipaddress.IPv6Address) else str(address)
+    return f"{host}:{explicit_port}" if explicit_port is not None else host
+
+
+def _configured_endpoint() -> tuple[str, dict[str, str]]:
+    configured = str(_config_value("invoice_ocr_url", DEFAULT_OCR_URL) or DEFAULT_OCR_URL).strip()
+    parsed = urlsplit(configured)
+    try:
+        explicit_port = parsed.port
     except ValueError as error:
-        raise OCRServiceError("OCR 服务配置无效，请联系管理员。") from error
+        _configuration_error(error)
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.hostname
@@ -97,10 +99,35 @@ def _configured_url() -> str:
         or parsed.query
         or parsed.fragment
         or parsed.path not in {"", "/"}
-        or not _host_is_internal(parsed.hostname, port)
     ):
-        raise OCRServiceError("OCR 服务配置无效，请联系管理员。")
-    return base
+        _configuration_error()
+
+    hostname = parsed.hostname
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+
+    if parsed.scheme == "https":
+        # Hostname HTTPS pinning requires custom SNI/hostname verification. Until
+        # that is implemented, accept only a private/loopback literal IP and keep
+        # Requests' normal certificate verification enabled.
+        if literal is None or not _safe_internal_address(str(literal)):
+            _configuration_error()
+        return configured.rstrip("/"), {}
+
+    if literal is not None:
+        if not _safe_internal_address(str(literal)):
+            _configuration_error()
+        return configured.rstrip("/"), {}
+
+    effective_port = explicit_port or 80
+    address = _resolved_private_addresses(hostname, effective_port)[0]
+    pinned = _pinned_netloc(address, explicit_port)
+    host_header = hostname
+    if explicit_port is not None:
+        host_header = f"{hostname}:{explicit_port}"
+    return f"http://{pinned}", {"Host": host_header}
 
 
 def _status_message(status_code: int) -> str:
@@ -155,16 +182,21 @@ def _read_response(response) -> bytes:
 
 
 def recognize_document(content: bytes, filename: str, record_id: str) -> dict:
-    """Send one server-read private file to the internal sidecar."""
+    """Send one server-read private file to one verified private endpoint."""
+    base_url, headers = _configured_endpoint()
+    session = requests.Session()
+    session.trust_env = False
+    request_kwargs = {
+        "files": {"file": (filename, content, "application/octet-stream")},
+        "data": {"record_id": record_id},
+        "timeout": (CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
+        "stream": True,
+        "allow_redirects": False,
+    }
+    if headers:
+        request_kwargs["headers"] = headers
     try:
-        with requests.post(
-            f"{_configured_url()}/v1/recognize",
-            files={"file": (filename, content, "application/octet-stream")},
-            data={"record_id": record_id},
-            timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
-            stream=True,
-            allow_redirects=False,
-        ) as response:
+        with session.post(f"{base_url}/v1/recognize", **request_kwargs) as response:
             if response.status_code != 200:
                 raise OCRServiceError(_status_message(response.status_code))
             raw = _read_response(response)

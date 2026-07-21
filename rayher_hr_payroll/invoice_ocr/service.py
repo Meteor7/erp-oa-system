@@ -79,6 +79,35 @@ def _get_all(doctype, *, filters=None, fields=None, order_by=None, limit=None):
     return list(frappe.get_all(doctype, **kwargs) or [])
 
 
+def _current_doc(doctype, name):
+    """Load a locking current read under MariaDB REPEATABLE READ."""
+    return frappe.get_doc(doctype, name, for_update=True)
+
+
+def _current_rows(doctype, *, filters=None, fields=None, order_by=None, limit=None):
+    kwargs = {
+        "filters": filters or {},
+        "fieldname": fields or ["name"],
+        "as_dict": True,
+        "for_update": True,
+    }
+    if order_by:
+        kwargs["order_by"] = order_by
+    if limit is not None:
+        kwargs["limit"] = limit
+    return list(frappe.db.get_values(doctype, **kwargs) or [])
+
+
+def _current_value(doctype, filters, fields):
+    return frappe.db.get_value(
+        doctype,
+        filters,
+        fields,
+        as_dict=True,
+        for_update=True,
+    )
+
+
 def _site_scope():
     site = str(getattr(getattr(frappe, "local", None), "site", "") or "default")
     return hashlib.sha256(site.encode("utf-8")).hexdigest()[:16]
@@ -150,18 +179,18 @@ def _can_write_record(record, user=None) -> bool:
     request_name = str(_get(record, "request") or "")
     return bool(request_name and invoice_permissions.can_edit_request(request_name, user))
 
-def _require_record(name: str, *, write=False):
+def _require_record(name: str, *, write=False, current=False):
     user = _user()
-    record = frappe.get_doc(RECORD_DOCTYPE, name)
+    record = _current_doc(RECORD_DOCTYPE, name) if current else frappe.get_doc(RECORD_DOCTYPE, name)
     allowed = _can_write_record(record, user) if write else can_read_invoice(record, user)
     if not allowed:
         _throw("您无权访问该发票记录。")
     return record
 
 
-def _require_batch(name: str, *, owner_only=False):
+def _require_batch(name: str, *, owner_only=False, current=False):
     user = _user()
-    batch = frappe.get_doc(BATCH_DOCTYPE, name)
+    batch = _current_doc(BATCH_DOCTYPE, name) if current else frappe.get_doc(BATCH_DOCTYPE, name)
     if owner_only:
         allowed = _get(batch, "owner") == user or user == "Administrator" or "System Manager" in _roles(user)
     else:
@@ -203,11 +232,14 @@ def _safe_file_url(file_url) -> str:
     return value
 
 
-def _file_doc(file_url: str):
+def _file_doc(file_url: str, *, current=False):
     name = frappe.db.get_value("File", {"file_url": file_url}, "name")
     if not name:
         _throw("找不到已上传的发票文件。")
-    return frappe.get_doc("File", name)
+    file_doc = _current_doc("File", name) if current else frappe.get_doc("File", name)
+    if _get(file_doc, "file_url") != file_url:
+        _throw("发票文件关联已失效。")
+    return file_doc
 
 
 def _read_limited(file_doc) -> bytes:
@@ -232,6 +264,8 @@ def _read_limited(file_doc) -> bytes:
 def _validated_file(batch, file_doc, file_url: str):
     file_url = _safe_file_url(file_url)
     user = _user()
+    if _get(file_doc, "file_url") != file_url:
+        _throw("发票文件关联已失效。")
     if int(_get(file_doc, "is_private") or 0) != 1:
         _throw("发票文件必须为私有文件。")
     if _get(file_doc, "owner") != user and "System Manager" not in _roles(user):
@@ -257,10 +291,17 @@ def _validated_file(batch, file_doc, file_url: str):
     return file_doc, content, original, CANONICAL_MIME[url_extension]
 
 
-def _first_duplicate(filters, *, exclude=None):
+def _first_duplicate(filters, *, exclude=None, current=False):
     filters = dict(filters)
     filters.setdefault("recognition_status", ["!=", "已排除"])
-    rows = _get_all(RECORD_DOCTYPE, filters=filters, fields=["name", "recognition_status", "request"], order_by="creation asc", limit=20)
+    reader = _current_rows if current else _get_all
+    rows = reader(
+        RECORD_DOCTYPE,
+        filters=filters,
+        fields=["name", "recognition_status", "request"],
+        order_by="creation asc",
+        limit=20,
+    )
     for row in rows:
         if _get(row, "name") != exclude:
             return row
@@ -357,6 +398,43 @@ def _enqueue_recognition_after_commit(invoice_name):
     frappe.db.after_commit.add(lambda: _dispatch_recognition(invoice_name))
 
 
+def _recompute_batch_after_commit(batch_name):
+    local = getattr(frappe, "local", None)
+    pending = getattr(local, "invoice_batch_recomputes", None)
+    if pending is None:
+        pending = set()
+        setattr(local, "invoice_batch_recomputes", pending)
+    if batch_name in pending:
+        return
+    pending.add(batch_name)
+
+    def run():
+        pending.discard(batch_name)
+        try:
+            recompute_batch(batch_name)
+            frappe.db.commit()
+        except Exception:
+            rollback = getattr(frappe.db, "rollback", None)
+            if callable(rollback):
+                rollback()
+            _log_internal("Invoice OCR batch aggregation failed")
+            try:
+                frappe.enqueue(
+                    "rayher_hr_payroll.invoice_ocr.jobs.recompute_invoice_batch",
+                    batch_name=batch_name,
+                    queue="short",
+                )
+            except Exception:
+                _log_internal("Invoice OCR batch aggregation retry enqueue failed")
+
+    frappe.db.after_commit.add(run)
+
+
+def _recompute_record_batch(record):
+    batch_name = str(_get(record, "batch") or "")
+    if batch_name:
+        _recompute_batch_after_commit(batch_name)
+
 
 def register_file(batch, file_url):
     batch_name = str(batch)
@@ -365,17 +443,17 @@ def register_file(batch, file_url):
     if not file_name:
         _throw("找不到已上传的发票文件。")
     with _transaction_lock("batch", batch_name):
-        batch_doc = _require_batch(batch_name, owner_only=True)
+        batch_doc = _require_batch(batch_name, owner_only=True, current=True)
         with _transaction_lock("file", file_name):
-            file_doc = frappe.get_doc("File", file_name)
+            file_doc = _current_doc("File", file_name)
             file_doc, content, server_name, server_mime = _validated_file(batch_doc, file_doc, file_url)
             digest = hashlib.sha256(content).hexdigest()
             with _transaction_lock("file-hash", digest):
-                count = len(_get_all(RECORD_DOCTYPE, filters={"batch": batch_name}, fields=["name"]))
+                count = len(_current_rows(RECORD_DOCTYPE, filters={"batch": batch_name}, fields=["name"]))
                 if count >= MAX_BATCH_FILES:
                     _throw("每批最多上传 20 张发票。")
                 user = _user()
-                duplicate = _first_duplicate({"file_sha256": digest})
+                duplicate = _first_duplicate({"file_sha256": digest}, current=True)
                 record = frappe.get_doc({
                     "doctype": RECORD_DOCTYPE, "owner": user, "batch": batch_name,
                     "invoice_file": _get(file_doc, "file_url"), "original_filename": server_name,
@@ -386,7 +464,7 @@ def register_file(batch, file_url):
                 })
                 record.insert(ignore_permissions=True)
                 _attach_file(file_doc, record, len(content))
-                recompute_batch(batch_name)
+                _recompute_batch_after_commit(batch_name)
                 if not duplicate:
                     _enqueue_recognition_after_commit(_get(record, "name"))
     return _serialize_record(record)
@@ -405,8 +483,8 @@ def _batch_status(current, counts):
 
 def recompute_batch(batch_name: str):
     with _transaction_lock("batch", batch_name):
-        batch = frappe.get_doc(BATCH_DOCTYPE, batch_name)
-        rows = _get_all(
+        batch = _current_doc(BATCH_DOCTYPE, batch_name)
+        rows = _current_rows(
             RECORD_DOCTYPE,
             filters={"batch": batch_name},
             fields=["recognition_status", "processing_error"],
@@ -511,18 +589,11 @@ def _apply_supplied_fields(record, supplied):
         _set(record, field, value)
 
 
-def _recompute_record_batch(record):
-    batch_name = str(_get(record, "batch") or "")
-    if batch_name:
-        with _transaction_lock("batch", batch_name):
-            recompute_batch(batch_name)
-
-
 def update_invoice(invoice_name, values):
     supplied = _parse_values(values)
     name = str(invoice_name)
     with _transaction_lock("record", name):
-        record = _require_record(name, write=True)
+        record = _require_record(name, write=True, current=True)
         if _get(record, "recognition_status") not in {"待确认", "疑似重复"}:
             _throw("当前发票状态不允许修改识别字段。")
         _apply_supplied_fields(record, supplied)
@@ -539,7 +610,7 @@ def _resolution_applies(record, key):
     return str(_get(record, "duplicate_reason") or "").startswith(_resolution_prefix(key))
 
 
-def _business_duplicate(record):
+def _business_duplicate(record, *, current=False):
     key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _get(record, "total_amount"))
     if not key:
         return None, None
@@ -549,7 +620,7 @@ def _business_duplicate(record):
         "total_amount": _get(record, "total_amount"),
         "recognition_status": "已确认",
     }
-    return key, _first_duplicate(filters, exclude=_get(record, "name"))
+    return key, _first_duplicate(filters, exclude=_get(record, "name"), current=current)
 
 
 def _confirm(record):
@@ -565,7 +636,7 @@ def confirm_invoice(invoice_name, values=None):
     supplied = _parse_values(values)
     name = str(invoice_name)
     with _transaction_lock("record", name):
-        record = _require_record(name, write=True)
+        record = _require_record(name, write=True, current=True)
         status = _get(record, "recognition_status")
         if status == "疑似重复":
             _throw("疑似重复发票必须先由财务解除后才能确认。")
@@ -576,7 +647,7 @@ def confirm_invoice(invoice_name, values=None):
         key, _duplicate = _business_duplicate(record)
         if key and not _resolution_applies(record, key):
             with _transaction_lock("business", key):
-                _, duplicate = _business_duplicate(record)
+                _, duplicate = _business_duplicate(record, current=True)
                 if duplicate:
                     duplicate_name = _get(duplicate, "name")
                     _set(record, "recognition_status", "疑似重复")
@@ -614,7 +685,7 @@ def _processing_claim_is_stale(record):
 def retry_invoice(invoice_name):
     name = str(invoice_name)
     with _transaction_lock("record", name):
-        record = _require_record(name, write=True)
+        record = _require_record(name, write=True, current=True)
         status = _get(record, "recognition_status")
         if status != "失败" and not (status == "识别中" and _processing_claim_is_stale(record)):
             _throw("只有识别失败或识别超时的发票可以重试。")
@@ -636,7 +707,7 @@ def exclude_invoice(invoice_name, reason):
         _throw("排除原因过长。")
     name = str(invoice_name)
     with _transaction_lock("record", name):
-        record = _require_record(name, write=True)
+        record = _require_record(name, write=True, current=True)
         if _get(record, "recognition_status") not in {"待确认", "疑似重复", "失败"}:
             _throw("当前发票状态不允许排除。")
         _set(record, "recognition_status", "已排除")
@@ -658,7 +729,7 @@ def resolve_duplicate(invoice_name, reason):
         _throw("复核原因过长。")
     name = str(invoice_name)
     with _transaction_lock("record", name):
-        record = frappe.get_doc(RECORD_DOCTYPE, name)
+        record = _current_doc(RECORD_DOCTYPE, name)
         if _get(record, "recognition_status") != "疑似重复":
             _throw("该发票当前不是疑似重复状态。")
         key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _get(record, "total_amount"))
@@ -685,19 +756,27 @@ def link_invoice(invoice_name, request, expense_line_key):
     line_key = str(expense_line_key or "").strip()
     if not line_key:
         _throw("必须选择费用明细。")
+
+    # This first read is address/authentication only. Every decision is repeated
+    # as a current read after all Redis locks are acquired, so no DB row lock is
+    # held while waiting on the batch/request Redis locks.
+    preliminary = _require_record(invoice_name, write=True)
+    preliminary_batch = str(_get(preliminary, "batch") or "")
     with _transaction_lock("record", invoice_name):
-        record = _require_record(invoice_name, write=True)
-        if _get(record, "recognition_status") != "已确认":
-            _throw("只有已确认发票可以关联费用明细。")
-        batch_name = str(_get(record, "batch") or "")
-        with _transaction_lock("batch", batch_name):
-            batch = frappe.get_doc(BATCH_DOCTYPE, batch_name)
+        with _transaction_lock("batch", preliminary_batch):
             with _transaction_lock("request", request_name):
-                request_doc = frappe.get_doc(REQUEST_DOCTYPE, request_name)
+                record = _require_record(invoice_name, write=True, current=True)
+                batch_name = str(_get(record, "batch") or "")
+                if batch_name != preliminary_batch:
+                    _throw("发票批次已发生变化，请刷新后重试。")
+                batch = _current_doc(BATCH_DOCTYPE, batch_name)
+                request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
                 _request_permission(request_doc, "edit")
+                if _get(record, "recognition_status") != "已确认":
+                    _throw("只有已确认发票可以关联费用明细。")
                 if _get(request_doc, "workflow_status") not in ACTIVE_REQUEST_STATUSES:
                     _throw("报销单提交后不能调整发票关联。")
-                line = frappe.db.get_value(
+                line = _current_value(
                     LINE_DOCTYPE,
                     {
                         "parent": request_name,
@@ -706,7 +785,6 @@ def link_invoice(invoice_name, request, expense_line_key):
                         "line_key": line_key,
                     },
                     ["name", "line_key"],
-                    as_dict=True,
                 )
                 if not line:
                     _throw("所选费用明细不属于该报销单。")
@@ -729,8 +807,8 @@ def link_invoice(invoice_name, request, expense_line_key):
 
 
 
-def _read_private_record(record):
-    file_url = _safe_file_url(_get(record, "invoice_file")); file_doc = _file_doc(file_url)
+def _read_private_record(record, *, current=False):
+    file_url = _safe_file_url(_get(record, "invoice_file")); file_doc = _file_doc(file_url, current=current)
     if int(_get(file_doc, "is_private") or 0) != 1: _throw("发票文件不再是私有文件。")
     if _get(file_doc, "attached_to_doctype") != RECORD_DOCTYPE or _get(file_doc, "attached_to_name") != _get(record, "name"): _throw("发票文件关联已失效。")
     content = _read_limited(file_doc); digest = hashlib.sha256(content).hexdigest()
@@ -779,9 +857,10 @@ def preview_invoice(invoice_name):
     )
     return {
         "token": token,
+        "preview_method": "POST",
         "preview_url": (
             "/api/method/rayher_hr_payroll.api.invoice_entry."
-            f"serve_invoice_preview?token={token}"
+            "serve_invoice_preview"
         ),
         "mime_type": _get(record, "mime_type"),
         "display_name": _get(record, "original_filename"),
@@ -793,9 +872,29 @@ def serve_invoice_preview(token):
     token = str(token or "").strip()
     if len(token) < 32 or len(token) > 200 or "\x00" in token:
         _throw("发票预览凭证已失效或过期。")
-    with _lease_lock("preview-consume", token, timeout=15, blocking_timeout=5):
-        key = _preview_cache_key(token)
-        raw = frappe.cache().get_value(key)
+
+    cache = frappe.cache()
+    key = _preview_cache_key(token)
+    lock = cache.lock(
+        _lock_key("preview-consume", token),
+        timeout=PREVIEW_TOKEN_TTL_SECONDS,
+        blocking_timeout=5,
+    )
+    if not lock.acquire(blocking=True, blocking_timeout=5):
+        _throw("发票正在被其他操作处理，请稍后重试。")
+    state = {"released": False, "deferred": False}
+
+    def release():
+        if state["released"]:
+            return
+        state["released"] = True
+        try:
+            lock.release()
+        except Exception:
+            _log_internal("Invoice OCR preview lock release failed")
+
+    try:
+        raw = cache.get_value(key)
         try:
             payload = json.loads(raw) if isinstance(raw, str) else raw
         except (TypeError, ValueError):
@@ -804,29 +903,62 @@ def serve_invoice_preview(token):
             _throw("发票预览凭证已失效或过期。")
         if payload.get("user") != user:
             _throw("您无权使用该发票预览凭证。")
-        record = _require_record(str(payload["invoice"]))
-        _file_doc_value, content = _read_private_record(record)
-        frappe.cache().delete_value(key)
-    log = frappe.get_doc(
-        {
-            "doctype": VIEW_LOG_DOCTYPE,
-            "invoice_record": _get(record, "name"),
-            "action": "查看",
-        }
-    )
-    log.insert(ignore_permissions=True)
-    display_name = (
-        str(_get(record, "original_filename") or "invoice")
-        .replace("\r", "")
-        .replace("\n", "")[:255]
-    )
-    response = frappe.local.response
-    response.type = "binary"
-    response.filename = display_name
-    response.filecontent = content
-    response.content_type = _get(record, "mime_type") or "application/octet-stream"
-    response.display_content_as = "inline"
-    return None
+
+        record = _require_record(str(payload["invoice"]), current=True)
+        _file_doc_value, content = _read_private_record(record, current=True)
+        consumed_marker = json.dumps(
+            {"consumed": True}, ensure_ascii=False, separators=(",", ":")
+        )
+        cache.set_value(
+            key,
+            consumed_marker,
+            expires_in_sec=PREVIEW_TOKEN_TTL_SECONDS,
+        )
+
+        def committed():
+            try:
+                cache.delete_value(key)
+            finally:
+                release()
+
+        def rolled_back():
+            try:
+                cache.set_value(
+                    key,
+                    raw,
+                    expires_in_sec=PREVIEW_TOKEN_TTL_SECONDS,
+                )
+            finally:
+                release()
+
+        frappe.db.after_commit.add(committed)
+        frappe.db.after_rollback.add(rolled_back)
+        state["deferred"] = True
+
+        log = frappe.get_doc(
+            {
+                "doctype": VIEW_LOG_DOCTYPE,
+                "invoice_record": _get(record, "name"),
+                "action": "查看",
+            }
+        )
+        log.insert(ignore_permissions=True)
+        display_name = (
+            str(_get(record, "original_filename") or "invoice")
+            .replace("\r", "")
+            .replace("\n", "")[:255]
+        )
+        response = frappe.local.response
+        response.type = "download"
+        response.filename = display_name
+        response.filecontent = content
+        response.content_type = _get(record, "mime_type") or "application/octet-stream"
+        response.display_content_as = "inline"
+        return None
+    except BaseException:
+        if not state["deferred"]:
+            release()
+        raise
 
 
 
