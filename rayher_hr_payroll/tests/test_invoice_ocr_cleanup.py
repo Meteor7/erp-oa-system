@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import importlib
 import json
 import re
@@ -183,7 +184,12 @@ class FakeFrappe:
         self.lifecycle_artifacts = set()
         self.db = FakeDB(self)
         self._cache = FakeCache(self)
-        self.local = types.SimpleNamespace(site="test.local")
+        self.local = types.SimpleNamespace(
+            site="test.local",
+            conf={
+                "encryption_key": "stable-test-site-encryption-key-2026",
+            },
+        )
         self.private_root = tmp_path / "sites" / "test.local" / "private" / "files"
         self.private_root.mkdir(parents=True)
         self.logs = []
@@ -770,3 +776,226 @@ def test_forged_cleanup_journal_is_never_processed(monkeypatch, tmp_path):
     assert journal_path.exists()
     assert tombstone.exists()
     assert "FILE-USER-JOURNAL" in env.docs[FILE]
+
+
+def _interrupt_after_invoice_move(monkeypatch, cleanup, original_path):
+    real_replace = cleanup.os.replace
+    interrupted = False
+
+    def stop_after_move(source, destination):
+        nonlocal interrupted
+        result = real_replace(source, destination)
+        if Path(source) == original_path and not interrupted:
+            interrupted = True
+            raise SystemExit(23)
+        return result
+
+    monkeypatch.setattr(cleanup.os, "replace", stop_after_move)
+    try:
+        cleanup.cleanup_orphan_invoice_batches(now=NOW)
+    except SystemExit as error:
+        assert error.code == 23
+    else:
+        raise AssertionError("simulated process interruption must escape")
+    monkeypatch.setattr(cleanup.os, "replace", real_replace)
+    journals = list(
+        original_path.parent.glob(
+            "__invoice_ocr_cleanup_journal__*.json"
+        )
+    )
+    assert len(journals) == 1
+    return journals[0]
+
+
+def _authenticated_journal_parts(journal_path):
+    envelope = json.loads(journal_path.read_text(encoding="utf-8"))
+    assert set(envelope) == {"payload", "signature"}
+    assert isinstance(envelope["payload"], str)
+    assert re.fullmatch(r"[0-9a-f]{64}", envelope["signature"])
+    payload_bytes = envelope["payload"].encode("utf-8")
+    expected = hmac.new(
+        b"stable-test-site-encryption-key-2026",
+        payload_bytes,
+        hashlib.sha256,
+    ).hexdigest()
+    assert hmac.compare_digest(expected, envelope["signature"])
+    payload = json.loads(envelope["payload"])
+    assert envelope["payload"] == json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return envelope, payload
+
+
+def test_cleanup_without_site_encryption_key_fails_closed(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    env.local.conf = {}
+    _batch(env, "BATCH-NO-KEY")
+    record, original_path = _record(env, "BATCH-NO-KEY")
+    env.mark_committed()
+
+    cleanup = _load_module(monkeypatch, env)
+    try:
+        cleanup.cleanup_orphan_invoice_batches(now=NOW)
+    except cleanup.CleanupFatalError as error:
+        assert "encryption key" in str(error).lower()
+    else:
+        raise AssertionError("cleanup must fail closed without a site key")
+
+    assert original_path.exists()
+    assert "BATCH-NO-KEY" in env.docs[BATCH]
+    assert record in env.docs[RECORD]
+    assert f"FILE-{record}" in env.docs[FILE]
+    assert not list(env.private_root.glob("__invoice_ocr_cleanup__*"))
+    assert env.logs == []
+
+
+def test_forged_journal_signature_cannot_unlink_tombstone(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    cleanup = _load_module(monkeypatch, env)
+    journal_id = "c" * 48
+    journal_path = env.private_root / (
+        f"__invoice_ocr_cleanup_journal__{journal_id}.json"
+    )
+    tombstone = env.private_root / (
+        f"__invoice_ocr_cleanup__{journal_id}.pending"
+    )
+    tombstone.write_bytes(b"must survive")
+    payload = {
+        "version": 1,
+        "kind": "rayher.invoice_ocr.cleanup.v1",
+        "journal_id": journal_id,
+        "file_id": "FILE-NOT-PRESENT",
+        "record_id": "REC-FORGED",
+        "batch_id": "BATCH-FORGED",
+        "original_basename": "forged.pdf",
+        "original_file_name": "forged.pdf",
+        "original_file_url": "/private/files/forged.pdf",
+        "original_owner": "attacker@example.com",
+        "tombstone_basename": tombstone.name,
+        "tombstone_file_url": f"/private/files/{tombstone.name}",
+    }
+    canonical_payload = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"),
+    )
+    journal_path.write_text(
+        json.dumps(
+            {"payload": canonical_payload, "signature": "0" * 64},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
+    assert cleanup.cleanup_orphan_invoice_batches(now=NOW) == []
+    assert journal_path.exists()
+    assert tombstone.exists()
+    assert tombstone.read_bytes() == b"must survive"
+
+
+def test_tampered_signed_journal_fields_are_never_processed(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-TAMPER")
+    record, original_path = _record(env, "BATCH-TAMPER")
+    env.mark_committed()
+    cleanup = _load_module(monkeypatch, env)
+    journal_path = _interrupt_after_invoice_move(
+        monkeypatch, cleanup, original_path,
+    )
+    envelope, payload = _authenticated_journal_parts(journal_path)
+    tombstone_path = env.private_root / payload["tombstone_basename"]
+    payload["batch_id"] = "BATCH-ATTACKER-CHANGED"
+    envelope["payload"] = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    journal_path.write_text(
+        json.dumps(envelope, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 2, 12, 0, 0)
+    ) == []
+    assert journal_path.exists()
+    assert tombstone_path.exists()
+    assert not original_path.exists()
+    assert record in env.docs[RECORD]
+    assert f"FILE-{record}" in env.docs[FILE]
+    log_text = json.dumps(env.logs)
+    assert "stable-test-site-encryption-key-2026" not in log_text
+    assert envelope["signature"] not in log_text
+
+
+def test_repointed_file_url_cannot_authorize_journal_cleanup(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-REPOINT")
+    record, original_path = _record(env, "BATCH-REPOINT")
+    env.mark_committed()
+    cleanup = _load_module(monkeypatch, env)
+    journal_path = _interrupt_after_invoice_move(
+        monkeypatch, cleanup, original_path,
+    )
+    _envelope, payload = _authenticated_journal_parts(journal_path)
+    tombstone_path = env.private_root / payload["tombstone_basename"]
+    file_doc = env.docs[FILE][f"FILE-{record}"]
+    file_doc["file_url"] = f"/private/files/{journal_path.name}"
+    env.mark_committed()
+
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 2, 12, 0, 0)
+    ) == []
+    assert journal_path.exists()
+    assert tombstone_path.exists()
+    assert f"FILE-{record}" in env.docs[FILE]
+
+
+def test_authenticated_managed_path_symlinks_fail_closed(monkeypatch, tmp_path):
+    env = FakeFrappe(tmp_path)
+    _batch(env, "BATCH-SYMLINK")
+    record, original_path = _record(env, "BATCH-SYMLINK")
+    env.mark_committed()
+    cleanup = _load_module(monkeypatch, env)
+    journal_path = _interrupt_after_invoice_move(
+        monkeypatch, cleanup, original_path,
+    )
+    _envelope, payload = _authenticated_journal_parts(journal_path)
+    tombstone_path = env.private_root / payload["tombstone_basename"]
+    outside = tmp_path / "outside-do-not-delete.txt"
+    outside.write_bytes(b"outside target")
+    tombstone_path.unlink()
+    tombstone_path.symlink_to(outside)
+
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 2, 12, 0, 0)
+    ) == []
+    assert journal_path.exists()
+    assert tombstone_path.is_symlink()
+    assert outside.read_bytes() == b"outside target"
+    assert record in env.docs[RECORD]
+    assert f"FILE-{record}" in env.docs[FILE]
+
+    tombstone_path.unlink()
+    tombstone_path.write_bytes(b"invoice")
+    original_path.symlink_to(outside)
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 3, 12, 0, 0)
+    ) == []
+    assert original_path.is_symlink()
+    assert tombstone_path.exists()
+    assert outside.read_bytes() == b"outside target"
+
+    journal_copy = tmp_path / "outside-journal.json"
+    journal_copy.write_bytes(journal_path.read_bytes())
+    journal_path.unlink()
+    journal_path.symlink_to(journal_copy)
+    assert cleanup.cleanup_orphan_invoice_batches(
+        now=datetime(2026, 7, 4, 12, 0, 0)
+    ) == []
+    assert journal_path.is_symlink()
+    assert journal_copy.exists()
+    assert outside.read_bytes() == b"outside target"

@@ -105,6 +105,7 @@ docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench/apps/r
 
 ```powershell
 docker compose -p rayher -f $InvoiceOcrMainCompose -f $InvoiceOcrCompose up -d bench
+docker exec -w /workspace/development/frappe-bench rayher-bench env/bin/python -c "import frappe; frappe.init(site='rayher.localhost', sites_path='sites'); from frappe.utils.password import get_encryption_key; get_encryption_key(); assert frappe.local.conf.get('encryption_key'); frappe.destroy()"
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench --site rayher.localhost set-config invoice_ocr_url http://invoice-ocr:8080"
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench --site rayher.localhost migrate"
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench build --app rayher_hr_payroll"
@@ -133,7 +134,7 @@ docker exec rayher-bench curl --max-time 110 -fsS http://invoice-ocr:8080/ready
 
 ## 8. 日常运维
 
-每日 scheduler 调用 cleanup_orphan_invoice_batches(retention_days=7)。它只清理过期、无申请单、所有记录未确认且未关联、状态一致、无查看审计、File 严格独占且无外部 duplicate_of 引用的批次。每个文件移动前先在 private/files 原子写入并 fsync 严格随机 cleanup journal，再原子移入系统墓碑；事务未提交时 journal 恢复原路径，已提交时它驱动 Frappe delete_doc 清理 File 元数据并在提交后精确 unlink 墓碑。journal 完成前始终保留，scheduler 每次运行前后都会 reconcile，并严格排除普通用户跟踪的伪装 journal 或同名前缀上传。
+每日 scheduler 调用 cleanup_orphan_invoice_batches(retention_days=7)。它只清理过期、无申请单、所有记录未确认且未关联、状态一致、无查看审计、File 严格独占且无外部 duplicate_of 引用的批次。每个文件移动前先在 private/files 原子写入并 fsync 随机 cleanup journal；journal 使用站点 encryption_key 对严格 canonical payload 做 HMAC-SHA256 签名，站点密钥不可用时任务关闭失败且不移动或删除文件。文件随后才原子移入系统墓碑；事务未提交时 journal 恢复原路径，已提交时它驱动 Frappe delete_doc 清理 File 元数据并在提交后精确 unlink 墓碑。journal 完成前始终保留，scheduler 每次运行前后都会先验签，并在解析路径后以 lstat 拒绝 journal、原文件或墓碑的符号链接，同时排除普通用户重指 File.file_url 的伪装 journal 或同名前缀上传。
 
 ```powershell
 docker exec rayher-bench bash -lc "cd /workspace/development/frappe-bench && bench --site rayher.localhost execute rayher_hr_payroll.maintenance.invoice_ocr_cleanup.cleanup_orphan_invoice_batches"

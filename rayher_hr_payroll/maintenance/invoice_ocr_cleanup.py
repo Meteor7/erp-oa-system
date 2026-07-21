@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
 import secrets
+import stat
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -244,7 +246,40 @@ def _has_view_audit(records) -> bool:
 
 
 def _private_root() -> Path:
-    return Path(frappe.get_site_path("private", "files")).resolve()
+    root = Path(
+        os.path.abspath(
+            os.fspath(frappe.get_site_path("private", "files"))
+        )
+    )
+    current = Path(root.anchor)
+    try:
+        for component in root.parts[1:]:
+            current /= component
+            metadata = current.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                raise OSError("symbolic link in private files root")
+        if not stat.S_ISDIR(root.lstat().st_mode):
+            raise OSError("private files root is not a directory")
+    except OSError as error:
+        raise CleanupFatalError(
+            "unsafe private files root for invoice cleanup"
+        ) from error
+    return root
+
+
+def _leaf_state(path: Path) -> str:
+    """Return a lexical leaf state without following symbolic links."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return "missing"
+    except OSError:
+        return "invalid"
+    if stat.S_ISLNK(metadata.st_mode):
+        return "symlink"
+    if stat.S_ISREG(metadata.st_mode):
+        return "regular"
+    return "other"
 
 
 def _private_path(file_doc, file_url: str) -> Path | None:
@@ -254,12 +289,14 @@ def _private_path(file_doc, file_url: str) -> Path | None:
     if not tail or PurePosixPath(tail).name != tail or tail in {".", ".."}:
         return None
     root = _private_root()
-    expected = (root / tail).resolve()
+    expected = root / tail
     try:
-        actual = Path(file_doc.get_full_path()).resolve()
+        actual = Path(os.path.abspath(os.fspath(file_doc.get_full_path())))
     except (AttributeError, OSError, TypeError, ValueError):
         return None
     if expected != actual or actual.parent != root:
+        return None
+    if _leaf_state(actual) == "symlink":
         return None
     return actual
 
@@ -283,6 +320,7 @@ _JOURNAL_PATTERN = re.compile(
 _JOURNAL_KIND = "rayher.invoice_ocr.cleanup.v1"
 _JOURNAL_VERSION = 1
 _JOURNAL_MAX_BYTES = 16 * 1024
+_JOURNAL_ENVELOPE_KEYS = {"payload", "signature"}
 _JOURNAL_KEYS = {
     "version", "kind", "journal_id", "file_id", "record_id", "batch_id",
     "original_basename", "original_file_name", "original_file_url",
@@ -292,6 +330,47 @@ _JOURNAL_KEYS = {
 
 class CleanupFatalError(RuntimeError):
     """Stop cleanup when the database transaction state is unknown."""
+
+
+def _journal_hmac_key() -> bytes:
+    """Return the current site's secret or fail closed without logging it."""
+    local = getattr(frappe, "local", None)
+    configuration = getattr(local, "conf", None)
+    if configuration is None:
+        getter = getattr(frappe, "get_conf", None)
+        configuration = getter() if callable(getter) else None
+    key = _value(configuration, "encryption_key") if configuration else None
+    if isinstance(key, bytes):
+        encoded = key
+    else:
+        value = str(key or "").strip()
+        encoded = value.encode("utf-8") if value else b""
+    if len(encoded) < 16:
+        raise CleanupFatalError(
+            "site encryption key unavailable for invoice cleanup"
+        )
+    return encoded
+
+
+def _canonical_json(value) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _signed_journal_bytes(payload) -> bytes:
+    canonical_payload = _canonical_json(payload)
+    signature = hmac.new(
+        _journal_hmac_key(),
+        canonical_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return _canonical_json(
+        {"payload": canonical_payload, "signature": signature}
+    ).encode("utf-8")
 
 
 def _rollback_or_fatal(subject: str):
@@ -405,7 +484,7 @@ def _owned_files(records, expected_file_names):
             return None
         file_doc = frappe.get_doc(FILE_DOCTYPE, file_id, for_update=True)
         path = _private_path(file_doc, file_url)
-        if path is None or not path.is_file():
+        if path is None or _leaf_state(path) != "regular":
             return None
         owned.append(
             {
@@ -502,31 +581,38 @@ def _journal_payload(owned, batch_name: str):
 
 def _write_journal(payload, journal_path: Path):
     root = _private_root()
-    if journal_path.parent.resolve() != root:
+    if journal_path.parent != root or not _JOURNAL_PATTERN.fullmatch(
+        journal_path.name
+    ):
         raise RuntimeError("invalid invoice cleanup journal path")
-    serialized = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8")
+    if _leaf_state(journal_path) != "missing":
+        raise RuntimeError("invoice cleanup journal path already exists")
+    serialized = _signed_journal_bytes(payload)
     if len(serialized) > _JOURNAL_MAX_BYTES:
         raise RuntimeError("invoice cleanup journal is too large")
     temporary = root / f".{journal_path.name}.{secrets.token_hex(12)}.tmp"
     descriptor = None
     try:
-        descriptor = os.open(
-            str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
-        )
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(str(temporary), flags, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             descriptor = None
             stream.write(serialized)
             stream.flush()
             os.fsync(stream.fileno())
+        if (
+            _leaf_state(journal_path) != "missing"
+            or _leaf_state(temporary) != "regular"
+        ):
+            raise RuntimeError("invoice cleanup journal path changed")
         os.replace(temporary, journal_path)
         _fsync_directory(root)
     finally:
         if descriptor is not None:
             os.close(descriptor)
         try:
-            if temporary.exists():
+            if _leaf_state(temporary) == "regular":
                 temporary.unlink()
         except OSError:
             pass
@@ -539,6 +625,12 @@ def _stage_files(owned_files, batch_name: str, journal_paths):
         _write_journal(payload, journal_path)
         journal_paths.append(journal_path)
         tombstone_path = root / payload["tombstone_basename"]
+        if (
+            owned["original_path"].parent != root
+            or _leaf_state(owned["original_path"]) != "regular"
+            or _leaf_state(tombstone_path) != "missing"
+        ):
+            raise RuntimeError("invoice cleanup managed path is unsafe")
         os.replace(owned["original_path"], tombstone_path)
         _fsync_directory(root)
         file_doc = owned["file_doc"]
@@ -551,23 +643,54 @@ def _stage_files(owned_files, batch_name: str, journal_paths):
         _set_value(file_doc, "attached_to_field", "")
         file_doc.save(ignore_permissions=True)
 
+
 def _validated_journal(journal_path: Path):
     root = _private_root()
+    match = _JOURNAL_PATTERN.fullmatch(journal_path.name)
+    if (
+        journal_path.parent != root
+        or not match
+        or _leaf_state(journal_path) != "regular"
+    ):
+        return None
     try:
-        if journal_path.is_symlink():
-            return None
-        resolved = journal_path.resolve()
-        match = _JOURNAL_PATTERN.fullmatch(journal_path.name)
-        if resolved.parent != root or not match or not journal_path.is_file():
-            return None
         raw = journal_path.read_bytes()
         if not raw or len(raw) > _JOURNAL_MAX_BYTES:
             return None
-        payload = json.loads(raw.decode("utf-8"))
+        envelope = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeError, ValueError, TypeError):
         return None
-    if not isinstance(payload, dict) or set(payload) != _JOURNAL_KEYS:
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != _JOURNAL_ENVELOPE_KEYS
+        or not isinstance(envelope.get("payload"), str)
+        or not isinstance(envelope.get("signature"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", envelope["signature"])
+        or raw != _canonical_json(envelope).encode("utf-8")
+    ):
         return None
+
+    # Authenticate the opaque canonical payload before parsing any of its
+    # identifiers or constructing/accessing paths from it.
+    canonical_payload = envelope["payload"]
+    expected_signature = hmac.new(
+        _journal_hmac_key(),
+        canonical_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected_signature, envelope["signature"]):
+        return None
+    try:
+        payload = json.loads(canonical_payload)
+    except (UnicodeError, ValueError, TypeError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != _JOURNAL_KEYS
+        or canonical_payload != _canonical_json(payload)
+    ):
+        return None
+
     journal_id = str(payload.get("journal_id") or "")
     if (
         payload.get("version") != _JOURNAL_VERSION
@@ -602,11 +725,14 @@ def _validated_journal(journal_path: Path):
         != f"{_PRIVATE_PREFIX}{tombstone_basename}"
     ):
         return None
-    original_path = (root / original_basename).resolve()
-    tombstone_path = (root / tombstone_basename).resolve()
+    original_path = root / original_basename
+    tombstone_path = root / tombstone_basename
     if (
-        original_path.parent != root or tombstone_path.parent != root
+        original_path.parent != root
+        or tombstone_path.parent != root
         or original_path == tombstone_path
+        or _leaf_state(original_path) == "symlink"
+        or _leaf_state(tombstone_path) == "symlink"
     ):
         return None
     return {
@@ -656,6 +782,10 @@ def _matches_tombstone_file(file_doc, journal) -> bool:
 
 
 def _remove_journal(journal_path: Path):
+    root = _private_root()
+    state = _leaf_state(journal_path)
+    if journal_path.parent != root or state != "regular":
+        raise OSError("refusing unsafe invoice cleanup journal unlink")
     journal_path.unlink()
     _fsync_directory(journal_path.parent)
 
@@ -663,7 +793,12 @@ def _remove_journal(journal_path: Path):
 def _unlink_tombstone(journal) -> bool:
     path = journal["tombstone_path"]
     try:
-        if path.exists():
+        state = _leaf_state(path)
+        if path.parent != _private_root() or state in {
+            "symlink", "other", "invalid",
+        }:
+            raise OSError("refusing unsafe invoice cleanup tombstone unlink")
+        if state == "regular":
             path.unlink()
             _fsync_directory(path.parent)
         return True
@@ -739,15 +874,30 @@ def _reconcile_journal(journal_path: Path) -> bool:
         if _matches_original_file(file_doc, journal):
             original = journal["original_path"]
             tombstone = journal["tombstone_path"]
-            if original.exists() and tombstone.exists():
+            original_state = _leaf_state(original)
+            tombstone_state = _leaf_state(tombstone)
+            unsafe_states = {"symlink", "other", "invalid"}
+            if (
+                original_state in unsafe_states
+                or tombstone_state in unsafe_states
+            ):
+                _rollback_or_fatal(file_id)
+                _log("unsafe original or tombstone path", file_id)
+                return False
+            if original_state == "regular" and tombstone_state == "regular":
                 _rollback_or_fatal(file_id)
                 _log("ambiguous original and tombstone paths", file_id)
                 return False
             try:
-                if tombstone.exists():
+                if tombstone_state == "regular":
+                    if (
+                        _leaf_state(tombstone) != "regular"
+                        or _leaf_state(original) != "missing"
+                    ):
+                        raise OSError("managed path changed during restore")
                     os.replace(tombstone, original)
                     _fsync_directory(original.parent)
-                elif not original.exists():
+                elif original_state != "regular":
                     _rollback_or_fatal(file_id)
                     _log("both original and tombstone paths are missing", file_id)
                     return False
@@ -803,6 +953,7 @@ def _reconcile_journals():
     ):
         _reconcile_journal(journal_path)
 
+
 def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
     """Clean expired invoice batches with locks and durable file journals.
 
@@ -817,6 +968,9 @@ def cleanup_orphan_invoice_batches(retention_days: int = 7, now=None):
         or retention_days < 0
     ):
         raise ValueError("retention_days must be a non-negative integer")
+    # A site secret is mandatory even when there are currently no candidates:
+    # unsigned journals must never trigger filesystem or database mutations.
+    _journal_hmac_key()
     current = _now(now)
     cutoff = current - timedelta(days=retention_days)
     _reconcile_journals()
