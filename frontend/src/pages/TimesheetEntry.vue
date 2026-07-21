@@ -206,7 +206,7 @@ async function importTimesheetWorkbookRows(event) {
   }
 }
 
-async function exportRows() {
+async function exportCurrent() {
   exporting.value = true;
   try {
     await exportTableWorkbook({
@@ -294,7 +294,7 @@ watch(() => monthly.data, hydrateEntries);
         <span class="text-sm text-gray-500">当月合计：<strong class="font-medium text-gray-800">{{ formatNumber(totalDays) }} 天</strong> / 上限 {{ formatNumber(dayLimit) }} 天</span>
         <Button v-if="canEdit" variant="subtle" :disabled="legacyDailyPresent" @click="addRow">+ 新增一行</Button>
         <Button v-if="canEdit" variant="solid" :loading="saving" :disabled="legacyDailyPresent || !selectedEmployee" @click="saveRows">保存</Button>
-        <Button variant="subtle" :loading="exporting" :disabled="!entries.length" @click="exportRows">导出Excel</Button>
+        <Button variant="subtle" :loading="exporting" :disabled="!entries.length" @click="exportCurrent">导出Excel</Button>
       </div>
     </div>
 
