@@ -16,3 +16,4 @@ Baseline:
 - Task 6 COMPLETE: 42c26bb + bf63f69 + 699faaf; 262 passed, 1 environment skip; final review Critical/Important/Minor = 0/0/0.
 - Task 7 COMPLETE: 3291a89 + 20ae817; frontend 124 passed; backend related 221 passed, 1 environment skip; Vite build passed; final review Critical/Important/Minor = 0/0/0.
 - Task 8 COMPLETE: 22cd904; frontend 131 passed; backend related 226 passed; Vite build 2077 modules; attach concurrency/reason persistence/upload race covered.
+- Task 8 REVIEW FIXES COMPLETE: 07387ff; frontend 135 passed; backend related 247 passed; Vite build 2077 modules; request/batch current-read uniqueness, strict reason JSON bounds, generation-safe detail loading/busy state, multi-batch error preservation, and post-register attach ordering covered; assets 23/23 reachable, missing/orphan 0.
