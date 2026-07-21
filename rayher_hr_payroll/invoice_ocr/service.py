@@ -458,26 +458,37 @@ def register_file(batch, file_url):
     file_url = _safe_file_url(file_url)
     file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
     if not file_name:
-        _throw("找不到已上传的发票文件。")
+        _throw("\u627e\u4e0d\u5230\u5df2\u4e0a\u4f20\u7684\u53d1\u7968\u6587\u4ef6\u3002")
     with _transaction_lock("batch", batch_name):
         batch_doc = _require_batch(batch_name, owner_only=True, current=True)
-        with _transaction_lock("file", file_name):
+        request_name = str(_get(batch_doc, "request") or "").strip()
+        with ExitStack() as registration_locks:
+            if request_name:
+                registration_locks.enter_context(
+                    _transaction_lock("request", request_name)
+                )
+                request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
+                _request_permission(request_doc, "edit", current=True)
+                if _get(request_doc, "workflow_status") not in ACTIVE_REQUEST_STATUSES:
+                    _throw("\u62a5\u9500\u5355\u63d0\u4ea4\u540e\u4e0d\u80fd\u8ffd\u52a0\u53d1\u7968\u3002")
+            registration_locks.enter_context(_transaction_lock("file", file_name))
             file_doc = _current_doc("File", file_name)
             file_doc, content, server_name, server_mime = _validated_file(batch_doc, file_doc, file_url)
             digest = hashlib.sha256(content).hexdigest()
             with _transaction_lock("file-hash", digest):
                 count = len(_current_rows(RECORD_DOCTYPE, filters={"batch": batch_name}, fields=["name"]))
                 if count >= MAX_BATCH_FILES:
-                    _throw("每批最多上传 20 张发票。")
+                    _throw("\u6bcf\u6279\u6700\u591a\u4e0a\u4f20 20 \u5f20\u53d1\u7968\u3002")
                 user = _user()
                 duplicate = _first_duplicate({"file_sha256": digest}, current=True)
                 record = frappe.get_doc({
                     "doctype": RECORD_DOCTYPE, "owner": user, "batch": batch_name,
+                    "request": request_name,
                     "invoice_file": _get(file_doc, "file_url"), "original_filename": server_name,
                     "mime_type": server_mime, "file_size": len(content), "file_sha256": digest,
-                    "uploaded_by": user, "recognition_status": "疑似重复" if duplicate else "排队中",
+                    "uploaded_by": user, "recognition_status": "\u7591\u4f3c\u91cd\u590d" if duplicate else "\u6392\u961f\u4e2d",
                     "duplicate_of": _get(duplicate, "name") if duplicate else "",
-                    "duplicate_reason": "文件内容与已有发票完全相同" if duplicate else "", "retry_count": 0,
+                    "duplicate_reason": "\u6587\u4ef6\u5185\u5bb9\u4e0e\u5df2\u6709\u53d1\u7968\u5b8c\u5168\u76f8\u540c" if duplicate else "", "retry_count": 0,
                 })
                 record.insert(ignore_permissions=True)
                 _attach_file(file_doc, record, len(content))
@@ -485,6 +496,7 @@ def register_file(batch, file_url):
                 if not duplicate:
                     _enqueue_recognition_after_commit(_get(record, "name"))
     return _serialize_record(record)
+
 
 def _batch_status(current, counts):
     if current == "已取消": return "已取消"
@@ -509,13 +521,13 @@ def recompute_batch(batch_name: str):
         statuses = [str(_get(row, "recognition_status") or "") for row in rows]
         counts = {
             "total_count": len(statuses),
-            "queued_count": statuses.count("排队中"),
-            "processing_count": statuses.count("识别中"),
-            "pending_confirmation_count": statuses.count("待确认"),
-            "confirmed_count": statuses.count("已确认"),
-            "duplicate_count": statuses.count("疑似重复"),
-            "failed_count": statuses.count("失败"),
-            "excluded_count": statuses.count("已排除"),
+            "queued_count": statuses.count("\u6392\u961f\u4e2d"),
+            "processing_count": statuses.count("\u8bc6\u522b\u4e2d"),
+            "pending_confirmation_count": statuses.count("\u5f85\u786e\u8ba4"),
+            "confirmed_count": statuses.count("\u5df2\u786e\u8ba4"),
+            "duplicate_count": statuses.count("\u7591\u4f3c\u91cd\u590d"),
+            "failed_count": statuses.count("\u5931\u8d25"),
+            "excluded_count": statuses.count("\u5df2\u6392\u9664"),
         }
         for field, value in counts.items():
             _set(batch, field, value)
@@ -527,6 +539,13 @@ def recompute_batch(batch_name: str):
         ]
         _set(batch, "error_summary", "\n".join(errors[:20]))
         _save(batch)
+        request_name = str(_get(batch, "request") or "").strip()
+        if request_name:
+            with _transaction_lock("request", request_name):
+                request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
+                _apply_request_invoice_summary(
+                    request_doc, save=True, current=True
+                )
         return batch
 
 
@@ -761,19 +780,33 @@ def resolve_duplicate(invoice_name, reason):
         return _serialize_record(record)
 
 
-def _request_invoice_records(request_name):
-    """Read request records without taking reverse record locks."""
+def _request_invoice_records(request_name, *, current=False):
+    """Read request records without taking reverse record Redis locks."""
     request_name = str(request_name or "").strip()
     if not request_name:
         return []
+    read_rows = _current_rows if current else _get_all
     records = {}
-    for row in _get_all(RECORD_DOCTYPE, filters={"request": request_name}, fields=REQUEST_RECORD_FIELDS):
+    for row in read_rows(
+        RECORD_DOCTYPE,
+        filters={"request": request_name},
+        fields=REQUEST_RECORD_FIELDS,
+    ):
         records[str(_get(row, "name"))] = row
-    batches = _get_all(BATCH_DOCTYPE, filters={"request": request_name}, fields=["name"])
+    batches = read_rows(
+        BATCH_DOCTYPE,
+        filters={"request": request_name},
+        fields=["name"],
+    )
     for batch in batches:
-        for row in _get_all(RECORD_DOCTYPE, filters={"batch": _get(batch, "name")}, fields=REQUEST_RECORD_FIELDS):
+        for row in read_rows(
+            RECORD_DOCTYPE,
+            filters={"batch": _get(batch, "name")},
+            fields=REQUEST_RECORD_FIELDS,
+        ):
             records.setdefault(str(_get(row, "name")), row)
     return list(records.values())
+
 
 
 def _request_name(request_doc):
@@ -805,8 +838,10 @@ def _deduplicated_text(values, limit=REQUEST_SEARCH_LIMIT):
     return "；".join(parts)
 
 
-def request_invoice_summary(request_doc):
-    records = _request_invoice_records(_request_name(request_doc))
+def request_invoice_summary(request_doc, *, current=False):
+    records = _request_invoice_records(
+        _request_name(request_doc), current=current
+    )
     included = [row for row in records if _get(row, "recognition_status") != "已排除"]
     statuses = []
     for row in included:
@@ -825,8 +860,8 @@ def request_invoice_summary(request_doc):
     }
 
 
-def _apply_request_invoice_summary(request_doc, *, save=False):
-    summary = request_invoice_summary(request_doc)
+def _apply_request_invoice_summary(request_doc, *, save=False, current=False):
+    summary = request_invoice_summary(request_doc, current=current)
     _set(request_doc, "invoice_count", summary["invoice_count"])
     _set(request_doc, "invoice_status", summary["invoice_status"])
     if save:
@@ -838,9 +873,9 @@ def attach_batch_to_request(batch_name, request_doc):
     batch_name = str(batch_name or "").strip()
     request_name = _request_name(request_doc)
     if not batch_name:
-        _throw("缺少发票批次。")
+        _throw("\u7f3a\u5c11\u53d1\u7968\u6279\u6b21\u3002")
     if not request_name:
-        _throw("请先保存费用付款/报销单。")
+        _throw("\u8bf7\u5148\u4fdd\u5b58\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500\u5355\u3002")
     preliminary = _get_all(
         RECORD_DOCTYPE,
         filters={"batch": batch_name},
@@ -859,7 +894,7 @@ def attach_batch_to_request(batch_name, request_doc):
         _request_permission(current_request, "edit", current=True)
         batch_request = str(_get(batch, "request") or "")
         if batch_request and batch_request != request_name:
-            _throw("该发票批次已关联到其他报销单。")
+            _throw("\u8be5\u53d1\u7968\u6279\u6b21\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
         current_rows = _current_rows(
             RECORD_DOCTYPE,
             filters={"batch": batch_name},
@@ -869,24 +904,22 @@ def attach_batch_to_request(batch_name, request_doc):
             {str(_get(row, "name") or "") for row in current_rows if _get(row, "name")}
         )
         if current_names != record_names:
-            _throw("发票批次内容已发生变化，请刷新后重试。")
+            _throw("\u53d1\u7968\u6279\u6b21\u5185\u5bb9\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002")
         records = [_current_doc(RECORD_DOCTYPE, name) for name in record_names]
         for record in records:
             if str(_get(record, "batch") or "") != batch_name:
-                _throw("发票批次内容已发生变化，请刷新后重试。")
+                _throw("\u53d1\u7968\u6279\u6b21\u5185\u5bb9\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002")
             existing = str(_get(record, "request") or "")
             if existing and existing != request_name:
-                _throw("该发票已关联到其他报销单。")
+                _throw("\u8be5\u53d1\u7968\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
         for record in records:
             _set(record, "request", request_name)
             _save(record)
         _set(batch, "request", request_name)
         _save(batch)
-        summary = _apply_request_invoice_summary(current_request, save=True)
-        if current_request is not request_doc:
-            _set(request_doc, "invoice_count", summary["invoice_count"])
-            _set(request_doc, "invoice_status", summary["invoice_status"])
-        return summary
+        _apply_request_invoice_summary(current_request, save=True, current=True)
+        return current_request
+
 
 
 def _request_reason(request_doc):

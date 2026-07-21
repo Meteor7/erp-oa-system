@@ -705,7 +705,7 @@ def create_request(
         no_invoice_reason=no_invoice_reason,
     )
     if batch_name:
-        invoice_service.attach_batch_to_request(batch_name, doc)
+        doc = invoice_service.attach_batch_to_request(batch_name, doc)
     draft_summary = invoice_service.validate_request_invoices(doc, submitting=False)
     if isinstance(draft_summary, dict):
         doc.invoice_count = draft_summary.get("invoice_count", 0)

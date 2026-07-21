@@ -2477,3 +2477,83 @@ def test_shared_request_preview_and_edit_use_one_current_permission_lock_order(e
     env.current_read_calls.clear()
     service._require_record(edit_record.name, current=True)
     assert _current_permission_doctypes(env.current_read_calls) == []
+
+
+# --- Task 6 independent-review RED tests ---
+def test_register_linked_batch_locks_current_draft_request_and_inherits_request(env):
+    request = _add_request(env, status="\u8349\u7a3f")
+    batch = env.add_batch(request=request.name)
+    file_doc = env.add_file(filename="linked.pdf", batch=batch.name)
+
+    result = service.register_file(batch.name, file_doc.file_url)
+
+    record = env.docs[service.RECORD_DOCTYPE][result["name"]]
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories[:4] == ["batch", "request", "file", "file-hash"]
+    assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
+    assert record.request == request.name
+
+
+def test_register_linked_batch_rejects_current_submitted_request_without_mutation(env):
+    request = _add_request(env, status="\u8349\u7a3f")
+    batch = env.add_batch(request=request.name)
+    file_doc = env.add_file(filename="submitted.pdf", batch=batch.name)
+    env.begin_mvcc_snapshot()
+    request.workflow_status = "\u5f85\u8d22\u52a1\u5ba1\u6838"
+
+    with pytest.raises(ValidationError, match="\u63d0\u4ea4\u540e\u4e0d\u80fd"):
+        service.register_file(batch.name, file_doc.file_url)
+
+    assert env.docs[service.RECORD_DOCTYPE] == {}
+    assert file_doc.attached_to_doctype == service.BATCH_DOCTYPE
+    assert file_doc.attached_to_name == batch.name
+    assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
+
+
+def test_independent_batch_aggregate_refreshes_linked_request_summary(env):
+    request = _add_request(env, status="\u8349\u7a3f")
+    request.invoice_count = 0
+    request.invoice_status = "\u5f85\u786e\u8ba4"
+    batch = env.add_batch(request=request.name)
+    record = env.add_record(
+        batch=batch.name,
+        request=request.name,
+        recognition_status="\u5f85\u786e\u8ba4",
+        invoice_category="\u7535\u5b50\u53d1\u7968\uff08\u666e\u901a\u53d1\u7968\uff09",
+        project_name="\u6587\u5177\u5370\u7ae0",
+        invoice_number="000123",
+    )
+
+    service.confirm_invoice(record.name)
+    env.db.commit()
+    _run_queued_batch_recomputes(env)
+
+    assert request.invoice_count == 1
+    assert request.invoice_status == "\u5df2\u786e\u8ba4"
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert "batch" in categories and "request" in categories
+    assert categories.index("batch") < categories.index("request")
+    assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
+
+
+def test_async_recognition_refreshes_linked_request_summary(env, monkeypatch):
+    request = _add_request(env, status="\u8349\u7a3f")
+    request.invoice_count = 0
+    request.invoice_status = "\u6392\u961f\u4e2d"
+    record, _file = _queued_record_with_file(env, name="INV-ASYNC-SUMMARY")
+    batch = env.docs[service.BATCH_DOCTYPE][record.batch]
+    batch.request = request.name
+    record.request = request.name
+    payload = _valid_payload(record.name)
+    payload["file_sha256"] = record.file_sha256
+    monkeypatch.setattr(
+        jobs_module.client,
+        "recognize_document",
+        Mock(return_value=payload),
+    )
+
+    result = jobs_module.recognize_invoice(record.name)
+
+    assert result["recognition_status"] == "\u5f85\u786e\u8ba4"
+    assert request.invoice_count == 1
+    assert request.invoice_status == "\u5f85\u786e\u8ba4"

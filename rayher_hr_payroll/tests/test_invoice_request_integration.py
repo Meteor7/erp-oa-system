@@ -33,6 +33,10 @@ oa_entry = importlib.import_module("rayher_hr_payroll.api.oa_entry")
 
 sys.modules.pop("rayher_hr_payroll.api.oa_entry", None)
 sys.modules.pop("rayher_hr_payroll.invoice_ocr.service", None)
+invoice_ocr_package = sys.modules.get("rayher_hr_payroll.invoice_ocr")
+if getattr(invoice_ocr_package, "permissions", None) is service.invoice_permissions:
+    delattr(invoice_ocr_package, "permissions")
+sys.modules.pop("rayher_hr_payroll.invoice_ocr.permissions", None)
 if not _had_frappe:
     sys.modules.pop("frappe", None)
     sys.modules.pop("frappe.utils", None)
@@ -97,7 +101,7 @@ def _invoice(status="已确认", *, total="100.00", line_key="11111111-1111-4111
 
 
 def _install_records(monkeypatch, records):
-    monkeypatch.setattr(service, "_request_invoice_records", lambda _request_name: list(records))
+    monkeypatch.setattr(service, "_request_invoice_records", lambda _request_name, **_kwargs: list(records))
 
 
 def _uuid4(value):
@@ -292,7 +296,7 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
     monkeypatch.setattr(
         service,
         "request_invoice_summary",
-        lambda _request: {
+        lambda _request, **_kwargs: {
             "invoice_count": 2,
             "invoice_status": "已确认",
             "invoice_search_text": "电子发票（普通发票）；文具印章；000123",
@@ -303,7 +307,8 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
 
 def test_attach_batch_uses_record_batch_request_lock_order_and_preserves_line_links(monkeypatch):
     batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
-    service.attach_batch_to_request(batch.name, request)
+    attached_request = service.attach_batch_to_request(batch.name, request)
+    assert attached_request is request
     assert lock_order == [
         ("record", "INV-1"),
         ("record", "INV-2"),
@@ -475,7 +480,7 @@ def test_create_draft_attaches_batch_after_insert_without_internal_commit(monkey
     monkeypatch.setattr(
         service,
         "attach_batch_to_request",
-        lambda batch, doc: events.append(("attach", batch, doc.name, doc.name in environment.pending)),
+        lambda batch, doc: (events.append(("attach", batch, doc.name, doc.name in environment.pending)) or doc),
     )
     monkeypatch.setattr(
         service,
@@ -693,3 +698,70 @@ def test_legacy_consumption_generated_key_survives_reordering():
     first_keys = {row["source_consumption"]: row["line_key"] for row in first}
     second_keys = {row["source_consumption"]: row["line_key"] for row in second}
     assert first_keys == second_keys
+
+
+# --- Task 6 independent-review RED tests ---
+@pytest.mark.parametrize("requested_submit", [0, 1])
+def test_create_continues_with_current_request_returned_by_attach(monkeypatch, requested_submit):
+    environment = _install_request_environment(monkeypatch)
+    environment.latest_modified = {}
+    environment.modification_version = 0
+    attached = []
+    validated = []
+
+    class TimestampCheckedDocument(RequestDocument):
+        def insert(self, ignore_permissions=False):
+            super().insert(ignore_permissions=ignore_permissions)
+            environment.modification_version += 1
+            self.modified = f"v{environment.modification_version}"
+            environment.latest_modified[self.name] = self.modified
+            return self
+
+        def save(self, ignore_permissions=False):
+            if self.modified != environment.latest_modified[self.name]:
+                raise ValidationError("TimestampMismatch")
+            environment.modification_version += 1
+            self.modified = f"v{environment.modification_version}"
+            environment.latest_modified[self.name] = self.modified
+            return super().save(ignore_permissions=ignore_permissions)
+
+    def get_doc(doctype_or_values, name=None, for_update=False, **_kwargs):
+        if isinstance(doctype_or_values, dict):
+            values = dict(doctype_or_values)
+            values.setdefault("expense_lines", [])
+            values.setdefault("steps", [])
+            return TimestampCheckedDocument(environment, values)
+        return environment.get_doc(doctype_or_values, name, for_update=for_update)
+
+    frappe_stub.get_doc = get_doc
+
+    def attach(_batch, inserted):
+        current = TimestampCheckedDocument(environment, dict(inserted))
+        environment.pending[current.name] = current
+        current.save(ignore_permissions=True)
+        attached.append(current)
+        return current
+
+    def validate(doc, submitting):
+        validated.append((doc, submitting))
+        return {"invoice_count": 1, "invoice_status": "\u5df2\u786e\u8ba4"}
+
+    monkeypatch.setattr(service, "attach_batch_to_request", attach)
+    monkeypatch.setattr(service, "validate_request_invoices", validate)
+
+    result = oa_entry.create_request(
+        oa_entry.REQUEST_EXPENSE_PAYMENT,
+        subject="expense",
+        submit=requested_submit,
+        expense_lines=[{"category": "office", "amount": "100.00"}],
+        invoice_batch="BATCH-1",
+    )
+
+    assert environment.pending[result["name"]] is attached[0]
+    assert all(doc is attached[0] for doc, _submitting in validated)
+    assert environment.saved[-2:] == [attached[0], attached[0]]
+    assert attached[0].modified == "v3"
+    expected_status = (
+        oa_entry.STATUS_PENDING if requested_submit else oa_entry.STATUS_DRAFT
+    )
+    assert attached[0].workflow_status == expected_status
