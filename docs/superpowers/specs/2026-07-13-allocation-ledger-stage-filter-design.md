@@ -44,5 +44,3 @@ Item 09 keeps its existing summary API and receives only its new display name.
 - Report tests assert all, capitalized, and expensed filtering, including project columns and total rows.
 - Existing frontend and relevant backend suites must remain green.
 - Production build and live asset responses are verified after deployment.
-
-

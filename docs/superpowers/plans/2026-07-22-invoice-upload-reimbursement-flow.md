@@ -42,7 +42,7 @@ Assert that `source_invoice` plus all seven OCR fields exist on `OA Approval Exp
 
 - [ ] **Step 2: Run schema tests and verify RED**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_doctype_json.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_doctype_json.py -q`
 Expected: FAIL because the fields and source option do not exist.
 
 - [ ] **Step 3: Write failing normalization tests**
@@ -64,7 +64,7 @@ Assert exact seven-field retention, `amount == 35.98`, compatibility category/da
 
 - [ ] **Step 4: Run normalization tests and verify RED**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_invoice_request_integration.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_invoice_request_integration.py -q`
 Expected: FAIL because normalization and serialization omit seven-field values.
 
 - [ ] **Step 5: Add schema and minimal compatibility implementation**
@@ -73,7 +73,7 @@ Add nullable fields, preserve existing fields and order, map `total_amount` to c
 
 - [ ] **Step 6: Run focused tests and verify GREEN**
 
-Run both commands from Steps 2 and 4.  
+Run both commands from Steps 2 and 4.
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -106,7 +106,7 @@ Verify an ordinary user sees owned records only, privileged roles can use `view=
 
 - [ ] **Step 2: Run listing tests and verify RED**
 
-Run: `python -m pytest rayher_hr_payroll/tests/test_invoice_workbench_flow.py -q`  
+Run: `python -m pytest rayher_hr_payroll/tests/test_invoice_workbench_flow.py -q`
 Expected: FAIL because the workbench API is absent.
 
 - [ ] **Step 3: Implement scoped listing**
@@ -119,7 +119,7 @@ Assert two confirmed records create one draft request with exactly two lines; ea
 
 - [ ] **Step 5: Run pushdown tests and verify RED**
 
-Run the test module from Step 2.  
+Run the test module from Step 2.
 Expected: FAIL because `push_invoices_to_request` is absent.
 
 - [ ] **Step 6: Implement transactional pushdown**
@@ -132,7 +132,7 @@ Verify unconfirm only works before push; unpush withdraws an active non-paid req
 
 - [ ] **Step 8: Run reversal tests and verify RED**
 
-Run the test module from Step 2.  
+Run the test module from Step 2.
 Expected: FAIL because reversal endpoints are absent.
 
 - [ ] **Step 9: Implement audit and reversal transitions**
@@ -152,7 +152,7 @@ Reset approval steps only after preserving their state in the audit entry. Never
 
 - [ ] **Step 10: Run all backend tests and verify GREEN**
 
-Run: `python -m pytest rayher_hr_payroll/tests -q`  
+Run: `python -m pytest rayher_hr_payroll/tests -q`
 Expected: PASS with no warnings introduced.
 
 - [ ] **Step 11: Commit**
@@ -182,7 +182,7 @@ Assert wrappers use POST JSON via `invoiceApi`; component has PDF/JPG/JPEG/PNG m
 
 - [ ] **Step 2: Run frontend tests and verify RED**
 
-Run: `node --test frontend/tests/*.test.js`  
+Run: `node --test frontend/tests/*.test.js`
 Expected: FAIL because wrappers and component do not exist.
 
 - [ ] **Step 3: Add API wrappers**
@@ -199,7 +199,7 @@ Collect selected confirmed invoice names; open payment-info push dialog; create 
 
 - [ ] **Step 6: Run frontend tests and verify GREEN**
 
-Run the command from Step 2.  
+Run the command from Step 2.
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -227,7 +227,7 @@ Assert main/sub labels and 消费明细 UI are absent; upload is first/default; 
 
 - [ ] **Step 2: Run frontend tests and verify RED**
 
-Run: `node --test frontend/tests/*.test.js`  
+Run: `node --test frontend/tests/*.test.js`
 Expected: FAIL against the legacy navigation and columns.
 
 - [ ] **Step 3: Replace navigation and remove legacy consumption UI**
@@ -270,12 +270,12 @@ git commit -m "feat: split invoice upload and reimbursement flow"
 
 - [ ] **Step 1: Verify project files are plaintext**
 
-Check changed files for `%TSD-Header`, NUL bytes, valid UTF-8/JSON, and compile Python modules.  
+Check changed files for `%TSD-Header`, NUL bytes, valid UTF-8/JSON, and compile Python modules.
 Expected: no encrypted header, no NUL, JSON parse succeeds, Python compile succeeds.
 
 - [ ] **Step 2: Run full isolated verification**
 
-Stage plaintext source into a disposable Docker volume, run backend pytest, frontend Node tests, Vite build, and Frappe migration against an isolated site/backup.  
+Stage plaintext source into a disposable Docker volume, run backend pytest, frontend Node tests, Vite build, and Frappe migration against an isolated site/backup.
 Expected: all pass; existing two request rows and their expense lines remain.
 
 - [ ] **Step 3: Take a predeployment backup**

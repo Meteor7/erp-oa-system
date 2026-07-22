@@ -1,6 +1,6 @@
 # Invoice Upload and Reimbursement Flow Design
 
-**Date:** 2026-07-22  
+**Date:** 2026-07-22
 **Branch:** `feat/invoice-ocr-reimbursement`
 
 ## Goal
