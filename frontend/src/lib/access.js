@@ -6,8 +6,8 @@ const FOREIGN_RD_ACCESS = [...FINANCE, 'All Project Access'];
 const HR = ['System Manager', 'HR User', 'HR Manager'];
 const MANAGE = ['System Manager', 'Accounts User', 'HR User', 'HR Manager'];
 const PROJECT_ACCESS = [...MANAGE, 'Project Owner'];
-const TIME_ENTRY = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const TIME_VIEW = [...TIME_ENTRY, 'Accounts User'];
+const TIME_ENTRY = ['System Manager', 'HR User', 'HR Manager', 'Department Manager'];
+const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
 const ROUTE_ORDER = ['/dashboard', '/personnel', '/accommodation', '/projects', '/entry', '/approval/leave', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/allocation', '/allocation-dashboard'];
 

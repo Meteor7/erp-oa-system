@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from rayher_hr_payroll.rd_cost.frappe_adapter import (
     source_expense_rows_from_rows,
     stage_for_period,
 )
+from rayher_hr_payroll.rd_cost import frappe_adapter
 
 
 def test_stage_for_period_uses_capitalization_dates():
@@ -60,6 +62,43 @@ def test_historical_org_for_date_falls_back_when_no_history_applies():
         "employee_department": "Current Department",
         "employee_designation": "Current Designation",
     }
+
+
+def test_generated_monthly_hours_use_month_end_for_org_history(monkeypatch):
+    captured = {}
+
+    class FakeDB:
+        @staticmethod
+        def sql(query, values, as_dict=False):
+            captured["query"] = query
+            return [
+                SimpleNamespace(
+                    timesheet="TS-MONTHLY",
+                    timesheet_detail="TSD-1",
+                    employee="EMP-1",
+                    fallback_department="Current",
+                    fallback_designation="Current Role",
+                    project="PROJ-1",
+                    posting_date=date(2026, 7, 1),
+                    rd_system_generated=1,
+                    hours=8,
+                )
+            ]
+
+    fake_frappe = SimpleNamespace(
+        db=FakeDB(),
+        get_all=lambda *args, **kwargs: [
+            SimpleNamespace(from_date="2026-07-15", department="New Department", designation="New Role")
+        ],
+    )
+    monkeypatch.setattr(frappe_adapter, "_get_frappe", lambda: fake_frappe)
+
+    rows = frappe_adapter.get_project_hour_rows(year=2026, month=7)
+
+    assert "ts.rd_system_generated" in captured["query"]
+    assert rows[0]["posting_date"] == date(2026, 7, 31)
+    assert rows[0]["employee_department"] == "New Department"
+    assert rows[0]["employee_designation"] == "New Role"
 
 
 def test_expense_items_from_rows_converts_frappe_child_rows():

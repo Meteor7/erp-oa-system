@@ -11,17 +11,16 @@ const projects = [
   { name: 'PROJ-1', rd_project_code: 'RD14', project_name: 'ACONCA 7961' },
   { name: 'PROJ-2', rd_project_code: 'RD16', project_name: 'EFEM-8-2LP-EG-A' },
 ];
-const activityTypes = [{ name: '方案设计' }, { name: '编码开发' }];
 
 function options(extra = {}) {
-  return { employees, projects, activityTypes, period: '2026-07', existingRows: [], ...extra };
+  return { employees, projects, period: '2026-07', existingRows: [], ...extra };
 }
 
-test('parses timesheet rows with employee and project matching', () => {
+test('parses two-decimal monthly occurrence days and calculates hours', () => {
   const text = [
-    '日期\t研发人员\t项目代码\t项目名称\t活动类型\t工时(h)\t工作内容',
-    '2026/07/01\t演示员工134\tRD14\tACONCA 7961\t方案设计\t6\t完成方案设计',
-    '2026-07-02\tEMP-2\tRD16\tEFEM-8-2LP-EG-A\t编码开发\t2.5\t接口联调',
+    '研发人员\t项目代码\t项目名称\t发生天数\t备注',
+    '演示员工134\tRD14\tACONCA 7961\t2.35\t方案设计',
+    'EMP-2\tRD16\tEFEM-8-2LP-EG-A\t1.25\t接口联调',
   ].join('\n');
 
   const result = parseTimesheetPaste(text, options());
@@ -29,81 +28,66 @@ test('parses timesheet rows with employee and project matching', () => {
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.rows, [
     {
-      work_date: '2026-07-01',
-      employee: 'EMP-1',
-      employee_name: '演示员工134',
-      project: 'PROJ-1',
-      project_code: 'RD14',
-      project_name: 'ACONCA 7961',
-      activity_type: '方案设计',
-      hours: 6,
-      description: '完成方案设计',
+      employee: 'EMP-1', employee_name: '演示员工134', project: 'PROJ-1',
+      project_code: 'RD14', project_name: 'ACONCA 7961',
+      occurrence_days: 2.35, hours: 18.8, remark: '方案设计',
     },
     {
-      work_date: '2026-07-02',
-      employee: 'EMP-2',
-      employee_name: '演示员工107',
-      project: 'PROJ-2',
-      project_code: 'RD16',
-      project_name: 'EFEM-8-2LP-EG-A',
-      activity_type: '编码开发',
-      hours: 2.5,
-      description: '接口联调',
+      employee: 'EMP-2', employee_name: '演示员工107', project: 'PROJ-2',
+      project_code: 'RD16', project_name: 'EFEM-8-2LP-EG-A',
+      occurrence_days: 1.25, hours: 10, remark: '接口联调',
     },
   ]);
 });
 
-test('rejects rows outside period, invalid references, and daily totals over eight hours', () => {
+test('rejects invalid references and occurrence-day precision', () => {
   const result = parseTimesheetTableRows([
-    ['日期', '研发人员', '项目代码', '项目名称', '活动类型', '工时', '工作内容'],
-    ['2026-08-01', '演示员工134', 'RD14', 'ACONCA 7961', '方案设计', 1, 'wrong period'],
-    ['2026-07-01', '不存在', 'RD14', 'ACONCA 7961', '方案设计', 1, 'bad employee'],
-    ['2026-07-01', '演示员工134', 'RD404', '无项目', '方案设计', 1, 'bad project'],
-    ['2026-07-01', '演示员工134', 'RD14', 'ACONCA 7961', '不存在活动', 1, 'bad activity'],
-    ['2026-07-01', '演示员工134', 'RD14', 'ACONCA 7961', '方案设计', 5, 'too much'],
-  ], options({ existingRows: [{ employee: 'EMP-1', work_date: '2026-07-01', hours: 4 }] }));
+    ['研发人员', '项目代码', '项目名称', '发生天数', '备注'],
+    ['不存在', 'RD14', 'ACONCA 7961', '1', 'bad employee'],
+    ['演示员工134', 'RD404', '无项目', '1', 'bad project'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '1.001', 'too precise'],
+    ['演示员工107', 'RD16', 'EFEM-8-2LP-EG-A', '0', 'zero'],
+  ], options());
 
   assert.deepEqual(result.rows, []);
-  assert.match(result.errors.join('\n'), /第 2 行：日期必须在当前会计期间 2026-07 内/);
-  assert.match(result.errors.join('\n'), /第 3 行：研发人员“不存在”未匹配/);
-  assert.match(result.errors.join('\n'), /第 4 行：项目代码和项目名称未匹配/);
-  assert.match(result.errors.join('\n'), /第 5 行：活动类型“不存在活动”不存在/);
-  assert.match(result.errors.join('\n'), /第 6 行：演示员工134 2026-07-01 工时合计超过 8 小时/);
+  assert.match(result.errors.join('\n'), /第 2 行：研发人员“不存在”未匹配/);
+  assert.match(result.errors.join('\n'), /第 3 行：项目代码和项目名称未匹配/);
+  assert.match(result.errors.join('\n'), /第 4 行：发生天数最多保留两位小数/);
+  assert.match(result.errors.join('\n'), /第 5 行：发生天数必须大于 0/);
 });
 
-test('rejects duplicate imported or existing employee date project activity rows', () => {
-  const rows = [
-    ['日期', '研发人员', '项目代码', '项目名称', '活动类型', '工时', '工作内容'],
-    ['2026-07-03', '演示员工134', 'RD14', 'ACONCA 7961', '方案设计', 2, 'a'],
-    ['2026-07-03', '演示员工134', 'RD14', 'ACONCA 7961', '方案设计', 1, 'b'],
-    ['2026-07-04', '演示员工134', 'RD14', 'ACONCA 7961', '方案设计', 1, 'c'],
-  ];
-  const result = parseTimesheetTableRows(rows, options({
-    existingRows: [{ employee: 'EMP-1', work_date: '2026-07-04', rd_project_code: 'RD14', project_name: 'ACONCA 7961', activity_type: '方案设计', hours: 2 }],
+test('rejects duplicate employee-project rows from import or saved entries', () => {
+  const result = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '发生天数', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '2', 'a'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '1', 'b'],
+    ['演示员工107', 'RD16', 'EFEM-8-2LP-EG-A', '1', 'c'],
+  ], options({
+    existingRows: [{ employee: 'EMP-2', project: 'PROJ-2', project_code: 'RD16', project_name: 'EFEM-8-2LP-EG-A', occurrence_days: 2 }],
   }));
 
   assert.deepEqual(result.rows, []);
-  assert.match(result.errors.join('\n'), /第 3 行：导入内容中存在重复的员工\/日期\/项目\/活动类型/);
-  assert.match(result.errors.join('\n'), /第 4 行：系统中已存在相同员工\/日期\/项目\/活动类型工时/);
+  assert.match(result.errors.join('\n'), /第 3 行：导入内容中存在重复的员工和项目/);
+  assert.match(result.errors.join('\n'), /第 4 行：系统中已存在相同员工和项目的月度工时/);
 });
 
-test('accepts zero-hour leave and rejects zero-hour normal activity', () => {
-  const specialActivities = [...activityTypes, { name: '请假' }, { name: '调休' }];
-  const accepted = parseTimesheetTableRows([
-    ['日期', '研发人员', '项目代码', '项目名称', '活动类型', '工时', '工作内容'],
-    ['2026-07-05', '演示员工134', 'RD14', 'ACONCA 7961', '请假', 0, 'annual leave'],
-  ], options({ activityTypes: specialActivities }));
+test('rejects employee monthly total above the selected calendar-month limit', () => {
+  const result = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '发生天数', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '20', 'a'],
+    ['演示员工134', 'RD16', 'EFEM-8-2LP-EG-A', '11.01', 'b'],
+  ], options());
 
-  assert.deepEqual(accepted.errors, []);
-  assert.equal(accepted.rows.length, 1);
-  assert.equal(accepted.rows[0].activity_type, '请假');
-  assert.equal(accepted.rows[0].hours, 0);
+  assert.deepEqual(result.rows, []);
+  assert.match(result.errors.join('\n'), /演示员工134当月累计发生天数不能超过 31.00 天/);
+});
 
-  const rejected = parseTimesheetTableRows([
-    ['日期', '研发人员', '项目代码', '项目名称', '活动类型', '工时', '工作内容'],
-    ['2026-07-06', '演示员工134', 'RD14', 'ACONCA 7961', '编码开发', 0, 'invalid zero'],
-  ], options({ activityTypes: specialActivities }));
+test('uses the accounting period to enforce February day capacity', () => {
+  const result = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '发生天数', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '29', 'too many'],
+  ], options({ period: '2026-02' }));
 
-  assert.deepEqual(rejected.rows, []);
-  assert.match(rejected.errors.join('\n'), /第 2 行：只有请假或调休的工时可以为 0/);
+  assert.deepEqual(result.rows, []);
+  assert.match(result.errors.join('\n'), /不能超过 28.00 天/);
 });
