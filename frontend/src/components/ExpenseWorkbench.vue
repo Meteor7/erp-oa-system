@@ -35,16 +35,25 @@ const previewInvoiceRow = ref(null);
 const keyword = ref('');
 const statisticsView = ref(null);
 const approvalView = ref(null);
+const draftSources = ref([]);
+const showManualExpense = ref(false);
+const manualExpense = reactive({
+  project_name: '', expense_item: '', issue_date: '', total_amount: '',
+  description: '', no_invoice_reason: '',
+});
 
 const blankLine = () => ({
   line_key: newLineKey(),
   invoice_category: '',
   project_name: '',
+  expense_item: '',
   issue_date: '',
   invoice_number: '',
   amount_before_tax: '',
   tax_amount: '',
   total_amount: '',
+  description: '',
+  no_invoice_reason: '',
   invoice_difference_reason: '',
 });
 const expenseLines = ref([blankLine()]);
@@ -76,6 +85,7 @@ const draftSubmitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.sub
 const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_paid' });
 const requestWithdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_request' });
 const paymentWithdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_payment' });
+const draftSourceSaver = createResource({ url: 'rayher_hr_payroll.api.oa_entry.save_draft_expense_sources' });
 
 const rows = computed(() => requests.data || []);
 const exactRequest = computed(() => requestDetail.data?.[0] || null);
@@ -88,6 +98,15 @@ const urgencies = computed(() => options.data?.urgencies || []);
 const assetCategories = computed(() => options.data?.asset_categories || [ASSET_OTHER]);
 const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
+const expenseCategories = computed(() => options.data?.expense_categories || []);
+const isDraftDetail = computed(() => selectedRequest.value?.kanban_status === 'draft');
+const detailGroups = computed(() => {
+  if (isDraftDetail.value) return groupSources(draftSources.value);
+  return selectedRequest.value?.project_groups?.length
+    ? selectedRequest.value.project_groups
+    : groupSources(selectedRequest.value?.expense_lines || []);
+});
+const detailGroupTotal = computed(() => detailGroups.value.reduce((sum, group) => sum + Number(group.total_amount || 0), 0));
 const total = computed(() => expenseLines.value.reduce((sum, row) => sum + Number(row.total_amount || 0), 0));
 const filteredRows = computed(() => {
   const value = keyword.value.trim().toLowerCase();
@@ -134,6 +153,102 @@ function sourceLabel(row) {
   if (row.from_consumption) return '历史数据下推';
   return '无票/手工新建';
 }
+function uniqueValues(values) {
+  return [...new Set(values.map((value) => clean(value)).filter(Boolean))];
+}
+function optionalSum(sources, field) {
+  const values = sources
+    .map((source) => source[field])
+    .filter((value) => value !== null && value !== undefined && value !== '');
+  return values.length ? Math.round(values.reduce((sum, value) => sum + Number(value || 0), 0) * 100) / 100 : null;
+}
+function groupSources(sources) {
+  const groups = new Map();
+  (sources || []).forEach((source, index) => {
+    const projectName = clean(source.project_name);
+    const lineKey = clean(source.line_key) || `draft-${index + 1}`;
+    const groupKey = projectName ? `project:${projectName}` : `line:${lineKey}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, { group_key: groupKey, project_name: projectName, source_line_keys: [], source_lines: [] });
+    const group = groups.get(groupKey);
+    group.source_line_keys.push(lineKey);
+    group.source_lines.push(source);
+  });
+  return [...groups.values()].map((group) => {
+    const items = uniqueValues(group.source_lines.map((source) => source.expense_item));
+    return {
+      ...group,
+      source_count: group.source_lines.length,
+      expense_item: items.length === 1 ? items[0] : '',
+      needs_expense_item: items.length !== 1,
+      invoice_category: uniqueValues(group.source_lines.map((source) => source.invoice_category)).join('、'),
+      issue_date: uniqueValues(group.source_lines.map((source) => source.issue_date)).join('、'),
+      invoice_number: uniqueValues(group.source_lines.map((source) => source.invoice_number)).join('、'),
+      amount_before_tax: optionalSum(group.source_lines, 'amount_before_tax'),
+      tax_amount: optionalSum(group.source_lines, 'tax_amount'),
+      total_amount: optionalSum(group.source_lines, 'total_amount'),
+    };
+  });
+}
+function hydrateDraftSources(row) {
+  draftSources.value = (row?.expense_lines || []).map((source) => ({ ...source }));
+}
+function updateGroupField(group, field, value) {
+  const keys = new Set(group.source_line_keys || []);
+  draftSources.value = draftSources.value.map((source) => (
+    keys.has(clean(source.line_key)) ? { ...source, [field]: value } : source
+  ));
+}
+function invoicesForGroup(group) {
+  return (group?.source_line_keys || []).flatMap((lineKey) => invoicesForLine(detailInvoices.value, lineKey));
+}
+function resetManualExpense() {
+  Object.assign(manualExpense, { project_name: '', expense_item: '', issue_date: '', total_amount: '', description: '', no_invoice_reason: '' });
+}
+function openManualExpense() {
+  resetManualExpense();
+  showManualExpense.value = true;
+}
+async function saveDraftSources(silent = false) {
+  if (!selectedRequest.value || selectedRequest.value.kanban_status !== 'draft') return false;
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    const result = await draftSourceSaver.submit({
+      name: selectedRequest.value.name,
+      source_lines: JSON.stringify(draftSources.value),
+    });
+    hydrateDraftSources(result);
+    if (!silent) message.value = '报销草稿费用明细已保存。';
+    await requests.reload();
+    return true;
+  } catch (error) {
+    errorMessage.value = apiError(error, '报销草稿保存失败');
+    return false;
+  } finally {
+    saving.value = false;
+  }
+}
+async function addManualExpense() {
+  const row = {
+    line_key: '', source_invoice: null, invoice_category: '',
+    project_name: clean(manualExpense.project_name), expense_item: clean(manualExpense.expense_item),
+    issue_date: manualExpense.issue_date, invoice_number: '', amount_before_tax: null, tax_amount: null,
+    total_amount: Number(manualExpense.total_amount || 0), description: clean(manualExpense.description),
+    no_invoice_reason: clean(manualExpense.no_invoice_reason),
+  };
+  if (!row.project_name || !row.expense_item || !row.issue_date || row.total_amount <= 0 || !row.description || !row.no_invoice_reason) {
+    errorMessage.value = '请完整填写项目名称、费用项目、日期、税后金额、费用说明和无票原因。';
+    return;
+  }
+  draftSources.value.push(row);
+  const saved = await saveDraftSources(true);
+  if (saved) {
+    showManualExpense.value = false;
+    message.value = '手工费用已加入报销草稿。';
+  } else {
+    draftSources.value = draftSources.value.filter((source) => source !== row);
+  }
+}
 function applyDefaults() {
   const context = options.data?.context || {};
   requestForm.company ||= first(companies.value);
@@ -176,12 +291,16 @@ async function reload() {
 async function saveRequest(submit) {
   errorMessage.value = '';
   const valid = expenseLines.value.filter((line) => Number(line.total_amount || 0) > 0);
-  if (!requestForm.department || valid.length !== expenseLines.value.length) {
-    errorMessage.value = '请填写申请部门，并保证每行合计金额大于 0。';
-    return;
-  }
-  if (submit && !requestForm.no_invoice_reason.trim()) {
-    errorMessage.value = '无票报销提交前必须填写无票原因。';
+  const hasIncompleteLine = expenseLines.value.some((line) => (
+    !clean(line.project_name)
+    || !clean(line.expense_item)
+    || !line.issue_date
+    || Number(line.total_amount || 0) <= 0
+    || !clean(line.description)
+    || !clean(line.no_invoice_reason)
+  ));
+  if (!requestForm.department || hasIncompleteLine) {
+    errorMessage.value = '请填写申请部门，并完整填写每行的项目名称、费用项目、日期、税后金额、费用说明和无票原因。';
     return;
   }
   saving.value = true;
@@ -210,7 +329,8 @@ async function saveRequest(submit) {
       payee_name: requestForm.payee_name,
       branch: requestForm.branch,
       account_no: requestForm.account_no,
-      no_invoice_reason: requestForm.no_invoice_reason.trim(),
+      no_invoice_reason: requestForm.no_invoice_reason.trim()
+        || uniqueValues(valid.map((line) => line.no_invoice_reason)).join('；'),
     });
     showRequestForm.value = false;
     activeView.value = 'board';
@@ -261,6 +381,7 @@ async function requestCreated(name) {
   await openRequest(name);
 }
 async function submitDraft(row) {
+  if (row.kanban_status === 'draft' && !(await saveDraftSources(true))) return;
   saving.value = true;
   try {
     await draftSubmitter.submit({ name: row.name, no_invoice_reason: String(row.no_invoice_reason || '').trim() });
@@ -313,6 +434,7 @@ async function withdrawPayment(row) {
 }
 
 watch(() => options.data, applyDefaults, { immediate: true });
+watch(selectedRequest, hydrateDraftSources, { immediate: true });
 </script>
 
 <template>
@@ -395,21 +517,23 @@ watch(() => options.data, applyDefaults, { immediate: true });
             </div>
           </section>
           <section>
-            <div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">费用明细（七字段）</h4><button class="text-sm text-blue-700" @click="addLine">＋ 添加明细</button></div>
-            <div class="overflow-x-auto">
+            <div class="mb-3 flex items-center justify-between">
+              <div><h4 class="text-sm font-semibold">费用明细（无票/手工）</h4><p class="mt-1 text-xs text-gray-500">每行填写项目、费用项目、日期、税后金额、费用说明和无票原因。</p></div>
+              <button class="text-sm text-blue-700" @click="addLine">＋ 添加明细</button>
+            </div>
+            <div class="overflow-x-auto rounded border border-gray-200">
               <table class="w-full min-w-[1320px] text-sm">
-                <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-2 py-2 text-left">发票类别</th><th class="px-2 py-2 text-left">项目名称</th><th class="px-2 py-2 text-left">开票日期</th><th class="px-2 py-2 text-left">发票号码</th><th class="px-2 py-2 text-right">税前金额</th><th class="px-2 py-2 text-right">税额</th><th class="px-2 py-2 text-right">合计金额</th><th class="w-10"></th></tr></thead>
-                <tbody><tr v-for="(line,index) in expenseLines" :key="line.line_key" class="border-b">
-                  <td class="p-2"><input v-model="line.invoice_category" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td>
-                  <td class="p-2"><input v-model="line.project_name" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td>
+                <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-2 text-left">项目名称</th><th class="px-3 py-2 text-left">费用项目</th><th class="px-3 py-2 text-left">日期</th><th class="px-3 py-2 text-right">税后金额</th><th class="px-3 py-2 text-left">费用说明</th><th class="px-3 py-2 text-left">无票原因</th><th class="w-10"></th></tr></thead>
+                <tbody><tr v-for="(line,index) in expenseLines" :key="line.line_key" class="border-b last:border-0">
+                  <td class="p-2"><input v-model="line.project_name" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="必填" /></td>
+                  <td class="p-2"><input v-model="line.expense_item" list="expense-item-options" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="可下拉或填写" /></td>
                   <td class="p-2"><input v-model="line.issue_date" type="date" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td>
-                  <td class="p-2"><input v-model="line.invoice_number" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td>
-                  <td class="p-2"><input v-model="line.amount_before_tax" type="number" min="0" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td>
-                  <td class="p-2"><input v-model="line.tax_amount" type="number" min="0" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td>
-                  <td class="p-2"><input v-model="line.total_amount" type="number" min="0" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td>
+                  <td class="p-2"><input v-model="line.total_amount" type="number" min="0.01" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td>
+                  <td class="p-2"><input v-model="line.description" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="费用说明" /></td>
+                  <td class="p-2"><input v-model="line.no_invoice_reason" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="例如：出差津贴" /></td>
                   <td class="p-2"><button title="删除明细" :disabled="expenseLines.length === 1" class="text-red-600 disabled:text-gray-300" @click="removeLine(index)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button></td>
                 </tr></tbody>
-                <tfoot><tr><td colspan="6" class="px-2 py-3 text-right font-medium">总费用发生额</td><td class="px-2 py-3 text-right text-base font-semibold text-red-600">{{ money(total) }}</td><td></td></tr></tfoot>
+                <tfoot class="border-t bg-gray-50"><tr><td colspan="3" class="px-3 py-3 text-right font-medium">总费用发生额</td><td class="px-3 py-3 text-right text-base font-semibold text-red-600">{{ money(total) }}</td><td colspan="3"></td></tr></tfoot>
               </table>
             </div>
           </section>
@@ -423,7 +547,7 @@ watch(() => options.data, applyDefaults, { immediate: true });
               <label class="text-xs text-gray-500">支行<input v-model="requestForm.branch" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500">收款账号<input v-model="requestForm.account_no" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500 md:col-span-3">情况说明/备注<textarea v-model="requestForm.reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
-              <label class="text-xs text-gray-500 md:col-span-3">无票原因（提交时必填）<textarea v-model="requestForm.no_invoice_reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
+              <label class="text-xs text-gray-500 md:col-span-3">整单无票补充说明（可选）<textarea v-model="requestForm.no_invoice_reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
             </div>
           </section>
         </div>
@@ -441,12 +565,39 @@ watch(() => options.data, applyDefaults, { immediate: true });
         <div class="flex-1 space-y-5 overflow-y-auto p-5">
           <section><div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">基本信息</h4><span class="rounded px-2 py-1 text-xs" :class="statusMeta(selectedRequest.kanban_status).badge">{{ statusMeta(selectedRequest.kanban_status).label }}</span></div><dl class="grid gap-3 text-sm md:grid-cols-4"><div><dt class="text-xs text-gray-500">公司</dt><dd class="mt-1">{{ selectedRequest.company || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请部门</dt><dd class="mt-1">{{ selectedRequest.department || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请人</dt><dd class="mt-1">{{ selectedRequest.employee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">来源</dt><dd class="mt-1">{{ sourceLabel(selectedRequest) }}</dd></div></dl></section>
           <section>
-            <h4 class="mb-3 text-sm font-semibold">费用明细（七字段）</h4>
-            <div class="overflow-x-auto"><table class="w-full min-w-[1300px] text-sm">
-              <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-2 py-2 text-left">发票类别</th><th class="px-2 py-2 text-left">项目名称</th><th class="px-2 py-2 text-left">开票日期</th><th class="px-2 py-2 text-left">发票号码</th><th class="px-2 py-2 text-right">税前金额</th><th class="px-2 py-2 text-right">税额</th><th class="px-2 py-2 text-right">合计金额</th><th class="px-2 py-2 text-left">发票文件</th></tr></thead>
-              <tbody><tr v-for="line in selectedRequest.expense_lines || []" :key="line.line_key" class="border-b"><td class="px-2 py-3">{{ line.invoice_category || '-' }}</td><td class="px-2 py-3">{{ line.project_name || '-' }}</td><td class="px-2 py-3">{{ line.issue_date || '-' }}</td><td class="px-2 py-3">{{ line.invoice_number || '-' }}</td><td class="px-2 py-3 text-right">{{ money(line.amount_before_tax, true) }}</td><td class="px-2 py-3 text-right">{{ money(line.tax_amount, true) }}</td><td class="px-2 py-3 text-right font-semibold text-red-600">{{ money(line.total_amount) }}</td><td class="px-2 py-3"><div class="flex flex-wrap gap-1"><button v-for="(invoice,index) in invoicesForLine(detailInvoices,line.line_key)" :key="invoice.name" class="rounded bg-blue-50 px-2 py-1 text-xs text-blue-700" @click="previewInvoiceRow = invoice">查看发票 {{ index + 1 }}</button><span v-if="!invoicesForLine(detailInvoices,line.line_key).length" class="text-gray-400">无票</span></div></td></tr></tbody>
-              <tfoot><tr><td colspan="6" class="px-2 py-3 text-right font-medium">总额</td><td class="px-2 py-3 text-right text-base font-semibold text-red-600">{{ money(selectedRequest.amount) }}</td><td></td></tr></tfoot>
-            </table></div>
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div><h4 class="text-sm font-semibold">费用明细（按项目名称汇总）</h4><p class="mt-1 text-xs text-gray-500">同一项目名称汇总为一行；可在草稿中补充费用项目或手工费用。</p></div>
+              <div v-if="isDraftDetail" class="flex gap-2">
+                <Button variant="subtle" @click="openManualExpense"><FeatherIcon name="plus" class="h-4 w-4" />手动增加</Button>
+                <Button variant="solid" :loading="saving" @click="saveDraftSources(false)">保存费用明细</Button>
+              </div>
+            </div>
+            <div class="overflow-x-auto rounded border border-gray-200">
+              <table class="w-full min-w-[1500px] text-sm">
+                <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-2 text-left">发票类别</th><th class="px-3 py-2 text-left">项目名称</th><th class="px-3 py-2 text-left">费用项目</th><th class="px-3 py-2 text-left">开票日期</th><th class="px-3 py-2 text-left">发票号码</th><th class="px-3 py-2 text-right">税前金额</th><th class="px-3 py-2 text-right">税额</th><th class="px-3 py-2 text-right">合计金额</th><th class="px-3 py-2 text-left">发票文件</th></tr></thead>
+                <tbody>
+                  <tr v-for="group in detailGroups" :key="group.group_key" class="border-b last:border-0 align-top">
+                    <td class="px-3 py-3">{{ group.invoice_category || '-' }}</td>
+                    <td class="px-3 py-2">
+                      <input v-if="isDraftDetail" :value="group.project_name" class="w-full min-w-[160px] rounded border border-gray-300 px-2 py-1.5" placeholder="识别为空时请填写" @change="updateGroupField(group, 'project_name', $event.target.value)" />
+                      <span v-else>{{ group.project_name || '-' }}</span>
+                    </td>
+                    <td class="px-3 py-2">
+                      <input v-if="isDraftDetail" :value="group.expense_item" list="expense-item-options" class="w-full min-w-[150px] rounded border px-2 py-1.5" :class="group.needs_expense_item ? 'border-amber-400 bg-amber-50' : 'border-gray-300'" placeholder="下拉选择或填写" @input="updateGroupField(group, 'expense_item', $event.target.value)" />
+                      <span v-else>{{ group.expense_item || '-' }}</span>
+                    </td>
+                    <td class="px-3 py-3">{{ group.issue_date || '-' }}</td>
+                    <td class="px-3 py-3">{{ group.invoice_number || '-' }}</td>
+                    <td class="px-3 py-3 text-right">{{ money(group.amount_before_tax, true) }}</td>
+                    <td class="px-3 py-3 text-right">{{ money(group.tax_amount, true) }}</td>
+                    <td class="px-3 py-3 text-right font-semibold text-red-600">{{ money(group.total_amount, true) }}</td>
+                    <td class="px-3 py-3"><div class="flex min-w-[120px] flex-wrap gap-1"><button v-for="(invoice,index) in invoicesForGroup(group)" :key="invoice.name" class="rounded bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoice">查看发票 {{ index + 1 }}</button><span v-if="!invoicesForGroup(group).length" class="text-gray-400">无票</span></div></td>
+                  </tr>
+                  <tr v-if="!detailGroups.length"><td colspan="9" class="px-3 py-10 text-center text-gray-400">暂无费用明细</td></tr>
+                </tbody>
+                <tfoot class="border-t bg-gray-50"><tr><td colspan="7" class="px-3 py-3 text-right font-medium">总额</td><td class="px-3 py-3 text-right text-base font-semibold text-red-600">{{ money(detailGroupTotal) }}</td><td></td></tr></tfoot>
+              </table>
+            </div>
           </section>
           <section><h4 class="mb-3 text-sm font-semibold">付款信息</h4><dl class="grid gap-3 text-sm md:grid-cols-3"><div><dt class="text-xs text-gray-500">付款类型</dt><dd class="mt-1">{{ selectedRequest.payment_type || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款方式</dt><dd class="mt-1">{{ selectedRequest.payment_method || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款人</dt><dd class="mt-1">{{ selectedRequest.payee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">开户行/支行</dt><dd class="mt-1">{{ [selectedRequest.bank_name,selectedRequest.branch].filter(Boolean).join(' / ') || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款账号</dt><dd class="mt-1">{{ selectedRequest.account_no || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款时间</dt><dd class="mt-1">{{ dateText(selectedRequest.paid_on) }}</dd></div></dl></section>
           <section v-if="selectedRequest.no_invoice_reason"><h4 class="mb-2 text-sm font-semibold">无票原因</h4><p class="rounded bg-gray-50 p-3 text-sm text-gray-600 whitespace-pre-wrap">{{ selectedRequest.no_invoice_reason }}</p></section>
@@ -457,6 +608,25 @@ watch(() => options.data, applyDefaults, { immediate: true });
       </div>
     </div>
 
+    <div v-if="showManualExpense" class="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 p-4" @click.self="showManualExpense = false">
+      <div role="dialog" aria-modal="true" class="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
+        <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
+          <div><h3 class="font-semibold">手动增加费用</h3><p class="mt-1 text-xs text-gray-500">用于出差津贴等没有发票的费用，六项内容均需填写。</p></div>
+          <button title="关闭" @click="showManualExpense = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
+        </header>
+        <div class="grid gap-4 p-5 md:grid-cols-2">
+          <label class="text-xs text-gray-500">项目名称<input v-model="manualExpense.project_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="必填" /></label>
+          <label class="text-xs text-gray-500">费用项目<input v-model="manualExpense.expense_item" list="expense-item-options" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="可下拉或填写" /></label>
+          <label class="text-xs text-gray-500">日期<input v-model="manualExpense.issue_date" type="date" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500">税后金额<input v-model="manualExpense.total_amount" type="number" min="0.01" step="0.01" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-right" /></label>
+          <label class="text-xs text-gray-500 md:col-span-2">费用说明<input v-model="manualExpense.description" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="例如：深圳出差津贴" /></label>
+          <label class="text-xs text-gray-500 md:col-span-2">无票原因<textarea v-model="manualExpense.no_invoice_reason" rows="3" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="说明为什么没有发票"></textarea></label>
+        </div>
+        <footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showManualExpense = false">取消</Button><Button variant="solid" :loading="saving" @click="addManualExpense">确认添加</Button></footer>
+      </div>
+    </div>
+
+    <datalist id="expense-item-options"><option v-for="item in expenseCategories" :key="item" :value="item"></option></datalist>
     <InvoicePreviewDrawer :open="Boolean(previewInvoiceRow)" :invoice="previewInvoiceRow" @close="previewInvoiceRow = null" />
   </div>
 </template>

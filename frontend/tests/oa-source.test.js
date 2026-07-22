@@ -18,7 +18,7 @@ const C = {
   statistics: '\u8d39\u7528\u7edf\u8ba1',
   audit: '\u5ba1\u6279\u8bb0\u5f55',
   viewInvoice: '\u67e5\u770b\u53d1\u7968',
-  noInvoiceReason: '\u65e0\u7968\u539f\u56e0\uff08\u63d0\u4ea4\u65f6\u5fc5\u586b\uff09',
+  noInvoiceReason: '\u65e0\u7968\u539f\u56e0',
   withdrawRequest: '\u64a4\u56de\u7533\u8bf7',
   withdrawPayment: '\u64a4\u56de\u4ed8\u6b3e',
 };
@@ -97,7 +97,7 @@ test('upload page supports batch upload confirmation pushdown and private previe
   assert.ok(uploadSource.includes('\u53ef\u4e0b\u63a8'));
 });
 
-test('OCR and manual rows use the same seven-field detail table', () => {
+test('OCR details and manual rows preserve their required fields', () => {
   for (const label of sevenFields) {
     assert.ok(uploadSource.includes(label), `upload page missing field: ${label}`);
     assert.ok(workbenchSource.includes(label), `reimbursement page missing field: ${label}`);
@@ -108,6 +108,26 @@ test('OCR and manual rows use the same seven-field detail table', () => {
   assert.ok(workbenchSource.includes(C.viewInvoice));
   assert.match(workbenchSource, /no_invoice_reason/);
   assert.ok(workbenchSource.includes(C.noInvoiceReason));
+});
+
+
+
+test('reimbursement draft edits project groups and manual no-invoice sources', () => {
+  assert.match(workbenchSource, /save_draft_expense_sources/);
+  assert.match(workbenchSource, /draftSources/);
+  assert.match(workbenchSource, /project_groups/);
+  assert.match(workbenchSource, /expense_item/);
+  assert.match(workbenchSource, /datalist/);
+  assert.ok(workbenchSource.includes('费用项目'));
+  assert.ok(workbenchSource.includes('手动增加'));
+  for (const label of ['项目名称', '费用项目', '日期', '税后金额', '费用说明', '无票原因']) {
+    assert.ok(workbenchSource.includes(label), label);
+  }
+  assert.match(workbenchSource, /invoicesForGroup/);
+  assert.match(workbenchSource, /source_line_keys/);
+  assert.match(workbenchSource, /查看发票/);
+  assert.match(workbenchSource, /审批记录/);
+  assert.match(workbenchSource, /付款信息/);
 });
 
 test('approval and invoice APIs expose pushdown and reversible operations', () => {
