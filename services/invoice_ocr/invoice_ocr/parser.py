@@ -476,8 +476,13 @@ def parse_invoice(lines: list[OCRLine]) -> ParseOutcome:
         if total_amount is not None and tax_amount is not None:
             amount_before_tax = (total_amount - tax_amount).quantize(Decimal("0.01"))
             warnings.append("amount_before_tax_derived_from_total_minus_tax")
-    elif category == "铁路电子客票" and total_amount is None:
-        total_amount = _money((rf"票价[:：]?{CURRENCY}({MONEY})",), text)
+    elif category == "铁路电子客票":
+        if total_amount is None:
+            total_amount = _money((rf"票价[:：]?{CURRENCY}({MONEY})",), text)
+        if total_amount is None and tax_amount is None:
+            total_amount = amount_before_tax
+        if total_amount is not None and tax_amount is None:
+            amount_before_tax = None
 
     if category in NON_TAX_CATEGORIES:
         if total_amount is None:

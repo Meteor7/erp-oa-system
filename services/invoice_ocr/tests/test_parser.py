@@ -219,6 +219,21 @@ def test_rail_ticket_price_is_total_but_tax_stays_blank():
     assert outcome.fields.amount_before_tax is None
 
 
+def test_rail_ticket_with_single_amount_column_uses_total_only():
+    sample = [
+        OCRLine(text="铁路电子客票", score=0.99, box=(200, 20, 800, 60)),
+        OCRLine(text="电子客票号：26449165860000056191", score=0.99, box=(700, 120, 1180, 150)),
+        OCRLine(text="金额", score=0.99, box=(860, 300, 930, 330)),
+        OCRLine(text="￥874.00", score=0.99, box=(860, 360, 960, 390)),
+    ]
+
+    outcome = parse_invoice(sample)
+
+    assert outcome.fields.total_amount == Decimal("874.00")
+    assert outcome.fields.amount_before_tax is None
+    assert outcome.fields.tax_amount is None
+
+
 def test_layout_ignores_zero_width_embedded_text_boxes():
     sample = [
         OCRLine(text="深圳增值税电子普通发票", score=0.99, box=(100, 20, 500, 50)),
