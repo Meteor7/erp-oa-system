@@ -1,17 +1,17 @@
 <template>
-  <section class='space-y-4 rounded-xl border border-slate-200 bg-white p-4'>
+  <section class='space-y-4 rounded-xl border border-gray-200 bg-white p-4'>
     <header class='flex flex-wrap items-center justify-between gap-3'>
       <div>
-        <h3 class='text-base font-semibold text-slate-900'>&#x53D1;&#x7968; OCR</h3>
-        <p class='mt-1 text-xs text-slate-500'>PDF / JPG / JPEG / PNG&#xFF0C;&#x6BCF;&#x6279;&#x6700;&#x591A; 20 &#x4E2A;&#xFF0C;&#x5355;&#x4E2A;&#x4E0D;&#x8D85;&#x8FC7; 10MB</p>
+        <h3 class='text-base font-semibold text-gray-900'>&#x53D1;&#x7968; OCR</h3>
+        <p class='mt-1 text-xs text-gray-500'>PDF / JPG / JPEG / PNG&#xFF0C;&#x6BCF;&#x6279;&#x6700;&#x591A; 20 &#x4E2A;&#xFF0C;&#x5355;&#x4E2A;&#x4E0D;&#x8D85;&#x8FC7; 10MB</p>
       </div>
-      <label class='inline-flex cursor-pointer items-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white' :class='{ "cursor-not-allowed opacity-50": disabled || uploading }'>
+      <label class='inline-flex cursor-pointer items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white' :class='{ "cursor-not-allowed opacity-50": disabled || uploading }'>
         {{ uploading ? labels.uploading : labels.choose }}
         <input class='sr-only' type='file' multiple accept='.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png' :disabled='disabled || uploading' @change='onFilesSelected'>
       </label>
     </header>
 
-    <div v-if='batchSummary' class='grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 sm:grid-cols-4 lg:grid-cols-7'>
+    <div v-if='batchSummary' class='grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 sm:grid-cols-4 lg:grid-cols-7'>
       <span>{{ labels.total }} {{ batchSummary.total_count || rows.length }}</span>
       <span>{{ labels.queued }} {{ batchSummary.queued_count || 0 }}</span>
       <span>{{ labels.processing }} {{ batchSummary.processing_count || 0 }}</span>
@@ -21,14 +21,14 @@
       <span>{{ labels.failed }} {{ batchSummary.failed_count || 0 }}</span>
     </div>
 
-    <p v-if='errorMessage' role='alert' class='rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700'>{{ errorMessage }}</p>
+    <p v-if='errorMessage' role='alert' class='rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700'>{{ errorMessage }}</p>
     <p v-if='uploadFailures.length' class='rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800'>
       {{ uploadFailures.map((item) => item.file.name).join(labels.separator) }} {{ labels.partialFailure }}
     </p>
 
-    <div v-if='rows.length' class='overflow-x-auto rounded-lg border border-slate-200'>
-      <table class='min-w-[1500px] divide-y divide-slate-200 text-left text-xs'>
-        <thead class='bg-slate-50 text-slate-600'>
+    <div v-if='rows.length' class='overflow-x-auto rounded-lg border border-gray-200'>
+      <table class='min-w-[1500px] divide-y divide-gray-200 text-left text-xs'>
+        <thead class='bg-gray-50 text-gray-600'>
           <tr>
             <th class='px-2 py-2'>{{ labels.file }}</th>
             <th v-for='field in INVOICE_FIELDS' :key='field' class='px-2 py-2'>{{ fieldLabels[field] }}</th>
@@ -37,7 +37,7 @@
             <th class='px-2 py-2'>{{ labels.actions }}</th>
           </tr>
         </thead>
-        <tbody class='divide-y divide-slate-100'>
+        <tbody class='divide-y divide-gray-100'>
           <tr v-for='row in visibleRows' :key='row.name' :class='{ "opacity-60": row.recognition_status === labels.excluded }'>
             <td class='max-w-[180px] truncate px-2 py-2' :title='row.original_filename'>{{ row.original_filename }}</td>
             <td v-for='field in INVOICE_FIELDS' :key='field' class='px-1 py-1'>
@@ -51,26 +51,26 @@
               >
             </td>
             <td class='px-2 py-2'>
-              <span class='whitespace-nowrap rounded-full bg-slate-100 px-2 py-1'>{{ row.recognition_status }}</span>
-              <p v-if='row.processing_error' class='mt-1 max-w-[160px] text-rose-600'>{{ row.processing_error }}</p>
+              <span class='whitespace-nowrap rounded-full bg-gray-100 px-2 py-1'>{{ row.recognition_status }}</span>
+              <p v-if='row.processing_error' class='mt-1 max-w-[160px] text-red-600'>{{ row.processing_error }}</p>
             </td>
             <td class='px-2 py-2'>
-              <select :value='row.expense_line_key' class='w-44 rounded border-slate-300 text-xs' :disabled='disabled || row.recognition_status !== labels.confirmed' @change='changeLink(row, $event.target.value)'>
+              <select :value='row.expense_line_key' class='w-44 rounded border-gray-300 text-xs' :disabled='disabled || row.recognition_status !== labels.confirmed' @change='changeLink(row, $event.target.value)'>
                 <option value=''>{{ labels.unlinked }}</option>
                 <option v-for='line in expenseLines' :key='line.line_key' :value='line.line_key'>{{ lineLabel(line) }}</option>
               </select>
             </td>
             <td class='space-x-2 whitespace-nowrap px-2 py-2'>
-              <button v-if='row.recognition_status === labels.pending' type='button' class='text-emerald-700' :disabled='disabled || busyNames.has(row.name)' @click='confirmRow(row)'>{{ labels.confirmAction }}</button>
-              <button v-if='row.recognition_status === labels.failed' type='button' class='text-sky-700' :disabled='disabled || busyNames.has(row.name)' @click='retryRow(row)'>{{ labels.retry }}</button>
+              <button v-if='row.recognition_status === labels.pending' type='button' class='text-green-700' :disabled='disabled || busyNames.has(row.name)' @click='confirmRow(row)'>{{ labels.confirmAction }}</button>
+              <button v-if='row.recognition_status === labels.failed' type='button' class='text-blue-700' :disabled='disabled || busyNames.has(row.name)' @click='retryRow(row)'>{{ labels.retry }}</button>
               <button v-if='row.recognition_status === labels.duplicate' type='button' class='text-violet-700' :disabled='disabled || busyNames.has(row.name)' @click='resolveRow(row)'>{{ labels.resolve }}</button>
-              <button v-if='[labels.pending, labels.duplicate, labels.failed].includes(row.recognition_status)' type='button' class='text-rose-700' :disabled='disabled || busyNames.has(row.name)' @click='excludeRow(row)'>{{ labels.exclude }}</button>
+              <button v-if='[labels.pending, labels.duplicate, labels.failed].includes(row.recognition_status)' type='button' class='text-red-700' :disabled='disabled || busyNames.has(row.name)' @click='excludeRow(row)'>{{ labels.exclude }}</button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p v-else class='rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500'>{{ labels.empty }}</p>
+    <p v-else class='rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500'>{{ labels.empty }}</p>
   </section>
 </template>
 
@@ -292,7 +292,7 @@ function warningFields(row) {
 
 function fieldClass(row, field) {
   const warned = warningFields(row).has(field) || String(row.field_warnings || '').includes(field) || row[field] === null || row[field] === undefined || String(row[field]).trim() === '';
-  return ['w-full rounded border px-2 py-1 text-xs', warned ? 'border-amber-400 bg-amber-50' : 'border-slate-300', row.recognition_status === labels.confirmed ? 'bg-slate-100' : 'bg-white'];
+  return ['w-full rounded border px-2 py-1 text-xs', warned ? 'border-amber-400 bg-amber-50' : 'border-gray-300', row.recognition_status === labels.confirmed ? 'bg-gray-100' : 'bg-white'];
 }
 
 function lineLabel(line) {

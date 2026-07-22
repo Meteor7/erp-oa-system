@@ -39,3 +39,5 @@ test('panel and drawer expose lifecycle, field and preview protections', () => {
   assert.match(preview, /watermark/i);
   assert.doesNotMatch(preview, /<a\b|download|:src=['"]invoice/);
 });
+
+test('invoice upload control uses supported palette', () => { assert.match(panel, /bg-blue-600/); assert.doesNotMatch(panel, /bg-sky-600/); });
