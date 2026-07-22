@@ -318,14 +318,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <header class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-      <div>
-        <h2 class="text-xl font-bold text-gray-900">上传发票</h2>
-        <p class="mt-1 text-sm text-gray-500">批量上传后由本地 OCR 识别，人工确认七项内容，再下推到费用报销流。</p>
+  <div class="space-y-5 pb-6">
+    <header class="sticky top-0 z-10 -mx-1 flex flex-col gap-4 border-b border-gray-200 bg-white/95 px-1 py-3 backdrop-blur md:flex-row md:items-center md:justify-between">
+      <div class="min-w-0">
+        <h2 class="text-xl font-bold tracking-tight text-gray-900">上传发票</h2>
+        <p class="mt-1 text-sm leading-5 text-gray-500">批量上传后由本地 OCR 识别，人工确认七项内容，再下推到费用报销流。</p>
       </div>
-      <div class="flex flex-wrap gap-2">
-        <label class="inline-flex cursor-pointer items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
+        <div v-if="checkedNames.length" class="mr-1 text-right text-xs text-gray-500">
+          <div>已选择 {{ checkedNames.length }} 张</div>
+          <div class="mt-0.5 font-semibold text-gray-800">{{ money(selectedTotal) }}</div>
+        </div>
+        <label class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
           <FeatherIcon name="upload-cloud" class="h-4 w-4" />
           {{ uploadText || '批量上传发票' }}
           <input class="hidden" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple :disabled="busy" @change="uploadFiles" />
@@ -335,91 +339,102 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div v-if="message" class="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</div>
-    <div v-if="errorMessage" role="alert" class="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ errorMessage }}</div>
+    <div v-if="message" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</div>
+    <div v-if="errorMessage" role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ errorMessage }}</div>
 
-    <section class="grid gap-3 md:grid-cols-5">
+    <section class="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <div v-for="item in [
-        ['发票总数', stats.total],
-        ['待确认', stats.pending],
-        ['已确认', stats.confirmed],
-        ['已下推', stats.pushed],
-        ['疑似重复', stats.duplicate],
-      ]" :key="item[0]" class="rounded border bg-white px-4 py-3 shadow-sm">
-        <div class="text-xs text-gray-500">{{ item[0] }}</div>
-        <div class="mt-1 text-2xl font-semibold text-gray-900">{{ item[1] }}</div>
+        ['发票总数', stats.total, 'bg-blue-500'],
+        ['待确认', stats.pending, 'bg-amber-500'],
+        ['已确认', stats.confirmed, 'bg-emerald-500'],
+        ['已下推', stats.pushed, 'bg-cyan-500'],
+        ['疑似重复', stats.duplicate, 'bg-red-500'],
+      ]" :key="item[0]" class="relative overflow-hidden rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+        <div class="absolute inset-y-0 left-0 w-1" :class="item[2]"></div>
+        <div class="text-xs font-medium text-gray-500">{{ item[0] }}</div>
+        <div class="mt-1 text-2xl font-semibold tracking-tight text-gray-900">{{ item[1] }}</div>
       </div>
     </section>
 
-    <section class="grid min-h-[560px] gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]">
-      <div class="overflow-hidden rounded border bg-white shadow-sm">
-        <div class="flex items-center justify-between border-b px-4 py-3">
+    <section class="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div class="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div class="flex flex-col gap-3 border-b border-gray-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 class="font-semibold">发票列表</h3>
-            <p class="mt-1 text-xs text-gray-500">可下推 {{ selectableRows.length }} 张，只有已确认且未下推的发票可勾选。</p>
+            <h3 class="font-semibold text-gray-900">发票列表</h3>
+            <p class="mt-1 text-xs leading-5 text-gray-500">可下推 {{ selectableRows.length }} 张；已确认且未下推的发票才可勾选。</p>
           </div>
-          <select v-model="statusFilter" class="rounded border border-gray-300 px-2 py-1 text-sm" @change="reload">
-            <option value="">全部状态</option>
-            <option v-for="status in ['排队中','识别中','待确认','已确认','疑似重复','失败','已排除']" :key="status">{{ status }}</option>
-          </select>
+          <label class="flex items-center gap-2 text-xs text-gray-500">
+            状态
+            <select v-model="statusFilter" class="h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" @change="reload">
+              <option value="">全部状态</option>
+              <option v-for="status in ['排队中','识别中','待确认','已确认','疑似重复','失败','已排除']" :key="status">{{ status }}</option>
+            </select>
+          </label>
         </div>
-        <div class="overflow-x-auto">
-          <table class="w-full min-w-[860px] text-sm">
-            <thead class="border-b bg-gray-50 text-xs text-gray-500">
+        <div class="max-h-[calc(100vh-360px)] overflow-x-auto overflow-y-auto">
+          <table class="w-full min-w-[920px] text-sm">
+            <thead class="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs font-medium text-gray-500 shadow-[0_1px_0_rgba(0,0,0,0.04)]">
               <tr>
-                <th class="w-10 px-3 py-2"></th>
-                <th class="px-3 py-2 text-left">文件</th>
-                <th class="px-3 py-2 text-left">状态</th>
-                <th class="px-3 py-2 text-left">发票类别</th>
-                <th class="px-3 py-2 text-left">项目名称</th>
-                <th class="px-3 py-2 text-left">开票日期</th>
-                <th class="px-3 py-2 text-left">发票号码</th>
-                <th class="px-3 py-2 text-right">合计金额</th>
+                <th class="w-11 px-3 py-3"></th>
+                <th class="px-3 py-3 text-left">文件</th>
+                <th class="px-3 py-3 text-left">状态</th>
+                <th class="px-3 py-3 text-left">发票类别</th>
+                <th class="px-3 py-3 text-left">项目名称</th>
+                <th class="px-3 py-3 text-left">开票日期</th>
+                <th class="px-3 py-3 text-left">发票号码</th>
+                <th class="px-3 py-3 text-right">合计金额</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in visibleRows" :key="row.name" class="cursor-pointer border-b hover:bg-blue-50" :class="selectedRow?.name === row.name ? 'bg-blue-50' : ''" @click="selectedName = row.name">
-                <td class="px-3 py-3" :title="selectionReason(row)" @click.stop>
-                  <input type="checkbox" :checked="checkedNames.includes(row.name)" :disabled="!canCheck(row)" @change="toggleChecked(row.name)" />
+              <tr v-for="row in visibleRows" :key="row.name" class="group cursor-pointer border-b border-gray-100 transition hover:bg-blue-50/60" :class="selectedRow?.name === row.name ? 'bg-blue-50 shadow-[inset_3px_0_0_#2563eb]' : ''" :aria-current="selectedRow?.name === row.name ? 'true' : undefined" @click="selectedName = row.name">
+                <td class="px-3 py-3.5" :title="selectionReason(row)" @click.stop>
+                  <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 disabled:cursor-not-allowed disabled:opacity-40" :checked="checkedNames.includes(row.name)" :disabled="!canCheck(row)" @change="toggleChecked(row.name)" />
                 </td>
-                <td class="max-w-[220px] truncate px-3 py-3 font-medium" :title="row.original_filename">{{ row.original_filename }}</td>
-                <td class="px-3 py-3">
-                  <span class="rounded px-2 py-1 text-xs" :class="statusClass(row.recognition_status)">{{ row.request ? '已下推' : row.recognition_status }}</span>
-                  <p v-if="selectionReason(row)" class="mt-2 max-w-[180px] text-xs leading-4 text-gray-500">{{ selectionReason(row) }}</p>
+                <td class="max-w-[230px] px-3 py-3.5">
+                  <div class="truncate font-medium text-gray-800" :title="row.original_filename">{{ row.original_filename }}</div>
+                  <div class="mt-1 truncate text-[11px] text-gray-400">{{ row.name }}</div>
                 </td>
-                <td class="max-w-[180px] truncate px-3 py-3">{{ row.invoice_category || '-' }}</td>
-                <td class="max-w-[180px] truncate px-3 py-3">{{ row.project_name || '-' }}</td>
-                <td class="px-3 py-3">{{ row.issue_date || '-' }}</td>
-                <td class="px-3 py-3">{{ row.invoice_number || '-' }}</td>
-                <td class="px-3 py-3 text-right font-medium text-red-600">{{ money(row.total_amount) }}</td>
+                <td class="px-3 py-3.5">
+                  <span class="inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(row.recognition_status)">{{ row.request ? '已下推' : row.recognition_status }}</span>
+                  <p v-if="selectionReason(row)" class="mt-1.5 max-w-[190px] text-[11px] leading-4 text-gray-500">{{ selectionReason(row) }}</p>
+                </td>
+                <td class="max-w-[190px] truncate px-3 py-3.5 text-gray-700">{{ row.invoice_category || '-' }}</td>
+                <td class="max-w-[190px] truncate px-3 py-3.5 text-gray-700">{{ row.project_name || '-' }}</td>
+                <td class="whitespace-nowrap px-3 py-3.5 text-gray-600">{{ row.issue_date || '-' }}</td>
+                <td class="whitespace-nowrap px-3 py-3.5 font-mono text-xs text-gray-600">{{ row.invoice_number || '-' }}</td>
+                <td class="whitespace-nowrap px-3 py-3.5 text-right font-semibold text-red-600">{{ money(row.total_amount) }}</td>
               </tr>
-              <tr v-if="!visibleRows.length"><td colspan="8" class="py-24 text-center text-gray-400">还没有发票，请点击右上角批量上传。</td></tr>
+              <tr v-if="!visibleRows.length"><td colspan="8" class="py-20 text-center"><FeatherIcon name="file-text" class="mx-auto h-8 w-8 text-gray-300" /><p class="mt-3 text-sm text-gray-400">还没有发票，请点击上方“批量上传发票”。</p></td></tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <aside class="rounded border bg-white shadow-sm">
+      <aside class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm 2xl:sticky 2xl:top-4 2xl:h-fit">
         <template v-if="selectedRow">
-          <header class="flex items-start justify-between border-b px-4 py-3">
-            <div class="min-w-0">
-              <h3 class="truncate font-semibold">{{ selectedRow.original_filename }}</h3>
-              <p class="mt-1 text-xs text-gray-500">{{ selectedRow.name }}</p>
+          <header class="border-b border-gray-200 bg-gray-50/70 px-5 py-4">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h3 class="truncate font-semibold text-gray-900" :title="selectedRow.original_filename">{{ selectedRow.original_filename }}</h3>
+                <p class="mt-1 truncate text-xs text-gray-500">{{ selectedRow.name }}</p>
+              </div>
+              <span class="shrink-0 rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(selectedRow.recognition_status)">{{ selectedRow.request ? '已下推' : selectedRow.recognition_status }}</span>
             </div>
-            <span class="ml-3 rounded px-2 py-1 text-xs" :class="statusClass(selectedRow.recognition_status)">{{ selectedRow.request ? '已下推' : selectedRow.recognition_status }}</span>
           </header>
-          <div class="space-y-4 p-4">
-            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              <label v-for="[name, label, type] in fields" :key="name" class="text-xs text-gray-500" :class="name === 'project_name' || name === 'invoice_category' ? '2xl:col-span-2' : ''">
+          <div class="space-y-4 p-5">
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label v-for="[name, label, type] in fields" :key="name" class="text-xs font-medium text-gray-500" :class="name === 'project_name' || name === 'invoice_category' ? 'sm:col-span-2' : ''">
                 {{ label }}
-                <input v-model="selectedRow[name]" :type="type" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-600" />
+                <input v-model="selectedRow[name]" :type="type" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-600" />
               </label>
             </div>
-            <div v-if="invoiceFieldWarnings(selectedRow.field_warnings).length" class="rounded bg-amber-50 p-3 text-xs text-amber-700">
+            <div v-if="invoiceFieldWarnings(selectedRow.field_warnings).length" class="break-words rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+              <div class="mb-1 font-semibold">请检查识别结果</div>
               <div v-for="warning in invoiceFieldWarnings(selectedRow.field_warnings)" :key="String(warning)">{{ warning.message || warning }}</div>
             </div>
-            <div class="flex flex-wrap gap-2 border-t pt-4">
-              <Button variant="subtle" @click="previewRow = selectedRow">查看发票</Button>
+            <div v-if="selectedRow.request" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm leading-5 text-blue-700">已下推到费用报销流：{{ selectedRow.request }}</div>
+            <div class="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
+              <Button variant="subtle" @click="previewRow = selectedRow"><FeatherIcon name="eye" class="h-4 w-4" />查看发票</Button>
               <Button v-if="isEditable(selectedRow)" variant="subtle" :disabled="busy" @click="saveFields(selectedRow)">保存修改</Button>
               <Button v-if="selectedRow.recognition_status === '待确认'" variant="solid" :disabled="busy" @click="confirmRow(selectedRow)">确认内容</Button>
               <Button v-if="selectedRow.recognition_status === '已确认' && !selectedRow.request" variant="subtle" :disabled="busy" @click="undoConfirm(selectedRow)">撤回确认</Button>
@@ -428,10 +443,13 @@ onBeforeUnmount(() => {
               <Button v-if="selectedRow.request" variant="subtle" :disabled="busy" @click="undoPush(selectedRow)">撤回下推</Button>
               <Button v-if="['待确认','疑似重复','失败'].includes(selectedRow.recognition_status)" variant="subtle" :disabled="busy" @click="excludeRow(selectedRow)">排除</Button>
             </div>
-            <div v-if="selectedRow.request" class="rounded bg-blue-50 p-3 text-sm text-blue-700">已下推到费用报销流：{{ selectedRow.request }}</div>
           </div>
         </template>
-        <div v-else class="flex min-h-[420px] items-center justify-center text-sm text-gray-400">请从左侧选择一张发票</div>
+        <div v-else class="flex min-h-[360px] flex-col items-center justify-center px-6 text-center text-sm text-gray-400">
+          <FeatherIcon name="mouse-pointer" class="h-8 w-8 text-gray-300" />
+          <p class="mt-3">从左侧选择一张发票</p>
+          <p class="mt-1 text-xs text-gray-300">识别结果和确认操作会显示在这里</p>
+        </div>
       </aside>
     </section>
 

@@ -69,3 +69,14 @@ test('expense workbench uses four first-class pages and exact seven-column detai
   assert.match(expense, /withdraw_request/);
   assert.match(expense, /withdraw_payment/);
 });
+
+
+test('invoice upload workspace uses a responsive list and focused review panel', () => {
+  const source = readFileSync(componentUrl, 'utf8');
+  assert.match(source, /sticky top-0 z-10/);
+  assert.match(source, /2xl:grid-cols-\[minmax\(0,1fr\)_420px\]/);
+  assert.match(source, /2xl:sticky 2xl:top-4/);
+  assert.match(source, /max-h-\[calc\(100vh-360px\)\]/);
+  assert.match(source, /overflow-x-auto/);
+  assert.doesNotMatch(source, /min-h-\[560px\]/);
+});
