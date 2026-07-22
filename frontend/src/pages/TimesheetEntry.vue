@@ -34,9 +34,12 @@ const batchWorkbookInput = ref(null);
 const employees = computed(() => options.data?.employees || []);
 const projects = computed(() => options.data?.projects || []);
 const dayLimit = computed(() => Number(monthly.data?.day_limit || new Date(selectedYear.value, selectedMonth.value, 0).getDate() || 31));
-const legacyDailyPresent = computed(() => Boolean(monthly.data?.legacy_daily_present));
+const isAllEmployees = computed(() => !selectedEmployee.value);
+const hasLegacySources = computed(() => Boolean(monthly.data?.has_legacy_sources));
+const canEditSelection = computed(() => Boolean(canEdit.value && selectedEmployee.value && !hasLegacySources.value));
+const employeeCount = computed(() => Number(monthly.data?.employee_count || 0));
 const totalDays = computed(() => Math.round(entries.value.reduce((sum, row) => sum + validDays(row.occurrence_days), 0) * 100) / 100);
-const totalHours = computed(() => Math.round(totalDays.value * 8 * 100) / 100);
+const totalHours = computed(() => Math.round(entries.value.reduce((sum, row) => sum + Number(row.hours ?? calculatedRowHours(row)), 0) * 100) / 100);
 const months = Array.from({ length: 12 }, (_, index) => index + 1);
 
 function emptyRow() {
@@ -101,10 +104,6 @@ function hydrateEntries() {
 async function loadEntries() {
   errMsg.value = "";
   okMsg.value = "";
-  if (!selectedEmployee.value) {
-    entries.value = [];
-    return;
-  }
   try {
     await monthly.reload();
     hydrateEntries();
@@ -114,12 +113,12 @@ async function loadEntries() {
 }
 
 function addRow() {
-  if (!canEdit.value || legacyDailyPresent.value) return;
+  if (!canEditSelection.value) return;
   entries.value.push(emptyRow());
 }
 
 function removeRow(_row, index) {
-  if (!canEdit.value || legacyDailyPresent.value) return;
+  if (!canEditSelection.value) return;
   errMsg.value = "";
   entries.value.splice(index, 1);
   okMsg.value = "该行已移出表格，点击保存后生效";
@@ -127,7 +126,7 @@ function removeRow(_row, index) {
 
 function validateRows() {
   if (!selectedEmployee.value) return "请选择研发人员";
-  if (legacyDailyPresent.value) return "该员工本月已有按日工时，不能与按月工时混用";
+  if (hasLegacySources.value) return "历史按日记录不能在月度视图中直接修改";
   const seenProjects = new Set();
   let sum = 0;
   for (let index = 0; index < entries.value.length; index += 1) {
@@ -146,7 +145,7 @@ function validateRows() {
 }
 
 async function saveRows() {
-  if (!canEdit.value) return;
+  if (!canEditSelection.value) return;
   errMsg.value = validateRows();
   okMsg.value = "";
   if (errMsg.value) return;
@@ -212,13 +211,16 @@ async function exportCurrent() {
     await exportTableWorkbook({
       filename: `研发工时填报-${period.value}`,
       sheetName: "月度研发工时",
-      rows: entries.value.map((row) => ({ ...row, employee_name: employees.value.find((item) => item.name === selectedEmployee.value)?.employee_name || selectedEmployee.value })),
+      rows: entries.value.map((row) => ({
+        ...row,
+        employee_name: row.employee_name || employees.value.find((item) => item.name === selectedEmployee.value)?.employee_name || selectedEmployee.value,
+      })),
       columns: [
         { label: "研发人员", key: "employee_name", width: 18 },
         { label: "项目代码", key: "project_code", width: 14 },
         { label: "项目名称", key: "project_name", width: 28 },
         { label: "发生天数", value: (row) => Number(row.occurrence_days || 0), width: 12 },
-        { label: "工时(h)", value: (row) => calculatedRowHours(row), width: 12 },
+        { label: "工时(h)", value: (row) => Number(row.hours ?? calculatedRowHours(row)), width: 12 },
         { label: "备注", key: "remark", width: 36 },
       ],
     });
@@ -261,7 +263,13 @@ watch(period, (value) => {
   if (month) selectedMonth.value = month;
 });
 watch(() => options.data?.employees, (items) => {
-  if (!selectedEmployee.value && items?.length) selectedEmployee.value = items[0].name;
+  if (items?.length === 1 && !selectedEmployee.value) {
+    selectedEmployee.value = items[0].name;
+    return;
+  }
+  if (selectedEmployee.value && !items?.some((item) => item.name === selectedEmployee.value)) {
+    selectedEmployee.value = "";
+  }
 }, { immediate: true });
 watch([period, selectedEmployee], loadEntries, { immediate: true });
 watch(() => monthly.data, hydrateEntries);
@@ -275,7 +283,7 @@ watch(() => monthly.data, hydrateEntries);
         <label class="flex items-center gap-2 text-sm text-gray-600">
           <span>研发人员</span>
           <select v-model="selectedEmployee" class="min-w-[210px] rounded border border-gray-300 bg-white px-3 py-2 text-sm">
-            <option value="">请选择</option>
+            <option value="">全部员工</option>
             <option v-for="employee in employees" :key="employee.name" :value="employee.name">{{ employee.employee_name }} - {{ employee.name }}</option>
           </select>
         </label>
@@ -291,24 +299,23 @@ watch(() => monthly.data, hydrateEntries);
         </label>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <span class="text-sm text-gray-500">当月合计：<strong class="font-medium text-gray-800">{{ formatNumber(totalDays) }} 天</strong> / 上限 {{ formatNumber(dayLimit) }} 天</span>
-        <Button v-if="canEdit" variant="subtle" :disabled="legacyDailyPresent" @click="addRow">+ 新增一行</Button>
-        <Button v-if="canEdit" variant="solid" :loading="saving" :disabled="legacyDailyPresent || !selectedEmployee" @click="saveRows">保存</Button>
+        <span v-if="isAllEmployees" class="text-sm text-gray-500">员工：<strong class="font-medium text-gray-800">{{ employeeCount }} 人</strong></span>
+        <span class="text-sm text-gray-500">当月合计：<strong class="font-medium text-gray-800">{{ formatNumber(totalDays) }} 天 / {{ formatNumber(totalHours) }} 小时</strong><template v-if="!isAllEmployees"> / 上限 {{ formatNumber(dayLimit) }} 天</template></span>
+        <Button v-if="canEditSelection" variant="subtle" @click="addRow">+ 新增一行</Button>
+        <Button v-if="canEditSelection" variant="solid" :loading="saving" @click="saveRows">保存</Button>
         <Button variant="subtle" :loading="exporting" :disabled="!entries.length" @click="exportCurrent">导出Excel</Button>
       </div>
     </div>
 
-    <div v-if="legacyDailyPresent" class="mx-5 mt-4 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-      该员工本月已有按日工时，只能只读查看；请勿与按月工时混用。
-    </div>
     <p v-if="errMsg" class="mx-5 mt-4 text-sm text-red-600">{{ errMsg }}</p>
     <p v-if="okMsg" class="mx-5 mt-4 text-sm text-green-700">{{ okMsg }}</p>
 
     <div v-if="monthly.loading" class="flex justify-center py-12"><Spinner class="h-6 w-6" /></div>
     <div v-else class="overflow-x-auto px-5 py-4">
-      <table class="w-full min-w-[980px] border-separate border-spacing-0 text-sm">
+      <table class="w-full min-w-[1080px] border-separate border-spacing-0 text-sm">
         <thead class="bg-gray-50 text-gray-500">
           <tr>
+            <th v-if="isAllEmployees" class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">研发人员</th>
             <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">项目</th>
             <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">发生天数</th>
             <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">工时</th>
@@ -318,34 +325,41 @@ watch(() => monthly.data, hydrateEntries);
         </thead>
         <tbody>
           <tr v-for="(row, index) in entries" :key="row.key || row.monthly_entry_id || index">
+            <td v-if="isAllEmployees" class="border-b border-l border-gray-200 px-4 py-3 whitespace-nowrap">
+              <div class="font-medium text-gray-800">{{ row.employee_name || row.employee }}</div>
+              <div class="text-xs text-gray-400">{{ row.employee }}</div>
+            </td>
             <td class="border-b border-l border-gray-200 px-4 py-2">
-              <select v-model="row.project" :disabled="!canEdit || legacyDailyPresent" class="w-full rounded border border-gray-300 bg-white px-3 py-2" @change="chooseProject(row, row.project)">
+              <div v-if="!canEditSelection" class="px-2 py-2 text-gray-700">{{ row.project_name || row.project }}<span v-if="row.project_code" class="ml-2 text-xs text-gray-400">({{ row.project_code }})</span></div>
+              <select v-else v-model="row.project" class="w-full rounded border border-gray-300 bg-white px-3 py-2" @change="chooseProject(row, row.project)">
                 <option value="">请选择项目</option>
                 <option v-for="project in filteredProjects(row)" :key="project.name" :value="project.name">{{ projectName(project) }} ({{ projectCode(project) }})</option>
               </select>
               <p v-if="!projects.length" class="mt-1 text-xs text-amber-700">无匹配项目，请先在项目管理中新增</p>
             </td>
             <td class="border-b border-l border-gray-200 px-4 py-2">
-              <input v-model="row.occurrence_days" type="number" min="0.01" :max="dayLimit" step="0.01" :disabled="!canEdit || legacyDailyPresent" class="w-32 rounded border border-gray-300 px-3 py-2 text-right tabular-nums" @input="recalculateRow(row)" />
+              <span v-if="!canEditSelection" class="block w-32 px-3 py-2 text-right tabular-nums">{{ formatNumber(row.occurrence_days) }}</span>
+              <input v-else v-model="row.occurrence_days" type="number" min="0.01" :max="dayLimit" step="0.01" class="w-32 rounded border border-gray-300 px-3 py-2 text-right tabular-nums" @input="recalculateRow(row)" />
             </td>
             <td class="border-b border-l border-gray-200 px-4 py-2">
               <input :value="formatNumber(calculatedRowHours(row))" readonly class="w-32 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-right tabular-nums text-gray-600" />
             </td>
             <td class="border-b border-l border-gray-200 px-4 py-2">
-              <input v-model="row.remark" :disabled="!canEdit || legacyDailyPresent" class="w-full rounded border border-gray-300 px-3 py-2" />
+              <span v-if="!canEditSelection" class="block min-w-[220px] px-3 py-2 text-gray-600">{{ row.remark || '-' }}</span>
+              <input v-else v-model="row.remark" class="w-full rounded border border-gray-300 px-3 py-2" />
             </td>
             <td class="border-x border-b border-gray-200 px-4 py-2">
-              <button v-if="canEdit" type="button" :disabled="legacyDailyPresent" class="text-red-600 hover:underline disabled:text-gray-300" @click="removeRow(row, index)">删除</button>
+              <button v-if="canEditSelection" type="button" class="text-red-600 hover:underline" @click="removeRow(row, index)">删除</button>
               <span v-else class="text-gray-400">只读</span>
             </td>
           </tr>
           <tr v-if="!entries.length">
-            <td colspan="5" class="border-x border-b border-gray-200 px-4 py-10 text-center text-gray-400">本月暂无工时记录</td>
+            <td :colspan="isAllEmployees ? 6 : 5" class="border-x border-b border-gray-200 px-4 py-10 text-center text-gray-400">本月暂无工时记录</td>
           </tr>
         </tbody>
         <tfoot v-if="entries.length" class="bg-gray-50 font-medium text-gray-700">
           <tr>
-            <td class="border-x border-b border-gray-200 px-4 py-3 text-right">合计</td>
+            <td :colspan="isAllEmployees ? 2 : 1" class="border-x border-b border-gray-200 px-4 py-3 text-right">合计</td>
             <td class="border-b border-gray-200 px-4 py-3 text-right tabular-nums">{{ formatNumber(totalDays) }}</td>
             <td class="border-b border-gray-200 px-4 py-3 text-right tabular-nums">{{ formatNumber(totalHours) }}</td>
             <td colspan="2" class="border-x border-b border-gray-200"></td>
@@ -354,7 +368,7 @@ watch(() => monthly.data, hydrateEntries);
       </table>
     </div>
 
-    <div v-if="canEdit" class="border-t border-gray-200 px-5 py-4">
+    <div v-if="canEditSelection" class="border-t border-gray-200 px-5 py-4">
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="text-sm font-medium text-gray-700">批量粘贴 / Excel 导入</span>
         <Button variant="subtle" @click="chooseTimesheetWorkbook">导入Excel</Button>

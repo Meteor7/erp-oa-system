@@ -56,7 +56,7 @@ test("monthly rows keep resolved project identity and editable project search", 
 test("entry mutations remain role-gated and show server validation messages", () => {
   assert.match(source, /canEditTimesheetEntry/);
   assert.match(source, /const canEdit = computed/);
-  assert.match(source, /v-if="canEdit"/);
+  assert.match(source, /v-if="canEditSelection"/);
   assert.match(source, /function serverMessage/);
   assert.match(source, /_server_messages/);
 });
@@ -69,8 +69,12 @@ test("monthly import and export contain days and hours but no technical dates", 
   assert.doesNotMatch(source, /label: "日期"/);
 });
 
-test("legacy daily data is visibly read-only and blocks monthly save", () => {
-  assert.match(source, /legacy_daily_present/);
-  assert.ok(source.includes("已有按日工时"));
-  assert.match(source, /:disabled="legacyDailyPresent/);
+test("legacy daily data and all employees render through the unified monthly view", () => {
+  assert.match(source, /const isAllEmployees = computed/);
+  assert.match(source, /const canEditSelection = computed/);
+  assert.ok(source.includes('<option value="">全部员工</option>'));
+  assert.match(source, /employee_count/);
+  assert.match(source, /v-if="isAllEmployees"/);
+  assert.doesNotMatch(source, /该员工本月已有按日工时/);
+  assert.doesNotMatch(source, /entries\.value = \[\];\s*return;/);
 });

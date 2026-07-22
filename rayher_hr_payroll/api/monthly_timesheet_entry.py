@@ -247,6 +247,104 @@ def _query_monthly_entries(period: str, employee=None) -> list:
     )
 
 
+
+def _query_legacy_monthly_entries(period: str, employee=None) -> list:
+    daily = _daily_module()
+    employee_filter, selected_employee, visible_employees = daily._summary_employee_filter(employee)
+    return frappe.db.sql(
+        f"""
+        select ts.employee,
+               e.employee_name,
+               tsd.project,
+               coalesce(nullif(tsd.rd_project_code, ''), p.rd_project_code) as project_code,
+               coalesce(nullif(tsd.rd_project_name, ''), p.project_name) as project_name,
+               round(sum(tsd.hours) / 8, 2) as occurrence_days,
+               round(sum(tsd.hours), 2) as hours,
+               group_concat(
+                   distinct nullif(trim(tsd.description), '')
+                   order by trim(tsd.description)
+                   separator '；'
+               ) as remark,
+               'legacy_daily' as source_kind
+          from `tabTimesheet Detail` tsd
+          inner join `tabTimesheet` ts on ts.name = tsd.parent
+          inner join `tabEmployee` e on e.name = ts.employee
+          inner join `tabProject` p on p.name = tsd.project
+         where ts.docstatus = 1
+           and coalesce(ts.rd_system_generated, 0) = 0
+           and date_format(tsd.from_time, '%%Y-%%m') = %(period)s
+           and e.rd_personnel_type in %(types)s
+           and coalesce(p.allow_rd_timesheet, 0) = 1
+           {employee_filter}
+         group by ts.employee, e.employee_name, tsd.project,
+                  coalesce(nullif(tsd.rd_project_code, ''), p.rd_project_code),
+                  coalesce(nullif(tsd.rd_project_name, ''), p.project_name)
+         order by e.employee_name, project_code, project_name
+        """,
+        {
+            "period": period,
+            "types": daily.RD_TYPES,
+            "employee": selected_employee,
+            "employees": visible_employees or ("__none__",),
+        },
+        as_dict=True,
+    )
+
+
+def _monthly_view_row(source, period: str, source_kind: str) -> dict:
+    employee = str(_value(source, "employee") or "")
+    project = str(_value(source, "project") or "")
+    monthly_entry_id = _value(source, "monthly_entry_id")
+    if source_kind == "legacy_daily":
+        monthly_entry_id = f"legacy:{period}:{employee}:{project}"
+    return {
+        "monthly_entry_id": monthly_entry_id,
+        "timesheet": _value(source, "timesheet"),
+        "employee": employee,
+        "employee_name": _value(source, "employee_name") or "",
+        "period": period,
+        "project": project,
+        "project_code": _value(source, "project_code") or "",
+        "project_name": _value(source, "project_name") or "",
+        "occurrence_days": round(float(_value(source, "occurrence_days", 0) or 0), 2),
+        "hours": round(float(_value(source, "hours", 0) or 0), 2),
+        "remark": _value(source, "remark") or "",
+        "review_status": _value(source, "review_status") or "",
+        "source_kind": source_kind,
+        "editable": source_kind == "monthly",
+    }
+
+
+def _merge_monthly_entry_rows(monthly_rows: list, legacy_rows: list, period: str) -> list[dict]:
+    grouped = {}
+    for source_kind, sources in (("monthly", monthly_rows or []), ("legacy_daily", legacy_rows or [])):
+        for source in sources:
+            row = _monthly_view_row(source, period, source_kind)
+            key = (row["employee"], row["project"])
+            current = grouped.get(key)
+            if current is None:
+                grouped[key] = row
+                continue
+            current["occurrence_days"] = round(current["occurrence_days"] + row["occurrence_days"], 2)
+            current["hours"] = round(current["hours"] + row["hours"], 2)
+            remarks = []
+            for value in (current.get("remark"), row.get("remark")):
+                for item in str(value or "").split("；"):
+                    item = item.strip()
+                    if item and item not in remarks:
+                        remarks.append(item)
+            current["remark"] = "；".join(remarks)
+            current["source_kind"] = "mixed" if current["source_kind"] != row["source_kind"] else current["source_kind"]
+            current["editable"] = current["source_kind"] == "monthly"
+            if current["source_kind"] == "mixed":
+                current["monthly_entry_id"] = f"mixed:{period}:{row['employee']}:{row['project']}"
+                current["timesheet"] = None
+    return sorted(
+        grouped.values(),
+        key=lambda row: (row["employee_name"], row["project_code"], row["project_name"], row["project"]),
+    )
+
+
 @frappe.whitelist()
 def get_monthly_options():
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
@@ -258,34 +356,25 @@ def list_monthly_entries(period, employee=None):
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
     year, month = parse_period(period)
     period_text = _canonical_period(year, month)
-    rows = []
-    for source in _query_monthly_entries(period_text, employee):
-        rows.append(
-            {
-                "monthly_entry_id": _value(source, "monthly_entry_id"),
-                "timesheet": _value(source, "timesheet"),
-                "employee": _value(source, "employee"),
-                "employee_name": _value(source, "employee_name"),
-                "period": period_text,
-                "project": _value(source, "project"),
-                "project_code": _value(source, "project_code"),
-                "project_name": _value(source, "project_name"),
-                "occurrence_days": round(float(_value(source, "occurrence_days", 0) or 0), 2),
-                "hours": round(float(_value(source, "hours", 0) or 0), 2),
-                "remark": _value(source, "remark") or "",
-                "review_status": _value(source, "review_status") or "",
-            }
-        )
+    rows = _merge_monthly_entry_rows(
+        _query_monthly_entries(period_text, employee),
+        _query_legacy_monthly_entries(period_text, employee),
+        period_text,
+    )
     total_days = round(sum(float(row["occurrence_days"]) for row in rows), 2)
     total_hours = round(sum(float(row["hours"]) for row in rows), 2)
+    has_legacy_sources = any(row["source_kind"] in {"legacy_daily", "mixed"} for row in rows)
+    employee_count = len({row["employee"] for row in rows if row["employee"]})
     return {
         "period": period_text,
         "employee": employee or None,
         "entries": rows,
         "total_days": total_days,
         "total_hours": total_hours,
+        "employee_count": employee_count,
         "day_limit": monthrange(year, month)[1],
-        "legacy_daily_present": bool(employee and _legacy_daily_exists(employee, year, month)),
+        "has_legacy_sources": has_legacy_sources,
+        "legacy_daily_present": has_legacy_sources,
     }
 
 

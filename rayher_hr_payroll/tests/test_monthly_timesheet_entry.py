@@ -317,6 +317,7 @@ def test_list_monthly_entries_returns_parent_rows_without_technical_dates(monthl
         raising=False,
     )
     monkeypatch.setattr(mod, "_legacy_daily_exists", lambda *args: False, raising=False)
+    monkeypatch.setattr(mod, "_query_legacy_monthly_entries", lambda *args: [], raising=False)
 
     result = mod.list_monthly_entries("2026-07", employee="EMP-1")
 
@@ -451,3 +452,56 @@ def test_delete_monthly_entry_uses_parent_id_and_period_locks(monthly_module, mo
     assert locks[1] == ("import", (2026, 7))
     assert result == {"entries": [], "employee": "EMP-1"}
     assert frappe.db.events[-1] == ("commit", None)
+
+def test_merge_monthly_rows_normalizes_legacy_daily_sources(monthly_module):
+    mod, _frappe = monthly_module
+
+    rows = mod._merge_monthly_entry_rows(
+        [],
+        [{
+            "employee": "HR-EMP-90014",
+            "employee_name": "演示员工112",
+            "project": "PROJ-1",
+            "project_code": "RD14",
+            "project_name": "项目甲",
+            "hours": 12,
+            "occurrence_days": 1.5,
+            "remark": "需求分析；编码开发",
+            "source_kind": "legacy_daily",
+        }],
+        "2026-06",
+    )
+
+    assert rows[0]["monthly_entry_id"] == "legacy:2026-06:HR-EMP-90014:PROJ-1"
+    assert rows[0]["period"] == "2026-06"
+    assert rows[0]["employee_name"] == "演示员工112"
+    assert rows[0]["project_name"] == "项目甲"
+    assert rows[0]["occurrence_days"] == 1.5
+    assert rows[0]["hours"] == 12.0
+    assert rows[0]["source_kind"] == "legacy_daily"
+    assert rows[0]["editable"] is False
+
+
+def test_list_monthly_entries_returns_legacy_rows_and_employee_count(monthly_module, monkeypatch):
+    mod, _frappe = monthly_module
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 6), raising=False)
+    monkeypatch.setattr(mod, "_query_monthly_entries", lambda *args: [], raising=False)
+    monkeypatch.setattr(
+        mod,
+        "_query_legacy_monthly_entries",
+        lambda *args: [
+            {"employee": "HR-EMP-90014", "employee_name": "演示员工112", "project": "PROJ-1", "project_code": "RD14", "project_name": "项目甲", "hours": 12, "occurrence_days": 1.5, "remark": "历史按日汇总", "source_kind": "legacy_daily"},
+            {"employee": "HR-EMP-90015", "employee_name": "演示员工162", "project": "PROJ-2", "project_code": "RD15", "project_name": "项目乙", "hours": 8, "occurrence_days": 1, "remark": "", "source_kind": "legacy_daily"},
+        ],
+        raising=False,
+    )
+
+    result = mod.list_monthly_entries("2026-06", employee=None)
+
+    assert len(result["entries"]) == 2
+    assert result["total_days"] == 2.5
+    assert result["total_hours"] == 20
+    assert result["employee_count"] == 2
+    assert result["has_legacy_sources"] is True
+    assert result["legacy_daily_present"] is True
