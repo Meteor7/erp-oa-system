@@ -158,6 +158,18 @@ export function invoiceBlockers(invoices) {
   return blockers;
 }
 
+export function invoiceSelectionReason(invoice) {
+  if (invoice?.request) return `已下推到 ${invoice.request}`;
+  const status = invoice?.recognition_status;
+  if (status === '已确认') return '';
+  if (status === '待确认') return '请先确认发票内容';
+  if (status === '疑似重复') return '疑似重复发票不能下推';
+  if (status === '失败') return '识别失败，不能下推';
+  if (ACTIVE_RECOGNITION_STATUSES.includes(status)) return 'OCR 处理中，暂不能下推';
+  if (status === '已排除') return '已排除发票不能下推';
+  return '当前状态不能下推';
+}
+
 function extensionOf(file) {
   const name = String(file?.name || '');
   return name.includes('.') ? name.split('.').pop().toLowerCase() : '';

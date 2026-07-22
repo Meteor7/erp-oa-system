@@ -7,6 +7,7 @@ import {
   createInvoiceBatch,
   excludeInvoice,
   listWorkbenchInvoices,
+  invoiceSelectionReason,
   pushInvoices,
   resolveDuplicate,
   retryInvoice,
@@ -65,7 +66,7 @@ const fields = [
 
 const visibleRows = computed(() => rows.value.filter((row) => !statusFilter.value || row.recognition_status === statusFilter.value));
 const selectedRow = computed(() => rows.value.find((row) => row.name === selectedName.value) || visibleRows.value[0] || null);
-const selectableRows = computed(() => rows.value.filter((row) => row.recognition_status === '已确认' && !row.request));
+const selectableRows = computed(() => rows.value.filter((row) => !invoiceSelectionReason(row)));
 const selectedTotal = computed(() => rows.value
   .filter((row) => checkedNames.value.includes(row.name))
   .reduce((sum, row) => sum + Number(row.total_amount || 0), 0));
@@ -102,8 +103,12 @@ function isEditable(row) {
   return ['待确认', '疑似重复'].includes(row?.recognition_status);
 }
 
+function selectionReason(row) {
+  return invoiceSelectionReason(row);
+}
+
 function canCheck(row) {
-  return row?.recognition_status === '已确认' && !row?.request;
+  return !selectionReason(row);
 }
 
 function syncChecked() {
@@ -349,7 +354,10 @@ onBeforeUnmount(() => {
     <section class="grid min-h-[560px] gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]">
       <div class="overflow-hidden rounded border bg-white shadow-sm">
         <div class="flex items-center justify-between border-b px-4 py-3">
-          <h3 class="font-semibold">发票列表</h3>
+          <div>
+            <h3 class="font-semibold">发票列表</h3>
+            <p class="mt-1 text-xs text-gray-500">可下推 {{ selectableRows.length }} 张，只有已确认且未下推的发票可勾选。</p>
+          </div>
           <select v-model="statusFilter" class="rounded border border-gray-300 px-2 py-1 text-sm" @change="reload">
             <option value="">全部状态</option>
             <option v-for="status in ['排队中','识别中','待确认','已确认','疑似重复','失败','已排除']" :key="status">{{ status }}</option>
@@ -371,11 +379,14 @@ onBeforeUnmount(() => {
             </thead>
             <tbody>
               <tr v-for="row in visibleRows" :key="row.name" class="cursor-pointer border-b hover:bg-blue-50" :class="selectedRow?.name === row.name ? 'bg-blue-50' : ''" @click="selectedName = row.name">
-                <td class="px-3 py-3" @click.stop>
+                <td class="px-3 py-3" :title="selectionReason(row)" @click.stop>
                   <input type="checkbox" :checked="checkedNames.includes(row.name)" :disabled="!canCheck(row)" @change="toggleChecked(row.name)" />
                 </td>
                 <td class="max-w-[220px] truncate px-3 py-3 font-medium" :title="row.original_filename">{{ row.original_filename }}</td>
-                <td class="px-3 py-3"><span class="rounded px-2 py-1 text-xs" :class="statusClass(row.recognition_status)">{{ row.request ? '已下推' : row.recognition_status }}</span></td>
+                <td class="px-3 py-3">
+                  <span class="rounded px-2 py-1 text-xs" :class="statusClass(row.recognition_status)">{{ row.request ? '已下推' : row.recognition_status }}</span>
+                  <p v-if="selectionReason(row)" class="mt-2 max-w-[180px] text-xs leading-4 text-gray-500">{{ selectionReason(row) }}</p>
+                </td>
                 <td class="max-w-[180px] truncate px-3 py-3">{{ row.invoice_category || '-' }}</td>
                 <td class="max-w-[180px] truncate px-3 py-3">{{ row.project_name || '-' }}</td>
                 <td class="px-3 py-3">{{ row.issue_date || '-' }}</td>

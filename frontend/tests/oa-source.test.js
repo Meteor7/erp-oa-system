@@ -73,6 +73,9 @@ test('upload page supports batch upload confirmation pushdown and private previe
   assert.match(uploadSource, /InvoicePreviewDrawer/);
   assert.doesNotMatch(uploadSource, /download\s*=|target="_blank"/);
   assert.match(invoiceLibSource, /\/api\/method\/upload_file/);
+  assert.match(uploadSource, /selectionReason\(row\)/);
+  assert.match(uploadSource, /:title="selectionReason\(row\)"/);
+  assert.ok(uploadSource.includes('\u53ef\u4e0b\u63a8'));
 });
 
 test('OCR and manual rows use the same seven-field detail table', () => {

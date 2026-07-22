@@ -11,6 +11,7 @@ import {
   getRequestInvoices,
   hasRegisteredInvoiceUpload,
   invoiceBlockers,
+  invoiceSelectionReason,
   invoiceSaveGuard,
   invoicesForLine,
   moneyToCents,
@@ -33,6 +34,14 @@ test('blocks unconfirmed and duplicate records', () => {
     invoiceBlockers([{ recognition_status: '\u5f85\u786e\u8ba4' }, { recognition_status: '\u7591\u4f3c\u91cd\u590d' }]),
     ['\u5b58\u5728\u672a\u786e\u8ba4\u53d1\u7968', '\u5b58\u5728\u7591\u4f3c\u91cd\u590d\u53d1\u7968'],
   );
+});
+
+test('explains why an invoice can or cannot be selected for pushdown', () => {
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: '' }), '');
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u5f85\u786e\u8ba4', request: '' }), '\u8bf7\u5148\u786e\u8ba4\u53d1\u7968\u5185\u5bb9');
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u7591\u4f3c\u91cd\u590d', request: '' }), '\u7591\u4f3c\u91cd\u590d\u53d1\u7968\u4e0d\u80fd\u4e0b\u63a8');
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u5931\u8d25', request: '' }), '\u8bc6\u522b\u5931\u8d25\uff0c\u4e0d\u80fd\u4e0b\u63a8');
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: 'OA-2026-0001' }), '\u5df2\u4e0b\u63a8\u5230 OA-2026-0001');
 });
 
 test('money comparisons use integer cents', () => {
