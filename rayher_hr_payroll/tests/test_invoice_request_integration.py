@@ -1001,3 +1001,56 @@ def test_update_draft_invoice_details_uses_current_read_and_permission_before_va
         )
     assert environment.current_reads == [(service.REQUEST_DOCTYPE, doc.name)]
     assert calls == [(doc.name, "edit", True)]
+
+
+def test_normalize_preserves_exact_seven_invoice_fields_and_compatibility_values():
+    payload = {
+        "source_invoice": "OIR-1",
+        "invoice_category": "电子发票（普通发票）",
+        "project_name": "文具印章",
+        "issue_date": "2026-07-14",
+        "invoice_number": "26322000005753891281",
+        "amount_before_tax": "35.62",
+        "tax_amount": "0.36",
+        "total_amount": "35.98",
+    }
+    rows, total = oa_entry._normalize_expense_lines([payload])
+    row = rows[0]
+    assert total == 35.98
+    assert {key: row[key] for key in (
+        "source_invoice", "invoice_category", "project_name", "issue_date",
+        "invoice_number", "amount_before_tax", "tax_amount", "total_amount",
+    )} == {
+        "source_invoice": "OIR-1",
+        "invoice_category": "电子发票（普通发票）",
+        "project_name": "文具印章",
+        "issue_date": "2026-07-14",
+        "invoice_number": "26322000005753891281",
+        "amount_before_tax": 35.62,
+        "tax_amount": 0.36,
+        "total_amount": 35.98,
+    }
+    assert row["category"] == "电子发票（普通发票）"
+    assert row["description"] == "文具印章"
+    assert row["start_date"] == row["end_date"] == "2026-07-14"
+    assert row["amount"] == 35.98
+    assert UUID(row["line_key"]).version == 5
+
+
+def test_serialize_expense_line_maps_legacy_values_without_losing_zero_money():
+    row = Row(
+        source_consumption="OLD-1", line_key="line-1", start_date="2026-01-01",
+        end_date="2026-01-01", category="办公费", amount=Decimal("12.00"),
+        description="旧说明", attachment_count=0, invoice_status="",
+        invoice_difference_reason="", invoice_category="", project_name="",
+        issue_date=None, invoice_number="", amount_before_tax=Decimal("0.00"),
+        tax_amount=Decimal("0.00"), total_amount=None, source_invoice=None,
+    )
+    result = oa_entry._serialize_expense_line(row)
+    assert result["invoice_category"] == "办公费"
+    assert result["project_name"] == "旧说明"
+    assert result["issue_date"] == "2026-01-01"
+    assert result["invoice_number"] == ""
+    assert result["amount_before_tax"] == Decimal("0.00")
+    assert result["tax_amount"] == Decimal("0.00")
+    assert result["total_amount"] == Decimal("12.00")

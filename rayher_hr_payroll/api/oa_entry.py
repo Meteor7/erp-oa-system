@@ -126,6 +126,15 @@ def _money(value):
         return 0.0
 
 
+def _optional_money(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
 def _json_list(values):
     return json.dumps(list(values), ensure_ascii=False)
 
@@ -300,15 +309,33 @@ def _serialize_doc_step(step):
 
 
 def _serialize_expense_line(row):
+    legacy_category = getattr(row, "category", None)
+    legacy_description = getattr(row, "description", None)
+    legacy_date = getattr(row, "start_date", None)
+    legacy_amount = getattr(row, "amount", 0)
+    invoice_category = getattr(row, "invoice_category", None) or legacy_category
+    project_name = getattr(row, "project_name", None) or legacy_description
+    issue_date = getattr(row, "issue_date", None) or legacy_date
+    total_amount = getattr(row, "total_amount", None)
+    if total_amount in (None, ""):
+        total_amount = legacy_amount
     return {
         "source_consumption": getattr(row, "source_consumption", None),
+        "source_invoice": getattr(row, "source_invoice", None),
         "line_key": getattr(row, "line_key", None),
+        "invoice_category": invoice_category or "",
+        "project_name": project_name or "",
+        "issue_date": issue_date,
+        "invoice_number": getattr(row, "invoice_number", None) or "",
+        "amount_before_tax": getattr(row, "amount_before_tax", None),
+        "tax_amount": getattr(row, "tax_amount", None),
+        "total_amount": total_amount,
         "invoice_difference_reason": getattr(row, "invoice_difference_reason", None),
         "start_date": getattr(row, "start_date", None),
         "end_date": getattr(row, "end_date", None),
-        "category": getattr(row, "category", None),
-        "amount": getattr(row, "amount", 0),
-        "description": getattr(row, "description", None),
+        "category": legacy_category,
+        "amount": legacy_amount,
+        "description": legacy_description,
         "attachment_count": getattr(row, "attachment_count", 0),
         "invoice_status": getattr(row, "invoice_status", None),
     }
@@ -520,10 +547,16 @@ def _uuid4_text(value):
 def _expense_line_key(row, seen):
     supplied = row.get("line_key")
     supplied = supplied.strip() if isinstance(supplied, str) else ""
-    source = _clean(row.get("source_consumption"))
-    if source:
+    source_invoice = _clean(row.get("source_invoice"))
+    source_consumption = _clean(row.get("source_consumption"))
+    if source_invoice:
+        candidate = str(uuid5(NAMESPACE_URL, f"rayher:invoice:{source_invoice}"))
+        if candidate not in seen:
+            seen.add(candidate)
+            return candidate
+    if source_consumption:
         candidate = supplied if supplied and len(supplied) <= 140 else str(
-            uuid5(NAMESPACE_URL, f"rayher:consumption:{source}")
+            uuid5(NAMESPACE_URL, f"rayher:consumption:{source_consumption}")
         )
         if candidate not in seen:
             seen.add(candidate)
@@ -558,21 +591,36 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
     total = 0
     seen_line_keys = set()
     for row in rows or []:
-        amount = _money(row.get("amount"))
-        if amount <= 0:
+        source_invoice = _clean(row.get("source_invoice"))
+        total_value = row.get("total_amount")
+        if total_value in (None, ""):
+            total_value = row.get("amount")
+        amount = _money(total_value)
+        if amount <= 0 and not source_invoice:
             continue
-        category = _clean(row.get("category")) or REQUEST_EXPENSE_PAYMENT
+        invoice_category = _clean(row.get("invoice_category"))
+        project_name = _clean(row.get("project_name"))
+        issue_date = row.get("issue_date") or row.get("start_date") or row.get("expense_date")
+        category = invoice_category or _clean(row.get("category")) or project_name or REQUEST_EXPENSE_PAYMENT
         normalized.append(
             {
                 "source_consumption": row.get("source_consumption"),
+                "source_invoice": source_invoice or None,
                 "line_key": _expense_line_key(row, seen_line_keys),
-                "start_date": row.get("start_date") or row.get("expense_date"),
-                "end_date": row.get("end_date") or row.get("expense_date") or row.get("start_date"),
+                "invoice_category": invoice_category,
+                "project_name": project_name,
+                "issue_date": issue_date,
+                "invoice_number": _clean(row.get("invoice_number")),
+                "amount_before_tax": _optional_money(row.get("amount_before_tax")),
+                "tax_amount": _optional_money(row.get("tax_amount")),
+                "total_amount": amount,
+                "start_date": issue_date,
+                "end_date": row.get("end_date") or issue_date,
                 "category": category,
                 "amount": amount,
-                "description": _clean(row.get("description") or row.get("desc")),
-                "attachment_count": int(row.get("attachment_count") or row.get("invoice_count") or 0),
-                "invoice_status": _clean(row.get("invoice_status")) or (INVOICE_UPLOADED if row.get("attachment_count") else ""),
+                "description": project_name or _clean(row.get("description") or row.get("desc")),
+                "attachment_count": int(row.get("attachment_count") or row.get("invoice_count") or (1 if source_invoice else 0)),
+                "invoice_status": _clean(row.get("invoice_status")) or (INVOICE_CONFIRMED if source_invoice else (INVOICE_UPLOADED if row.get("attachment_count") else "")),
                 "invoice_difference_reason": _difference_reason(row.get("invoice_difference_reason")),
             }
         )

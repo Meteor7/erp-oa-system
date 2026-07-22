@@ -625,3 +625,28 @@ def test_invoice_record_has_read_only_worker_claim_fence():
     assert claim["read_only"] == 1
     assert invoice["field_order"].index("processing_started_on") < invoice["field_order"].index("processing_claim_id")
     assert invoice["field_order"].index("processing_claim_id") < invoice["field_order"].index("processing_error")
+
+
+def test_reimbursement_lines_define_exact_ocr_fields_and_reversible_logs():
+    line_fields = _fields_by_name(load_doctype("oa_approval_expense_line"))
+    request_fields = _fields_by_name(load_doctype("oa_approval_request"))
+    record_fields = _fields_by_name(load_doctype("oa_invoice_record"))
+    expected = {
+        "source_invoice": ("Link", "OA Invoice Record"),
+        "invoice_category": ("Data", None),
+        "project_name": ("Small Text", None),
+        "issue_date": ("Date", None),
+        "invoice_number": ("Data", None),
+        "amount_before_tax": ("Currency", None),
+        "tax_amount": ("Currency", None),
+        "total_amount": ("Currency", None),
+    }
+    for name, (fieldtype, options) in expected.items():
+        assert line_fields[name]["fieldtype"] == fieldtype
+        assert line_fields[name].get("options") == options
+        assert line_fields[name].get("reqd") != 1
+    assert "发票下推" in request_fields["source_type"]["options"].split("\n")
+    for fields in (request_fields, record_fields):
+        assert fields["operation_log"]["fieldtype"] == "Long Text"
+        assert fields["operation_log"].get("read_only") == 1
+        assert fields["operation_log"].get("reqd") != 1
