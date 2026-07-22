@@ -74,9 +74,27 @@ test('expense workbench uses four first-class pages and exact seven-column detai
 test('invoice upload workspace uses a responsive list and focused review panel', () => {
   const source = readFileSync(componentUrl, 'utf8');
   assert.match(source, /sticky top-0 z-10/);
-  assert.match(source, /2xl:grid-cols-\[minmax\(0,1fr\)_420px\]/);
-  assert.match(source, /2xl:sticky 2xl:top-4/);
+  assert.match(source, /xl:grid-cols-\[minmax\(0,1fr\)_420px\]/);
+  assert.match(source, /xl:sticky xl:top-4/);
   assert.match(source, /max-h-\[calc\(100vh-360px\)\]/);
   assert.match(source, /overflow-x-auto/);
+  assert.match(source, /required_fields_missing/);
+  assert.match(source, /field_conflict:/);
   assert.doesNotMatch(source, /min-h-\[560px\]/);
+});
+
+test('invoice warnings translate every OCR service code and hide unknown internal codes', () => {
+  const source = readFileSync(componentUrl, 'utf8');
+  for (const warning of [
+    'invoice_category_raw_missing',
+    'amount_before_tax_derived_from_total_minus_tax',
+    'zero_tax_rule_applied',
+    'tax_amount_missing_for_taxable_invoice',
+    'amount_arithmetic_mismatch',
+    'dependent_fields_cleared_due_to_conflict',
+    'temporary_files_cleanup_failed:sensitive_invoice_files_may_remain',
+  ]) {
+    assert.ok(source.includes(warning), warning);
+  }
+  assert.doesNotMatch(source, /return raw \|\|/);
 });

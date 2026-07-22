@@ -653,3 +653,17 @@ def test_reimbursement_lines_define_exact_ocr_fields_and_reversible_logs():
         assert fields["operation_log"]["fieldtype"] == "Long Text"
         assert fields["operation_log"].get("read_only") == 1
         assert fields["operation_log"].get("reqd") != 1
+
+
+def test_oa_consumption_detail_write_permission_is_limited_to_finance():
+    permissions = {
+        item["role"]: item
+        for item in load_doctype("oa_consumption_detail")["permissions"]
+    }
+    assert permissions["System Manager"]["write"] == 1
+    assert permissions["Accounts User"]["write"] == 1
+    for role in ("Employee", "Department Manager", "HR User", "HR Manager"):
+        assert permissions[role].get("write", 0) == 0
+    assert permissions["Employee"]["create"] == 1
+    assert permissions["Employee"]["if_owner"] == 1
+    assert permissions["Department Manager"]["if_owner"] == 1

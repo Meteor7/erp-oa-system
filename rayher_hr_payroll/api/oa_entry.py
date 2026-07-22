@@ -633,6 +633,17 @@ def _load_consumption(name):
         frappe.throw(frappe._("\u7f3a\u5c11\u6d88\u8d39\u660e\u7ec6\u7f16\u53f7\u3002"))
     return frappe.get_doc("OA Consumption Detail", name)
 
+def _require_consumption_write_access(doc):
+    user = frappe.session.user
+    if _is_finance_user(user):
+        return
+    if _clean(getattr(doc, "owner", None)) == _clean(user):
+        return
+    ctx = _employee_context(user)
+    if ctx.get("employee") and _clean(getattr(doc, "employee", None)) == _clean(ctx.get("employee")):
+        return
+    frappe.throw(frappe._("\u60a8\u65e0\u6743\u4fee\u6539\u8be5\u6d88\u8d39\u660e\u7ec6\u3002"))
+
 
 def _is_finance_user(user=None):
     return bool(set(frappe.get_roles(user or frappe.session.user)) & FINANCE_ROLES)
@@ -1683,6 +1694,7 @@ def save_consumption_detail(name=None, title=None, category=None, expense_date=N
     ctx = _employee_context()
     if name:
         doc = _load_consumption(name)
+        _require_consumption_write_access(doc)
         if doc.status == CD_PUSHED:
             frappe.throw(frappe._("\u5df2\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u4e0d\u80fd\u4fee\u6539\u3002"))
     else:
@@ -1715,6 +1727,7 @@ def add_invoice(
     remark=None,
 ):
     doc = _load_consumption(consumption)
+    _require_consumption_write_access(doc)
     if doc.status == CD_PUSHED:
         frappe.throw(frappe._("\u5df2\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u4e0d\u80fd\u518d\u6dfb\u52a0\u53d1\u7968\u3002"))
     if not _clean(invoice_name):
@@ -1744,6 +1757,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
         frappe.throw(frappe._("\u8bf7\u9009\u62e9\u8981\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u3002"))
     docs = [_load_consumption(name) for name in names]
     for doc in docs:
+        _require_consumption_write_access(doc)
         if doc.status == CD_PUSHED:
             frappe.throw(frappe._("\u6d88\u8d39\u660e\u7ec6 {0} \u5df2\u4e0b\u63a8\u3002").format(doc.name))
         if not doc.invoices:
@@ -1978,40 +1992,74 @@ def withdraw_payment(name, note=None):
 
 @frappe.whitelist(methods=["POST"])
 def withdraw_invoice_push(invoice_names, note=None):
-    names = _invoice_names(invoice_names)
-    note = _bounded_optional_text(note, "操作说明", 500)
+    names = sorted(_invoice_names(invoice_names))
+    note = _bounded_optional_text(note, "\u64cd\u4f5c\u8bf4\u660e", 500)
+
+    snapshot_records = [
+        invoice_service._require_record(name, write=True, current=False)
+        for name in names
+    ]
+    snapshot_links = {
+        record.name: _clean(getattr(record, "request", None))
+        for record in snapshot_records
+    }
+    request_names = sorted({request_name for request_name in snapshot_links.values() if request_name})
+    if not request_names or any(not request_name for request_name in snapshot_links.values()):
+        frappe.throw(frappe._("\u6240\u9009\u53d1\u7968\u4e2d\u5b58\u5728\u5c1a\u672a\u4e0b\u63a8\u7684\u8bb0\u5f55\u3002"))
+
     with ExitStack() as locks:
-        for name in sorted(names):
-            locks.enter_context(invoice_service._transaction_lock("record", name))
-        records = [invoice_service._require_record(name, write=True, current=True) for name in sorted(names)]
-        request_names = sorted({str(record.request or "").strip() for record in records if str(record.request or "").strip()})
-        if not request_names or any(not str(record.request or "").strip() for record in records):
-            frappe.throw(frappe._("所选发票中存在尚未下推的记录。"))
         for request_name in request_names:
             locks.enter_context(invoice_service._transaction_lock("request", request_name))
+        for name in names:
+            locks.enter_context(invoice_service._transaction_lock("record", name))
+
+        records = [
+            invoice_service._require_record(name, write=True, current=True)
+            for name in names
+        ]
+        current_links = {
+            record.name: _clean(getattr(record, "request", None))
+            for record in records
+        }
+        if current_links != snapshot_links:
+            frappe.throw(frappe._("\u53d1\u7968\u5173\u8054\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002"))
+
         results = []
         for request_name in request_names:
             doc = _load_request(request_name, current=True)
             invoice_service._request_permission(doc, "edit", current=True)
             if doc.workflow_status == STATUS_PAID:
-                frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
+                frappe.throw(frappe._("\u5df2\u4ed8\u6b3e\u5355\u636e\u5fc5\u987b\u5148\u7531\u8d22\u52a1\u64a4\u56de\u4ed8\u6b3e\u3002"))
             if doc.workflow_status != STATUS_DRAFT:
                 _reset_request_to_draft(doc, note)
-            selected = [record for record in records if str(record.request) == request_name]
-            selected_keys = {str(record.expense_line_key or "") for record in selected}
+            selected = [record for record in records if _clean(record.request) == request_name]
+            selected_keys = {_clean(record.expense_line_key) for record in selected}
             remaining = [
                 _serialize_expense_line(row)
                 for row in list(doc.expense_lines or [])
-                if str(getattr(row, "line_key", "") or "") not in selected_keys
+                if _clean(getattr(row, "line_key", None)) not in selected_keys
             ]
             _set_expense_lines(doc, remaining)
             doc.amount = sum(_money(row.amount) for row in doc.expense_lines)
             for record in selected:
                 record.request = ""
                 record.expense_line_key = ""
-                invoice_service._append_record_event(record, "撤回发票下推", INVOICE_CONFIRMED, INVOICE_CONFIRMED, note)
+                invoice_service._append_record_event(
+                    record,
+                    "\u64a4\u56de\u53d1\u7968\u4e0b\u63a8",
+                    INVOICE_CONFIRMED,
+                    INVOICE_CONFIRMED,
+                    note,
+                )
                 invoice_service._save(record)
-            _append_request_event(doc, "撤回发票下推", STATUS_DRAFT, STATUS_DRAFT, note, {"invoices": [record.name for record in selected]})
+            _append_request_event(
+                doc,
+                "\u64a4\u56de\u53d1\u7968\u4e0b\u63a8",
+                STATUS_DRAFT,
+                STATUS_DRAFT,
+                note,
+                {"invoices": [record.name for record in selected]},
+            )
             invoice_service._apply_request_invoice_summary(doc, save=False)
             doc.save(ignore_permissions=True)
             results.append(_summarize_doc(doc))

@@ -586,6 +586,8 @@ def test_link_validates_line_ownership_and_allows_many_invoices_per_line(env):
     one = env.add_record(name="INV-1", recognition_status="已确认")
     two = env.add_record(name="INV-2", recognition_status="已确认")
     service.link_invoice(one.name, request.name, "KEY-1")
+    categories = [key.split(":")[2] for key, _kwargs in env.locks]
+    assert categories[:3] == ["request", "batch", "record"]
     service.link_invoice(two.name, request.name, "KEY-1")
     assert one.expense_line_key == two.expense_line_key == "KEY-1"
     assert one.request == two.request == "REQ-1"
@@ -1475,7 +1477,7 @@ def test_expired_job_lease_release_never_overwrites_business_result(env, monkeyp
 
 
 
-def test_link_holds_record_batch_request_in_order_and_reloads_submitted_request(env):
+def test_link_holds_request_batch_record_in_order_and_reloads_submitted_request(env):
     env.add_batch()
     record = env.add_record(recognition_status="已确认")
     request = _add_request(env)
@@ -1497,7 +1499,7 @@ def test_link_holds_record_batch_request_in_order_and_reloads_submitted_request(
     with pytest.raises(ValidationError, match="提交后"):
         service.link_invoice(record.name, request.name, "KEY-1")
     categories = [key.split(":")[2] for key, _kwargs in env.locks]
-    assert categories[:3] == ["record", "batch", "request"]
+    assert categories[:3] == ["request", "batch", "record"]
     assert not record.request
 
 
@@ -1964,7 +1966,7 @@ def test_link_acquires_all_redis_locks_then_current_reads_submitted_request(env)
         service.link_invoice(record.name, request.name, line.line_key)
 
     categories = [key.split(":")[2] for key, _kwargs in env.locks]
-    assert categories[:3] == ["record", "batch", "request"]
+    assert categories[:3] == ["request", "batch", "record"]
     assert ("get_doc", service.RECORD_DOCTYPE, record.name) in env.current_read_calls
     assert ("get_doc", service.BATCH_DOCTYPE, batch.name) in env.current_read_calls
     assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
@@ -2602,7 +2604,7 @@ def test_register_linked_batch_locks_current_draft_request_and_inherits_request(
 
     record = env.docs[service.RECORD_DOCTYPE][result["name"]]
     categories = [key.split(":")[2] for key, _kwargs in env.locks]
-    assert categories[:4] == ["batch", "request", "file", "file-hash"]
+    assert categories[:4] == ["request", "batch", "file", "file-hash"]
     assert ("get_doc", service.REQUEST_DOCTYPE, request.name) in env.current_read_calls
     assert record.request == request.name
 

@@ -541,48 +541,76 @@ def register_file(batch, file_url):
     file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
     if not file_name:
         _throw("\u627e\u4e0d\u5230\u5df2\u4e0a\u4f20\u7684\u53d1\u7968\u6587\u4ef6\u3002")
-    with _transaction_lock("batch", batch_name):
+
+    preliminary_batch = _require_batch(batch_name, owner_only=True)
+    preliminary_request = str(_get(preliminary_batch, "request") or "").strip()
+    with ExitStack() as registration_locks:
+        if preliminary_request:
+            registration_locks.enter_context(
+                _transaction_lock("request", preliminary_request)
+            )
+        registration_locks.enter_context(_transaction_lock("batch", batch_name))
         batch_doc = _require_batch(batch_name, owner_only=True, current=True)
         request_name = str(_get(batch_doc, "request") or "").strip()
-        with ExitStack() as registration_locks:
-            if request_name:
-                registration_locks.enter_context(
-                    _transaction_lock("request", request_name)
+        if request_name != preliminary_request:
+            _throw("\u53d1\u7968\u6279\u6b21\u5173\u8054\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002")
+        if request_name:
+            request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
+            _request_permission(request_doc, "edit", current=True)
+            if _get(request_doc, "workflow_status") not in ACTIVE_REQUEST_STATUSES:
+                _throw("\u62a5\u9500\u5355\u63d0\u4ea4\u540e\u4e0d\u80fd\u8ffd\u52a0\u53d1\u7968\u3002")
+
+        registration_locks.enter_context(_transaction_lock("file", file_name))
+        file_doc = _current_doc("File", file_name)
+        file_doc, content, server_name, server_mime = _validated_file(
+            batch_doc, file_doc, file_url
+        )
+        file_guard = {
+            "name": str(_get(file_doc, "name") or ""),
+            "file_url": str(_get(file_doc, "file_url") or ""),
+            "is_private": int(_get(file_doc, "is_private") or 0),
+            "owner": str(_get(file_doc, "owner") or ""),
+        }
+        digest = hashlib.sha256(content).hexdigest()
+        with _transaction_lock("file-hash", digest):
+            count = len(
+                _current_rows(
+                    RECORD_DOCTYPE,
+                    filters={"batch": batch_name},
+                    fields=["name"],
                 )
-                request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
-                _request_permission(request_doc, "edit", current=True)
-                if _get(request_doc, "workflow_status") not in ACTIVE_REQUEST_STATUSES:
-                    _throw("\u62a5\u9500\u5355\u63d0\u4ea4\u540e\u4e0d\u80fd\u8ffd\u52a0\u53d1\u7968\u3002")
-            registration_locks.enter_context(_transaction_lock("file", file_name))
-            file_doc = _current_doc("File", file_name)
-            file_doc, content, server_name, server_mime = _validated_file(batch_doc, file_doc, file_url)
-            file_guard = {
-                "name": str(_get(file_doc, "name") or ""),
-                "file_url": str(_get(file_doc, "file_url") or ""),
-                "is_private": int(_get(file_doc, "is_private") or 0),
-                "owner": str(_get(file_doc, "owner") or ""),
-            }
-            digest = hashlib.sha256(content).hexdigest()
-            with _transaction_lock("file-hash", digest):
-                count = len(_current_rows(RECORD_DOCTYPE, filters={"batch": batch_name}, fields=["name"]))
-                if count >= MAX_BATCH_FILES:
-                    _throw("\u6bcf\u6279\u6700\u591a\u4e0a\u4f20 20 \u5f20\u53d1\u7968\u3002")
-                user = _user()
-                duplicate = _first_duplicate({"file_sha256": digest}, current=True)
-                record = frappe.get_doc({
-                    "doctype": RECORD_DOCTYPE, "owner": user, "batch": batch_name,
+            )
+            if count >= MAX_BATCH_FILES:
+                _throw("\u6bcf\u6279\u6700\u591a\u4e0a\u4f20 20 \u5f20\u53d1\u7968\u3002")
+            user = _user()
+            duplicate = _first_duplicate({"file_sha256": digest}, current=True)
+            record = frappe.get_doc(
+                {
+                    "doctype": RECORD_DOCTYPE,
+                    "owner": user,
+                    "batch": batch_name,
                     "request": request_name,
-                    "invoice_file": _get(file_doc, "file_url"), "original_filename": server_name,
-                    "mime_type": server_mime, "file_size": len(content), "file_sha256": digest,
-                    "uploaded_by": user, "recognition_status": "\u7591\u4f3c\u91cd\u590d" if duplicate else "\u6392\u961f\u4e2d",
+                    "invoice_file": _get(file_doc, "file_url"),
+                    "original_filename": server_name,
+                    "mime_type": server_mime,
+                    "file_size": len(content),
+                    "file_sha256": digest,
+                    "uploaded_by": user,
+                    "recognition_status": "\u7591\u4f3c\u91cd\u590d" if duplicate else "\u6392\u961f\u4e2d",
                     "duplicate_of": _get(duplicate, "name") if duplicate else "",
-                    "duplicate_reason": "\u6587\u4ef6\u5185\u5bb9\u4e0e\u5df2\u6709\u53d1\u7968\u5b8c\u5168\u76f8\u540c" if duplicate else "", "retry_count": 0,
-                })
-                record.insert(ignore_permissions=True)
-                _attach_file(file_guard, record, len(content))
-                _recompute_batch_after_commit(batch_name)
-                if not duplicate:
-                    _enqueue_recognition_after_commit(_get(record, "name"))
+                    "duplicate_reason": (
+                        "\u6587\u4ef6\u5185\u5bb9\u4e0e\u5df2\u6709\u53d1\u7968\u5b8c\u5168\u76f8\u540c"
+                        if duplicate
+                        else ""
+                    ),
+                    "retry_count": 0,
+                }
+            )
+            record.insert(ignore_permissions=True)
+            _attach_file(file_guard, record, len(content))
+            _recompute_batch_after_commit(batch_name)
+            if not duplicate:
+                _enqueue_recognition_after_commit(_get(record, "name"))
     return _serialize_record(record)
 
 
@@ -1173,10 +1201,10 @@ def attach_batch_to_request(batch_name, request_doc):
         {str(_get(row, "name") or "") for row in preliminary if _get(row, "name")}
     )
     with ExitStack() as locks:
+        locks.enter_context(_transaction_lock("request", request_name))
+        locks.enter_context(_transaction_lock("batch", batch_name))
         for record_name in record_names:
             locks.enter_context(_transaction_lock("record", record_name))
-        locks.enter_context(_transaction_lock("batch", batch_name))
-        locks.enter_context(_transaction_lock("request", request_name))
         batch = _require_batch(batch_name, owner_only=True, current=True)
         current_request = _current_doc(REQUEST_DOCTYPE, request_name)
         _request_permission(current_request, "edit", current=True)
@@ -1310,9 +1338,9 @@ def link_invoice(invoice_name, request, expense_line_key):
     # held while waiting on the batch/request Redis locks.
     preliminary = _require_record(invoice_name, write=True)
     preliminary_batch = str(_get(preliminary, "batch") or "")
-    with _transaction_lock("record", invoice_name):
+    with _transaction_lock("request", request_name):
         with _transaction_lock("batch", preliminary_batch):
-            with _transaction_lock("request", request_name):
+            with _transaction_lock("record", invoice_name):
                 record = _require_record(invoice_name, write=True, current=True)
                 batch_name = str(_get(record, "batch") or "")
                 if batch_name != preliminary_batch:

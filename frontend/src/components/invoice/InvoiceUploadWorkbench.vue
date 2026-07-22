@@ -258,6 +258,36 @@ function toggleChecked(name) {
     : [...checkedNames.value, name];
 }
 
+function warningText(warning) {
+  const raw = typeof warning === 'object' ? (warning?.message || warning?.code || '') : String(warning || '');
+  const labels = {
+    required_fields_missing: '\u5fc5\u586b\u4fe1\u606f\u672a\u8bc6\u522b\u5b8c\u6574\uff0c\u8bf7\u8865\u5145\u540e\u786e\u8ba4',
+    invoice_category_raw_missing: '\u672a\u8bc6\u522b\u5230\u53d1\u7968\u7968\u9762\u7c7b\u522b\uff0c\u8bf7\u4eba\u5de5\u586b\u5199',
+    amount_before_tax_derived_from_total_minus_tax: '\u7a0e\u524d\u91d1\u989d\u7531\u5408\u8ba1\u91d1\u989d\u51cf\u7a0e\u989d\u8ba1\u7b97\u5f97\u51fa\uff0c\u8bf7\u6838\u5bf9',
+    zero_tax_rule_applied: '\u5f53\u524d\u53d1\u7968\u6309\u96f6\u7a0e\u7387\u89c4\u5219\u5904\u7406\uff0c\u8bf7\u786e\u8ba4\u7a0e\u989d',
+    tax_amount_missing_for_taxable_invoice: '\u53d1\u7968\u53ef\u80fd\u542b\u7a0e\uff0c\u4f46\u672a\u8bc6\u522b\u5230\u7a0e\u989d\uff0c\u8bf7\u8865\u5145\u540e\u786e\u8ba4',
+    amount_arithmetic_mismatch: '\u7a0e\u524d\u91d1\u989d\u3001\u7a0e\u989d\u4e0e\u5408\u8ba1\u91d1\u989d\u7684\u8ba1\u7b97\u5173\u7cfb\u4e0d\u4e00\u81f4\uff0c\u8bf7\u6838\u5bf9',
+    amount_mismatch: '\u7a0e\u524d\u91d1\u989d\u3001\u7a0e\u989d\u4e0e\u5408\u8ba1\u91d1\u989d\u53ef\u80fd\u4e0d\u4e00\u81f4\uff0c\u8bf7\u6838\u5bf9',
+    dependent_fields_cleared_due_to_conflict: '\u8bc6\u522b\u7ed3\u679c\u51b2\u7a81\uff0c\u76f8\u5173\u91d1\u989d\u5b57\u6bb5\u5df2\u7559\u7a7a\uff0c\u8bf7\u8865\u5145\u540e\u786e\u8ba4',
+    'temporary_files_cleanup_failed:sensitive_invoice_files_may_remain': '\u4e34\u65f6\u6587\u4ef6\u6e05\u7406\u5f02\u5e38\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5\u670d\u52a1\u5668',
+  };
+  if (labels[raw]) return labels[raw];
+  const fieldLabels = {
+    invoice_category: '\u53d1\u7968\u7c7b\u522b',
+    invoice_category_normalized: '\u53d1\u7968\u7c7b\u522b',
+    project_name: '\u9879\u76ee\u540d\u79f0',
+    issue_date: '\u5f00\u7968\u65e5\u671f',
+    invoice_number: '\u53d1\u7968\u53f7\u7801',
+    amount_before_tax: '\u7a0e\u524d\u91d1\u989d',
+    tax_amount: '\u7a0e\u989d',
+    total_amount: '\u5408\u8ba1\u91d1\u989d',
+  };
+  if (raw.startsWith('field_conflict:')) return (fieldLabels[raw.split(':')[1]] || '\u5b57\u6bb5') + '\u8bc6\u522b\u7ed3\u679c\u5b58\u5728\u51b2\u7a81\uff0c\u8bf7\u4eba\u5de5\u786e\u8ba4';
+  if (raw.startsWith('low_confidence:')) return (fieldLabels[raw.split(':')[1]] || '\u5b57\u6bb5') + '\u8bc6\u522b\u7f6e\u4fe1\u5ea6\u8f83\u4f4e\uff0c\u8bf7\u4eba\u5de5\u6838\u5bf9';
+  if (/[\u3400-\u9fff]/.test(raw)) return raw;
+  return '\u8bc6\u522b\u7ed3\u679c\u5b58\u5728\u5f02\u5e38\uff0c\u8bf7\u4eba\u5de5\u6838\u5bf9';
+}
+
 function applyPushDefaults() {
   const context = props.options?.context || {};
   pushForm.company ||= props.options?.companies?.[0] || '';
@@ -356,7 +386,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_420px]">
+    <section class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
       <div class="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <div class="flex flex-col gap-3 border-b border-gray-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -410,7 +440,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <aside class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm 2xl:sticky 2xl:top-4 2xl:h-fit">
+      <aside class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm xl:sticky xl:top-4 xl:h-fit">
         <template v-if="selectedRow">
           <header class="border-b border-gray-200 bg-gray-50/70 px-5 py-4">
             <div class="flex items-start justify-between gap-3">
@@ -430,7 +460,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="invoiceFieldWarnings(selectedRow.field_warnings).length" class="break-words rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
               <div class="mb-1 font-semibold">请检查识别结果</div>
-              <div v-for="warning in invoiceFieldWarnings(selectedRow.field_warnings)" :key="String(warning)">{{ warning.message || warning }}</div>
+              <div v-for="warning in invoiceFieldWarnings(selectedRow.field_warnings)" :key="String(warning)">{{ warningText(warning) }}</div>
             </div>
             <div v-if="selectedRow.request" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm leading-5 text-blue-700">已下推到费用报销流：{{ selectedRow.request }}</div>
             <div class="flex flex-wrap gap-2 border-t border-gray-200 pt-4">

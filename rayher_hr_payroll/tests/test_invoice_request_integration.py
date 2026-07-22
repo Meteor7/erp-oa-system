@@ -318,7 +318,7 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
 
     def committed_batch_names(request_name):
         assert request_name == request.name
-        assert lock_order[-1] == ("request", request.name)
+        assert lock_order[0] == ("request", request.name)
         return [batch.name] if batch.request == request.name else []
 
     monkeypatch.setattr(service, "_transaction_lock", transaction_lock)
@@ -345,15 +345,15 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
     return batch, request, records, lock_order, saves
 
 
-def test_attach_batch_uses_record_batch_request_lock_order_and_preserves_line_links(monkeypatch):
+def test_attach_batch_uses_request_batch_record_lock_order_and_preserves_line_links(monkeypatch):
     batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
     attached_request = service.attach_batch_to_request(batch.name, request)
     assert attached_request is request
     assert lock_order == [
+        ("request", "REQ-1"),
+        ("batch", "BATCH-1"),
         ("record", "INV-1"),
         ("record", "INV-2"),
-        ("batch", "BATCH-1"),
-        ("request", "REQ-1"),
     ]
     assert batch.request == request.name
     assert {record.request for record in records.values()} == {request.name}
@@ -815,7 +815,7 @@ def test_attach_batch_rejects_request_that_is_no_longer_draft_under_lock(monkeyp
     request.workflow_status = "审批中"
     with pytest.raises(ValidationError, match="只有草稿"):
         service.attach_batch_to_request(batch.name, {"name": request.name})
-    assert lock_order[-1] == ("request", request.name)
+    assert lock_order[0] == ("request", request.name)
     assert not batch.request and not any(record.request for record in records.values())
     assert saves == []
 
@@ -867,7 +867,7 @@ def test_attach_batch_rejects_a_different_committed_batch_for_the_same_request(
 
     def committed_batch_names(request_name):
         assert request_name == request.name
-        assert lock_order[-1] == ("request", request.name)
+        assert lock_order[0] == ("request", request.name)
         return ["BATCH-OTHER"]
 
     monkeypatch.setattr(
@@ -1126,7 +1126,7 @@ def _install_invoice_push_environment(monkeypatch, records):
         yield object()
 
     def require_record(name, write=False, current=False):
-        assert write is True and current is True
+        assert write is True
         return records[name]
 
     monkeypatch.setattr(service, "_transaction_lock", transaction_lock)
@@ -1342,7 +1342,13 @@ def test_push_rejects_unconfirmed_or_already_linked_invoice(monkeypatch, status,
 
 def test_request_and_push_withdrawals_are_reversible_and_audited(monkeypatch):
     records = {"INV-1": _push_record("INV-1", request="REQ-WITHDRAW")}
-    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    environment, locks = _install_invoice_push_environment(monkeypatch, records)
+    read_modes = []
+    require_record = service._require_record
+    def tracked_record(name, write=False, current=False):
+        read_modes.append(current)
+        return require_record(name, write=write, current=current)
+    monkeypatch.setattr(service, "_require_record", tracked_record)
     line_key = "11111111-1111-4111-8111-111111111111"
     records["INV-1"].expense_line_key = line_key
     request = RequestDocument(
@@ -1386,6 +1392,8 @@ def test_request_and_push_withdrawals_are_reversible_and_audited(monkeypatch):
     assert request.expense_lines == [] and request.amount == 0
     assert records["INV-1"].request == "" and records["INV-1"].expense_line_key == ""
     assert [event["action"] for event in result["operation_log"]][-2:] == ["撤回申请", "撤回发票下推"]
+    assert locks[:2] == [("request", request.name), ("record", "INV-1")]
+    assert read_modes == [False, True]
 
 
 def test_withdraw_one_invoice_keeps_other_source_in_same_project_group(monkeypatch):
@@ -1851,3 +1859,65 @@ def test_approval_records_merge_steps_and_operation_events_with_permissions(monk
     frappe_stub.get_roles = lambda user=None: ["Accounts User"]
     privileged = oa_entry.list_expense_approval_records(view="all")
     assert {record["request_name"] for record in privileged["records"]} == {"REQ-AUDIT", "REQ-BOB"}
+
+
+
+def test_legacy_consumption_write_access_is_row_scoped(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {
+            "employee": "EMP-1",
+            "employee_name": "Alice",
+            "department": "\u7814\u53d1\u90e8",
+            "supervisor": "",
+        },
+    )
+    foreign = Row(name="CD-FOREIGN", owner="bob@example.com", employee="EMP-2")
+
+    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
+        oa_entry._require_consumption_write_access(foreign)
+
+    oa_entry._require_consumption_write_access(
+        Row(name="CD-OWNER", owner="alice@example.com", employee="EMP-2")
+    )
+    oa_entry._require_consumption_write_access(
+        Row(name="CD-EMPLOYEE", owner="bob@example.com", employee="EMP-1")
+    )
+
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    oa_entry._require_consumption_write_access(foreign)
+
+
+def test_every_legacy_consumption_mutation_enforces_row_scope(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {
+            "employee": "EMP-1",
+            "employee_name": "Alice",
+            "department": "\u7814\u53d1\u90e8",
+            "supervisor": "",
+        },
+    )
+    foreign = Row(
+        name="CD-FOREIGN",
+        owner="bob@example.com",
+        employee="EMP-2",
+        status=oa_entry.CD_WAIT_UPLOAD,
+        invoices=[],
+    )
+    monkeypatch.setattr(oa_entry, "_load_consumption", lambda _name: foreign)
+
+    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
+        oa_entry.save_consumption_detail(
+            name=foreign.name,
+            title="travel",
+            category="transport",
+            expense_date="2026-07-22",
+            amount=10,
+        )
+    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
+        oa_entry.add_invoice(foreign.name, "foreign.pdf")
+    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
+        oa_entry.push_consumption_to_request([foreign.name])
