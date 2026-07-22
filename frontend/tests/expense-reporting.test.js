@@ -13,6 +13,8 @@ const {
 
 const statisticsUrl = new URL('../src/components/expense/ExpenseStatistics.vue', import.meta.url);
 const statisticsSource = existsSync(statisticsUrl) ? readFileSync(statisticsUrl, 'utf8') : '';
+const approvalUrl = new URL('../src/components/expense/ExpenseApprovalRecords.vue', import.meta.url);
+const approvalSource = existsSync(approvalUrl) ? readFileSync(approvalUrl, 'utf8') : '';
 
 test('maps statistics filters to bounded server parameters', () => {
   assert.deepEqual(toExpenseStatisticsParams({
@@ -92,4 +94,24 @@ test('statistics view exposes all filters metrics table and states', () => {
   assert.ok(statisticsSource.includes('\u67e5\u8be2'));
   assert.ok(statisticsSource.includes('\u91cd\u7f6e'));
   assert.ok(statisticsSource.includes('\u5237\u65b0'));
+});
+
+test('approval records view exposes filters audit columns and states', () => {
+  assert.match(approvalSource, /list_expense_approval_records/);
+  for (const key of [
+    'requestKeyword', 'employee', 'department', 'approver', 'action',
+    'workflowStatus', 'fromDate', 'toDate',
+  ]) assert.ok(approvalSource.includes(key), `missing approval filter: ${key}`);
+  for (const label of [
+    '\u7533\u8bf7\u5355', '\u4e8b\u4ef6\u7c7b\u578b', '\u5ba1\u6279\u8282\u70b9', '\u5ba1\u6279\u4eba',
+    '\u64cd\u4f5c', '\u64cd\u4f5c\u4eba', '\u64cd\u4f5c\u65f6\u95f4', '\u5907\u6ce8', '\u5f53\u524d\u72b6\u6001',
+  ]) assert.ok(approvalSource.includes(label), `missing audit column: ${label}`);
+  assert.match(approvalSource, /emit\('open-request'/);
+  assert.match(approvalSource, /records\.loading/);
+  assert.match(approvalSource, /records\.error/);
+  assert.match(approvalSource, /truncated/);
+  assert.ok(approvalSource.includes('\u6682\u65e0\u5ba1\u6279\u6216\u64cd\u4f5c\u8bb0\u5f55'));
+  assert.ok(approvalSource.includes('\u67e5\u8be2'));
+  assert.ok(approvalSource.includes('\u91cd\u7f6e'));
+  assert.ok(approvalSource.includes('\u5237\u65b0'));
 });
