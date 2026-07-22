@@ -1,5 +1,7 @@
 import json
 from contextlib import ExitStack
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import frappe
@@ -36,6 +38,7 @@ SOURCE_MANUAL = "\u624b\u5de5\u65b0\u5efa"
 SOURCE_PUSH = "\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8"
 SOURCE_INVOICE_PUSH = "发票下推"
 OPERATION_LOG_LIMIT = 100
+REPORT_LIMIT = 1000
 
 CD_WAIT_UPLOAD = "\u5f85\u4e0a\u4f20"
 CD_UPLOADED = "\u5df2\u4e0a\u4f20\u53d1\u7968"
@@ -994,12 +997,16 @@ def submit_request(name, no_invoice_reason=None):
 
 
 @frappe.whitelist()
-def list_requests(view="mine", limit=50, request_type=None):
+def list_requests(view="mine", limit=50, request_type=None, name=None):
     if request_type and request_type not in REQUEST_TYPES:
-        frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
+        frappe.throw(frappe._("不支持的 OA 申请类型。"))
     roles = set(frappe.get_roles(frappe.session.user))
     ctx = _employee_context()
-    limit = min(int(limit or 50), 200)
+    try:
+        limit = max(1, min(int(limit or 50), 200))
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("查询数量格式无效。"))
+    exact_name = _report_text(name, "申请单号") if name is not None else ""
     filters = {}
     if view == "pending":
         filters["workflow_status"] = ["in", list(ACTIVE_STATUSES)]
@@ -1009,6 +1016,8 @@ def list_requests(view="mine", limit=50, request_type=None):
         filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
     if request_type:
         filters["request_type"] = request_type
+    if exact_name:
+        filters["name"] = exact_name
     names = frappe.get_all(
         "OA Approval Request",
         filters=filters,
@@ -1016,10 +1025,335 @@ def list_requests(view="mine", limit=50, request_type=None):
         order_by="modified desc",
         limit_page_length=limit,
     )
-    docs = [_load_request(row.name) for row in names]
+    docs = [_load_request(_result_name(row)) for row in names]
     if view == "pending":
         docs = [doc for doc in docs if _can_act_on_current_step(doc)]
     return [_summarize_doc(doc) for doc in docs]
+
+
+def _result_name(row):
+    if isinstance(row, dict):
+        return row.get("name")
+    return row.name
+
+
+def _report_text(value, label, limit=140):
+    text = _bounded_optional_text(value, label, limit)
+    if "\x00" in text:
+        frappe.throw(frappe._("{0}格式无效。").format(label))
+    return text
+
+
+def _report_date(value, label):
+    text = _report_text(value, label, 10)
+    if not text:
+        return ""
+    try:
+        date.fromisoformat(text)
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("{0}格式无效。").format(label))
+    return text
+
+
+def _bounded_report_limit(value):
+    try:
+        return max(1, min(int(value or REPORT_LIMIT), REPORT_LIMIT))
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("查询数量格式无效。"))
+
+
+def _decimal_money(value):
+    if value in (None, ""):
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+def _expense_report_documents(
+    *,
+    view="mine",
+    limit=REPORT_LIMIT,
+    from_date=None,
+    to_date=None,
+    department=None,
+    employee=None,
+    workflow_status=None,
+    source_type=None,
+):
+    report_limit = _bounded_report_limit(limit)
+    roles = set(frappe.get_roles(frappe.session.user))
+    ctx = _employee_context()
+    if view == "all" and roles & PRIVILEGED_ROLES:
+        filters = {}
+    else:
+        filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
+    filters["request_type"] = REQUEST_EXPENSE_PAYMENT
+
+    for field, value, label in (
+        ("department", department, "部门"),
+        ("employee", employee, "申请人"),
+        ("workflow_status", workflow_status, "审批状态"),
+        ("source_type", source_type, "来源"),
+    ):
+        cleaned = _report_text(value, label) if value is not None else ""
+        if cleaned:
+            filters[field] = cleaned
+
+    start_date = _report_date(from_date, "开始日期") if from_date is not None else ""
+    end_date = _report_date(to_date, "结束日期") if to_date is not None else ""
+    if start_date and end_date and start_date > end_date:
+        frappe.throw(frappe._("开始日期不能晚于结束日期。"))
+    if start_date and end_date:
+        filters["creation"] = ["between", [start_date + " 00:00:00", end_date + " 23:59:59"]]
+    elif start_date:
+        filters["creation"] = [">=", start_date + " 00:00:00"]
+    elif end_date:
+        filters["creation"] = ["<=", end_date + " 23:59:59"]
+
+    names = frappe.get_all(
+        "OA Approval Request",
+        filters=filters,
+        fields=["name"],
+        order_by="modified desc",
+        limit_page_length=report_limit + 1,
+    )
+    truncated = len(names) > report_limit
+    docs = [_load_request(_result_name(row)) for row in names[:report_limit]]
+    return docs, truncated
+
+
+def _line_value(line, field, default=None):
+    if isinstance(line, dict):
+        return line.get(field, default)
+    return getattr(line, field, default)
+
+
+@frappe.whitelist()
+def get_expense_statistics(
+    view="mine",
+    from_date=None,
+    to_date=None,
+    department=None,
+    employee=None,
+    invoice_category=None,
+    project_name=None,
+    workflow_status=None,
+    payment_status=None,
+    source_type=None,
+    limit=REPORT_LIMIT,
+):
+    report_limit = _bounded_report_limit(limit)
+    category_filter = _report_text(invoice_category, "发票类别") if invoice_category is not None else ""
+    project_filter = _report_text(project_name, "项目名称") if project_name is not None else ""
+    payment_filter = _report_text(payment_status, "付款状态") if payment_status is not None else ""
+    if payment_filter not in {"", "已付款", "未付款"}:
+        frappe.throw(frappe._("付款状态格式无效。"))
+
+    docs, truncated = _expense_report_documents(
+        view=view,
+        limit=report_limit,
+        from_date=from_date,
+        to_date=to_date,
+        department=department,
+        employee=employee,
+        workflow_status=workflow_status,
+        source_type=source_type,
+    )
+    rows = []
+    request_names = set()
+    invoice_names = set()
+    fallback_invoice_count = 0
+    totals = {
+        "request_count": 0,
+        "invoice_count": 0,
+        "amount_before_tax": Decimal("0"),
+        "tax_amount": Decimal("0"),
+        "total_amount": Decimal("0"),
+        "paid_amount": Decimal("0"),
+        "unpaid_amount": Decimal("0"),
+    }
+
+    for doc in docs:
+        is_paid = doc.workflow_status == STATUS_PAID
+        if payment_filter == "已付款" and not is_paid:
+            continue
+        if payment_filter == "未付款" and is_paid:
+            continue
+
+        detail_lines = list(getattr(doc, "expense_lines", []) or [])
+        matched_lines = []
+        for line in detail_lines:
+            line_category = _clean(_line_value(line, "invoice_category") or _line_value(line, "category"))
+            line_project = _clean(_line_value(line, "project_name") or _line_value(line, "description"))
+            if category_filter and line_category != category_filter:
+                continue
+            if project_filter and line_project != project_filter:
+                continue
+            matched_lines.append(line)
+        if (category_filter or project_filter) and not matched_lines:
+            continue
+        if not matched_lines:
+            matched_lines = [None]
+
+        request_names.add(doc.name)
+        matched_sources = set()
+        for line in matched_lines:
+            if line is None:
+                amount_before_tax = Decimal("0")
+                tax_amount = Decimal("0")
+                total_amount = _decimal_money(getattr(doc, "amount", 0))
+                line_category = ""
+                line_project = ""
+                issue_date = None
+                invoice_number = ""
+                source_invoice = ""
+            else:
+                amount_before_tax = _decimal_money(_line_value(line, "amount_before_tax"))
+                tax_amount = _decimal_money(_line_value(line, "tax_amount"))
+                total_value = _line_value(line, "total_amount")
+                if total_value in (None, ""):
+                    total_value = _line_value(line, "amount", 0)
+                total_amount = _decimal_money(total_value)
+                line_category = _clean(_line_value(line, "invoice_category") or _line_value(line, "category"))
+                line_project = _clean(_line_value(line, "project_name") or _line_value(line, "description"))
+                issue_date = _line_value(line, "issue_date") or _line_value(line, "start_date")
+                invoice_number = _clean(_line_value(line, "invoice_number"))
+                source_invoice = _clean(_line_value(line, "source_invoice"))
+            if source_invoice:
+                invoice_names.add(source_invoice)
+                matched_sources.add(source_invoice)
+            paid_amount = total_amount if is_paid else Decimal("0")
+            unpaid_amount = Decimal("0") if is_paid else total_amount
+            totals["amount_before_tax"] += amount_before_tax
+            totals["tax_amount"] += tax_amount
+            totals["total_amount"] += total_amount
+            totals["paid_amount"] += paid_amount
+            totals["unpaid_amount"] += unpaid_amount
+            rows.append(
+                {
+                    "request_name": doc.name,
+                    "subject": getattr(doc, "subject", "") or "",
+                    "creation": getattr(doc, "creation", None),
+                    "employee": getattr(doc, "employee", None),
+                    "employee_name": getattr(doc, "employee_name", None) or "",
+                    "department": getattr(doc, "department", None) or "",
+                    "source_type": getattr(doc, "source_type", None) or SOURCE_MANUAL,
+                    "workflow_status": doc.workflow_status,
+                    "invoice_count": 1 if source_invoice else int(getattr(doc, "invoice_count", 0) or 0),
+                    "invoice_category": line_category,
+                    "project_name": line_project,
+                    "issue_date": issue_date,
+                    "invoice_number": invoice_number,
+                    "amount_before_tax": amount_before_tax,
+                    "tax_amount": tax_amount,
+                    "total_amount": total_amount,
+                    "paid_amount": paid_amount,
+                    "unpaid_amount": unpaid_amount,
+                }
+            )
+        if not matched_sources:
+            fallback_invoice_count += int(getattr(doc, "invoice_count", 0) or 0)
+
+    totals["request_count"] = len(request_names)
+    totals["invoice_count"] = len(invoice_names) + fallback_invoice_count
+    if len(rows) > report_limit:
+        truncated = True
+        rows = rows[:report_limit]
+    return {"totals": totals, "rows": rows, "truncated": truncated}
+
+
+def _approval_record_matches(record, approver, action, start_date, end_date):
+    if approver and approver not in set(record["approvers"]) | {record["actor"]}:
+        return False
+    if action and record["action"] != action:
+        return False
+    acted_on = str(record["acted_on"] or "")
+    if start_date and (not acted_on or acted_on < start_date + " 00:00:00"):
+        return False
+    if end_date and (not acted_on or acted_on > end_date + " 23:59:59"):
+        return False
+    return True
+
+
+@frappe.whitelist()
+def list_expense_approval_records(
+    view="mine",
+    request_keyword=None,
+    employee=None,
+    department=None,
+    approver=None,
+    action=None,
+    workflow_status=None,
+    from_date=None,
+    to_date=None,
+    limit=REPORT_LIMIT,
+):
+    report_limit = _bounded_report_limit(limit)
+    keyword = _report_text(request_keyword, "申请单关键字", 200).lower() if request_keyword is not None else ""
+    approver_filter = _report_text(approver, "审批人") if approver is not None else ""
+    action_filter = _report_text(action, "操作") if action is not None else ""
+    start_date = _report_date(from_date, "开始日期") if from_date is not None else ""
+    end_date = _report_date(to_date, "结束日期") if to_date is not None else ""
+    if start_date and end_date and start_date > end_date:
+        frappe.throw(frappe._("开始日期不能晚于结束日期。"))
+
+    docs, truncated = _expense_report_documents(
+        view=view,
+        limit=report_limit,
+        department=department,
+        employee=employee,
+        workflow_status=workflow_status,
+    )
+    records = []
+    for doc in docs:
+        if keyword and keyword not in (str(doc.name) + " " + str(getattr(doc, "subject", "") or "")).lower():
+            continue
+        common = {
+            "request_name": doc.name,
+            "subject": getattr(doc, "subject", "") or "",
+            "employee": getattr(doc, "employee", None),
+            "employee_name": getattr(doc, "employee_name", None) or "",
+            "department": getattr(doc, "department", None) or "",
+            "source_type": getattr(doc, "source_type", None) or SOURCE_MANUAL,
+            "workflow_status": doc.workflow_status,
+        }
+        for step in list(getattr(doc, "steps", []) or []):
+            serialized = _serialize_doc_step(step)
+            record = {
+                **common,
+                "event_type": "审批节点",
+                "step_label": serialized["label"] or "",
+                "approvers": serialized["approvers"],
+                "action": serialized["status"] or "",
+                "actor": serialized["action_by"] or "",
+                "acted_on": serialized["acted_on"] or "",
+                "note": serialized["note"] or "",
+            }
+            if _approval_record_matches(record, approver_filter, action_filter, start_date, end_date):
+                records.append(record)
+        for event in _operation_events(doc):
+            if not isinstance(event, dict):
+                continue
+            record = {
+                **common,
+                "event_type": "操作日志",
+                "step_label": "",
+                "approvers": [],
+                "action": _clean(event.get("action")),
+                "actor": _clean(event.get("actor") or event.get("user")),
+                "acted_on": _clean(event.get("acted_on") or event.get("timestamp")),
+                "note": _clean(event.get("note")),
+            }
+            if _approval_record_matches(record, approver_filter, action_filter, start_date, end_date):
+                records.append(record)
+
+    records.sort(key=lambda row: (bool(row["acted_on"]), str(row["acted_on"])), reverse=True)
+    if len(records) > report_limit:
+        truncated = True
+        records = records[:report_limit]
+    return {"records": records, "truncated": truncated}
 
 
 @frappe.whitelist()

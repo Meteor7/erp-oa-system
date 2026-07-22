@@ -1228,3 +1228,273 @@ def test_paid_request_requires_finance_payment_withdrawal(monkeypatch):
     assert result["workflow_status"] == oa_entry.STATUS_COMPLETED
     assert request.paid_by == "" and request.paid_on is None
     assert result["operation_log"][-1]["action"] == "撤回付款"
+
+
+# --- Expense reporting and audit views ---
+
+def _report_request(
+    name,
+    *,
+    owner="alice@example.com",
+    employee="EMP-1",
+    employee_name="Alice",
+    department="研发部",
+    workflow_status=None,
+    source_type=None,
+    creation="2026-07-20 09:00:00",
+    expense_lines=None,
+    steps=None,
+    operation_log=None,
+):
+    return Row(
+        name=name,
+        owner=owner,
+        request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
+        employee=employee,
+        employee_name=employee_name,
+        department=department,
+        supervisor="",
+        company="Rayher",
+        subject=f"报销-{name}",
+        doc_type="非固定资产",
+        urgency="一般",
+        from_date=None,
+        to_date=None,
+        amount=sum(Decimal(str(line.get("total_amount", 0))) for line in (expense_lines or [])),
+        asset_category=oa_entry.OTHER_ASSET,
+        source_type=source_type or oa_entry.SOURCE_MANUAL,
+        source_summary="",
+        payment_type="付款申请",
+        payment_method="银行转账",
+        paid_by="finance@example.com" if workflow_status == oa_entry.STATUS_PAID else "",
+        paid_on=creation if workflow_status == oa_entry.STATUS_PAID else None,
+        reason="",
+        workflow_status=workflow_status or oa_entry.STATUS_DRAFT,
+        current_step_index=0,
+        current_step_label="",
+        invoice_count=len([line for line in (expense_lines or []) if line.get("source_invoice")]),
+        invoice_status="已确认" if expense_lines else "无发票",
+        no_invoice_reason="",
+        operation_log=json.dumps(operation_log or [], ensure_ascii=False),
+        expense_lines=[Row(line) for line in (expense_lines or [])],
+        steps=[Row(step) for step in (steps or [])],
+        creation=creation,
+        modified=creation,
+    )
+
+
+def _install_report_requests(monkeypatch, docs):
+    def matches(doc, filters):
+        for key, expected in (filters or {}).items():
+            actual = getattr(doc, key, None)
+            if isinstance(expected, list):
+                operator, value = expected
+                if operator == "in" and actual not in value:
+                    return False
+                if operator == "!=" and actual == value:
+                    return False
+                if operator == "between" and not (str(value[0]) <= str(actual) <= str(value[1])):
+                    return False
+            elif actual != expected:
+                return False
+        return True
+
+    def get_all(doctype, filters=None, fields=None, order_by=None, limit_page_length=None):
+        assert doctype == "OA Approval Request"
+        rows = [doc for doc in docs.values() if matches(doc, filters)]
+        rows.sort(key=lambda doc: str(doc.modified), reverse=True)
+        return [Row(name=doc.name) for doc in rows[: int(limit_page_length or len(rows))]]
+
+    monkeypatch.setattr(frappe_stub, "get_all", get_all, raising=False)
+    monkeypatch.setattr(oa_entry, "_load_request", lambda name, current=False: docs[name])
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {
+            "employee": "EMP-1",
+            "employee_name": "Alice",
+            "department": "研发部",
+            "supervisor": "",
+        },
+    )
+
+
+def test_list_requests_supports_exact_name_without_bypassing_visibility(monkeypatch):
+    docs = {
+        "REQ-ALICE": _report_request("REQ-ALICE"),
+        "REQ-BOB": _report_request(
+            "REQ-BOB", owner="bob@example.com", employee="EMP-2", employee_name="Bob", department="研发部"
+        ),
+    }
+    _install_report_requests(monkeypatch, docs)
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc: {"name": doc.name})
+
+    result = oa_entry.list_requests(
+        view="all", limit=1, request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, name="REQ-ALICE"
+    )
+    assert result == [{"name": "REQ-ALICE"}]
+
+    result = oa_entry.list_requests(
+        view="all", limit=1, request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, name="REQ-BOB"
+    )
+    assert result == []
+
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    result = oa_entry.list_requests(
+        view="all", limit=1, request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, name="REQ-BOB"
+    )
+    assert result == [{"name": "REQ-BOB"}]
+
+
+def test_expense_statistics_filters_seven_field_lines_and_scopes_users(monkeypatch):
+    lines = [
+        {
+            "line_key": "line-1",
+            "source_invoice": "INV-1",
+            "invoice_category": "电子发票（普通发票）",
+            "project_name": "文具印章",
+            "issue_date": "2026-07-14",
+            "invoice_number": "NO-1",
+            "amount_before_tax": Decimal("35.62"),
+            "tax_amount": Decimal("0.36"),
+            "total_amount": Decimal("35.98"),
+            "amount": Decimal("35.98"),
+        },
+        {
+            "line_key": "line-2",
+            "source_invoice": "INV-2",
+            "invoice_category": "电子发票（普通发票）",
+            "project_name": "文具印章",
+            "issue_date": "2026-07-15",
+            "invoice_number": "NO-2",
+            "amount_before_tax": Decimal("100.00"),
+            "tax_amount": Decimal("6.00"),
+            "total_amount": Decimal("106.00"),
+            "amount": Decimal("106.00"),
+        },
+    ]
+    docs = {
+        "REQ-PAID": _report_request(
+            "REQ-PAID",
+            workflow_status=oa_entry.STATUS_PAID,
+            source_type=oa_entry.SOURCE_INVOICE_PUSH,
+            expense_lines=lines,
+        ),
+        "REQ-BOB": _report_request(
+            "REQ-BOB",
+            owner="bob@example.com",
+            employee="EMP-2",
+            employee_name="Bob",
+            department="研发部",
+            expense_lines=[dict(lines[0], source_invoice="INV-BOB")],
+        ),
+    }
+    _install_report_requests(monkeypatch, docs)
+
+    result = oa_entry.get_expense_statistics(
+        view="all",
+        from_date="2026-07-01",
+        to_date="2026-07-31",
+        department="研发部",
+        employee="EMP-1",
+        invoice_category="电子发票（普通发票）",
+        project_name="文具印章",
+        workflow_status=oa_entry.STATUS_PAID,
+        payment_status="已付款",
+        source_type=oa_entry.SOURCE_INVOICE_PUSH,
+    )
+    assert set(result) == {"totals", "rows", "truncated"}
+    assert result["truncated"] is False
+    assert result["totals"] == {
+        "request_count": 1,
+        "invoice_count": 2,
+        "amount_before_tax": Decimal("135.62"),
+        "tax_amount": Decimal("6.36"),
+        "total_amount": Decimal("141.98"),
+        "paid_amount": Decimal("141.98"),
+        "unpaid_amount": Decimal("0"),
+    }
+    assert {row["request_name"] for row in result["rows"]} == {"REQ-PAID"}
+
+    scoped = oa_entry.get_expense_statistics(view="all")
+    assert {row["request_name"] for row in scoped["rows"]} == {"REQ-PAID"}
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    privileged = oa_entry.get_expense_statistics(view="all")
+    assert {row["request_name"] for row in privileged["rows"]} == {"REQ-PAID", "REQ-BOB"}
+
+
+def test_approval_records_merge_steps_and_operation_events_with_permissions(monkeypatch):
+    steps = [
+        {
+            "step_index": 1,
+            "label": "财务审核",
+            "mode": "approve",
+            "approvers": json.dumps(["finance@example.com"]),
+            "status": oa_entry.STATUS_APPROVED,
+            "approved_by": json.dumps(["finance@example.com"]),
+            "action_by": "finance@example.com",
+            "acted_on": "2026-07-20 10:00:00",
+            "note": "同意",
+        },
+        {
+            "step_index": 2,
+            "label": "付款",
+            "mode": "handle",
+            "approvers": json.dumps(["cashier@example.com"]),
+            "status": oa_entry.STATUS_WAIT_HANDLE,
+            "approved_by": "[]",
+            "action_by": "",
+            "acted_on": "",
+            "note": "",
+        },
+    ]
+    events = [
+        {
+            "action": "撤回付款",
+            "actor": "finance@example.com",
+            "acted_on": "2026-07-21 10:00:00",
+            "from_status": oa_entry.STATUS_PAID,
+            "to_status": oa_entry.STATUS_COMPLETED,
+            "note": "付款信息有误",
+        }
+    ]
+    docs = {
+        "REQ-AUDIT": _report_request(
+            "REQ-AUDIT",
+            workflow_status=oa_entry.STATUS_COMPLETED,
+            steps=steps,
+            operation_log=events,
+        ),
+        "REQ-BOB": _report_request(
+            "REQ-BOB", owner="bob@example.com", employee="EMP-2", employee_name="Bob", steps=steps
+        ),
+    }
+    _install_report_requests(monkeypatch, docs)
+
+    result = oa_entry.list_expense_approval_records(
+        view="all",
+        request_keyword="REQ-AUDIT",
+        employee="EMP-1",
+        department="研发部",
+        approver="finance@example.com",
+        action="撤回付款",
+        workflow_status=oa_entry.STATUS_COMPLETED,
+        from_date="2026-07-01",
+        to_date="2026-07-31",
+    )
+    assert set(result) == {"records", "truncated"}
+    assert result["truncated"] is False
+    assert len(result["records"]) == 1
+    record = result["records"][0]
+    assert record["request_name"] == "REQ-AUDIT"
+    assert record["event_type"] == "操作日志"
+    assert record["action"] == "撤回付款"
+    assert record["actor"] == "finance@example.com"
+    assert record["acted_on"] == "2026-07-21 10:00:00"
+    assert record["note"] == "付款信息有误"
+
+    unfiltered = oa_entry.list_expense_approval_records(view="all")
+    assert {record["request_name"] for record in unfiltered["records"]} == {"REQ-AUDIT"}
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    privileged = oa_entry.list_expense_approval_records(view="all")
+    assert {record["request_name"] for record in privileged["records"]} == {"REQ-AUDIT", "REQ-BOB"}
