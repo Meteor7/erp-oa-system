@@ -23,6 +23,7 @@ test('maps statistics filters to bounded server parameters', () => {
     department: '  \u7814\u53d1\u90e8 ',
     employee: 'EMP-1',
     invoiceCategory: '\u7535\u5b50\u53d1\u7968\uff08\u666e\u901a\u53d1\u7968\uff09',
+    expenseItem: '\u4ea4\u901a\u8d39',
     projectName: '\u6587\u5177\u5370\u7ae0',
     workflowStatus: '\u5df2\u4ed8\u6b3e',
     paymentStatus: '\u5df2\u4ed8\u6b3e',
@@ -36,6 +37,7 @@ test('maps statistics filters to bounded server parameters', () => {
     department: '\u7814\u53d1\u90e8',
     employee: 'EMP-1',
     invoice_category: '\u7535\u5b50\u53d1\u7968\uff08\u666e\u901a\u53d1\u7968\uff09',
+    expense_item: '\u4ea4\u901a\u8d39',
     project_name: '\u6587\u5177\u5370\u7ae0',
     workflow_status: '\u5df2\u4ed8\u6b3e',
     payment_status: '\u5df2\u4ed8\u6b3e',
@@ -80,8 +82,9 @@ test('statistics view exposes all filters metrics table and states', () => {
   assert.match(statisticsSource, /get_expense_statistics/);
   for (const key of [
     'fromDate', 'toDate', 'department', 'employee', 'invoiceCategory',
-    'projectName', 'workflowStatus', 'paymentStatus', 'sourceType',
+    'expenseItem', 'projectName', 'workflowStatus', 'paymentStatus', 'sourceType',
   ]) assert.ok(statisticsSource.includes(key), `missing statistics filter: ${key}`);
+  assert.ok(statisticsSource.includes('\u8d39\u7528\u9879\u76ee'));
   for (const label of [
     '\u7533\u8bf7\u5355\u6570', '\u53d1\u7968\u5f20\u6570', '\u7a0e\u524d\u91d1\u989d', '\u7a0e\u989d',
     '\u5408\u8ba1\u91d1\u989d', '\u5df2\u4ed8\u6b3e\u91d1\u989d', '\u672a\u4ed8\u6b3e\u91d1\u989d',

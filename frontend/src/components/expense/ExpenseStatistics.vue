@@ -14,6 +14,7 @@ const filters = reactive({
   department: '',
   employee: '',
   invoiceCategory: '',
+  expenseItem: '',
   projectName: '',
   workflowStatus: '',
   paymentStatus: '',
@@ -96,6 +97,7 @@ defineExpose({ reload: refresh });
         <label class="text-xs text-gray-500">部门<select v-model="filters.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">全部部门</option><option v-for="item in props.options?.departments || []" :key="item" :value="item">{{ item }}</option></select></label>
         <label class="text-xs text-gray-500">申请人<input v-model="filters.employee" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="员工编号" /></label>
         <label class="text-xs text-gray-500">发票类别<input v-model="filters.invoiceCategory" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="如：电子发票（普通发票）" /></label>
+        <label class="text-xs text-gray-500">费用项目<input v-model="filters.expenseItem" list="statistics-expense-items" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="下拉选择或填写" /></label>
         <label class="text-xs text-gray-500">项目名称<input v-model="filters.projectName" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
         <label class="text-xs text-gray-500">审批状态<select v-model="filters.workflowStatus" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">全部状态</option><option v-for="item in workflowStatuses" :key="item">{{ item }}</option></select></label>
         <label class="text-xs text-gray-500">付款状态<select v-model="filters.paymentStatus" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">全部</option><option v-for="item in paymentStatuses" :key="item">{{ item }}</option></select></label>
@@ -106,6 +108,8 @@ defineExpose({ reload: refresh });
         </div>
       </div>
     </div>
+
+    <datalist id="statistics-expense-items"><option v-for="item in props.options?.expense_categories || []" :key="item" :value="item"></option></datalist>
 
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
       <div v-for="[label,value,icon,color] in metricItems" :key="label" class="rounded border bg-white p-4 shadow-sm">
@@ -119,13 +123,13 @@ defineExpose({ reload: refresh });
 
     <div class="overflow-hidden rounded border bg-white shadow-sm">
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[1500px] text-sm">
+        <table class="w-full min-w-[1640px] text-sm">
           <thead class="border-b bg-gray-50 text-xs text-gray-500">
             <tr>
               <th class="px-3 py-3 text-left">申请单号</th><th class="px-3 py-3 text-left">申请时间</th>
               <th class="px-3 py-3 text-left">申请人</th><th class="px-3 py-3 text-left">部门</th>
               <th class="px-3 py-3 text-left">发票类别</th><th class="px-3 py-3 text-left">项目名称</th>
-              <th class="px-3 py-3 text-left">来源</th><th class="px-3 py-3 text-left">状态</th>
+              <th class="px-3 py-3 text-left">费用项目</th><th class="px-3 py-3 text-left">来源</th><th class="px-3 py-3 text-left">状态</th>
               <th class="px-3 py-3 text-right">税前金额</th><th class="px-3 py-3 text-right">税额</th>
               <th class="px-3 py-3 text-right">合计金额</th><th class="px-3 py-3 text-right">已付</th><th class="px-3 py-3 text-right">未付</th>
             </tr>
@@ -137,12 +141,13 @@ defineExpose({ reload: refresh });
               <td class="px-3 py-3">{{ row.employee_name || row.employee || '-' }}</td><td class="px-3 py-3">{{ row.department || '-' }}</td>
               <td class="max-w-[220px] truncate px-3 py-3" :title="row.invoice_category">{{ row.invoice_category || '-' }}</td>
               <td class="max-w-[220px] truncate px-3 py-3" :title="row.project_name">{{ row.project_name || '-' }}</td>
+              <td class="max-w-[180px] truncate px-3 py-3" :title="row.expense_item">{{ row.expense_item || '-' }}</td>
               <td class="px-3 py-3">{{ row.source_type || '-' }}</td><td class="px-3 py-3">{{ row.workflow_status || '-' }}</td>
               <td class="px-3 py-3 text-right">{{ money(row.amount_before_tax) }}</td><td class="px-3 py-3 text-right">{{ money(row.tax_amount) }}</td>
               <td class="px-3 py-3 text-right font-semibold text-red-600">{{ money(row.total_amount) }}</td>
               <td class="px-3 py-3 text-right text-emerald-600">{{ money(row.paid_amount) }}</td><td class="px-3 py-3 text-right text-amber-600">{{ money(row.unpaid_amount) }}</td>
             </tr>
-            <tr v-if="statistics.loading"><td colspan="13" class="py-20 text-center text-gray-400">正在加载费用统计...</td></tr>
+            <tr v-if="statistics.loading"><td colspan="14" class="py-20 text-center text-gray-400">正在加载费用统计...</td></tr>
             <tr v-else-if="!rows.length"><td colspan="13" class="py-20 text-center text-gray-400">暂无统计数据</td></tr>
           </tbody>
         </table>

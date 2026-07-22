@@ -1411,6 +1411,7 @@ def get_expense_statistics(
     department=None,
     employee=None,
     invoice_category=None,
+    expense_item=None,
     project_name=None,
     workflow_status=None,
     payment_status=None,
@@ -1419,6 +1420,7 @@ def get_expense_statistics(
 ):
     report_limit = _bounded_report_limit(limit)
     category_filter = _report_text(invoice_category, "发票类别") if invoice_category is not None else ""
+    expense_filter = _report_text(expense_item, "费用项目") if expense_item is not None else ""
     project_filter = _report_text(project_name, "项目名称") if project_name is not None else ""
     payment_filter = _report_text(payment_status, "付款状态") if payment_status is not None else ""
     if payment_filter not in {"", "已付款", "未付款"}:
@@ -1455,55 +1457,31 @@ def get_expense_statistics(
         if payment_filter == "未付款" and is_paid:
             continue
 
-        detail_lines = list(getattr(doc, "expense_lines", []) or [])
+        detail_lines = [_serialize_expense_line(line) for line in list(getattr(doc, "expense_lines", []) or [])]
         matched_lines = []
         for line in detail_lines:
-            line_category = _clean(_line_value(line, "invoice_category") or _line_value(line, "category"))
-            line_project = _clean(_line_value(line, "project_name") or _line_value(line, "description"))
+            line_category = _clean(line.get("invoice_category") or line.get("category"))
+            line_expense_item = _clean(line.get("expense_item"))
+            line_project = _clean(line.get("project_name") or line.get("description"))
             if category_filter and line_category != category_filter:
+                continue
+            if expense_filter and line_expense_item != expense_filter:
                 continue
             if project_filter and line_project != project_filter:
                 continue
             matched_lines.append(line)
-        if (category_filter or project_filter) and not matched_lines:
+        if (category_filter or expense_filter or project_filter) and not matched_lines:
             continue
-        if not matched_lines:
-            matched_lines = [None]
 
-        request_names.add(doc.name)
-        matched_sources = set()
-        for line in matched_lines:
-            if line is None:
-                amount_before_tax = Decimal("0")
-                tax_amount = Decimal("0")
-                total_amount = _decimal_money(getattr(doc, "amount", 0))
-                line_category = ""
-                line_project = ""
-                issue_date = None
-                invoice_number = ""
-                source_invoice = ""
-            else:
-                amount_before_tax = _decimal_money(_line_value(line, "amount_before_tax"))
-                tax_amount = _decimal_money(_line_value(line, "tax_amount"))
-                total_value = _line_value(line, "total_amount")
-                if total_value in (None, ""):
-                    total_value = _line_value(line, "amount", 0)
-                total_amount = _decimal_money(total_value)
-                line_category = _clean(_line_value(line, "invoice_category") or _line_value(line, "category"))
-                line_project = _clean(_line_value(line, "project_name") or _line_value(line, "description"))
-                issue_date = _line_value(line, "issue_date") or _line_value(line, "start_date")
-                invoice_number = _clean(_line_value(line, "invoice_number"))
-                source_invoice = _clean(_line_value(line, "source_invoice"))
-            if source_invoice:
-                invoice_names.add(source_invoice)
-                matched_sources.add(source_invoice)
+        if not matched_lines:
+            request_names.add(doc.name)
+            total_amount = _decimal_money(getattr(doc, "amount", 0))
             paid_amount = total_amount if is_paid else Decimal("0")
             unpaid_amount = Decimal("0") if is_paid else total_amount
-            totals["amount_before_tax"] += amount_before_tax
-            totals["tax_amount"] += tax_amount
             totals["total_amount"] += total_amount
             totals["paid_amount"] += paid_amount
             totals["unpaid_amount"] += unpaid_amount
+            fallback_invoice_count += int(getattr(doc, "invoice_count", 0) or 0)
             rows.append(
                 {
                     "request_name": doc.name,
@@ -1514,11 +1492,70 @@ def get_expense_statistics(
                     "department": getattr(doc, "department", None) or "",
                     "source_type": getattr(doc, "source_type", None) or SOURCE_MANUAL,
                     "workflow_status": doc.workflow_status,
-                    "invoice_count": 1 if source_invoice else int(getattr(doc, "invoice_count", 0) or 0),
-                    "invoice_category": line_category,
-                    "project_name": line_project,
-                    "issue_date": issue_date,
-                    "invoice_number": invoice_number,
+                    "invoice_count": int(getattr(doc, "invoice_count", 0) or 0),
+                    "invoice_category": "",
+                    "expense_item": "",
+                    "project_name": "",
+                    "issue_date": None,
+                    "invoice_number": "",
+                    "amount_before_tax": Decimal("0"),
+                    "tax_amount": Decimal("0"),
+                    "total_amount": total_amount,
+                    "paid_amount": paid_amount,
+                    "unpaid_amount": unpaid_amount,
+                }
+            )
+            continue
+
+        request_names.add(doc.name)
+        for group in _group_expense_sources(matched_lines):
+            group_sources = list(group.get("source_lines") or [])
+            categories = []
+            issue_dates = []
+            invoice_numbers = []
+            source_invoices = []
+            for source in group_sources:
+                category_value = _clean(source.get("invoice_category") or source.get("category"))
+                issue_value = source.get("issue_date") or source.get("start_date")
+                number_value = _clean(source.get("invoice_number"))
+                invoice_value = _clean(source.get("source_invoice"))
+                if category_value and category_value not in categories:
+                    categories.append(category_value)
+                if issue_value and str(issue_value) not in issue_dates:
+                    issue_dates.append(str(issue_value))
+                if number_value and number_value not in invoice_numbers:
+                    invoice_numbers.append(number_value)
+                if invoice_value and invoice_value not in source_invoices:
+                    source_invoices.append(invoice_value)
+                    invoice_names.add(invoice_value)
+
+            amount_before_tax = _decimal_money(group.get("amount_before_tax"))
+            tax_amount = _decimal_money(group.get("tax_amount"))
+            total_amount = _decimal_money(group.get("total_amount"))
+            paid_amount = total_amount if is_paid else Decimal("0")
+            unpaid_amount = Decimal("0") if is_paid else total_amount
+            totals["amount_before_tax"] += amount_before_tax
+            totals["tax_amount"] += tax_amount
+            totals["total_amount"] += total_amount
+            totals["paid_amount"] += paid_amount
+            totals["unpaid_amount"] += unpaid_amount
+            expense_items = list(group.get("expense_items") or [])
+            rows.append(
+                {
+                    "request_name": doc.name,
+                    "subject": getattr(doc, "subject", "") or "",
+                    "creation": getattr(doc, "creation", None),
+                    "employee": getattr(doc, "employee", None),
+                    "employee_name": getattr(doc, "employee_name", None) or "",
+                    "department": getattr(doc, "department", None) or "",
+                    "source_type": getattr(doc, "source_type", None) or SOURCE_MANUAL,
+                    "workflow_status": doc.workflow_status,
+                    "invoice_count": len(source_invoices),
+                    "invoice_category": "、".join(categories),
+                    "expense_item": group.get("expense_item") or "、".join(expense_items),
+                    "project_name": group.get("project_name") or "",
+                    "issue_date": "、".join(issue_dates) if issue_dates else None,
+                    "invoice_number": "、".join(invoice_numbers),
                     "amount_before_tax": amount_before_tax,
                     "tax_amount": tax_amount,
                     "total_amount": total_amount,
@@ -1526,8 +1563,6 @@ def get_expense_statistics(
                     "unpaid_amount": unpaid_amount,
                 }
             )
-        if not matched_sources:
-            fallback_invoice_count += int(getattr(doc, "invoice_count", 0) or 0)
 
     totals["request_count"] = len(request_names)
     totals["invoice_count"] = len(invoice_names) + fallback_invoice_count

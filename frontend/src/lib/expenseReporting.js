@@ -4,6 +4,7 @@ const STATISTICS_FIELDS = Object.freeze({
   department: 'department',
   employee: 'employee',
   invoiceCategory: 'invoice_category',
+  expenseItem: 'expense_item',
   projectName: 'project_name',
   workflowStatus: 'workflow_status',
   paymentStatus: 'payment_status',

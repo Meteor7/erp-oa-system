@@ -90,6 +90,7 @@ def _invoice(status="已确认", *, total="100.00", line_key="11111111-1111-4111
         total_amount=Decimal(total) if total is not None else None,
         expense_line_key=line_key,
         invoice_category="电子发票（普通发票）",
+        expense_item="交通费",
         project_name="文具印章",
         invoice_number="000123",
         original_filename="禁止进入搜索.pdf",
@@ -1646,6 +1647,7 @@ def test_expense_statistics_filters_seven_field_lines_and_scopes_users(monkeypat
             "source_invoice": "INV-1",
             "invoice_category": "电子发票（普通发票）",
             "project_name": "文具印章",
+            "expense_item": "交通费",
             "issue_date": "2026-07-14",
             "invoice_number": "NO-1",
             "amount_before_tax": Decimal("35.62"),
@@ -1658,6 +1660,7 @@ def test_expense_statistics_filters_seven_field_lines_and_scopes_users(monkeypat
             "source_invoice": "INV-2",
             "invoice_category": "电子发票（普通发票）",
             "project_name": "文具印章",
+            "expense_item": "交通费",
             "issue_date": "2026-07-15",
             "invoice_number": "NO-2",
             "amount_before_tax": Decimal("100.00"),
@@ -1708,12 +1711,69 @@ def test_expense_statistics_filters_seven_field_lines_and_scopes_users(monkeypat
         "unpaid_amount": Decimal("0"),
     }
     assert {row["request_name"] for row in result["rows"]} == {"REQ-PAID"}
+    assert len(result["rows"]) == 1
+    assert result["rows"][0]["project_name"] == "文具印章"
+    assert result["rows"][0]["expense_item"] == "交通费"
+    assert result["rows"][0]["invoice_count"] == 2
+    assert result["rows"][0]["total_amount"] == Decimal("141.98")
 
     scoped = oa_entry.get_expense_statistics(view="all")
     assert {row["request_name"] for row in scoped["rows"]} == {"REQ-PAID"}
     frappe_stub.get_roles = lambda user=None: ["Accounts User"]
     privileged = oa_entry.get_expense_statistics(view="all")
     assert {row["request_name"] for row in privileged["rows"]} == {"REQ-PAID", "REQ-BOB"}
+
+
+def test_expense_statistics_includes_manual_no_invoice_lines_and_filters_expense_item(monkeypatch):
+    docs = {
+        "REQ-MIXED": _report_request(
+            "REQ-MIXED",
+            expense_lines=[
+                {
+                    "line_key": "invoice-line",
+                    "source_invoice": "INV-1",
+                    "invoice_category": "电子发票（普通发票）",
+                    "project_name": "项目甲",
+                    "expense_item": "交通费",
+                    "issue_date": "2026-07-14",
+                    "invoice_number": "NO-1",
+                    "amount_before_tax": Decimal("35.62"),
+                    "tax_amount": Decimal("0.36"),
+                    "total_amount": Decimal("35.98"),
+                },
+                {
+                    "line_key": "manual-line",
+                    "source_invoice": None,
+                    "invoice_category": "",
+                    "project_name": "项目乙",
+                    "expense_item": "差旅补贴",
+                    "issue_date": "2026-07-15",
+                    "invoice_number": "",
+                    "amount_before_tax": None,
+                    "tax_amount": None,
+                    "total_amount": Decimal("80.00"),
+                    "description": "出差津贴",
+                    "no_invoice_reason": "公司制度规定",
+                },
+            ],
+        ),
+    }
+    _install_report_requests(monkeypatch, docs)
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Accounts User"])
+
+    result = oa_entry.get_expense_statistics(view="all")
+
+    assert [row["project_name"] for row in result["rows"]] == ["项目甲", "项目乙"]
+    assert result["totals"]["invoice_count"] == 1
+    assert result["totals"]["total_amount"] == Decimal("115.98")
+
+    manual = oa_entry.get_expense_statistics(view="all", expense_item="差旅补贴")
+
+    assert len(manual["rows"]) == 1
+    assert manual["rows"][0]["project_name"] == "项目乙"
+    assert manual["rows"][0]["expense_item"] == "差旅补贴"
+    assert manual["rows"][0]["invoice_count"] == 0
+    assert manual["rows"][0]["total_amount"] == Decimal("80.00")
 
 
 def test_approval_records_merge_steps_and_operation_events_with_permissions(monkeypatch):
