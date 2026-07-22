@@ -102,6 +102,9 @@ test('approval records view exposes filters audit columns and states', () => {
     'requestKeyword', 'employee', 'department', 'approver', 'action',
     'workflowStatus', 'fromDate', 'toDate',
   ]) assert.ok(approvalSource.includes(key), `missing approval filter: ${key}`);
+  for (const action of ['\u5f85\u5ba1\u6279', '\u5f85\u6d41\u8f6c', '\u63d0\u4ea4\u7533\u8bf7', '\u6807\u8bb0\u5df2\u4ed8\u6b3e']) {
+    assert.ok(approvalSource.includes(action), `missing audit action filter: ${action}`);
+  }
   for (const label of [
     '\u7533\u8bf7\u5355', '\u4e8b\u4ef6\u7c7b\u578b', '\u5ba1\u6279\u8282\u70b9', '\u5ba1\u6279\u4eba',
     '\u64cd\u4f5c', '\u64cd\u4f5c\u4eba', '\u64cd\u4f5c\u65f6\u95f4', '\u5907\u6ce8', '\u5f53\u524d\u72b6\u6001',

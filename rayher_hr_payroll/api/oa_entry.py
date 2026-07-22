@@ -772,6 +772,7 @@ def _build_request_doc(
 def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
+    old_status = doc.workflow_status
     if doc.request_type == REQUEST_LEAVE and (not doc.from_date or not doc.to_date):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT and not list(getattr(doc, "expense_lines", []) or []):
@@ -786,6 +787,7 @@ def _submit_draft(doc):
     doc.workflow_status = route["steps"][0]["status"]
     doc.current_step_index = 1
     doc.current_step_label = route["steps"][0]["label"]
+    _append_request_event(doc, "提交申请", old_status, doc.workflow_status)
 
 
 def _update_consumption_invoice_state(doc):
@@ -1536,11 +1538,13 @@ def mark_paid(name, note=None):
             frappe.throw(frappe._("\u53ea\u6709\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500\u5355\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
         if doc.workflow_status != STATUS_COMPLETED:
             frappe.throw(frappe._("\u53ea\u6709\u5ba1\u6279\u5df2\u901a\u8fc7\u7684\u5355\u636e\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
+        old_status = doc.workflow_status
         doc.workflow_status = STATUS_PAID
         doc.paid_by = sorted(_actor_names())[0]
         doc.paid_on = now_datetime()
         if note:
             doc.reason = ((doc.reason or "") + "\n" + "\u4ed8\u6b3e\u5907\u6ce8\uff1a" + note).strip()
+        _append_request_event(doc, "标记已付款", old_status, STATUS_PAID, note)
         doc.save(ignore_permissions=True)
         return _summarize_doc(doc)
 

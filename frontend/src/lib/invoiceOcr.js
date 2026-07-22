@@ -129,6 +129,22 @@ export function moneyToCents(value) {
   return cents;
 }
 
+export function invoiceFieldWarnings(value) {
+  let warnings = value;
+  if (typeof warnings === 'string') {
+    const trimmed = warnings.trim();
+    if (!trimmed) return [];
+    try {
+      warnings = JSON.parse(trimmed);
+    } catch {
+      return [trimmed];
+    }
+  }
+  return Array.isArray(warnings)
+    ? warnings.filter((warning) => typeof warning === 'string' || (warning && typeof warning === 'object'))
+    : [];
+}
+
 export function amountMismatch(invoice, expectedAmount) {
   if (!invoice) return 0;
   const actual = moneyToCents(invoice.total_amount);

@@ -11,6 +11,7 @@ import {
   getRequestInvoices,
   hasRegisteredInvoiceUpload,
   invoiceBlockers,
+  invoiceFieldWarnings,
   invoiceSelectionReason,
   invoiceSaveGuard,
   invoicesForLine,
@@ -42,6 +43,13 @@ test('explains why an invoice can or cannot be selected for pushdown', () => {
   assert.equal(invoiceSelectionReason({ recognition_status: '\u7591\u4f3c\u91cd\u590d', request: '' }), '\u7591\u4f3c\u91cd\u590d\u53d1\u7968\u4e0d\u80fd\u4e0b\u63a8');
   assert.equal(invoiceSelectionReason({ recognition_status: '\u5931\u8d25', request: '' }), '\u8bc6\u522b\u5931\u8d25\uff0c\u4e0d\u80fd\u4e0b\u63a8');
   assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: 'OA-2026-0001' }), '\u5df2\u4e0b\u63a8\u5230 OA-2026-0001');
+});
+
+test('normalizes JSON warning payloads without rendering brackets as warnings', () => {
+  assert.deepEqual(invoiceFieldWarnings('[]'), []);
+  assert.deepEqual(invoiceFieldWarnings('["required_fields_missing"]'), ['required_fields_missing']);
+  assert.deepEqual(invoiceFieldWarnings([{ message: 'needs review' }]), [{ message: 'needs review' }]);
+  assert.deepEqual(invoiceFieldWarnings('plain warning'), ['plain warning']);
 });
 
 test('money comparisons use integer cents', () => {

@@ -19,7 +19,7 @@ const filters = reactive({
   toDate: '',
 });
 const workflowStatuses = ['草稿', '待审批', '待办理', '已完成', '已拒绝', '已付款'];
-const commonActions = ['发票下推', '提交申请', '已通过', '已办理', '已拒绝', '撤回申请', '撤回发票下推', '标记已付款', '撤回付款'];
+const commonActions = ['发票下推', '提交申请', '待审批', '待流转', '已通过', '已办理', '已拒绝', '撤回申请', '撤回发票下推', '标记已付款', '撤回付款'];
 
 const records = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.list_expense_approval_records',

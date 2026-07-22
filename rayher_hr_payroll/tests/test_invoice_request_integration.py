@@ -657,6 +657,7 @@ def test_submit_request_uses_request_lock_current_read_and_server_validation(mon
     assert validations[-1] == ("REQ-1", True, oa_entry.STATUS_DRAFT)
     assert doc.workflow_status == oa_entry.STATUS_PENDING
     assert result["status"] == oa_entry.STATUS_PENDING
+    assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
     assert environment.commits == 0
 
 
@@ -714,6 +715,8 @@ def test_existing_request_mutations_use_same_current_request_lock(monkeypatch, o
     assert locks == [("request", "REQ-1")]
     assert environment.current_reads == [(service.REQUEST_DOCTYPE, "REQ-1")]
     assert environment.commits == 0
+    if operation == "paid":
+        assert json.loads(doc.operation_log)[-1]["action"] == "标记已付款"
 
 
 def test_zero_total_confirmed_invoice_is_linked_but_requires_amount_difference_reason(monkeypatch):

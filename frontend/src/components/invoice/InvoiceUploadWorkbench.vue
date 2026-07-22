@@ -7,6 +7,7 @@ import {
   createInvoiceBatch,
   excludeInvoice,
   listWorkbenchInvoices,
+  invoiceFieldWarnings,
   invoiceSelectionReason,
   pushInvoices,
   resolveDuplicate,
@@ -415,8 +416,8 @@ onBeforeUnmount(() => {
                 <input v-model="selectedRow[name]" :type="type" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-600" />
               </label>
             </div>
-            <div v-if="selectedRow.field_warnings?.length" class="rounded bg-amber-50 p-3 text-xs text-amber-700">
-              <div v-for="warning in selectedRow.field_warnings" :key="String(warning)">{{ warning.message || warning }}</div>
+            <div v-if="invoiceFieldWarnings(selectedRow.field_warnings).length" class="rounded bg-amber-50 p-3 text-xs text-amber-700">
+              <div v-for="warning in invoiceFieldWarnings(selectedRow.field_warnings)" :key="String(warning)">{{ warning.message || warning }}</div>
             </div>
             <div class="flex flex-wrap gap-2 border-t pt-4">
               <Button variant="subtle" @click="previewRow = selectedRow">查看发票</Button>
