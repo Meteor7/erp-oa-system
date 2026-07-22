@@ -605,7 +605,7 @@ def test_direct_create_submission_validates_before_workflow_transition(monkeypat
         oa_entry.create_request(
             oa_entry.REQUEST_EXPENSE_PAYMENT,
             submit=1,
-            expense_lines=[{"category": "办公费", "amount": 1}],
+            expense_lines=[{"category": "办公费", "amount": 1, "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "有原因也不能绕过状态"}],
             no_invoice_reason="有原因也不能绕过状态",
         )
     doc = environment.pending["REQ-NEW"]
@@ -628,7 +628,7 @@ def test_submit_request_uses_request_lock_current_read_and_server_validation(mon
             "department": "研发部",
             "supervisor": "",
             "asset_category": "其它",
-            "expense_lines": [Row(line_key="11111111-1111-4111-8111-111111111111", amount=1, invoice_difference_reason="")],
+            "expense_lines": [Row(line_key="11111111-1111-4111-8111-111111111111", source_invoice=None, project_name="项目甲", expense_item="办公费", no_invoice_reason="纸质票据遗失", total_amount=1, amount=1, description="测试费用", invoice_difference_reason="")],
             "steps": [],
             "no_invoice_reason": "纸质票据遗失",
         },
@@ -795,7 +795,7 @@ def test_create_continues_with_current_request_returned_by_attach(monkeypatch, r
         oa_entry.REQUEST_EXPENSE_PAYMENT,
         subject="expense",
         submit=requested_submit,
-        expense_lines=[{"category": "office", "amount": "100.00"}],
+        expense_lines=[{"category": "office", "amount": "100.00", "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "测试无票"}],
         invoice_batch="BATCH-1",
     )
 
@@ -1385,6 +1385,77 @@ def test_request_and_push_withdrawals_are_reversible_and_audited(monkeypatch):
     assert request.expense_lines == [] and request.amount == 0
     assert records["INV-1"].request == "" and records["INV-1"].expense_line_key == ""
     assert [event["action"] for event in result["operation_log"]][-2:] == ["撤回申请", "撤回发票下推"]
+
+
+def test_withdraw_one_invoice_keeps_other_source_in_same_project_group(monkeypatch):
+    records = {
+        "INV-1": _push_record("INV-1", request="REQ-GROUP", total="35.98"),
+        "INV-2": _push_record("INV-2", request="REQ-GROUP", total="106.00"),
+    }
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    keys = {
+        "INV-1": "11111111-1111-4111-8111-111111111111",
+        "INV-2": "22222222-2222-4222-8222-222222222222",
+    }
+    for name, record in records.items():
+        record.expense_line_key = keys[name]
+        record.project_name = "项目甲"
+    request = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-GROUP",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_DRAFT,
+            "employee": "EMP-1",
+            "department": "研发部",
+            "supervisor": "",
+            "asset_category": oa_entry.OTHER_ASSET,
+            "source_type": oa_entry.SOURCE_INVOICE_PUSH,
+            "amount": 141.98,
+            "operation_log": "[]",
+            "expense_lines": [
+                Row(
+                    source_invoice=name, line_key=keys[name], invoice_category=record.invoice_category,
+                    project_name="项目甲", expense_item="交通费", no_invoice_reason="",
+                    issue_date=record.issue_date, invoice_number=record.invoice_number,
+                    amount_before_tax=record.amount_before_tax, tax_amount=record.tax_amount,
+                    total_amount=record.total_amount, amount=record.total_amount,
+                    category=record.invoice_category, description="项目甲",
+                    start_date=record.issue_date, end_date=record.issue_date,
+                    attachment_count=1, invoice_status="已确认", invoice_difference_reason="",
+                )
+                for name, record in records.items()
+            ],
+            "steps": [],
+        },
+    )
+    environment.committed[request.name] = request
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+
+    result = oa_entry.withdraw_invoice_push(["INV-1"], note="只撤回一张")
+
+    assert [line.source_invoice for line in request.expense_lines] == ["INV-2"]
+    assert request.amount == pytest.approx(106.00)
+    assert len(result["project_groups"]) == 1
+    assert result["project_groups"][0]["source_line_keys"] == [keys["INV-2"]]
+    assert records["INV-1"].request == ""
+    assert records["INV-2"].request == request.name
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ({"line_key": "a", "source_invoice": "INV-1", "project_name": "", "expense_item": "交通费", "total_amount": 10}, "项目名称"),
+        ({"line_key": "a", "source_invoice": "INV-1", "project_name": "项目甲", "expense_item": "", "total_amount": 10}, "费用项目"),
+        ({"line_key": "a", "source_invoice": None, "project_name": "项目甲", "expense_item": "差旅补贴", "total_amount": 80, "no_invoice_reason": ""}, "无票原因"),
+    ],
+)
+def test_validate_expense_project_groups_blocks_incomplete_submission(line, message):
+    doc = Row(request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, expense_lines=[Row(line)])
+    with pytest.raises(ValidationError, match=message):
+        oa_entry._validate_expense_project_groups(doc)
 
 
 def test_paid_request_requires_finance_payment_withdrawal(monkeypatch):

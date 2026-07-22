@@ -853,6 +853,22 @@ def _build_request_doc(
     return doc
 
 
+def _validate_expense_project_groups(doc):
+    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT:
+        return []
+    sources = [_serialize_expense_line(row) for row in list(getattr(doc, "expense_lines", []) or [])]
+    groups = _group_expense_sources(sources)
+    for group in groups:
+        if not _clean(group.get("project_name")):
+            frappe.throw(frappe._("提交前必须填写每项费用的项目名称。"))
+        if group.get("needs_expense_item"):
+            frappe.throw(frappe._("提交前必须为每个项目填写一致的费用项目。"))
+    for source in sources:
+        if not _clean(source.get("source_invoice")) and not _clean(source.get("no_invoice_reason")):
+            frappe.throw(frappe._("手工费用提交前必须填写无票原因。"))
+    return groups
+
+
 def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
@@ -861,6 +877,7 @@ def _submit_draft(doc):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT and not list(getattr(doc, "expense_lines", []) or []):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
+    _validate_expense_project_groups(doc)
     summary = invoice_service.validate_request_invoices(doc, submitting=True)
     if isinstance(summary, dict):
         doc.invoice_count = summary.get("invoice_count", 0)
