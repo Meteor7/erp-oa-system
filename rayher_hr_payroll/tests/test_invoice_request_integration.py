@@ -1040,6 +1040,38 @@ def test_normalize_preserves_exact_seven_invoice_fields_and_compatibility_values
     assert UUID(row["line_key"]).version == 5
 
 
+def test_group_expense_sources_aggregates_named_projects_and_keeps_blank_rows_independent():
+    groups = oa_entry._group_expense_sources([
+        {"line_key": "a", "project_name": " 项目甲 ", "expense_item": "交通费", "amount_before_tax": 100, "tax_amount": 6, "total_amount": 106},
+        {"line_key": "b", "project_name": "项目甲", "expense_item": "交通费", "amount_before_tax": 50, "tax_amount": 3, "total_amount": 53},
+        {"line_key": "c", "project_name": "", "expense_item": "", "amount_before_tax": None, "tax_amount": None, "total_amount": 10},
+        {"line_key": "d", "project_name": "   ", "expense_item": "", "amount_before_tax": None, "tax_amount": None, "total_amount": 20},
+    ])
+
+    assert len(groups) == 3
+    assert groups[0]["group_key"] == "project:项目甲"
+    assert groups[0]["project_name"] == "项目甲"
+    assert groups[0]["amount_before_tax"] == Decimal("150.00")
+    assert groups[0]["tax_amount"] == Decimal("9.00")
+    assert groups[0]["total_amount"] == Decimal("159.00")
+    assert groups[0]["source_line_keys"] == ["a", "b"]
+    assert groups[0]["needs_expense_item"] is False
+    assert groups[1]["group_key"] != groups[2]["group_key"]
+    assert groups[1]["amount_before_tax"] is None
+    assert groups[2]["tax_amount"] is None
+
+
+def test_group_expense_sources_flags_conflicting_expense_items():
+    groups = oa_entry._group_expense_sources([
+        {"line_key": "a", "project_name": "项目甲", "expense_item": "交通费", "total_amount": 10},
+        {"line_key": "b", "project_name": "项目甲", "expense_item": "办公费", "total_amount": 20},
+    ])
+
+    assert groups[0]["expense_item"] == ""
+    assert groups[0]["expense_items"] == ["交通费", "办公费"]
+    assert groups[0]["needs_expense_item"] is True
+
+
 def test_serialize_expense_line_maps_legacy_values_without_losing_zero_money():
     row = Row(
         source_consumption="OLD-1", line_key="line-1", start_date="2026-01-01",
@@ -1048,6 +1080,7 @@ def test_serialize_expense_line_maps_legacy_values_without_losing_zero_money():
         invoice_difference_reason="", invoice_category="", project_name="",
         issue_date=None, invoice_number="", amount_before_tax=Decimal("0.00"),
         tax_amount=Decimal("0.00"), total_amount=None, source_invoice=None,
+        expense_item="办公用品", no_invoice_reason="旧单无发票",
     )
     result = oa_entry._serialize_expense_line(row)
     assert result["invoice_category"] == "办公费"
@@ -1057,6 +1090,8 @@ def test_serialize_expense_line_maps_legacy_values_without_losing_zero_money():
     assert result["amount_before_tax"] == Decimal("0.00")
     assert result["tax_amount"] == Decimal("0.00")
     assert result["total_amount"] == Decimal("12.00")
+    assert result["expense_item"] == "办公用品"
+    assert result["no_invoice_reason"] == "旧单无发票"
 
 
 def _push_record(name, *, status="已确认", total="35.98", request="", batch="BATCH-1"):

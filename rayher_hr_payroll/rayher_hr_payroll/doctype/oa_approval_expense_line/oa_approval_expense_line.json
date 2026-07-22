@@ -10,6 +10,8 @@
     "source_invoice",
     "invoice_category",
     "project_name",
+    "expense_item",
+    "no_invoice_reason",
     "issue_date",
     "invoice_number",
     "amount_before_tax",
@@ -49,6 +51,16 @@
       "fieldname": "project_name",
       "fieldtype": "Small Text",
       "label": "Project Name"
+    },
+    {
+      "fieldname": "expense_item",
+      "fieldtype": "Data",
+      "label": "Expense Item"
+    },
+    {
+      "fieldname": "no_invoice_reason",
+      "fieldtype": "Small Text",
+      "label": "No Invoice Reason"
     },
     {
       "fieldname": "issue_date",

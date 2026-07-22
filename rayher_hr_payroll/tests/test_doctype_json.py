@@ -198,6 +198,7 @@ def test_oa_approval_doctypes_define_request_and_steps():
     request_fields = {field["fieldname"]: field for field in request["fields"] if "fieldname" in field}
     step_fields = fieldnames(step)
     line_fields = fieldnames(expense_line)
+    line_field_defs = {field["fieldname"]: field for field in expense_line["fields"] if "fieldname" in field}
 
     assert request['is_submittable'] == 0
     assert {
@@ -220,6 +221,8 @@ def test_oa_approval_doctypes_define_request_and_steps():
         'source_consumption', 'start_date', 'end_date', 'category', 'amount',
         'description', 'attachment_count', 'invoice_status'
     }.issubset(line_fields)
+    assert line_field_defs["expense_item"]["fieldtype"] == "Data"
+    assert line_field_defs["no_invoice_reason"]["fieldtype"] == "Small Text"
 
 
 def test_oa_consumption_detail_doctypes_define_invoice_pushdown_model():

@@ -361,6 +361,12 @@ def _serialize_doc_step(step):
     }
 
 
+def _source_value(source, fieldname, default=None):
+    if isinstance(source, dict):
+        return source.get(fieldname, default)
+    return getattr(source, fieldname, default)
+
+
 def _serialize_expense_line(row):
     legacy_category = getattr(row, "category", None)
     legacy_description = getattr(row, "description", None)
@@ -378,6 +384,8 @@ def _serialize_expense_line(row):
         "line_key": getattr(row, "line_key", None),
         "invoice_category": invoice_category or "",
         "project_name": project_name or "",
+        "expense_item": _source_value(row, "expense_item") or "",
+        "no_invoice_reason": _source_value(row, "no_invoice_reason") or "",
         "issue_date": issue_date,
         "invoice_number": getattr(row, "invoice_number", None) or "",
         "amount_before_tax": getattr(row, "amount_before_tax", None),
@@ -392,6 +400,76 @@ def _serialize_expense_line(row):
         "attachment_count": getattr(row, "attachment_count", 0),
         "invoice_status": getattr(row, "invoice_status", None),
     }
+
+def _group_money(value):
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _group_expense_sources(rows, invoices_by_key=None):
+    grouped = {}
+    invoices_by_key = invoices_by_key or {}
+    amount_fields = ("amount_before_tax", "tax_amount", "total_amount")
+    for index, source in enumerate(rows or []):
+        line_key = _clean(_source_value(source, "line_key")) or f"row-{index + 1}"
+        project_name = _clean(_source_value(source, "project_name"))
+        expense_item = _clean(_source_value(source, "expense_item"))
+        group_key = f"project:{project_name}" if project_name else f"line:{line_key}"
+        group = grouped.get(group_key)
+        if group is None:
+            group = {
+                "group_key": group_key,
+                "project_name": project_name,
+                "expense_item": "",
+                "expense_items": [],
+                "needs_expense_item": True,
+                "source_line_keys": [],
+                "source_lines": [],
+                "source_count": 0,
+                "invoice_source_count": 0,
+                "manual_source_count": 0,
+                "invoices": [],
+                "_amounts": {fieldname: [] for fieldname in amount_fields},
+            }
+            grouped[group_key] = group
+        normalized_source = dict(source) if isinstance(source, dict) else _serialize_expense_line(source)
+        normalized_source["line_key"] = line_key
+        normalized_source["project_name"] = project_name
+        normalized_source["expense_item"] = expense_item
+        group["source_line_keys"].append(line_key)
+        group["source_lines"].append(normalized_source)
+        group["source_count"] += 1
+        source_invoice = _clean(_source_value(source, "source_invoice"))
+        if source_invoice:
+            group["invoice_source_count"] += 1
+        else:
+            group["manual_source_count"] += 1
+        if expense_item and expense_item not in group["expense_items"]:
+            group["expense_items"].append(expense_item)
+        for fieldname in amount_fields:
+            value = _source_value(source, fieldname)
+            if fieldname == "total_amount" and value in (None, ""):
+                value = _source_value(source, "amount")
+            parsed = _group_money(value)
+            if parsed is not None:
+                group["_amounts"][fieldname].append(parsed)
+        group["invoices"].extend(list(invoices_by_key.get(line_key) or []))
+    result = []
+    for group in grouped.values():
+        for fieldname in amount_fields:
+            values = group["_amounts"][fieldname]
+            group[fieldname] = sum(values, Decimal("0.00")).quantize(Decimal("0.01")) if values else None
+        group.pop("_amounts", None)
+        if len(group["expense_items"]) == 1:
+            group["expense_item"] = group["expense_items"][0]
+            group["needs_expense_item"] = False
+        result.append(group)
+    return result
+
 
 
 def _serialize_invoice(row):
@@ -476,6 +554,7 @@ def _kanban_status(workflow_status):
 def _summarize_doc(doc):
     step = _current_step(doc)
     invoice_summary = invoice_service.request_invoice_summary(doc)
+    expense_lines = [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
     return {
         "name": doc.name,
         "request_type": doc.request_type,
@@ -521,7 +600,8 @@ def _summarize_doc(doc):
         "invoice_numbers": invoice_summary.get("invoice_numbers", []),
         "no_invoice_reason": getattr(doc, "no_invoice_reason", None) or "",
         "operation_log": _operation_events(doc),
-        "expense_lines": [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])],
+        "expense_lines": expense_lines,
+        "project_groups": _group_expense_sources(expense_lines),
         "steps": [_serialize_doc_step(row) for row in doc.steps],
         "creation": doc.creation,
         "modified": doc.modified,
@@ -666,6 +746,8 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
                 "line_key": _expense_line_key(row, seen_line_keys),
                 "invoice_category": invoice_category,
                 "project_name": project_name,
+                "expense_item": _clean(row.get("expense_item")),
+                "no_invoice_reason": _bounded_optional_text(row.get("no_invoice_reason"), "无票原因", 1000),
                 "issue_date": issue_date,
                 "invoice_number": _clean(row.get("invoice_number")),
                 "amount_before_tax": _optional_money(row.get("amount_before_tax")),
