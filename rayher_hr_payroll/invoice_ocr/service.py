@@ -38,6 +38,9 @@ REQUEST_SEARCH_LIMIT = 2000
 REQUEST_REASON_LIMIT = 1000
 FINANCE_ROLES = {"System Manager", "Accounts User"}
 ACTIVE_REQUEST_STATUSES = {"草稿"}
+WORKBENCH_STATUSES = {"排队中", "识别中", "待确认", "已确认", "疑似重复", "失败", "已排除"}
+WORKBENCH_PRIVILEGED_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager"}
+OPERATION_LOG_LIMIT = 100
 
 
 def _throw(message: str):
@@ -73,6 +76,41 @@ def _save(doc):
 def _now():
     value = frappe.utils.now_datetime()
     return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+
+
+def _bounded_note(value, limit=500):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        _throw("操作说明格式无效。")
+    value = value.strip()
+    if len(value) > limit:
+        _throw("操作说明不能超过 500 个字符。")
+    return value
+
+
+def _operation_events(doc):
+    raw = _get(doc, "operation_log") or "[]"
+    try:
+        events = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (TypeError, ValueError):
+        events = []
+    return events if isinstance(events, list) else []
+
+
+def _append_record_event(doc, action, from_status, to_status, note=""):
+    events = _operation_events(doc)
+    events.append(
+        {
+            "action": str(action),
+            "actor": _user(),
+            "acted_on": str(_now()),
+            "from_status": str(from_status or ""),
+            "to_status": str(to_status or ""),
+            "note": _bounded_note(note),
+        }
+    )
+    _set(doc, "operation_log", json.dumps(events[-OPERATION_LOG_LIMIT:], ensure_ascii=False))
 
 
 def _get_all(doctype, *, filters=None, fields=None, order_by=None, limit=None):
@@ -801,6 +839,61 @@ def confirm_invoice(invoice_name, values=None):
                 _recompute_record_batch(record)
                 return _serialize_record(record)
         _confirm(record)
+        _recompute_record_batch(record)
+        return _serialize_record(record)
+
+
+def list_workbench_invoices(view="mine", status=None, limit=200):
+    user = _user()
+    roles = _roles(user)
+    view = str(view or "mine").strip()
+    status = str(status or "").strip()
+    if status and status not in WORKBENCH_STATUSES:
+        _throw("发票状态无效。")
+    try:
+        bounded_limit = int(limit or 200)
+    except (TypeError, ValueError):
+        _throw("查询数量无效。")
+    if bounded_limit < 1 or bounded_limit > 300:
+        _throw("查询数量必须在 1 到 300 之间。")
+    filters = {}
+    if not (view == "all" and roles & WORKBENCH_PRIVILEGED_ROLES):
+        filters["owner"] = user
+    if status:
+        filters["recognition_status"] = status
+    names = _get_all(
+        RECORD_DOCTYPE,
+        filters=filters,
+        fields=["name"],
+        order_by="modified desc",
+        limit=bounded_limit,
+    )
+    rows = []
+    for item in names:
+        name = str(_get(item, "name") or "").strip()
+        if not name:
+            continue
+        record = frappe.get_doc(RECORD_DOCTYPE, name)
+        if can_read_invoice(record, user):
+            rows.append(_serialize_record(record))
+    return rows
+
+
+def unconfirm_invoice(invoice_name, note=None):
+    name = str(invoice_name or "").strip()
+    note = _bounded_note(note)
+    with _transaction_lock("record", name):
+        record = _require_record(name, write=True, current=True)
+        status = str(_get(record, "recognition_status") or "")
+        if status != "已确认":
+            _throw("只有已确认发票可以撤回确认。")
+        if str(_get(record, "request") or "").strip() or str(_get(record, "expense_line_key") or "").strip():
+            _throw("该发票已下推，请先撤回下推后再撤回确认。")
+        _set(record, "recognition_status", "待确认")
+        _set(record, "confirmed_by", "")
+        _set(record, "confirmed_on", None)
+        _append_record_event(record, "撤回确认", status, "待确认", note)
+        _save(record)
         _recompute_record_batch(record)
         return _serialize_record(record)
 

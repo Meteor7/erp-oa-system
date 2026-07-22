@@ -1,4 +1,5 @@
 import json
+from contextlib import ExitStack
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import frappe
@@ -33,6 +34,8 @@ FINANCE_ROLES = {"System Manager", "Accounts User"}
 
 SOURCE_MANUAL = "\u624b\u5de5\u65b0\u5efa"
 SOURCE_PUSH = "\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8"
+SOURCE_INVOICE_PUSH = "发票下推"
+OPERATION_LOG_LIMIT = 100
 
 CD_WAIT_UPLOAD = "\u5f85\u4e0a\u4f20"
 CD_UPLOADED = "\u5df2\u4e0a\u4f20\u53d1\u7968"
@@ -160,6 +163,53 @@ def _parse_json(value, default=None):
         return json.loads(value)
     except Exception:
         return default
+
+
+def _operation_events(doc):
+    raw = getattr(doc, "operation_log", None) or "[]"
+    try:
+        events = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (TypeError, ValueError):
+        events = []
+    return events if isinstance(events, list) else []
+
+
+def _append_request_event(doc, action, from_status, to_status, note="", details=None):
+    note = _bounded_optional_text(note, "操作说明", 500)
+    events = _operation_events(doc)
+    event = {
+        "action": str(action),
+        "actor": frappe.session.user,
+        "acted_on": str(now_datetime()),
+        "from_status": str(from_status or ""),
+        "to_status": str(to_status or ""),
+        "note": note,
+    }
+    if details:
+        event["details"] = details
+    events.append(event)
+    doc.operation_log = json.dumps(events[-OPERATION_LOG_LIMIT:], ensure_ascii=False)
+    return event
+
+
+def _invoice_names(value):
+    rows = _parse_json(value, None)
+    if not isinstance(rows, list) or not rows or len(rows) > 100:
+        frappe.throw(frappe._("请选择 1 到 100 张发票。"))
+    names = []
+    seen = set()
+    for item in rows:
+        if not isinstance(item, str):
+            frappe.throw(frappe._("发票标识格式无效。"))
+        name = item.strip()
+        if not name or len(name) > 140 or "\x00" in name:
+            frappe.throw(frappe._("发票标识格式无效。"))
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+    if not names:
+        frappe.throw(frappe._("请选择要操作的发票。"))
+    return names
 
 
 DRAFT_REASON_JSON_MAX_BYTES = 64 * 1024
@@ -302,9 +352,9 @@ def _serialize_doc_step(step):
         "approvers": _parse_json_list(step.approvers),
         "status": step.status,
         "approved_by": _parse_json_list(step.approved_by),
-        "action_by": step.action_by,
-        "acted_on": step.acted_on,
-        "note": step.note,
+        "action_by": getattr(step, "action_by", None),
+        "acted_on": getattr(step, "acted_on", None),
+        "note": getattr(step, "note", None),
     }
 
 
@@ -441,6 +491,7 @@ def _summarize_doc(doc):
         "source_type": getattr(doc, "source_type", None) or SOURCE_MANUAL,
         "source_summary": getattr(doc, "source_summary", None),
         "from_consumption": (getattr(doc, "source_type", None) == SOURCE_PUSH),
+        "from_invoice_push": (getattr(doc, "source_type", None) == SOURCE_INVOICE_PUSH),
         "payment_type": getattr(doc, "payment_type", None),
         "payment_method": getattr(doc, "payment_method", None),
         "bank_name": getattr(doc, "bank_name", None),
@@ -457,6 +508,8 @@ def _summarize_doc(doc):
         "current_step_mode": step.mode if step else "",
         "can_act": _can_act_on_current_step(doc),
         "can_mark_paid": doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_COMPLETED and _is_finance_user(),
+        "can_withdraw": doc.workflow_status not in {STATUS_DRAFT, STATUS_PAID} and invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user),
+        "can_withdraw_payment": doc.workflow_status == STATUS_PAID and _is_finance_user(),
         "invoice_count": invoice_summary["invoice_count"],
         "invoice_status": invoice_summary["invoice_status"],
         "invoice_search_text": invoice_summary.get("invoice_search_text", ""),
@@ -464,6 +517,7 @@ def _summarize_doc(doc):
         "invoice_project_names": invoice_summary.get("invoice_project_names", []),
         "invoice_numbers": invoice_summary.get("invoice_numbers", []),
         "no_invoice_reason": getattr(doc, "no_invoice_reason", None) or "",
+        "operation_log": _operation_events(doc),
         "expense_lines": [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])],
         "steps": [_serialize_doc_step(row) for row in doc.steps],
         "creation": doc.creation,
@@ -701,6 +755,7 @@ def _build_request_doc(
             "invoice_status": "无发票",
             "no_invoice_reason": no_invoice_reason or "",
             "reason": reason or "",
+            "operation_log": "[]",
             "current_step_index": 1 if submit else 0,
             "current_step_label": steps[0]["label"] if submit else "",
         }
@@ -1154,3 +1209,166 @@ def mark_paid(name, note=None):
             doc.reason = ((doc.reason or "") + "\n" + "\u4ed8\u6b3e\u5907\u6ce8\uff1a" + note).strip()
         doc.save(ignore_permissions=True)
         return _summarize_doc(doc)
+
+def _reset_request_to_draft(doc, note=""):
+    old_status = doc.workflow_status
+    details = {"steps": [_serialize_doc_step(row) for row in list(getattr(doc, "steps", []) or [])]}
+    ctx = _route_context(
+        department=doc.department,
+        supervisor=doc.supervisor,
+        asset_category=doc.asset_category,
+    )
+    route = preview_route(
+        doc.request_type,
+        ctx["department"],
+        ctx["supervisor"],
+        ctx["asset_category"],
+        active=False,
+    )
+    _append_steps(doc, route["steps"])
+    doc.workflow_status = STATUS_DRAFT
+    doc.current_step_index = 0
+    doc.current_step_label = ""
+    _append_request_event(doc, "撤回申请", old_status, STATUS_DRAFT, note, details)
+    return doc
+
+
+@frappe.whitelist(methods=["POST"])
+def push_invoices_to_request(invoice_names, payment_info=None):
+    names = _invoice_names(invoice_names)
+    info = _parse_json(payment_info, {}) or {}
+    if not isinstance(info, dict):
+        frappe.throw(frappe._("付款信息格式无效。"))
+    with ExitStack() as locks:
+        for name in sorted(names):
+            locks.enter_context(invoice_service._transaction_lock("record", name))
+        records = []
+        for name in sorted(names):
+            record = invoice_service._require_record(name, write=True, current=True)
+            if str(getattr(record, "recognition_status", "") or "") != INVOICE_CONFIRMED:
+                frappe.throw(frappe._("只有已确认发票可以下推。"))
+            if str(getattr(record, "request", "") or "").strip():
+                frappe.throw(frappe._("发票 {0} 已下推到其他报销单。").format(name))
+            records.append(record)
+        expense_lines = [
+            {
+                "source_invoice": record.name,
+                "invoice_category": getattr(record, "invoice_category", None),
+                "project_name": getattr(record, "project_name", None),
+                "issue_date": getattr(record, "issue_date", None),
+                "invoice_number": getattr(record, "invoice_number", None),
+                "amount_before_tax": getattr(record, "amount_before_tax", None),
+                "tax_amount": getattr(record, "tax_amount", None),
+                "total_amount": getattr(record, "total_amount", None),
+                "attachment_count": 1,
+                "invoice_status": INVOICE_CONFIRMED,
+            }
+            for record in records
+        ]
+        doc = _build_request_doc(
+            request_type=REQUEST_EXPENSE_PAYMENT,
+            subject=_clean(info.get("subject")) or "发票报销-" + (records[0].project_name or records[0].invoice_number or records[0].name),
+            department=info.get("department"),
+            supervisor=info.get("supervisor"),
+            asset_category=info.get("asset_category") or OTHER_ASSET,
+            reason=info.get("reason"),
+            submit=False,
+            expense_lines=expense_lines,
+            company=info.get("company"),
+            doc_type=info.get("doc_type"),
+            urgency=info.get("urgency"),
+            payment_type=info.get("payment_type"),
+            payment_method=info.get("payment_method"),
+            bank_name=info.get("bank_name"),
+            payee_name=info.get("payee_name"),
+            branch=info.get("branch"),
+            account_no=info.get("account_no"),
+            source_type=SOURCE_INVOICE_PUSH,
+            source_summary="、".join(record.name for record in records),
+            no_invoice_reason="",
+        )
+        lines = {str(row.source_invoice): row for row in doc.expense_lines}
+        for record in records:
+            line = lines[record.name]
+            record.request = doc.name
+            record.expense_line_key = line.line_key
+            invoice_service._append_record_event(record, "发票下推", INVOICE_CONFIRMED, INVOICE_CONFIRMED, doc.name)
+            invoice_service._save(record)
+        _append_request_event(doc, "发票下推", STATUS_DRAFT, STATUS_DRAFT, "、".join(names))
+        invoice_service._apply_request_invoice_summary(doc, save=False)
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def withdraw_request(name, note=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        invoice_service._request_permission(doc, "edit", current=True)
+        if doc.workflow_status == STATUS_PAID:
+            frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
+        if doc.workflow_status == STATUS_DRAFT:
+            return _summarize_doc(doc)
+        _reset_request_to_draft(doc, note)
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def withdraw_payment(name, note=None):
+    _require_finance_user()
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        if doc.request_type != REQUEST_EXPENSE_PAYMENT or doc.workflow_status != STATUS_PAID:
+            frappe.throw(frappe._("只有已付款报销单可以撤回付款。"))
+        old_status = doc.workflow_status
+        doc.workflow_status = STATUS_COMPLETED
+        doc.paid_by = ""
+        doc.paid_on = None
+        _append_request_event(doc, "撤回付款", old_status, STATUS_COMPLETED, note)
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def withdraw_invoice_push(invoice_names, note=None):
+    names = _invoice_names(invoice_names)
+    note = _bounded_optional_text(note, "操作说明", 500)
+    with ExitStack() as locks:
+        for name in sorted(names):
+            locks.enter_context(invoice_service._transaction_lock("record", name))
+        records = [invoice_service._require_record(name, write=True, current=True) for name in sorted(names)]
+        request_names = sorted({str(record.request or "").strip() for record in records if str(record.request or "").strip()})
+        if not request_names or any(not str(record.request or "").strip() for record in records):
+            frappe.throw(frappe._("所选发票中存在尚未下推的记录。"))
+        for request_name in request_names:
+            locks.enter_context(invoice_service._transaction_lock("request", request_name))
+        results = []
+        for request_name in request_names:
+            doc = _load_request(request_name, current=True)
+            invoice_service._request_permission(doc, "edit", current=True)
+            if doc.workflow_status == STATUS_PAID:
+                frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
+            if doc.workflow_status != STATUS_DRAFT:
+                _reset_request_to_draft(doc, note)
+            selected = [record for record in records if str(record.request) == request_name]
+            selected_keys = {str(record.expense_line_key or "") for record in selected}
+            remaining = [
+                _serialize_expense_line(row)
+                for row in list(doc.expense_lines or [])
+                if str(getattr(row, "line_key", "") or "") not in selected_keys
+            ]
+            _set_expense_lines(doc, remaining)
+            doc.amount = sum(_money(row.amount) for row in doc.expense_lines)
+            for record in selected:
+                record.request = ""
+                record.expense_line_key = ""
+                invoice_service._append_record_event(record, "撤回发票下推", INVOICE_CONFIRMED, INVOICE_CONFIRMED, note)
+                invoice_service._save(record)
+            _append_request_event(doc, "撤回发票下推", STATUS_DRAFT, STATUS_DRAFT, note, {"invoices": [record.name for record in selected]})
+            invoice_service._apply_request_invoice_summary(doc, save=False)
+            doc.save(ignore_permissions=True)
+            results.append(_summarize_doc(doc))
+        return results[0] if len(results) == 1 else {"requests": results, "invoice_names": names}

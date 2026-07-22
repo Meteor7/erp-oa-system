@@ -63,6 +63,21 @@ def confirm_invoice(invoice_name, values=None):
 
 
 @frappe.whitelist(methods=["POST"])
+def list_workbench(view="mine", status=None, limit=200):
+    _authenticated()
+    return service.list_workbench_invoices(view=view, status=status, limit=limit)
+
+
+@frappe.whitelist(methods=["POST"])
+def unconfirm_invoice(invoice_name, note=None):
+    _authenticated()
+    return service.unconfirm_invoice(
+        _bounded(invoice_name, "发票标识", 140),
+        _bounded(note, "操作说明", 500, required=False),
+    )
+
+
+@frappe.whitelist(methods=["POST"])
 def retry_invoice(invoice_name):
     _authenticated()
     return service.retry_invoice(_bounded(invoice_name, "发票标识", 140))

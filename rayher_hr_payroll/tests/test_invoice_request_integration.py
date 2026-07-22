@@ -1054,3 +1054,177 @@ def test_serialize_expense_line_maps_legacy_values_without_losing_zero_money():
     assert result["amount_before_tax"] == Decimal("0.00")
     assert result["tax_amount"] == Decimal("0.00")
     assert result["total_amount"] == Decimal("12.00")
+
+
+def _push_record(name, *, status="已确认", total="35.98", request="", batch="BATCH-1"):
+    return Row(
+        doctype=service.RECORD_DOCTYPE,
+        name=name,
+        owner="alice@example.com",
+        batch=batch,
+        recognition_status=status,
+        request=request,
+        expense_line_key="",
+        invoice_category="电子发票（普通发票）",
+        project_name=f"项目-{name}",
+        issue_date="2026-07-14",
+        invoice_number=f"NO-{name}",
+        amount_before_tax=Decimal("35.62"),
+        tax_amount=Decimal("0.36"),
+        total_amount=Decimal(total),
+        operation_log="[]",
+        save=lambda ignore_permissions=False: None,
+    )
+
+
+def _install_invoice_push_environment(monkeypatch, records):
+    environment = _install_request_environment(monkeypatch)
+    locks = []
+
+    @contextmanager
+    def transaction_lock(category, *parts, **_kwargs):
+        locks.append((category, *parts))
+        yield object()
+
+    def require_record(name, write=False, current=False):
+        assert write is True and current is True
+        return records[name]
+
+    monkeypatch.setattr(service, "_transaction_lock", transaction_lock)
+    monkeypatch.setattr(service, "_require_record", require_record)
+    monkeypatch.setattr(service, "_save", lambda doc: doc.save(ignore_permissions=True))
+    monkeypatch.setattr(
+        service,
+        "_apply_request_invoice_summary",
+        lambda doc, save=False, current=False: (
+            setattr(doc, "invoice_count", len([row for row in records.values() if row.request == doc.name]))
+            or setattr(doc, "invoice_status", "已确认")
+            or {"invoice_count": doc.invoice_count, "invoice_status": doc.invoice_status}
+        ),
+    )
+    monkeypatch.setattr(
+        oa_entry,
+        "_summarize_doc",
+        lambda doc: {
+            "name": doc.name,
+            "workflow_status": doc.workflow_status,
+            "source_type": doc.source_type,
+            "amount": doc.amount,
+            "expense_lines": [oa_entry._serialize_expense_line(line) for line in doc.expense_lines],
+            "operation_log": json.loads(doc.operation_log or "[]"),
+        },
+    )
+    return environment, locks
+
+
+def test_push_confirmed_invoices_creates_one_draft_with_one_exact_line_each(monkeypatch):
+    records = {
+        "INV-1": _push_record("INV-1", batch="BATCH-A"),
+        "INV-2": _push_record("INV-2", total="106.00", batch="BATCH-B"),
+    }
+    environment, locks = _install_invoice_push_environment(monkeypatch, records)
+    result = oa_entry.push_invoices_to_request(
+        '["INV-2","INV-1"]',
+        payment_info=json.dumps({"subject": "差旅发票报销", "department": "研发部"}, ensure_ascii=False),
+    )
+    request = environment.pending[result["name"]]
+    assert request.workflow_status == oa_entry.STATUS_DRAFT
+    assert request.source_type == oa_entry.SOURCE_INVOICE_PUSH
+    assert len(request.expense_lines) == 2
+    assert {line.source_invoice for line in request.expense_lines} == {"INV-1", "INV-2"}
+    assert {line.project_name for line in request.expense_lines} == {"项目-INV-1", "项目-INV-2"}
+    assert request.amount == 141.98
+    assert {record.request for record in records.values()} == {request.name}
+    assert all(record.expense_line_key for record in records.values())
+    assert locks[:2] == [("record", "INV-1"), ("record", "INV-2")]
+    assert result["operation_log"][-1]["action"] == "发票下推"
+
+
+@pytest.mark.parametrize(
+    ("status", "linked_request", "message"),
+    [("待确认", "", "已确认"), ("已确认", "OA-OTHER", "已下推")],
+)
+def test_push_rejects_unconfirmed_or_already_linked_invoice(monkeypatch, status, linked_request, message):
+    records = {"INV-1": _push_record("INV-1", status=status, request=linked_request)}
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    with pytest.raises(ValidationError, match=message):
+        oa_entry.push_invoices_to_request(["INV-1"])
+    assert environment.pending == {}
+
+
+def test_request_and_push_withdrawals_are_reversible_and_audited(monkeypatch):
+    records = {"INV-1": _push_record("INV-1", request="REQ-WITHDRAW")}
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    line_key = "11111111-1111-4111-8111-111111111111"
+    records["INV-1"].expense_line_key = line_key
+    request = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-WITHDRAW",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "employee": "EMP-1",
+            "department": "研发部",
+            "supervisor": "",
+            "asset_category": oa_entry.OTHER_ASSET,
+            "subject": "报销",
+            "source_type": oa_entry.SOURCE_INVOICE_PUSH,
+            "amount": 35.98,
+            "paid_by": "",
+            "paid_on": None,
+            "operation_log": "[]",
+            "expense_lines": [
+                Row(
+                    source_invoice="INV-1", line_key=line_key, total_amount=35.98,
+                    amount=35.98, category="电子发票（普通发票）", project_name="项目-INV-1",
+                    description="项目-INV-1", invoice_category="电子发票（普通发票）",
+                    issue_date="2026-07-14", invoice_number="NO-INV-1",
+                    amount_before_tax=35.62, tax_amount=0.36, start_date="2026-07-14",
+                    end_date="2026-07-14", attachment_count=1, invoice_status="已确认",
+                    invoice_difference_reason="",
+                )
+            ],
+            "steps": [Row(step_index=1, label="财务审核", mode="approve", approvers="[]", status=oa_entry.STATUS_PENDING, approved_by="[]")],
+            "current_step_index": 1,
+            "current_step_label": "财务审核",
+        },
+    )
+    environment.committed[request.name] = request
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    result = oa_entry.withdraw_invoice_push(["INV-1"], note="选错发票")
+    assert request.workflow_status == oa_entry.STATUS_DRAFT
+    assert request.expense_lines == [] and request.amount == 0
+    assert records["INV-1"].request == "" and records["INV-1"].expense_line_key == ""
+    assert [event["action"] for event in result["operation_log"]][-2:] == ["撤回申请", "撤回发票下推"]
+
+
+def test_paid_request_requires_finance_payment_withdrawal(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    request = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-PAID",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PAID,
+            "paid_by": "finance@example.com",
+            "paid_on": "2026-07-21 10:00:00",
+            "operation_log": "[]",
+            "expense_lines": [],
+            "steps": [],
+        },
+    )
+    environment.committed[request.name] = request
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc: {"workflow_status": doc.workflow_status, "operation_log": json.loads(doc.operation_log or "[]")})
+    with pytest.raises(ValidationError, match="财务"):
+        oa_entry.withdraw_request(request.name)
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    result = oa_entry.withdraw_payment(request.name, "付款信息有误")
+    assert result["workflow_status"] == oa_entry.STATUS_COMPLETED
+    assert request.paid_by == "" and request.paid_on is None
+    assert result["operation_log"][-1]["action"] == "撤回付款"

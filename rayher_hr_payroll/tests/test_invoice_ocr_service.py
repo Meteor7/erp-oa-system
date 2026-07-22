@@ -705,7 +705,7 @@ def test_job_is_idempotent_for_terminal_record(env, monkeypatch):
 def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monkeypatch):
     import inspect
     api = importlib.import_module("rayher_hr_payroll.api.invoice_entry")
-    expected = {"create_batch", "register_file", "get_batch", "update_invoice", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice"}
+    expected = {"create_batch", "register_file", "get_batch", "update_invoice", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice", "list_workbench", "unconfirm_invoice"}
     for name in expected:
         function = getattr(api, name)
         assert all(parameter.kind not in {inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL} for parameter in inspect.signature(function).parameters.values())
@@ -719,9 +719,9 @@ def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monk
 
 def test_api_source_whitelists_only_public_endpoints():
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 13
+    assert source.count("@frappe.whitelist") == 15
     assert "@frappe.whitelist\ndef _" not in source
-    assert source.count('methods=["POST"]') == 11
+    assert source.count('methods=["POST"]') == 13
     assert source.count('methods=["GET"]') == 0
 
 
@@ -812,6 +812,8 @@ def test_every_whitelisted_api_rejects_guest_before_delegation(env, monkeypatch)
     frappe_stub_module.session.user = "Guest"
     for name in ["create_batch", "register_file", "get_batch", "update_invoice", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice"]:
         monkeypatch.setattr(api.service, name, Mock(return_value={"leaked": True}))
+    monkeypatch.setattr(api.service, "list_workbench_invoices", Mock(return_value={"leaked": True}))
+    monkeypatch.setattr(api.service, "unconfirm_invoice", Mock(return_value={"leaked": True}))
     calls = [
         lambda: api.create_batch(),
         lambda: api.register_file("BATCH-1", "/private/files/a.pdf"),
@@ -824,6 +826,8 @@ def test_every_whitelisted_api_rejects_guest_before_delegation(env, monkeypatch)
         lambda: api.resolve_duplicate("INV-1", "reason"),
         lambda: api.get_request_invoices("REQ-1"),
         lambda: api.preview_invoice("INV-1"),
+        lambda: api.list_workbench(),
+        lambda: api.unconfirm_invoice("INV-1"),
     ]
     for function in calls:
         with pytest.raises(ValidationError, match="登录"):
@@ -1681,7 +1685,7 @@ def test_preview_serve_api_is_explicit_post_and_bounded(env, monkeypatch):
     api_module.serve_invoice_preview("x" * 43)
     delegated.assert_called_once_with("x" * 43)
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 13
+    assert source.count("@frappe.whitelist") == 15
     assert 'methods=["POST"]' in source
     assert 'methods=["GET"]' not in source
 
@@ -3163,3 +3167,44 @@ def test_register_reloads_file_after_insert_auto_relink_without_stale_save(
     assert env.current_read_calls.count(
         ("get_doc", "File", stale_file.name)
     ) >= 2
+
+
+def test_workbench_listing_scopes_owner_and_bounds_filters(env):
+    env.add_batch()
+    env.add_record(name="INV-OWN-CONFIRMED", recognition_status="已确认")
+    env.add_record(name="INV-OWN-PENDING", recognition_status="待确认")
+    env.add_record(name="INV-OTHER", owner="other@example.com", uploaded_by="other@example.com", recognition_status="已确认")
+    rows = service.list_workbench_invoices()
+    assert {row["name"] for row in rows} == {"INV-OWN-CONFIRMED", "INV-OWN-PENDING"}
+    assert all("ocr_payload" not in row for row in rows)
+    confirmed = service.list_workbench_invoices(status="已确认")
+    assert [row["name"] for row in confirmed] == ["INV-OWN-CONFIRMED"]
+    frappe_stub_module.session.user = "finance@example.com"
+    assert {row["name"] for row in service.list_workbench_invoices(view="all")} == {
+        "INV-OWN-CONFIRMED", "INV-OWN-PENDING", "INV-OTHER",
+    }
+    with pytest.raises(ValidationError, match="状态"):
+        service.list_workbench_invoices(status="伪造状态")
+    with pytest.raises(ValidationError, match="数量"):
+        service.list_workbench_invoices(limit=301)
+
+
+def test_unconfirm_invoice_requires_unlinked_confirmed_record_and_audits(env):
+    env.add_batch()
+    record = env.add_record(
+        recognition_status="已确认",
+        confirmed_by="alice@example.com",
+        confirmed_on=datetime(2026, 7, 21, 9, 0, 0),
+        operation_log="[]",
+    )
+    result = service.unconfirm_invoice(record.name, "识别内容需要重核")
+    assert result["recognition_status"] == "待确认"
+    assert record.confirmed_by == "" and record.confirmed_on is None
+    event = json.loads(record.operation_log)[-1]
+    assert event["action"] == "撤回确认"
+    assert event["from_status"] == "已确认" and event["to_status"] == "待确认"
+    assert event["note"] == "识别内容需要重核"
+    record.recognition_status = "已确认"
+    record.request = "OA-1"
+    with pytest.raises(ValidationError, match="下推"):
+        service.unconfirm_invoice(record.name)
