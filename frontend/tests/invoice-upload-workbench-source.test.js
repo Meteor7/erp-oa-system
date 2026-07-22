@@ -33,6 +33,23 @@ test('invoice upload workspace provides batch review selection detail push and p
   assert.doesNotMatch(source, /<a\b|download/);
 });
 
+
+test('invoice push form uses readonly current applicant and canonical payment labels', () => {
+  const source = readFileSync(componentUrl, 'utf8');
+  assert.match(source, /current_applicant/);
+  assert.ok(source.includes('申请人'));
+  assert.doesNotMatch(source, /v-model="pushForm\.supervisor"/);
+  assert.doesNotMatch(source, />部门主管</);
+  assert.ok(source.includes('付款类型'));
+  assert.ok(source.includes('支付方式'));
+  const payee = source.indexOf('收款人');
+  const method = source.indexOf('支付方式');
+  const bank = source.indexOf('开户行');
+  const branch = source.indexOf('支行');
+  const account = source.indexOf('收款账号');
+  assert.ok(method < payee && payee < bank && bank < branch && branch < account);
+});
+
 test('expense workbench uses four first-class pages and exact seven-column details', () => {
   assert.ok(expense.includes('上传发票'));
   assert.ok(expense.includes('费用报销流'));

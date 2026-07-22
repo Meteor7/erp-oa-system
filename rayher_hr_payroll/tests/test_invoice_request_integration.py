@@ -1541,6 +1541,41 @@ def _report_request(
     )
 
 
+def test_get_options_exposes_current_applicant_and_canonical_payment_types(monkeypatch):
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Employee"])
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {"employee": "EMP-1", "employee_name": "Alice", "department": "研发部", "supervisor": "Manager"},
+    )
+
+    result = oa_entry.get_options()
+
+    assert result["payment_types"] == ["支付个人", "对公支付"]
+    assert result["current_applicant"] == {
+        "employee": "EMP-1",
+        "employee_name": "Alice",
+        "user": "alice@example.com",
+    }
+
+
+def test_legacy_personal_payment_type_is_displayed_canonically(monkeypatch):
+    doc = _report_request("REQ-LEGACY")
+    doc.payment_type = "付款申请"
+    monkeypatch.setattr(
+        service,
+        "request_invoice_summary",
+        lambda _doc: {
+            "invoice_count": 0, "invoice_status": "无发票", "invoice_search_text": "",
+            "invoice_categories": [], "invoice_project_names": [], "invoice_numbers": [],
+        },
+    )
+
+    result = oa_entry._summarize_doc(doc)
+
+    assert result["payment_type"] == "支付个人"
+
+
 def _install_report_requests(monkeypatch, docs):
     def matches(doc, filters):
         for key, expected in (filters or {}).items():

@@ -97,13 +97,25 @@ DOC_TYPES = [
     "\u56fa\u5b9a\u8d44\u4ea7-\u751f\u4ea7\u8bbe\u5907",
 ]
 URGENCY = ["\u4e00\u822c", "\u52a0\u6025"]
-PAYMENT_TYPES = ["\u4ed8\u6b3e\u7533\u8bf7", "\u5bf9\u516c\u652f\u4ed8"]
+PAYMENT_PERSONAL = "支付个人"
+PAYMENT_PERSONAL_LEGACY = "付款申请"
+PAYMENT_TYPES = [PAYMENT_PERSONAL, "对公支付"]
 PAYMENT_METHODS = ["\u94f6\u884c\u8f6c\u8d26", "\u73b0\u91d1\u652f\u4ed8"]
 COMPANIES = ["\u67d0\u67d0\u5149\u534a\u5bfc\u4f53\u79d1\u6280\u6709\u9650\u516c\u53f8", "\u793a\u4f8b\u4f01\u4e1a025\u4e0a\u6d77\u6709\u9650\u516c\u53f8"]
 
 
 def _clean(value):
     return str(value or "").strip()
+
+
+def _display_payment_type(value):
+    value = _clean(value)
+    return PAYMENT_PERSONAL if value == PAYMENT_PERSONAL_LEGACY else value
+
+
+def _canonical_payment_type(value):
+    value = _display_payment_type(value)
+    return value if value in PAYMENT_TYPES else PAYMENT_TYPES[0]
 
 
 def _bounded_optional_text(value, label, limit):
@@ -574,7 +586,7 @@ def _summarize_doc(doc):
         "source_summary": getattr(doc, "source_summary", None),
         "from_consumption": (getattr(doc, "source_type", None) == SOURCE_PUSH),
         "from_invoice_push": (getattr(doc, "source_type", None) == SOURCE_INVOICE_PUSH),
-        "payment_type": getattr(doc, "payment_type", None),
+        "payment_type": _display_payment_type(getattr(doc, "payment_type", None)),
         "payment_method": getattr(doc, "payment_method", None),
         "bank_name": getattr(doc, "bank_name", None),
         "payee_name": getattr(doc, "payee_name", None),
@@ -832,7 +844,7 @@ def _build_request_doc(
             "asset_category": ctx.get("asset_category"),
             "source_type": source_type or SOURCE_MANUAL,
             "source_summary": source_summary or "",
-            "payment_type": payment_type or PAYMENT_TYPES[0],
+            "payment_type": _canonical_payment_type(payment_type),
             "payment_method": payment_method or PAYMENT_METHODS[0],
             "bank_name": bank_name or "",
             "payee_name": payee_name or ctx.get("employee_name") or "",
@@ -920,6 +932,7 @@ def _consumption_filters(view="mine", status=None):
 @frappe.whitelist()
 def get_options():
     roles = set(frappe.get_roles(frappe.session.user))
+    context = _employee_context()
     return {
         "request_types": REQUEST_TYPES,
         "asset_categories": ASSET_CATEGORIES,
@@ -930,7 +943,12 @@ def get_options():
         "payment_types": PAYMENT_TYPES,
         "payment_methods": PAYMENT_METHODS,
         "companies": COMPANIES,
-        "context": _employee_context(),
+        "context": context,
+        "current_applicant": {
+            "employee": context.get("employee"),
+            "employee_name": context.get("employee_name") or "",
+            "user": frappe.session.user,
+        },
         "can_manage_expense": bool(roles & FINANCE_ROLES),
         "can_see_all": bool(roles & PRIVILEGED_ROLES),
     }
@@ -1860,7 +1878,7 @@ def push_invoices_to_request(invoice_names, payment_info=None):
             request_type=REQUEST_EXPENSE_PAYMENT,
             subject=_clean(info.get("subject")) or "发票报销-" + (records[0].project_name or records[0].invoice_number or records[0].name),
             department=info.get("department"),
-            supervisor=info.get("supervisor"),
+            supervisor=None,
             asset_category=info.get("asset_category") or OTHER_ASSET,
             reason=info.get("reason"),
             submit=False,
