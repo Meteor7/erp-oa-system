@@ -737,8 +737,10 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
             continue
         invoice_category = _clean(row.get("invoice_category"))
         project_name = _clean(row.get("project_name"))
+        expense_item = _clean(row.get("expense_item"))
+        description = _clean(row.get("description") or row.get("desc"))
         issue_date = row.get("issue_date") or row.get("start_date") or row.get("expense_date")
-        category = invoice_category or _clean(row.get("category")) or project_name or REQUEST_EXPENSE_PAYMENT
+        category = invoice_category or expense_item or _clean(row.get("category")) or project_name or REQUEST_EXPENSE_PAYMENT
         normalized.append(
             {
                 "source_consumption": row.get("source_consumption"),
@@ -746,7 +748,7 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
                 "line_key": _expense_line_key(row, seen_line_keys),
                 "invoice_category": invoice_category,
                 "project_name": project_name,
-                "expense_item": _clean(row.get("expense_item")),
+                "expense_item": expense_item,
                 "no_invoice_reason": _bounded_optional_text(row.get("no_invoice_reason"), "无票原因", 1000),
                 "issue_date": issue_date,
                 "invoice_number": _clean(row.get("invoice_number")),
@@ -757,7 +759,7 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
                 "end_date": row.get("end_date") or issue_date,
                 "category": category,
                 "amount": amount,
-                "description": project_name or _clean(row.get("description") or row.get("desc")),
+                "description": (project_name if source_invoice else description) or project_name,
                 "attachment_count": int(row.get("attachment_count") or row.get("invoice_count") or (1 if source_invoice else 0)),
                 "invoice_status": _clean(row.get("invoice_status")) or (INVOICE_CONFIRMED if source_invoice else (INVOICE_UPLOADED if row.get("attachment_count") else "")),
                 "invoice_difference_reason": _difference_reason(row.get("invoice_difference_reason")),
@@ -993,6 +995,158 @@ def create_request(
         _submit_draft(doc)
     doc.save(ignore_permissions=True)
     return _summarize_doc(doc)
+
+
+def _draft_source_rows(source_lines):
+    rows = _parse_json(source_lines, None)
+    if not isinstance(rows, list) or len(rows) > 200:
+        frappe.throw(frappe._("报销费用明细格式无效，单次最多 200 行。"))
+    for row in rows:
+        if not isinstance(row, dict):
+            frappe.throw(frappe._("报销费用明细格式无效。"))
+    return rows
+
+
+def _manual_expense_source(payload, existing=None):
+    source = dict(existing or {})
+    for fieldname in (
+        "project_name", "expense_item", "issue_date", "total_amount",
+        "description", "no_invoice_reason", "line_key",
+    ):
+        if fieldname in payload:
+            source[fieldname] = payload.get(fieldname)
+    project_name = _bounded_optional_text(source.get("project_name"), "项目名称", 1000)
+    expense_item = _bounded_optional_text(source.get("expense_item"), "费用项目", 140)
+    issue_date = _clean(source.get("issue_date"))
+    total_amount = _optional_money(source.get("total_amount"))
+    description = _bounded_optional_text(source.get("description"), "费用说明", 1000)
+    no_invoice_reason = _bounded_optional_text(source.get("no_invoice_reason"), "无票原因", 1000)
+    if not project_name:
+        frappe.throw(frappe._("手工费用必须填写项目名称。"))
+    if not expense_item:
+        frappe.throw(frappe._("手工费用必须填写费用项目。"))
+    if not issue_date:
+        frappe.throw(frappe._("手工费用必须填写日期。"))
+    if total_amount is None or total_amount <= 0:
+        frappe.throw(frappe._("手工费用金额必须大于 0。"))
+    if not description:
+        frappe.throw(frappe._("手工费用必须填写费用说明。"))
+    if not no_invoice_reason:
+        frappe.throw(frappe._("手工费用必须填写无票原因。"))
+    source.update(
+        {
+            "source_invoice": None,
+            "source_consumption": None,
+            "project_name": project_name,
+            "expense_item": expense_item,
+            "no_invoice_reason": no_invoice_reason,
+            "invoice_category": "",
+            "issue_date": issue_date,
+            "invoice_number": "",
+            "amount_before_tax": None,
+            "tax_amount": None,
+            "total_amount": total_amount,
+            "category": expense_item,
+            "amount": total_amount,
+            "description": description,
+            "start_date": issue_date,
+            "end_date": issue_date,
+            "attachment_count": 0,
+            "invoice_status": "",
+            "invoice_difference_reason": "",
+        }
+    )
+    normalized, _total = _normalize_expense_lines([source])
+    if len(normalized) != 1:
+        frappe.throw(frappe._("手工费用明细无效。"))
+    return normalized[0]
+
+
+def _updated_invoice_source(existing, payload):
+    source = dict(existing)
+    project_value = payload.get("project_name") if "project_name" in payload else source.get("project_name")
+    item_value = payload.get("expense_item") if "expense_item" in payload else source.get("expense_item")
+    source["project_name"] = _bounded_optional_text(project_value, "项目名称", 1000)
+    source["expense_item"] = _bounded_optional_text(item_value, "费用项目", 140)
+    source["no_invoice_reason"] = ""
+    source["description"] = source["project_name"]
+    return source
+
+
+@frappe.whitelist(methods=["POST"])
+def save_draft_expense_sources(name, source_lines):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    payload_rows = _draft_source_rows(source_lines)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        invoice_service._request_permission(doc, "edit", current=True)
+        if doc.request_type != REQUEST_EXPENSE_PAYMENT:
+            frappe.throw(frappe._("只有费用付款/报销单可以编辑费用明细。"))
+        if doc.workflow_status != STATUS_DRAFT:
+            frappe.throw(frappe._("只有草稿状态可以编辑费用明细。"))
+        current_rows = [_serialize_expense_line(row) for row in list(getattr(doc, "expense_lines", []) or [])]
+        current_by_key = {_clean(row.get("line_key")): row for row in current_rows if _clean(row.get("line_key"))}
+        invoice_keys = {key for key, row in current_by_key.items() if _clean(row.get("source_invoice"))}
+        seen_keys = set()
+        prepared = []
+        invoice_sources = []
+        for payload in payload_rows:
+            line_key = _clean(payload.get("line_key"))
+            existing = current_by_key.get(line_key) if line_key else None
+            if line_key and existing is None:
+                frappe.throw(frappe._("费用明细不属于该报销单。"))
+            if line_key in seen_keys:
+                frappe.throw(frappe._("费用明细不能重复。"))
+            supplied_invoice = _clean(payload.get("source_invoice"))
+            existing_invoice = _clean(existing.get("source_invoice")) if existing else ""
+            if existing_invoice:
+                if supplied_invoice and supplied_invoice != existing_invoice:
+                    frappe.throw(frappe._("费用明细不属于该报销单。"))
+                source = _updated_invoice_source(existing, payload)
+                invoice_sources.append(source)
+            else:
+                if supplied_invoice:
+                    frappe.throw(frappe._("费用明细不属于该报销单。"))
+                source = _manual_expense_source(payload, existing)
+            prepared.append(source)
+            seen_keys.add(_clean(source.get("line_key")))
+        if invoice_keys - seen_keys:
+            frappe.throw(frappe._("发票费用不能在草稿编辑中删除，请使用撤回发票操作。"))
+        with ExitStack() as record_locks:
+            invoice_names = sorted({_clean(row.get("source_invoice")) for row in invoice_sources if _clean(row.get("source_invoice"))})
+            for invoice_name in invoice_names:
+                record_locks.enter_context(invoice_service._transaction_lock("record", invoice_name))
+            records = {}
+            for invoice_name in invoice_names:
+                record = invoice_service._require_record(invoice_name, write=True, current=True)
+                records[invoice_name] = record
+            for source in invoice_sources:
+                invoice_name = _clean(source.get("source_invoice"))
+                record = records[invoice_name]
+                if _clean(getattr(record, "request", None)) != doc.name or _clean(getattr(record, "expense_line_key", None)) != _clean(source.get("line_key")):
+                    frappe.throw(frappe._("发票关联已变化，请刷新后重试。"))
+                project_name = _clean(source.get("project_name"))
+                if _clean(getattr(record, "project_name", None)) != project_name:
+                    old_status = getattr(record, "recognition_status", None)
+                    record.project_name = project_name
+                    invoice_service._append_record_event(record, "报销草稿调整", old_status, old_status, doc.name)
+                    invoice_service._save(record)
+            _set_expense_lines(doc, prepared)
+            doc.amount = round(sum(_money(row.get("total_amount")) for row in prepared), 2)
+            _append_request_event(
+                doc,
+                "编辑报销草稿",
+                STATUS_DRAFT,
+                STATUS_DRAFT,
+                details={
+                    "source_count": len(prepared),
+                    "invoice_source_count": len(invoice_sources),
+                    "manual_source_count": len(prepared) - len(invoice_sources),
+                },
+            )
+            invoice_service._apply_request_invoice_summary(doc, save=False, current=True)
+            doc.save(ignore_permissions=True)
+            return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])

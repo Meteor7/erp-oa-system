@@ -1149,10 +1149,159 @@ def _install_invoice_push_environment(monkeypatch, records):
             "source_type": doc.source_type,
             "amount": doc.amount,
             "expense_lines": [oa_entry._serialize_expense_line(line) for line in doc.expense_lines],
+            "project_groups": oa_entry._group_expense_sources([oa_entry._serialize_expense_line(line) for line in doc.expense_lines]),
             "operation_log": json.loads(doc.operation_log or "[]"),
         },
     )
     return environment, locks
+
+
+def _draft_source_edit_request(environment, record, *, status=None):
+    line_key = "11111111-1111-4111-8111-111111111111"
+    record.request = "REQ-EDIT"
+    record.expense_line_key = line_key
+    request = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-EDIT",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": status or oa_entry.STATUS_DRAFT,
+            "employee": "EMP-1",
+            "department": "研发部",
+            "supervisor": "",
+            "asset_category": oa_entry.OTHER_ASSET,
+            "subject": "发票报销",
+            "source_type": oa_entry.SOURCE_INVOICE_PUSH,
+            "amount": 35.98,
+            "invoice_count": 1,
+            "invoice_status": "已确认",
+            "operation_log": "[]",
+            "expense_lines": [
+                Row(
+                    source_invoice=record.name, line_key=line_key,
+                    invoice_category=record.invoice_category, project_name=record.project_name,
+                    expense_item="", no_invoice_reason="", issue_date=record.issue_date,
+                    invoice_number=record.invoice_number, amount_before_tax=record.amount_before_tax,
+                    tax_amount=record.tax_amount, total_amount=record.total_amount,
+                    amount=record.total_amount, category=record.invoice_category,
+                    description=record.project_name, start_date=record.issue_date,
+                    end_date=record.issue_date, attachment_count=1, invoice_status="已确认",
+                    invoice_difference_reason="",
+                )
+            ],
+            "steps": [],
+        },
+    )
+    environment.committed[request.name] = request
+    return request, line_key
+
+
+def _source_edit_payload(line_key, **manual_overrides):
+    manual = {
+        "line_key": "",
+        "project_name": "项目甲",
+        "expense_item": "差旅补贴",
+        "issue_date": "2026-07-22",
+        "total_amount": "80.00",
+        "description": "出差津贴",
+        "no_invoice_reason": "出差津贴无发票",
+    }
+    manual.update(manual_overrides)
+    return [
+        {"line_key": line_key, "source_invoice": "INV-1", "project_name": "项目甲", "expense_item": "交通费"},
+        manual,
+    ]
+
+
+def test_save_draft_expense_sources_updates_invoice_adds_and_deletes_manual_source(monkeypatch):
+    records = {"INV-1": _push_record("INV-1", request="REQ-EDIT")}
+    environment, locks = _install_invoice_push_environment(monkeypatch, records)
+    request, line_key = _draft_source_edit_request(environment, records["INV-1"])
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+
+    result = oa_entry.save_draft_expense_sources(request.name, _source_edit_payload(line_key))
+
+    assert request.amount == pytest.approx(115.98)
+    assert len(request.expense_lines) == 2
+    manual = next(line for line in request.expense_lines if not line.source_invoice)
+    assert _uuid4(manual.line_key)
+    assert manual.project_name == "项目甲"
+    assert manual.expense_item == "差旅补贴"
+    assert manual.description == "出差津贴"
+    assert manual.no_invoice_reason == "出差津贴无发票"
+    assert records["INV-1"].project_name == "项目甲"
+    assert len(result["project_groups"]) == 1
+    assert result["project_groups"][0]["manual_source_count"] == 1
+    assert result["project_groups"][0]["total_amount"] == Decimal("115.98")
+    assert locks[:2] == [("request", request.name), ("record", "INV-1")]
+    assert result["operation_log"][-1]["action"] == "编辑报销草稿"
+
+    result = oa_entry.save_draft_expense_sources(
+        request.name,
+        [{"line_key": line_key, "source_invoice": "INV-1", "project_name": "项目甲", "expense_item": "交通费"}],
+    )
+    assert len(request.expense_lines) == 1
+    assert request.amount == pytest.approx(35.98)
+    assert result["project_groups"][0]["manual_source_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"project_name": ""}, "项目名称"),
+        ({"expense_item": ""}, "费用项目"),
+        ({"issue_date": ""}, "日期"),
+        ({"total_amount": "0"}, "金额"),
+        ({"description": ""}, "说明"),
+        ({"no_invoice_reason": ""}, "无票原因"),
+    ],
+)
+def test_save_draft_expense_sources_validates_manual_required_fields(monkeypatch, override, message):
+    records = {"INV-1": _push_record("INV-1", request="REQ-EDIT")}
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    request, line_key = _draft_source_edit_request(environment, records["INV-1"])
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ValidationError, match=message):
+        oa_entry.save_draft_expense_sources(request.name, _source_edit_payload(line_key, **override))
+
+
+@pytest.mark.parametrize("status", [oa_entry.STATUS_PENDING, oa_entry.STATUS_COMPLETED])
+def test_save_draft_expense_sources_rejects_non_draft(monkeypatch, status):
+    records = {"INV-1": _push_record("INV-1", request="REQ-EDIT")}
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    request, line_key = _draft_source_edit_request(environment, records["INV-1"], status=status)
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ValidationError, match="草稿"):
+        oa_entry.save_draft_expense_sources(request.name, _source_edit_payload(line_key)[:1])
+
+
+def test_save_draft_expense_sources_checks_edit_permission(monkeypatch):
+    records = {"INV-1": _push_record("INV-1", request="REQ-EDIT")}
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    request, line_key = _draft_source_edit_request(environment, records["INV-1"])
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: frappe_stub.throw("没有编辑权限"))
+
+    with pytest.raises(ValidationError, match="权限"):
+        oa_entry.save_draft_expense_sources(request.name, _source_edit_payload(line_key)[:1])
+
+
+def test_save_draft_expense_sources_cannot_remove_or_replace_invoice_lines(monkeypatch):
+    records = {"INV-1": _push_record("INV-1", request="REQ-EDIT")}
+    environment, _locks = _install_invoice_push_environment(monkeypatch, records)
+    request, line_key = _draft_source_edit_request(environment, records["INV-1"])
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ValidationError, match="撤回发票"):
+        oa_entry.save_draft_expense_sources(request.name, [])
+    with pytest.raises(ValidationError, match="不属于"):
+        oa_entry.save_draft_expense_sources(
+            request.name,
+            [{"line_key": "22222222-2222-4222-8222-222222222222", "source_invoice": "INV-X", "project_name": "项目甲", "expense_item": "交通费"}],
+        )
 
 
 def test_push_confirmed_invoices_creates_one_draft_with_one_exact_line_each(monkeypatch):
