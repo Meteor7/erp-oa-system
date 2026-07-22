@@ -1,2 +1,0 @@
-import{q as a}from"./index-CuEuqMlX.js";function r(){const e=new Date;return`${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,"0")}`}const t=a(r()),o=a("month"),i=[{value:"month",label:"月度"},{value:"year",label:"年度"}];function s(e){o.value=e==="year"?"year":"month"}function u(e=t.value){return String(e||r()).slice(0,4)}function l(e=t.value,n=o.value){return n==="year"?`${u(e)}年`:e}export{i as P,o as a,l as b,u as c,t as p,s};
-//# sourceMappingURL=period-Bjrt6Egg.js.map
