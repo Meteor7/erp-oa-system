@@ -7,125 +7,107 @@ const appSource = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8
 const accessSource = readFileSync(new URL('../src/lib/access.js', import.meta.url), 'utf8');
 const pageSource = readFileSync(new URL('../src/pages/OAApprovals.vue', import.meta.url), 'utf8');
 const workbenchSource = readFileSync(new URL('../src/components/ExpenseWorkbench.vue', import.meta.url), 'utf8');
+const uploadSource = readFileSync(new URL('../src/components/invoice/InvoiceUploadWorkbench.vue', import.meta.url), 'utf8');
+const invoiceLibSource = readFileSync(new URL('../src/lib/invoiceOcr.js', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../../rayher_hr_payroll/api/oa_entry.py', import.meta.url), 'utf8');
+const invoiceApiSource = readFileSync(new URL('../../rayher_hr_payroll/api/invoice_entry.py', import.meta.url), 'utf8');
+
+const C = {
+  upload: '\u4e0a\u4f20\u53d1\u7968',
+  flow: '\u8d39\u7528\u62a5\u9500\u6d41',
+  viewInvoice: '\u67e5\u770b\u53d1\u7968',
+  noInvoiceReason: '\u65e0\u7968\u539f\u56e0\uff08\u63d0\u4ea4\u65f6\u5fc5\u586b\uff09',
+  withdrawRequest: '\u64a4\u56de\u7533\u8bf7',
+  withdrawPayment: '\u64a4\u56de\u4ed8\u6b3e',
+};
+const sevenFields = [
+  '\u53d1\u7968\u7c7b\u522b', '\u9879\u76ee\u540d\u79f0', '\u5f00\u7968\u65e5\u671f',
+  '\u53d1\u7968\u53f7\u7801', '\u7a0e\u524d\u91d1\u989d', '\u7a0e\u989d', '\u5408\u8ba1\u91d1\u989d',
+];
+const removedViews = [
+  '\u4e3b\u770b\u677f', '\u5b50\u770b\u677f', '\u6d88\u8d39\u660e\u7ec6\u770b\u677f',
+  '\u5ba1\u6279\u6d41\u914d\u7f6e', '\u8d39\u7528\u7edf\u8ba1', '\u5ba1\u6279\u8bb0\u5f55\u5217\u8868',
+];
 
 test('rayher SPA registers split approval pages', () => {
-  assert.match(routerSource, /path:\s*['\"]\/approval\/leave['\"]/);
-  assert.match(routerSource, /path:\s*['\"]\/approval\/purchase['\"]/);
-  assert.match(routerSource, /path:\s*['\"]\/oa['\"],\s*redirect:\s*['\"]\/approval\/leave['\"]/);
-  assert.match(accessSource, /['\"]\/approval\/leave['\"]/);
-  assert.match(accessSource, /['\"]\/approval\/purchase['\"]/);
+  assert.match(routerSource, /path:\s*['"]\/approval\/leave['"]/);
+  assert.match(routerSource, /path:\s*['"]\/approval\/purchase['"]/);
+  assert.match(routerSource, /path:\s*['"]\/oa['"],\s*redirect:\s*['"]\/approval\/leave['"]/);
+  assert.match(accessSource, /['"]\/approval\/leave['"]/);
+  assert.match(accessSource, /['"]\/approval\/purchase['"]/);
   assert.match(appSource, /\\u5ba1\\u6279/);
   assert.match(appSource, /\\u8bf7\\u5047\\u5ba1\\u6279/);
   assert.match(appSource, /\\u8d39\\u7528\\u4ed8\\u6b3e\/\\u62a5\\u9500/);
 });
 
-test('approval page fixes request type from route and filters lists by type', () => {
+test('approval page keeps leave behavior and delegates expense reimbursement to its workbench', () => {
   assert.match(pageSource, /useRoute/);
   assert.match(pageSource, /PAGE_CONFIG/);
   assert.match(pageSource, /\/approval\/leave/);
   assert.match(pageSource, /\/approval\/purchase/);
   assert.match(pageSource, /request_type:\s*currentRequestType\.value/);
-  assert.doesNotMatch(pageSource, /<select\s+v-model='form\.request_type'/);
-  assert.match(pageSource, /preview\.data = null/);
-  assert.match(pageSource, /function previewPayload/);
-  assert.match(pageSource, /supervisor:\s*leaveForm\.supervisor\.trim\(\)\s*\|\|\s*T\.supervisor/);
-});
-
-test('approval page supports leave plus expense board and consumption pushdown actions', () => {
-  assert.match(pageSource, /ExpenseWorkbench/);
+  assert.match(pageSource, /<ExpenseWorkbench\s+v-else\s*\/>/);
   assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.preview_route/);
   assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.create_request/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.list_requests/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.action_request/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.list_consumption_details/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.save_consumption_detail/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.add_invoice/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.push_consumption_to_request/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.submit_request/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.mark_paid/);
-  assert.match(pageSource, /\\u8bf7\\u5047\\u7533\\u8bf7/);
-  assert.match(pageSource, /\\u8d39\\u7528\\u4ed8\\u6b3e\\u7533\\u8bf7/);
-  assert.match(pageSource, /\\u5ba1\\u6279\\u6d41\\u7a0b/);
-  assert.match(pageSource, /STATUS_COLUMNS/);
-  assert.match(pageSource, /purchaseTab\s*=\s*ref\('board'\)/);
-  assert.match(pageSource, /kanban_status/);
-  assert.match(pageSource, /pushSelection/);
-  assert.match(pageSource, /selectedConsumption/);
-  assert.match(pageSource, /\\u4ed8\\u6b3e\/\\u62a5\\u9500\\u5355\\u770b\\u677f/);
-  assert.match(pageSource, /\\u6d88\\u8d39\\u660e\\u7ec6/);
-  assert.match(pageSource, /\\u4e0b\\u63a8\\u751f\\u6210\\u4ed8\\u6b3e\\u5355/);
-  assert.match(pageSource, /\\u6807\\u8bb0\\u5df2\\u4ed8\\u6b3e/);
-  assert.match(pageSource, /\\u884c\\u653f\\u56fa\\u5b9a\\u8d44\\u4ea7/);
-  assert.match(pageSource, /\\u0049\\u0054\\u7c7b\\u56fa\\u5b9a\\u8d44\\u4ea7/);
+  assert.doesNotMatch(pageSource, /<select\s+v-model='form\.request_type'/);
 });
 
-test('expense workbench implements the five reference-platform views with a horizontal kanban', () => {
-  for (const label of ['付款/报销单', '消费明细', '审批流配置', '费用统计', '审批记录']) {
-    assert.ok(workbenchSource.includes(label));
-  }
+test('expense workbench exposes only upload and reimbursement flow as first-class pages', () => {
+  assert.ok(workbenchSource.includes(C.upload));
+  assert.ok(workbenchSource.includes(C.flow));
+  assert.match(workbenchSource, /InvoiceUploadWorkbench/);
   assert.match(workbenchSource, /STATUS_COLUMNS/);
   assert.match(workbenchSource, /grid-cols-5/);
-  assert.match(workbenchSource, /总申请数/);
-  assert.match(workbenchSource, /本月申请总额/);
-  assert.match(workbenchSource, /已付款总额/);
-  assert.match(workbenchSource, /批量下推/);
-  assert.match(workbenchSource, /发票查看限制/);
-  assert.match(workbenchSource, /费用分类汇总/);
-  assert.match(workbenchSource, /审批记录列表/);
+  for (const label of removedViews) assert.ok(!workbenchSource.includes(label), `removed view remains: ${label}`);
 });
 
-test('expense workbench uses real APIs for files, approvals, payment and export', () => {
-  assert.match(workbenchSource, /\/api\/method\/upload_file/);
-  assert.match(workbenchSource, /invoice_file/);
-  assert.match(workbenchSource, /push_consumption_to_request/);
-  assert.match(workbenchSource, /action_request/);
-  assert.match(workbenchSource, /mark_paid/);
-  assert.match(workbenchSource, /exportTableWorkbook/);
-  assert.match(workbenchSource, /preview_route/);
+test('upload page supports batch upload confirmation pushdown and private preview', () => {
+  assert.match(uploadSource, /type="file"/);
+  assert.match(uploadSource, /multiple/);
+  assert.match(uploadSource, /accept="\.pdf,\.jpg,\.jpeg,\.png"/);
+  assert.match(uploadSource, /uploadFiles/);
+  assert.match(uploadSource, /confirmInvoice/);
+  assert.match(uploadSource, /unconfirmInvoice/);
+  assert.match(uploadSource, /pushInvoices/);
+  assert.match(uploadSource, /withdrawInvoicePush/);
+  assert.match(uploadSource, /InvoicePreviewDrawer/);
+  assert.doesNotMatch(uploadSource, /download\s*=|target="_blank"/);
+  assert.match(invoiceLibSource, /\/api\/method\/upload_file/);
 });
 
-test('approval API exposes expense reimbursement board and pushdown endpoints', () => {
-  assert.match(apiSource, /def list_requests\(view=["']mine["'], limit=50, request_type=None\):/);
-  assert.match(apiSource, /request_type and request_type not in REQUEST_TYPES/);
-  assert.match(apiSource, /filters\[['"]request_type['"]\] = request_type/);
-  assert.match(apiSource, /def list_consumption_details\(view=["']mine["'], status=None, limit=100\):/);
-  assert.match(apiSource, /def save_consumption_detail\(name=None, title=None, category=None, expense_date=None, amount=None, department=None, description=None\):/);
-  assert.match(apiSource, /def add_invoice\(/);
-  assert.match(apiSource, /def push_consumption_to_request\(consumption_names, payment_info=None, submit=0\):/);
-  assert.match(apiSource, /if not doc\.invoices:/);
-  assert.match(apiSource, /source_type=SOURCE_PUSH/);
-  assert.match(apiSource, /def mark_paid\(name, note=None\):/);
-  assert.match(apiSource, /doc\.workflow_status = STATUS_PAID/);
-  assert.match(apiSource, /["']creation["']:\s*doc\.creation/);
-});
-
-test('expense workbench integrates invoice OCR into draft creation and detail review', () => {
-  assert.match(workbenchSource, /InvoiceRecognitionPanel/);
-  assert.match(workbenchSource, /InvoicePreviewDrawer/);
-  assert.match(workbenchSource, /newLineKey/);
+test('OCR and manual rows use the same seven-field detail table', () => {
+  for (const label of sevenFields) {
+    assert.ok(uploadSource.includes(label), `upload page missing field: ${label}`);
+    assert.ok(workbenchSource.includes(label), `reimbursement page missing field: ${label}`);
+  }
   assert.match(workbenchSource, /line_key/);
-  assert.match(workbenchSource, /invoice_difference_reason/);
-  assert.match(workbenchSource, /invoice_batch/);
-  assert.match(workbenchSource, /no_invoice_reason/);
-  assert.match(workbenchSource, /invoice_search_text/);
   assert.match(workbenchSource, /getRequestInvoices/);
   assert.match(workbenchSource, /invoicesForLine/);
-  assert.match(workbenchSource, /查看发票/);
-  assert.match(workbenchSource, /发票类别/);
-  assert.match(workbenchSource, /项目名称/);
-  assert.match(workbenchSource, /发票号码/);
+  assert.ok(workbenchSource.includes(C.viewInvoice));
+  assert.match(workbenchSource, /no_invoice_reason/);
+  assert.ok(workbenchSource.includes(C.noInvoiceReason));
 });
 
-test('draft detail persists no-invoice and per-line difference reasons before submission', () => {
-  assert.match(workbenchSource, /update_draft_invoice_details/);
-  assert.match(workbenchSource, /saveDraftInvoiceDetails/);
-  assert.match(apiSource, /def update_draft_invoice_details/);
-  assert.match(apiSource, /expense_line_reasons/);
+test('approval and invoice APIs expose pushdown and reversible operations', () => {
+  assert.match(apiSource, /def push_invoices_to_request\(invoice_names, payment_info=None\):/);
+  assert.match(apiSource, /def withdraw_request\(name, note=None\):/);
+  assert.match(apiSource, /def withdraw_payment\(name, note=None\):/);
+  assert.match(apiSource, /def withdraw_invoice_push\(invoice_names, note=None\):/);
+  assert.match(apiSource, /def action_request\(/);
+  assert.match(apiSource, /def mark_paid\(name, note=None\):/);
+  assert.match(apiSource, /operation_log/);
+  assert.match(invoiceApiSource, /def list_workbench\(/);
+  assert.match(invoiceApiSource, /def unconfirm_invoice\(/);
+  assert.match(invoiceLibSource, /export function pushInvoices/);
+  assert.match(invoiceLibSource, /export function withdrawInvoicePush/);
 });
 
-test('invoice upload busy state blocks submit until every registered row is visible', () => {
-  assert.match(workbenchSource, /formInvoiceBusy/);
-  assert.match(workbenchSource, /detailInvoiceBusy/);
-  assert.match(workbenchSource, /发票上传或批次回填尚未完成/);
+test('reimbursement board supports approval payment and both withdrawal paths', () => {
+  assert.match(workbenchSource, /action_request/);
+  assert.match(workbenchSource, /mark_paid/);
+  assert.match(workbenchSource, /withdraw_request/);
+  assert.match(workbenchSource, /withdraw_payment/);
+  assert.ok(workbenchSource.includes(C.withdrawRequest));
+  assert.ok(workbenchSource.includes(C.withdrawPayment));
+  assert.match(workbenchSource, /operation_log/);
 });

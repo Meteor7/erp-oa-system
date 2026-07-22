@@ -37,6 +37,7 @@ export const ACCEPTED_INVOICE_EXTENSIONS = Object.freeze(['pdf', 'jpg', 'jpeg', 
 export const ACTIVE_RECOGNITION_STATUSES = Object.freeze(['\u6392\u961f\u4e2d', '\u8bc6\u522b\u4e2d']);
 
 const API_PREFIX = '/api/method/rayher_hr_payroll.api.invoice_entry.';
+const OA_API_PREFIX = '/api/method/rayher_hr_payroll.api.oa_entry.';
 
 function csrfHeaders(extra = {}) {
   const token = globalThis.window?.csrf_token;
@@ -72,6 +73,26 @@ export async function invoiceApi(action, args = {}, { signal } = {}) {
   }
   if (!response.ok || payload.exc) {
     throw new Error(errorText(payload, `Invoice API ${action} failed`));
+  }
+  return payload.message;
+}
+
+export async function oaApi(action, args = {}, { signal } = {}) {
+  const response = await fetch(`${OA_API_PREFIX}${action}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(args),
+    signal,
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    // Keep the bounded fallback for non-JSON server failures.
+  }
+  if (!response.ok || payload.exc) {
+    throw new Error(errorText(payload, `OA API ${action} failed`));
   }
   return payload.message;
 }
@@ -173,6 +194,28 @@ export function getInvoiceBatch(batch, options) {
 
 export function getRequestInvoices(request, options) {
   return invoiceApi('get_request_invoices', { request }, options);
+}
+
+export function listWorkbenchInvoices({ view = 'mine', status = '', limit = 200 } = {}, options) {
+  return invoiceApi('list_workbench', { view, status, limit }, options);
+}
+
+export function unconfirmInvoice(invoiceName, note = '', options) {
+  return invoiceApi('unconfirm_invoice', { invoice_name: invoiceName, note: String(note || '').trim() }, options);
+}
+
+export function pushInvoices(invoiceNames, paymentInfo = {}, options) {
+  return oaApi('push_invoices_to_request', {
+    invoice_names: JSON.stringify(Array.from(invoiceNames || [])),
+    payment_info: JSON.stringify(paymentInfo || {}),
+  }, options);
+}
+
+export function withdrawInvoicePush(invoiceNames, note = '', options) {
+  return oaApi('withdraw_invoice_push', {
+    invoice_names: JSON.stringify(Array.from(invoiceNames || [])),
+    note: String(note || '').trim(),
+  }, options);
 }
 
 export function attachInvoiceBatch(batch, request, options) {

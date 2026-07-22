@@ -1,0 +1,458 @@
+<script setup>
+import { Button, FeatherIcon } from 'frappe-ui';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import {
+  ACTIVE_RECOGNITION_STATUSES,
+  confirmInvoice,
+  createInvoiceBatch,
+  excludeInvoice,
+  listWorkbenchInvoices,
+  pushInvoices,
+  resolveDuplicate,
+  retryInvoice,
+  unconfirmInvoice,
+  updateInvoice,
+  uploadInvoiceFiles,
+  validateInvoiceFiles,
+  withdrawInvoicePush,
+} from '../../lib/invoiceOcr.js';
+import InvoicePreviewDrawer from './InvoicePreviewDrawer.vue';
+
+const props = defineProps({
+  options: { type: Object, default: () => ({}) },
+});
+const emit = defineEmits(['request-created']);
+
+const rows = ref([]);
+const selectedName = ref('');
+const checkedNames = ref([]);
+const busy = ref(false);
+const loading = ref(false);
+const uploadText = ref('');
+const errorMessage = ref('');
+const message = ref('');
+const previewRow = ref(null);
+const showPush = ref(false);
+const statusFilter = ref('');
+const pushForm = reactive({
+  subject: '',
+  company: '',
+  department: '',
+  supervisor: '',
+  asset_category: '其它',
+  doc_type: '',
+  urgency: '',
+  payment_type: '',
+  payment_method: '',
+  bank_name: '',
+  payee_name: '',
+  branch: '',
+  account_no: '',
+  reason: '',
+});
+let pollTimer = null;
+let disposed = false;
+
+const fields = [
+  ['invoice_category', '发票类别', 'text'],
+  ['project_name', '项目名称', 'text'],
+  ['issue_date', '开票日期', 'date'],
+  ['invoice_number', '发票号码', 'text'],
+  ['amount_before_tax', '税前金额', 'number'],
+  ['tax_amount', '税额', 'number'],
+  ['total_amount', '合计金额', 'number'],
+];
+
+const visibleRows = computed(() => rows.value.filter((row) => !statusFilter.value || row.recognition_status === statusFilter.value));
+const selectedRow = computed(() => rows.value.find((row) => row.name === selectedName.value) || visibleRows.value[0] || null);
+const selectableRows = computed(() => rows.value.filter((row) => row.recognition_status === '已确认' && !row.request));
+const selectedTotal = computed(() => rows.value
+  .filter((row) => checkedNames.value.includes(row.name))
+  .reduce((sum, row) => sum + Number(row.total_amount || 0), 0));
+const stats = computed(() => ({
+  total: rows.value.length,
+  pending: rows.value.filter((row) => row.recognition_status === '待确认').length,
+  confirmed: rows.value.filter((row) => row.recognition_status === '已确认').length,
+  pushed: rows.value.filter((row) => Boolean(row.request)).length,
+  duplicate: rows.value.filter((row) => row.recognition_status === '疑似重复').length,
+}));
+
+function cleanError(error, fallback) {
+  return String(error?.message || fallback).replace(/<[^>]*>/g, '').trim();
+}
+
+function money(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return Number(value).toLocaleString('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 });
+}
+
+function statusClass(status) {
+  return {
+    排队中: 'bg-gray-100 text-gray-700',
+    识别中: 'bg-blue-50 text-blue-700',
+    待确认: 'bg-amber-50 text-amber-700',
+    已确认: 'bg-emerald-50 text-emerald-700',
+    疑似重复: 'bg-red-50 text-red-700',
+    失败: 'bg-red-50 text-red-700',
+    已排除: 'bg-gray-100 text-gray-500',
+  }[status] || 'bg-gray-100 text-gray-700';
+}
+
+function isEditable(row) {
+  return ['待确认', '疑似重复'].includes(row?.recognition_status);
+}
+
+function canCheck(row) {
+  return row?.recognition_status === '已确认' && !row?.request;
+}
+
+function syncChecked() {
+  const allowed = new Set(selectableRows.value.map((row) => row.name));
+  checkedNames.value = checkedNames.value.filter((name) => allowed.has(name));
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (disposed || !rows.value.some((row) => ACTIVE_RECOGNITION_STATUSES.includes(row.recognition_status))) return;
+  pollTimer = setTimeout(() => reload(false), 1500);
+}
+
+async function reload(showError = true) {
+  loading.value = true;
+  try {
+    rows.value = await listWorkbenchInvoices({ view: 'all', status: statusFilter.value, limit: 300 }) || [];
+    if (!rows.value.some((row) => row.name === selectedName.value)) selectedName.value = rows.value[0]?.name || '';
+    syncChecked();
+    schedulePoll();
+  } catch (error) {
+    if (showError) errorMessage.value = cleanError(error, '发票列表加载失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function uploadFiles(event) {
+  const input = event.target;
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  errorMessage.value = '';
+  message.value = '';
+  busy.value = true;
+  try {
+    validateInvoiceFiles(files);
+    const batch = await createInvoiceBatch();
+    const batchName = typeof batch === 'string' ? batch : batch?.name;
+    if (!batchName) throw new Error('未能创建发票批次');
+    const results = await uploadInvoiceFiles(files, batchName, {
+      onSettled: (_result, _index, complete, total) => {
+        uploadText.value = `上传并识别中 ${complete}/${total}`;
+      },
+    });
+    const failed = results.filter((result) => result?.error);
+    message.value = `已接收 ${results.length - failed.length} 张发票，OCR 正在后台处理。`;
+    if (failed.length) errorMessage.value = `${failed.length} 个文件上传失败，其余文件继续识别。`;
+    await reload(false);
+  } catch (error) {
+    errorMessage.value = cleanError(error, '发票上传失败');
+  } finally {
+    busy.value = false;
+    uploadText.value = '';
+  }
+}
+
+async function saveFields(row) {
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const updated = await updateInvoice(row.name, Object.fromEntries(fields.map(([name]) => [name, row[name]])));
+    rows.value = rows.value.map((item) => item.name === updated.name ? updated : item);
+    message.value = '识别内容已保存。';
+  } catch (error) {
+    errorMessage.value = cleanError(error, '识别内容保存失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function confirmRow(row) {
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const updated = await confirmInvoice(row.name, Object.fromEntries(fields.map(([name]) => [name, row[name]])));
+    rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    message.value = updated.conflict ? '检测到疑似重复发票，请财务复核。' : '发票内容已确认，可勾选下推。';
+  } catch (error) {
+    errorMessage.value = cleanError(error, '发票确认失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function undoConfirm(row) {
+  if (!window.confirm('确认撤回这张发票的内容确认吗？')) return;
+  busy.value = true;
+  try {
+    const updated = await unconfirmInvoice(row.name, '用户撤回确认');
+    rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    syncChecked();
+    message.value = '已撤回确认，可重新修改识别内容。';
+  } catch (error) {
+    errorMessage.value = cleanError(error, '撤回确认失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function retryRow(row) {
+  busy.value = true;
+  try {
+    const updated = await retryInvoice(row.name);
+    rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    schedulePoll();
+  } catch (error) {
+    errorMessage.value = cleanError(error, '重新识别失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function resolveRow(row) {
+  const reason = window.prompt('请填写解除重复的复核原因');
+  if (!reason?.trim()) return;
+  busy.value = true;
+  try {
+    const updated = await resolveDuplicate(row.name, reason);
+    rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    message.value = '重复标记已解除，请再次确认内容。';
+  } catch (error) {
+    errorMessage.value = cleanError(error, '重复复核失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function excludeRow(row) {
+  const reason = window.prompt('请填写排除原因');
+  if (!reason?.trim()) return;
+  busy.value = true;
+  try {
+    await excludeInvoice(row.name, reason);
+    await reload(false);
+  } catch (error) {
+    errorMessage.value = cleanError(error, '排除失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+function toggleChecked(name) {
+  checkedNames.value = checkedNames.value.includes(name)
+    ? checkedNames.value.filter((item) => item !== name)
+    : [...checkedNames.value, name];
+}
+
+function applyPushDefaults() {
+  const context = props.options?.context || {};
+  pushForm.company ||= props.options?.companies?.[0] || '';
+  pushForm.department ||= context.department || props.options?.departments?.[0] || '';
+  pushForm.supervisor ||= context.supervisor || '';
+  pushForm.doc_type ||= props.options?.doc_types?.[0] || '';
+  pushForm.urgency ||= props.options?.urgencies?.[0] || '';
+  pushForm.payment_type ||= props.options?.payment_types?.[0] || '';
+  pushForm.payment_method ||= props.options?.payment_methods?.[0] || '';
+  pushForm.payee_name ||= context.employee_name || '';
+}
+
+function openPush() {
+  if (!checkedNames.value.length) {
+    errorMessage.value = '请先勾选已确认且未下推的发票。';
+    return;
+  }
+  applyPushDefaults();
+  showPush.value = true;
+}
+
+async function submitPush() {
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const request = await pushInvoices(checkedNames.value, pushForm);
+    showPush.value = false;
+    checkedNames.value = [];
+    message.value = `已生成费用报销草稿 ${request.name}。`;
+    emit('request-created', request.name);
+    await reload(false);
+  } catch (error) {
+    errorMessage.value = cleanError(error, '下推失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function undoPush(row) {
+  if (!window.confirm('撤回下推会将关联报销单退回草稿，并解除这张发票的费用明细，是否继续？')) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    await withdrawInvoicePush([row.name], '用户操作失误撤回下推');
+    message.value = '已撤回下推，发票可重新选择。';
+    await reload(false);
+  } catch (error) {
+    errorMessage.value = cleanError(error, '撤回下推失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
+onMounted(() => reload());
+onBeforeUnmount(() => {
+  disposed = true;
+  clearTimeout(pollTimer);
+});
+</script>
+
+<template>
+  <div class="space-y-4">
+    <header class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <div>
+        <h2 class="text-xl font-bold text-gray-900">上传发票</h2>
+        <p class="mt-1 text-sm text-gray-500">批量上传后由本地 OCR 识别，人工确认七项内容，再下推到费用报销流。</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <label class="inline-flex cursor-pointer items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+          <FeatherIcon name="upload-cloud" class="h-4 w-4" />
+          {{ uploadText || '批量上传发票' }}
+          <input class="hidden" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple :disabled="busy" @change="uploadFiles" />
+        </label>
+        <Button variant="subtle" :loading="loading" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
+        <Button variant="solid" :disabled="!checkedNames.length" @click="openPush">下推到费用报销流（{{ checkedNames.length }}）</Button>
+      </div>
+    </header>
+
+    <div v-if="message" class="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ message }}</div>
+    <div v-if="errorMessage" role="alert" class="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ errorMessage }}</div>
+
+    <section class="grid gap-3 md:grid-cols-5">
+      <div v-for="item in [
+        ['发票总数', stats.total],
+        ['待确认', stats.pending],
+        ['已确认', stats.confirmed],
+        ['已下推', stats.pushed],
+        ['疑似重复', stats.duplicate],
+      ]" :key="item[0]" class="rounded border bg-white px-4 py-3 shadow-sm">
+        <div class="text-xs text-gray-500">{{ item[0] }}</div>
+        <div class="mt-1 text-2xl font-semibold text-gray-900">{{ item[1] }}</div>
+      </div>
+    </section>
+
+    <section class="grid min-h-[560px] gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]">
+      <div class="overflow-hidden rounded border bg-white shadow-sm">
+        <div class="flex items-center justify-between border-b px-4 py-3">
+          <h3 class="font-semibold">发票列表</h3>
+          <select v-model="statusFilter" class="rounded border border-gray-300 px-2 py-1 text-sm" @change="reload">
+            <option value="">全部状态</option>
+            <option v-for="status in ['排队中','识别中','待确认','已确认','疑似重复','失败','已排除']" :key="status">{{ status }}</option>
+          </select>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[860px] text-sm">
+            <thead class="border-b bg-gray-50 text-xs text-gray-500">
+              <tr>
+                <th class="w-10 px-3 py-2"></th>
+                <th class="px-3 py-2 text-left">文件</th>
+                <th class="px-3 py-2 text-left">状态</th>
+                <th class="px-3 py-2 text-left">发票类别</th>
+                <th class="px-3 py-2 text-left">项目名称</th>
+                <th class="px-3 py-2 text-left">开票日期</th>
+                <th class="px-3 py-2 text-left">发票号码</th>
+                <th class="px-3 py-2 text-right">合计金额</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in visibleRows" :key="row.name" class="cursor-pointer border-b hover:bg-blue-50" :class="selectedRow?.name === row.name ? 'bg-blue-50' : ''" @click="selectedName = row.name">
+                <td class="px-3 py-3" @click.stop>
+                  <input type="checkbox" :checked="checkedNames.includes(row.name)" :disabled="!canCheck(row)" @change="toggleChecked(row.name)" />
+                </td>
+                <td class="max-w-[220px] truncate px-3 py-3 font-medium" :title="row.original_filename">{{ row.original_filename }}</td>
+                <td class="px-3 py-3"><span class="rounded px-2 py-1 text-xs" :class="statusClass(row.recognition_status)">{{ row.request ? '已下推' : row.recognition_status }}</span></td>
+                <td class="max-w-[180px] truncate px-3 py-3">{{ row.invoice_category || '-' }}</td>
+                <td class="max-w-[180px] truncate px-3 py-3">{{ row.project_name || '-' }}</td>
+                <td class="px-3 py-3">{{ row.issue_date || '-' }}</td>
+                <td class="px-3 py-3">{{ row.invoice_number || '-' }}</td>
+                <td class="px-3 py-3 text-right font-medium text-red-600">{{ money(row.total_amount) }}</td>
+              </tr>
+              <tr v-if="!visibleRows.length"><td colspan="8" class="py-24 text-center text-gray-400">还没有发票，请点击右上角批量上传。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="rounded border bg-white shadow-sm">
+        <template v-if="selectedRow">
+          <header class="flex items-start justify-between border-b px-4 py-3">
+            <div class="min-w-0">
+              <h3 class="truncate font-semibold">{{ selectedRow.original_filename }}</h3>
+              <p class="mt-1 text-xs text-gray-500">{{ selectedRow.name }}</p>
+            </div>
+            <span class="ml-3 rounded px-2 py-1 text-xs" :class="statusClass(selectedRow.recognition_status)">{{ selectedRow.request ? '已下推' : selectedRow.recognition_status }}</span>
+          </header>
+          <div class="space-y-4 p-4">
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <label v-for="[name, label, type] in fields" :key="name" class="text-xs text-gray-500" :class="name === 'project_name' || name === 'invoice_category' ? '2xl:col-span-2' : ''">
+                {{ label }}
+                <input v-model="selectedRow[name]" :type="type" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-600" />
+              </label>
+            </div>
+            <div v-if="selectedRow.field_warnings?.length" class="rounded bg-amber-50 p-3 text-xs text-amber-700">
+              <div v-for="warning in selectedRow.field_warnings" :key="String(warning)">{{ warning.message || warning }}</div>
+            </div>
+            <div class="flex flex-wrap gap-2 border-t pt-4">
+              <Button variant="subtle" @click="previewRow = selectedRow">查看发票</Button>
+              <Button v-if="isEditable(selectedRow)" variant="subtle" :disabled="busy" @click="saveFields(selectedRow)">保存修改</Button>
+              <Button v-if="selectedRow.recognition_status === '待确认'" variant="solid" :disabled="busy" @click="confirmRow(selectedRow)">确认内容</Button>
+              <Button v-if="selectedRow.recognition_status === '已确认' && !selectedRow.request" variant="subtle" :disabled="busy" @click="undoConfirm(selectedRow)">撤回确认</Button>
+              <Button v-if="selectedRow.recognition_status === '失败'" variant="solid" :disabled="busy" @click="retryRow(selectedRow)">重新识别</Button>
+              <Button v-if="selectedRow.recognition_status === '疑似重复'" variant="solid" :disabled="busy" @click="resolveRow(selectedRow)">解除重复</Button>
+              <Button v-if="selectedRow.request" variant="subtle" :disabled="busy" @click="undoPush(selectedRow)">撤回下推</Button>
+              <Button v-if="['待确认','疑似重复','失败'].includes(selectedRow.recognition_status)" variant="subtle" :disabled="busy" @click="excludeRow(selectedRow)">排除</Button>
+            </div>
+            <div v-if="selectedRow.request" class="rounded bg-blue-50 p-3 text-sm text-blue-700">已下推到费用报销流：{{ selectedRow.request }}</div>
+          </div>
+        </template>
+        <div v-else class="flex min-h-[420px] items-center justify-center text-sm text-gray-400">请从左侧选择一张发票</div>
+      </aside>
+    </section>
+
+    <div v-if="showPush" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showPush = false">
+      <div role="dialog" aria-modal="true" class="w-full max-w-4xl overflow-hidden rounded bg-white shadow-xl">
+        <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
+          <div>
+            <h3 class="font-semibold">下推到费用报销流</h3>
+            <p class="mt-1 text-xs text-gray-500">已选 {{ checkedNames.length }} 张发票，将生成一张报销草稿和 {{ checkedNames.length }} 行费用明细，合计 {{ money(selectedTotal) }}。</p>
+          </div>
+          <button title="关闭" @click="showPush = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
+        </header>
+        <div class="grid max-h-[65vh] gap-3 overflow-y-auto p-5 md:grid-cols-3">
+          <label class="text-xs text-gray-500 md:col-span-2">主题<input v-model="pushForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="发票报销" /></label>
+          <label class="text-xs text-gray-500">公司<select v-model="pushForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.companies || []" :key="item">{{ item }}</option></select></label>
+          <label class="text-xs text-gray-500">申请部门<select v-model="pushForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.departments || []" :key="item">{{ item }}</option></select></label>
+          <label class="text-xs text-gray-500">部门主管<input v-model="pushForm.supervisor" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500">收款人<input v-model="pushForm.payee_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500">付款类型<select v-model="pushForm.payment_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.payment_types || []" :key="item">{{ item }}</option></select></label>
+          <label class="text-xs text-gray-500">付款方式<select v-model="pushForm.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.payment_methods || []" :key="item">{{ item }}</option></select></label>
+          <label class="text-xs text-gray-500">收款账号<input v-model="pushForm.account_no" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500">开户行<input v-model="pushForm.bank_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500">支行<input v-model="pushForm.branch" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500 md:col-span-3">备注<textarea v-model="pushForm.reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
+        </div>
+        <footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3">
+          <Button variant="subtle" @click="showPush = false">取消</Button>
+          <Button variant="solid" :loading="busy" @click="submitPush">生成报销草稿</Button>
+        </footer>
+      </div>
+    </div>
+
+    <InvoicePreviewDrawer :invoice="previewRow" @close="previewRow = null" />
+  </div>
+</template>
