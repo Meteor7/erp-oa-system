@@ -33,9 +33,13 @@ test('invoice upload workspace provides batch review selection detail push and p
   assert.doesNotMatch(source, /<a\b|download/);
 });
 
-test('expense workbench uses two first-class pages and exact seven-column details', () => {
+test('expense workbench uses four first-class pages and exact seven-column details', () => {
   assert.ok(expense.includes('上传发票'));
   assert.ok(expense.includes('费用报销流'));
+  assert.ok(expense.includes('费用统计'));
+  assert.ok(expense.includes('审批记录'));
+  assert.match(expense, /ExpenseStatistics/);
+  assert.match(expense, /ExpenseApprovalRecords/);
   assert.doesNotMatch(expense, /label:\s*['"]主看板['"]|label:\s*['"]子模板['"]/);
   assert.doesNotMatch(expense, /新建消费明细|下推生成付款单/);
   assert.match(expense, /activeView\s*=\s*ref\(['"]invoices['"]\)/);

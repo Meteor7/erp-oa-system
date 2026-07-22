@@ -15,6 +15,8 @@ const invoiceApiSource = readFileSync(new URL('../../rayher_hr_payroll/api/invoi
 const C = {
   upload: '\u4e0a\u4f20\u53d1\u7968',
   flow: '\u8d39\u7528\u62a5\u9500\u6d41',
+  statistics: '\u8d39\u7528\u7edf\u8ba1',
+  audit: '\u5ba1\u6279\u8bb0\u5f55',
   viewInvoice: '\u67e5\u770b\u53d1\u7968',
   noInvoiceReason: '\u65e0\u7968\u539f\u56e0\uff08\u63d0\u4ea4\u65f6\u5fc5\u586b\uff09',
   withdrawRequest: '\u64a4\u56de\u7533\u8bf7',
@@ -26,7 +28,7 @@ const sevenFields = [
 ];
 const removedViews = [
   '\u4e3b\u770b\u677f', '\u5b50\u770b\u677f', '\u6d88\u8d39\u660e\u7ec6\u770b\u677f',
-  '\u5ba1\u6279\u6d41\u914d\u7f6e', '\u8d39\u7528\u7edf\u8ba1', '\u5ba1\u6279\u8bb0\u5f55\u5217\u8868',
+  '\u5ba1\u6279\u6d41\u914d\u7f6e',
 ];
 
 test('rayher SPA registers split approval pages', () => {
@@ -52,13 +54,30 @@ test('approval page keeps leave behavior and delegates expense reimbursement to 
   assert.doesNotMatch(pageSource, /<select\s+v-model='form\.request_type'/);
 });
 
-test('expense workbench exposes only upload and reimbursement flow as first-class pages', () => {
-  assert.ok(workbenchSource.includes(C.upload));
-  assert.ok(workbenchSource.includes(C.flow));
+test('expense workbench exposes four focused expense pages', () => {
+  for (const label of [C.upload, C.flow, C.statistics, C.audit]) {
+    assert.ok(workbenchSource.includes(label), `missing expense page: ${label}`);
+  }
   assert.match(workbenchSource, /InvoiceUploadWorkbench/);
+  assert.match(workbenchSource, /ExpenseStatistics/);
+  assert.match(workbenchSource, /ExpenseApprovalRecords/);
+  assert.match(workbenchSource, /activeView === 'statistics'/);
+  assert.match(workbenchSource, /activeView === 'audit'/);
+  assert.match(workbenchSource, /@open-request="openRequest"/);
   assert.match(workbenchSource, /STATUS_COLUMNS/);
   assert.match(workbenchSource, /grid-cols-5/);
   for (const label of removedViews) assert.ok(!workbenchSource.includes(label), `removed view remains: ${label}`);
+});
+
+test('report rows load an exact permission-scoped request detail', () => {
+  assert.match(workbenchSource, /const requestDetail = createResource/);
+  assert.match(workbenchSource, /view:\s*'all'/);
+  assert.match(workbenchSource, /limit:\s*1/);
+  assert.match(workbenchSource, /request_type:\s*REQUEST_TYPE/);
+  assert.match(workbenchSource, /name:\s*detailRequestName\.value/);
+  assert.match(workbenchSource, /async function openRequest\(name\)/);
+  assert.match(workbenchSource, /requestDetail\.reload/);
+  assert.ok(workbenchSource.includes('\u65e0\u6743\u9650\u6216\u5355\u636e\u4e0d\u5b58\u5728'));
 });
 
 test('upload page supports batch upload confirmation pushdown and private preview', () => {

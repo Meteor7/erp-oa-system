@@ -2,6 +2,8 @@
 import { Button, FeatherIcon, createResource } from 'frappe-ui';
 import { computed, reactive, ref, watch } from 'vue';
 import { getRequestInvoices, invoicesForLine, newLineKey } from '../lib/invoiceOcr.js';
+import ExpenseApprovalRecords from './expense/ExpenseApprovalRecords.vue';
+import ExpenseStatistics from './expense/ExpenseStatistics.vue';
 import InvoicePreviewDrawer from './invoice/InvoicePreviewDrawer.vue';
 import InvoiceUploadWorkbench from './invoice/InvoiceUploadWorkbench.vue';
 
@@ -10,6 +12,8 @@ const ASSET_OTHER = '其它';
 const NAV_ITEMS = [
   { key: 'invoices', label: '上传发票', icon: 'upload-cloud' },
   { key: 'board', label: '费用报销流', icon: 'trello' },
+  { key: 'statistics', label: '费用统计', icon: 'bar-chart-2' },
+  { key: 'audit', label: '审批记录', icon: 'clipboard' },
 ];
 const STATUS_COLUMNS = [
   { key: 'draft', label: '待提交', icon: 'edit-3', header: 'border-gray-400 text-gray-700', accent: 'border-l-gray-400', badge: 'bg-gray-100 text-gray-700' },
@@ -29,6 +33,8 @@ const errorMessage = ref('');
 const detailInvoices = ref([]);
 const previewInvoiceRow = ref(null);
 const keyword = ref('');
+const statisticsView = ref(null);
+const approvalView = ref(null);
 
 const blankLine = () => ({
   line_key: newLineKey(),
@@ -53,6 +59,17 @@ const requests = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET',
   makeParams: () => ({ view: 'all', request_type: REQUEST_TYPE, limit: 200 }), auto: true,
 });
+const requestDetail = createResource({
+  url: 'rayher_hr_payroll.api.oa_entry.list_requests',
+  method: 'GET',
+  makeParams: () => ({
+    view: 'all',
+    limit: 1,
+    request_type: REQUEST_TYPE,
+    name: detailRequestName.value,
+  }),
+  auto: false,
+});
 const creator = createResource({ url: 'rayher_hr_payroll.api.oa_entry.create_request' });
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
 const draftSubmitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.submit_request' });
@@ -61,7 +78,9 @@ const requestWithdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.
 const paymentWithdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_payment' });
 
 const rows = computed(() => requests.data || []);
-const selectedRequest = computed(() => rows.value.find((row) => row.name === detailRequestName.value) || null);
+const exactRequest = computed(() => requestDetail.data?.[0] || null);
+const selectedRequest = computed(() => rows.value.find((row) => row.name === detailRequestName.value)
+  || (exactRequest.value?.name === detailRequestName.value ? exactRequest.value : null));
 const departments = computed(() => options.data?.departments || []);
 const companies = computed(() => options.data?.companies || []);
 const docTypes = computed(() => options.data?.doc_types || []);
@@ -148,6 +167,11 @@ function removeLine(index) {
 }
 async function reload() {
   await requests.reload();
+  if (detailRequestName.value && !rows.value.some((row) => row.name === detailRequestName.value)) {
+    await requestDetail.reload();
+  }
+  if (activeView.value === 'statistics') await statisticsView.value?.reload?.();
+  if (activeView.value === 'audit') await approvalView.value?.reload?.();
 }
 async function saveRequest(submit) {
   errorMessage.value = '';
@@ -190,8 +214,8 @@ async function saveRequest(submit) {
     });
     showRequestForm.value = false;
     activeView.value = 'board';
-    detailRequestName.value = result.name;
     await reload();
+    await openRequest(result.name);
   } catch (error) {
     errorMessage.value = apiError(error, '报销单保存失败');
   } finally {
@@ -206,10 +230,35 @@ async function loadInvoices(name) {
     errorMessage.value = apiError(error, '发票明细加载失败');
   }
 }
-function requestCreated(name) {
+async function openRequest(name) {
+  const requestedName = String(name || '').trim();
+  if (!requestedName) return;
+  errorMessage.value = '';
+  detailRequestName.value = requestedName;
+  detailInvoices.value = [];
+  if (rows.value.some((row) => row.name === requestedName)) {
+    await loadInvoices(requestedName);
+    return;
+  }
+  try {
+    await requestDetail.reload();
+    if (!requestDetail.data?.some((row) => row.name === requestedName)) {
+      errorMessage.value = '无权限或单据不存在。';
+      detailRequestName.value = '';
+      detailInvoices.value = [];
+      return;
+    }
+    await loadInvoices(requestedName);
+  } catch (error) {
+    errorMessage.value = apiError(error, '报销单详情加载失败');
+    detailRequestName.value = '';
+    detailInvoices.value = [];
+  }
+}
+async function requestCreated(name) {
   activeView.value = 'board';
-  detailRequestName.value = name;
-  reload();
+  await reload();
+  await openRequest(name);
 }
 async function submitDraft(row) {
   saving.value = true;
@@ -264,7 +313,6 @@ async function withdrawPayment(row) {
 }
 
 watch(() => options.data, applyDefaults, { immediate: true });
-watch(detailRequestName, loadInvoices);
 </script>
 
 <template>
@@ -284,8 +332,10 @@ watch(detailRequestName, loadInvoices);
       <div v-if="errorMessage" role="alert" class="mb-3 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ errorMessage }}</div>
 
       <InvoiceUploadWorkbench v-if="activeView === 'invoices'" :options="options.data || {}" @request-created="requestCreated" />
+      <ExpenseStatistics v-else-if="activeView === 'statistics'" ref="statisticsView" :options="options.data || {}" @open-request="openRequest" />
+      <ExpenseApprovalRecords v-else-if="activeView === 'audit'" ref="approvalView" :options="options.data || {}" @open-request="openRequest" />
 
-      <section v-else class="space-y-4">
+      <section v-else-if="activeView === 'board'" class="space-y-4">
         <header class="flex items-center justify-between">
           <div><h2 class="text-xl font-bold">费用报销流</h2><p class="mt-1 text-sm text-gray-500">报销审批看板与七字段费用明细</p></div>
           <Button variant="subtle" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
@@ -312,7 +362,7 @@ watch(detailRequestName, loadInvoices);
               <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{{ rowsForStatus(column.key).length }}</span>
             </div>
             <div class="space-y-2 p-2">
-              <button v-for="row in rowsForStatus(column.key)" :key="row.name" class="w-full rounded border border-l-4 bg-white p-3 text-left shadow-sm hover:bg-gray-50" :class="column.accent" @click="detailRequestName = row.name">
+              <button v-for="row in rowsForStatus(column.key)" :key="row.name" class="w-full rounded border border-l-4 bg-white p-3 text-left shadow-sm hover:bg-gray-50" :class="column.accent" @click="openRequest(row.name)">
                 <div class="flex justify-between gap-2"><span class="text-xs text-gray-500">{{ row.name }}</span><span class="rounded px-1.5 py-0.5 text-[10px]" :class="column.badge">{{ column.label }}</span></div>
                 <div class="mt-2 truncate text-sm font-semibold">{{ row.subject }}</div>
                 <div class="mt-1 truncate text-xs text-gray-500">{{ sourceLabel(row) }}</div>
@@ -379,6 +429,10 @@ watch(detailRequestName, loadInvoices);
         </div>
         <footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showRequestForm = false">取消</Button><Button variant="subtle" :loading="saving" @click="saveRequest(false)">保存草稿</Button><Button variant="solid" :loading="saving" @click="saveRequest(true)">保存并提交</Button></footer>
       </div>
+    </div>
+
+    <div v-if="detailRequestName && !selectedRequest && requestDetail.loading" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4">
+      <div class="rounded bg-white px-6 py-5 text-sm text-gray-600 shadow-xl">正在加载报销单详情...</div>
     </div>
 
     <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="detailRequestName = ''">
