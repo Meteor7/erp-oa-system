@@ -453,6 +453,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <InvoicePreviewDrawer :invoice="previewRow" @close="previewRow = null" />
+    <InvoicePreviewDrawer :open="Boolean(previewRow)" :invoice="previewRow" @close="previewRow = null" />
   </div>
 </template>

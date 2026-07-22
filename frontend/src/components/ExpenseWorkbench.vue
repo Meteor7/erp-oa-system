@@ -403,6 +403,6 @@ watch(detailRequestName, loadInvoices);
       </div>
     </div>
 
-    <InvoicePreviewDrawer :invoice="previewInvoiceRow" @close="previewInvoiceRow = null" />
+    <InvoicePreviewDrawer :open="Boolean(previewInvoiceRow)" :invoice="previewInvoiceRow" @close="previewInvoiceRow = null" />
   </div>
 </template>

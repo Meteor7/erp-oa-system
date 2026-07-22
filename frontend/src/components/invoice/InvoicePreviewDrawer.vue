@@ -1,6 +1,6 @@
 <template>
   <Teleport to='body'>
-    <div v-if='open' class='fixed inset-0 z-50 flex justify-end bg-gray-900/50' role='dialog' aria-modal='true' @click.self='closeDrawer'>
+    <div v-if="open && invoiceName" class='fixed inset-0 z-50 flex justify-end bg-gray-900/50' role='dialog' aria-modal='true' @click.self='closeDrawer'>
       <aside class='flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl'>
         <header class='flex items-center justify-between border-b border-gray-200 px-4 py-3'>
           <div class='min-w-0'>
@@ -31,7 +31,7 @@ import { fetchInvoicePreview } from '../../lib/invoiceOcr.js';
 
 // Security contract: preview_invoice POST -> token -> preview_url POST -> blob URL.
 const props = defineProps({
-  open: { type: Boolean, default: true },
+  open: { type: Boolean, default: false },
   invoice: { type: [String, Object], default: '' },
   currentUser: { type: String, default: '' },
 });
