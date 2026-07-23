@@ -1095,7 +1095,7 @@ def test_serialize_expense_line_maps_legacy_values_without_losing_zero_money():
     assert result["no_invoice_reason"] == "旧单无发票"
 
 
-def _push_record(name, *, status="已确认", total="35.98", request="", batch="BATCH-1"):
+def _push_record(name, *, status="已确认", total="35.98", request="", batch="BATCH-1", expense_description=None):
     return Row(
         doctype=service.RECORD_DOCTYPE,
         name=name,
@@ -1111,6 +1111,7 @@ def _push_record(name, *, status="已确认", total="35.98", request="", batch="
         amount_before_tax=Decimal("35.62"),
         tax_amount=Decimal("0.36"),
         total_amount=Decimal(total),
+        expense_description=expense_description or f"费用说明-{name}",
         operation_log="[]",
         save=lambda ignore_permissions=False: None,
     )
@@ -1320,11 +1321,29 @@ def test_push_confirmed_invoices_creates_one_draft_with_one_exact_line_each(monk
     assert len(request.expense_lines) == 2
     assert {line.source_invoice for line in request.expense_lines} == {"INV-1", "INV-2"}
     assert {line.project_name for line in request.expense_lines} == {"项目-INV-1", "项目-INV-2"}
+    assert {line.expense_description for line in request.expense_lines} == {
+        "费用说明-INV-1",
+        "费用说明-INV-2",
+    }
     assert request.amount == 141.98
     assert {record.request for record in records.values()} == {request.name}
     assert all(record.expense_line_key for record in records.values())
     assert locks[:2] == [("record", "INV-1"), ("record", "INV-2")]
     assert result["operation_log"][-1]["action"] == "发票下推"
+
+
+def test_push_rejects_invoice_without_expense_description(monkeypatch):
+    records = {
+        "INV-1": _push_record("INV-1", expense_description=" ")
+    }
+    environment, _locks = _install_invoice_push_environment(
+        monkeypatch, records
+    )
+
+    with pytest.raises(ValidationError, match="费用说明"):
+        oa_entry.push_invoices_to_request(["INV-1"])
+
+    assert environment.pending == {}
 
 
 @pytest.mark.parametrize(
@@ -2200,7 +2219,13 @@ def test_expense_attachment_api_contract_delegates_to_hardened_service(monkeypat
 
 def test_request_expense_lines_include_supplemental_attachment_metadata(monkeypatch):
     doc = Row(name="REQ-1")
-    lines = [{"line_key": "line-a", "attachment_count": 0}]
+    lines = [
+        {
+            "line_key": "line-a",
+            "source_invoice": "INV-1",
+            "attachment_count": 0,
+        }
+    ]
     monkeypatch.setattr(
         oa_entry.expense_attachments,
         "list_attachments",
@@ -2208,9 +2233,24 @@ def test_request_expense_lines_include_supplemental_attachment_metadata(monkeypa
             {"name": "ATT-1", "expense_line_key": "line-a", "original_filename": "receipt.pdf"}
         ],
     )
+    monkeypatch.setattr(
+        oa_entry.invoice_supplemental_attachments,
+        "list_attachments",
+        lambda invoice_name, current=False: [
+            {
+                "name": "ISA-1",
+                "invoice_record": invoice_name,
+                "original_filename": "itinerary.pdf",
+            }
+        ],
+    )
     result = oa_entry._with_expense_attachments(doc, lines)
-    assert result[0]["attachment_count"] == 1
+    assert result[0]["attachment_count"] == 2
     assert result[0]["attachments"][0]["name"] == "ATT-1"
+    assert result[0]["attachments"][0]["attachment_source"] == "request_line"
+    assert result[0]["attachments"][1]["name"] == "ISA-1"
+    assert result[0]["attachments"][1]["attachment_source"] == "invoice"
+    assert result[0]["supplemental_attachments"][0]["name"] == "ISA-1"
 
 
 def _dynamic_workflow_doc(steps, current_index):

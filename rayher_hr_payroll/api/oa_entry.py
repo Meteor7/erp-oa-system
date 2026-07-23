@@ -8,7 +8,7 @@ import frappe
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
-from rayher_hr_payroll import expense_attachments
+from rayher_hr_payroll import expense_attachments, invoice_supplemental_attachments
 from rayher_hr_payroll.access_control import BUSINESS_EXECUTIVE_ROLE
 from rayher_hr_payroll.expense_accounts import account_options
 from rayher_hr_payroll.oa_approval import (
@@ -651,13 +651,23 @@ def _with_expense_attachments(doc, lines):
     attachments = expense_attachments.list_attachments(getattr(doc, "name", None))
     by_line = {}
     for attachment in attachments:
-        by_line.setdefault(_clean(attachment.get("expense_line_key")), []).append(attachment)
+        serialized = dict(attachment)
+        serialized["attachment_source"] = "request_line"
+        by_line.setdefault(_clean(serialized.get("expense_line_key")), []).append(serialized)
     result = []
     for source in lines:
         line = dict(source)
         line_attachments = list(by_line.get(_clean(line.get("line_key")), []))
-        line["attachments"] = line_attachments
-        line["attachment_count"] = len(line_attachments)
+        invoice_attachments = []
+        source_invoice = _clean(line.get("source_invoice"))
+        if source_invoice:
+            invoice_attachments = [
+                {**dict(attachment), "attachment_source": "invoice"}
+                for attachment in invoice_supplemental_attachments.list_attachments(source_invoice)
+            ]
+        line["supplemental_attachments"] = invoice_attachments
+        line["attachments"] = line_attachments + invoice_attachments
+        line["attachment_count"] = len(line["attachments"])
         result.append(line)
     return result
 
@@ -2091,6 +2101,8 @@ def push_invoices_to_request(invoice_names, payment_info=None):
                 frappe.throw(frappe._("只有已确认发票可以下推。"))
             if str(getattr(record, "request", "") or "").strip():
                 frappe.throw(frappe._("发票 {0} 已下推到其他报销单。").format(name))
+            if not _clean(getattr(record, "expense_description", None)):
+                frappe.throw(frappe._("确认并下推发票前必须填写费用说明。"))
             records.append(record)
         expense_lines = [
             {
@@ -2102,7 +2114,9 @@ def push_invoices_to_request(invoice_names, payment_info=None):
                 "amount_before_tax": getattr(record, "amount_before_tax", None),
                 "tax_amount": getattr(record, "tax_amount", None),
                 "total_amount": getattr(record, "total_amount", None),
-                "attachment_count": 1,
+                "description": getattr(record, "expense_description", None),
+                "expense_description": getattr(record, "expense_description", None),
+                "attachment_count": 0,
                 "invoice_status": INVOICE_CONFIRMED,
             }
             for record in records
