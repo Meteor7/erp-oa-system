@@ -4,9 +4,8 @@ from __future__ import annotations
 
 
 PAID = "已付款"
-SOURCE_INVOICE_PUSH = "发票下推"
-PAYMENT_CORPORATE = "对公支付"
 PAYMENT_PERSONAL = "支付个人"
+PAYMENT_PERSONAL_LEGACY = "付款申请"
 DEPARTMENT_LEGACY = "总经理室"
 DEPARTMENT_CURRENT = "总经办"
 
@@ -14,16 +13,14 @@ DEPARTMENT_CURRENT = "总经办"
 def build_migration_plan(rows):
     plan = []
     for row in rows or []:
-        if str(row.get("workflow_status") or "") == PAID:
-            continue
+        is_paid = str(row.get("workflow_status") or "") == PAID
+        payment_type = str(row.get("payment_type") or "")
         changes = {}
-        if (
-            str(row.get("source_type") or "") == SOURCE_INVOICE_PUSH
-            and str(row.get("payment_type") or "") == PAYMENT_CORPORATE
-        ):
+        if payment_type == PAYMENT_PERSONAL_LEGACY:
             changes["payment_type"] = PAYMENT_PERSONAL
-        if str(row.get("department") or "") == DEPARTMENT_LEGACY:
-            changes["department"] = DEPARTMENT_CURRENT
+        if not is_paid:
+            if str(row.get("department") or "") == DEPARTMENT_LEGACY:
+                changes["department"] = DEPARTMENT_CURRENT
         if changes:
             plan.append({"name": str(row.get("name") or ""), "changes": changes})
     return plan
@@ -34,7 +31,6 @@ def normalize_unpaid_expense_handoff(dry_run=True):
 
     rows = frappe.get_all(
         "OA Approval Request",
-        filters={"workflow_status": ["!=", PAID]},
         fields=[
             "name",
             "workflow_status",
