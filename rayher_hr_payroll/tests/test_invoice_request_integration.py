@@ -2467,9 +2467,9 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
     step = Row(
         step_index=1,
         step_key="executive-all",
-        label="\u6f14\u793a\u5458\u5de521\u3001\u6f14\u793a\u5458\u5de528",
+        label="\u6f14\u793a\u5458\u5de521\u3001\u6f14\u793a\u5458\u5de529",
         mode="all",
-        approvers='["person046@business.example.invalid", "person058@legacy.example.invalid"]',
+        approvers='["person046@business.example.invalid", "person060@legacy.example.invalid"]',
         approved_by="[]",
         status=oa_entry.STATUS_PENDING,
         action_by="",

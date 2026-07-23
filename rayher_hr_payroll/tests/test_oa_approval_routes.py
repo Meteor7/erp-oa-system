@@ -18,7 +18,7 @@ def modes(steps):
 def test_leave_route_uses_current_vice_and_general_manager_accounts():
     steps = build_leave_route(supervisor="\u76f4\u5c5e\u4e0a\u7ea7")
 
-    assert labels(steps) == ["\u76f4\u5c5e\u4e0a\u7ea7", "\u6f14\u793a\u5458\u5de521", "\u6f14\u793a\u5458\u5de528"]
+    assert labels(steps) == ["\u76f4\u5c5e\u4e0a\u7ea7", "\u6f14\u793a\u5458\u5de521", "\u6f14\u793a\u5458\u5de529"]
     assert modes(steps) == ["approve", "approve", "approve"]
     assert steps[1]["approvers"] == [VICE_MANAGER_USER]
     assert steps[2]["approvers"] == [GENERAL_MANAGER_USER]
@@ -35,7 +35,7 @@ def test_expense_payment_finance_department_route_with_admin_asset():
         "\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513",
         "\u76f4\u5c5e\u4e0a\u7ea7",
         "\u6f14\u793a\u5458\u5de521",
-        "\u6f14\u793a\u5458\u5de528",
+        "\u6f14\u793a\u5458\u5de529",
         "\u8d22\u52a1\u529e\u7406\uff1a\u6f14\u793a\u5458\u5de513",
     ]
     assert modes(steps) == ["approve", "approve", "approve", "approve", "handle"]
@@ -56,7 +56,7 @@ def test_expense_payment_sales_department_uses_executive_cosign():
         "\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513",
         "\u76f4\u5c5e\u4e0a\u7ea7",
         "\u6f14\u793a\u5458\u5de518",
-        "\u6f14\u793a\u5458\u5de521\u3001\u6f14\u793a\u5458\u5de528",
+        "\u6f14\u793a\u5458\u5de521\u3001\u6f14\u793a\u5458\u5de529",
         "\u8d22\u52a1\u529e\u7406\uff1a\u6f14\u793a\u5458\u5de513",
     ]
     assert modes(steps) == ["approve", "approve", "approve", "all", "handle"]
@@ -66,13 +66,13 @@ def test_expense_payment_sales_department_uses_executive_cosign():
 def test_expense_payment_skips_duplicate_general_manager_node():
     steps = build_expense_payment_route(
         department="\u7814\u53d1\u90e8",
-        supervisor="\u6f14\u793a\u5458\u5de528",
+        supervisor="\u6f14\u793a\u5458\u5de529",
         asset_category="\u5176\u5b83",
     )
 
     assert labels(steps) == [
         "\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513",
-        "\u6f14\u793a\u5458\u5de528",
+        "\u6f14\u793a\u5458\u5de529",
         "\u8d22\u52a1\u529e\u7406\uff1a\u6f14\u793a\u5458\u5de513",
     ]
     assert modes(steps) == ["approve", "approve", "handle"]

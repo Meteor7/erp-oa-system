@@ -54,11 +54,12 @@ ACCOUNT_SPECS = (
         "roles": ("Employee",) + EXECUTIVE_ROLES,
     },
     {
-        "user_id": "person058@legacy.example.invalid",
-        "full_name": "\u6f14\u793a\u4eba\u5458H038ea0",
-        "employee": None,
-        "employee_name": None,
-        "roles": EXECUTIVE_ROLES,
+        "user_id": "person060@legacy.example.invalid",
+        "legacy_user_id": "person058@legacy.example.invalid",
+        "full_name": "\u6f14\u793a\u4eba\u5458H57af9a",
+        "employee": "HR-EMP-90003",
+        "employee_name": "\u6f14\u793a\u4eba\u5458H57af9a",
+        "roles": ("Employee",) + EXECUTIVE_ROLES,
     },
 )
 
@@ -70,9 +71,22 @@ def build_account_plan(specs, *, existing_users, employees, roles_by_user, emplo
     for source in specs:
         spec = dict(source)
         user_id = str(spec["user_id"]).strip().lower()
+        legacy_user_id = str(spec.get("legacy_user_id") or "").strip().lower()
+        target_exists = user_id in existing_users
+        legacy_exists = bool(
+            legacy_user_id
+            and legacy_user_id != user_id
+            and legacy_user_id in existing_users
+        )
+        rename_user = legacy_exists and not target_exists
+        effective_user_id = legacy_user_id if rename_user else user_id
         employee_id = spec.get("employee")
         employee = (employees or {}).get(employee_id) if employee_id else None
         conflicts = []
+        if target_exists and legacy_exists:
+            conflicts.append(
+                f"both {user_id} and legacy account {legacy_user_id} exist"
+            )
         link_employee = False
         if employee_id:
             if not employee:
@@ -85,22 +99,32 @@ def build_account_plan(specs, *, existing_users, employees, roles_by_user, emplo
                 if str(employee.get("status") or "") != "Active":
                     conflicts.append(f"{employee_id} is not active")
                 linked_user = str(employee.get("user_id") or "").strip().lower()
-                if linked_user and linked_user != user_id:
+                allowed_linked_users = {user_id}
+                if rename_user:
+                    allowed_linked_users.add(legacy_user_id)
+                if linked_user and linked_user not in allowed_linked_users:
                     conflicts.append(f"{employee_id} is already linked to {linked_user}")
                 else:
                     link_employee = linked_user != user_id
-            reverse_link = str((employee_by_user or {}).get(user_id) or "").strip()
-            if reverse_link and reverse_link != employee_id:
-                conflicts.append(f"{user_id} is already linked to {reverse_link}")
+            for linked_user_id in dict.fromkeys((user_id, effective_user_id)):
+                reverse_link = str(
+                    (employee_by_user or {}).get(linked_user_id) or ""
+                ).strip()
+                if reverse_link and reverse_link != employee_id:
+                    conflicts.append(
+                        f"{linked_user_id} is already linked to {reverse_link}"
+                    )
 
-        current_roles = set((roles_by_user or {}).get(user_id) or set())
+        current_roles = set((roles_by_user or {}).get(effective_user_id) or set())
         desired_roles = list(dict.fromkeys(spec.get("roles") or ()))
         result.append(
             {
                 **spec,
                 "user_id": user_id,
+                "legacy_user_id": legacy_user_id or None,
                 "roles": desired_roles,
-                "create_user": user_id not in existing_users,
+                "create_user": not target_exists and not rename_user,
+                "rename_user": bool(rename_user),
                 "link_employee": bool(link_employee),
                 "roles_to_add": [role for role in desired_roles if role not in current_roles],
                 "conflicts": conflicts,
@@ -110,7 +134,14 @@ def build_account_plan(specs, *, existing_users, employees, roles_by_user, emplo
 
 
 def plan_business_accounts():
-    user_ids = [row["user_id"] for row in ACCOUNT_SPECS]
+    user_ids = list(
+        dict.fromkeys(
+            user_id
+            for row in ACCOUNT_SPECS
+            for user_id in (row["user_id"], row.get("legacy_user_id"))
+            if user_id
+        )
+    )
     existing_users = set(
         frappe.get_all("User", filters={"name": ["in", user_ids]}, pluck="name")
     )
@@ -180,6 +211,19 @@ def ensure_business_accounts(dry_run=True):
 
     try:
         for item in plan:
+            if item.get("rename_user"):
+                frappe.rename_doc(
+                    "User",
+                    item["legacy_user_id"],
+                    item["user_id"],
+                    force=True,
+                )
+                user = frappe.get_doc("User", item["user_id"])
+                user.email = item["user_id"]
+                user.first_name = item["full_name"]
+                user.middle_name = None
+                user.last_name = None
+                user.save(ignore_permissions=True)
             if item["create_user"]:
                 password = _create_user(item)
                 result["created_credentials"].append(

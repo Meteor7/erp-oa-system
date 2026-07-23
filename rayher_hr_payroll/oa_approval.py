@@ -5,8 +5,8 @@ FINANCE_AUDITOR_NAME = "\u6f14\u793a\u5458\u5de513"
 FINANCE_AUDITOR_USER = "person067@legacy.example.invalid"
 VICE_MANAGER_NAME = "\u6f14\u793a\u5458\u5de521"
 VICE_MANAGER_USER = "person046@business.example.invalid"
-GENERAL_MANAGER_NAME = "\u6f14\u793a\u5458\u5de528"
-GENERAL_MANAGER_USER = "person058@legacy.example.invalid"
+GENERAL_MANAGER_NAME = "\u6f14\u793a\u5458\u5de529"
+GENERAL_MANAGER_USER = "person060@legacy.example.invalid"
 IT_APPROVER_NAME = "\u6f14\u793a\u5458\u5de518"
 
 FINANCE_AUDIT_LABEL = "\u8d22\u52a1\u5ba1\u8ba1\uff1a" + FINANCE_AUDITOR_NAME

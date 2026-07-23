@@ -19,9 +19,9 @@ Create a custom `Rayher Business Executive` role. Users with this role can view 
 Assign the role to:
 
 - Vice General Manager Li Qinggele through the existing `person046@business.example.invalid` account.
-- General Manager Wang Bo through a new internal `person058@legacy.example.invalid` account.
+- General Manager Wang Yansong through the corrected internal `person060@legacy.example.invalid` account, linked to `HR-EMP-90003`.
 
-Li Qinggele receives Employee, HR Manager, Accounts User, Department Manager, All Project Access, and Rayher Business Executive. Wang Bo receives the same business role bundle except Employee until a verified Employee record exists. Neither executive receives System Manager.
+Li Qinggele and Wang Yansong receive Employee, HR Manager, Accounts User, Department Manager, All Project Access, and Rayher Business Executive. Neither executive receives System Manager.
 
 `admin@legacy-business.example.invalid` already has the existing `总控 Owner` role profile, including System Manager. The OA override check recognizes that existing System Manager role instead of trying to add a custom role that the Role Profile would immediately remove.
 
@@ -39,7 +39,7 @@ All three receive Employee and Accounts User. Zhang Meng also receives Departmen
 
 New accounts receive cryptographically random temporary passwords during the explicit deployment command. Passwords are not stored in Git or source files. Existing account passwords are not changed.
 
-There is currently no Employee record named Wang Bo. The new Wang Bo User is therefore created without inventing an Employee record. The executive role makes the account usable in the platform and approval flow. HR can link a verified Employee record later without changing the account name.
+The General Manager is Wang Yansong (`HR-EMP-90003`). The mistakenly created `person058@legacy.example.invalid` User is renamed to `person060@legacy.example.invalid` so its password and audit references are preserved, then linked to the verified Employee record. A second executive account is not created.
 
 ## 4. Approval identity and route rules
 
@@ -49,11 +49,11 @@ The canonical people are:
 
 - Finance audit and Finance handling: Ye Liwei / `person067@legacy.example.invalid`
 - Vice General Manager: Li Qinggele / `person046@business.example.invalid`
-- General Manager: Wang Bo / `person058@legacy.example.invalid`
+- General Manager: Wang Yansong / `person060@legacy.example.invalid`
 
 New leave routes are supervisor -> Vice General Manager -> General Manager.
 
-New expense routes are Finance audit -> direct supervisor -> optional asset specialist -> executive approval -> Finance handling. Sales executive approval is an all-sign step for Li Qinggele and Wang Bo; other departments require Wang Bo unless already represented by the supervisor.
+New expense routes are Finance audit -> direct supervisor -> optional asset specialist -> executive approval -> Finance handling. Sales executive approval is an all-sign step for Li Qinggele and Wang Yansong; other departments require Wang Yansong unless already represented by the supervisor.
 
 Department supervisors supplied as employee names are resolved to linked User IDs when possible. Unresolved names remain visible and are reported by diagnostics instead of creating guessed users.
 
@@ -65,9 +65,9 @@ Legacy identity mapping:
 
 - Ye Liwei -> `person067@legacy.example.invalid`
 - Ren Feifan vice-manager nodes -> Li Qinggele account
-- Qing Bo general-manager nodes -> Wang Bo account
-- Wang Bo nodes -> Wang Bo account
-- Legacy joint `Qing Bo, Wang Bo` nodes -> joint Li Qinggele and Wang Bo accounts
+- Qing Bo legacy general-manager nodes -> Wang Yansong account
+- Wang Bo mistaken nodes/account ID -> Wang Yansong account
+- Legacy joint `Qing Bo, Wang Bo` nodes -> joint Li Qinggele and Wang Yansong accounts
 
 Labels on unresolved steps are updated to the current names. The migration is idempotent and produces counts plus an unresolved-identity report before it commits.
 

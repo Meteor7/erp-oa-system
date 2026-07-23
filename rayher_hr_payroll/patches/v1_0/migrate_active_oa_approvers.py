@@ -14,16 +14,20 @@ REN = "\u6f14\u793a\u5458\u5de510"
 QING = "\u6f14\u793a\u5458\u5de537"
 WANG = "\u6f14\u793a\u5458\u5de528"
 VICE = "\u6f14\u793a\u5458\u5de521"
+GENERAL = "\u6f14\u793a\u5458\u5de529"
 
 YE_USER = "person067@legacy.example.invalid"
 VICE_USER = "person046@business.example.invalid"
-GENERAL_USER = "person058@legacy.example.invalid"
+LEGACY_GENERAL_USER = "person058@legacy.example.invalid"
+GENERAL_USER = "person060@legacy.example.invalid"
 
 LEGACY_USER_MAP = {
     YE: YE_USER,
     REN: VICE_USER,
     QING: GENERAL_USER,
     WANG: GENERAL_USER,
+    GENERAL: GENERAL_USER,
+    LEGACY_GENERAL_USER: GENERAL_USER,
 }
 
 
@@ -44,12 +48,24 @@ def build_step_migration(label, approvers, status):
         return None
     label = str(label or "")
     approvers = _list(approvers)
-    if set(approvers) == {QING, WANG} and len(approvers) == 2:
-        next_label = label.replace(QING + "\u3001" + WANG, VICE + "\u3001" + WANG)
-        result = {"label": next_label, "approvers": [VICE_USER, GENERAL_USER]}
+    legacy_joint_label = QING + "\u3001" + WANG
+    legacy_joint_approvers = set(approvers) == {QING, WANG} and len(approvers) == 2
+    if legacy_joint_label in label or legacy_joint_approvers:
+        next_label = label.replace(
+            legacy_joint_label,
+            VICE + "\u3001" + GENERAL,
+        )
+        next_approvers = (
+            [VICE_USER, GENERAL_USER]
+            if legacy_joint_approvers
+            else list(
+                dict.fromkeys(LEGACY_USER_MAP.get(value, value) for value in approvers)
+            )
+        )
+        result = {"label": next_label, "approvers": next_approvers}
         return result if result != {"label": label, "approvers": approvers} else None
 
-    next_label = label.replace(REN, VICE).replace(QING, WANG)
+    next_label = label.replace(REN, VICE).replace(QING, GENERAL).replace(WANG, GENERAL)
     next_approvers = list(dict.fromkeys(LEGACY_USER_MAP.get(value, value) for value in approvers))
     result = {"label": next_label, "approvers": next_approvers}
     return result if result != {"label": label, "approvers": approvers} else None

@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - Work only on `feat/ocr-monthly-timesheet-integration`; do not push or merge `main`.
-- Do not create a Wang Bo Employee record without verified HR data.
-- Do not grant Li Qinggele or Wang Bo `System Manager`.
+- Link Wang Yansong only to the verified `HR-EMP-90003` record.
+- Do not grant Li Qinggele or Wang Yansong `System Manager`.
 - Do not rewrite completed approval steps, approval history, invoices, attachments, amounts, or payment data.
 - Use trusted cmd/certutil or Docker writers and reject `%TSD-Header` from every staged blob.
 - Begin every behavior with a failing test and deploy backend, migration, and exact frontend assets together.
@@ -68,14 +68,15 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
     assert specs["person065@legacy.example.invalid"]["employee"] == "HR-EMP-90016"
     assert specs["person072@legacy.example.invalid"]["employee"] == "HR-EMP-90007"
     assert specs["person046@business.example.invalid"]["employee"] == "HR-EMP-90004"
-    assert specs["person058@legacy.example.invalid"]["employee"] is None
+    assert specs["person060@legacy.example.invalid"]["employee"] == "HR-EMP-90003"
+    assert specs["person060@legacy.example.invalid"]["legacy_user_id"] == "person058@legacy.example.invalid"
     assert specs["admin@legacy-business.example.invalid"]["roles"] == ("System Manager",)
-    assert all("System Manager" not in specs[user]["roles"] for user in ("person046@business.example.invalid", "person058@legacy.example.invalid"))
+    assert all("System Manager" not in specs[user]["roles"] for user in ("person046@business.example.invalid", "person060@legacy.example.invalid"))
 ```
 
 - [ ] **Step 2: Add failing adapter tests proving dry-run makes no writes, existing users/passwords remain untouched, new users are enabled System Users, exact Employees are linked, role additions are idempotent, and collisions abort before any commit.**
 - [ ] **Step 3: Run `python -m pytest rayher_hr_payroll/tests/test_business_account_bootstrap.py -q` and confirm failures.**
-- [ ] **Step 4: Implement `ACCOUNT_SPECS` with these exact IDs: `admin@legacy-business.example.invalid`, `person067@legacy.example.invalid`, `person065@legacy.example.invalid`, `person072@legacy.example.invalid`, `person046@business.example.invalid`, and `person058@legacy.example.invalid`.**
+- [ ] **Step 4: Implement `ACCOUNT_SPECS` with these exact target IDs: `admin@legacy-business.example.invalid`, `person067@legacy.example.invalid`, `person065@legacy.example.invalid`, `person072@legacy.example.invalid`, `person046@business.example.invalid`, and `person060@legacy.example.invalid`; rename legacy `person058@legacy.example.invalid` instead of creating a duplicate.**
 - [ ] **Step 5: Implement preflight validation, User insert/update, `Employee.user_id` linking, additive role assignment, random temporary password generation using `secrets`, transaction rollback, and a result that never returns existing passwords.**
 - [ ] **Step 6: Re-run the focused tests and confirm they pass.**
 - [ ] **Step 7: Commit the account bootstrap module and tests.**
@@ -95,7 +96,7 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
 - Produces `_resolve_route_approver(value: str) -> str`
 
 - [ ] **Step 1: Replace legacy route expectations with failing tests for Finance -> supervisor -> optional specialist -> executive -> Finance handling using User IDs and Chinese display labels.**
-- [ ] **Step 2: Add failing tests for leave supervisor -> Li Qinggele -> Wang Bo, sales all-sign Li Qinggele + Wang Bo, non-sales Wang Bo, and Employee-name supervisor resolution to linked User ID.**
+- [ ] **Step 2: Add failing tests for leave supervisor -> Li Qinggele -> Wang Yansong, sales all-sign Li Qinggele + Wang Yansong, non-sales Wang Yansong, and Employee-name supervisor resolution to linked User ID.**
 - [ ] **Step 3: Run the two focused test files and confirm failures against legacy Ren Feifan/Qing Bo names.**
 - [ ] **Step 4: Refactor route constants and builders so fixed approvers are stable User IDs while labels remain names.**
 - [ ] **Step 5: Resolve dynamic supervisors by enabled User name/full name and then active Employee `user_id`; keep the original value only when unresolved.**
@@ -117,7 +118,7 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
 - Produces: `execute(dry_run=False) -> dict`
 - Extends request summary with `is_override_actor` and `action_scope`
 
-- [ ] **Step 1: Add failing migration tests for Ye Liwei, Ren Feifan, Qing Bo, Wang Bo, and legacy joint Qing Bo/Wang Bo mappings. Assert completed steps return no change and repeated execution is a no-op.**
+- [ ] **Step 1: Add failing migration tests for Ye Liwei, Ren Feifan, Qing Bo, mistaken Wang Bo, and legacy joint Qing Bo/Wang Bo mappings into the corrected Wang Yansong identity. Assert completed steps return no change and repeated execution is a no-op.**
 - [ ] **Step 2: Add failing capability/action tests for ordinary assigned approver, unrelated user, `Administrator`, `admin@legacy-business.example.invalid` with its existing `System Manager`, a `Rayher Business Executive`, Finance classification at Finance audit, all-mode override completion, stale/completed denial, and real `action_by` audit identity.**
 - [ ] **Step 3: Run focused tests and confirm the new cases fail.**
 - [ ] **Step 4: Implement the unresolved-only migration patch with dry-run counts, unresolved diagnostics, and no historical-field mutation.**
@@ -162,7 +163,7 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
 - [ ] **Step 3: Back up the site database and private files before any live User or approval-step mutation.**
 - [ ] **Step 4: Run account bootstrap and active-step migration in dry-run mode; inspect exact accounts, Employee links, role additions, changed step counts, and unresolved identities. Abort on any unexpected target.**
 - [ ] **Step 5: Deploy source and exact build, run `bench --site rayher.localhost migrate`, then run explicit account provisioning once. Capture temporary passwords outside Git.**
-- [ ] **Step 6: Verify role memberships, Employee links, no System Manager on Li Qinggele/Wang Bo, and active-step User IDs directly from Frappe.**
+- [ ] **Step 6: Verify role memberships, Employee links, no System Manager on Li Qinggele/Wang Yansong, and active-step User IDs directly from Frappe.**
 
 ---
 
@@ -173,7 +174,7 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
 
 - [ ] **Step 1: Use the in-app Browser at `http://203.0.113.88:8000/rayher/approval/purchase` as `admin@legacy-business.example.invalid`; verify all requests are visible and the current approval exposes classification, targeted reject, add-sign, and approve.**
 - [ ] **Step 2: Verify a Finance account sees classification/actions only when assigned to the active Finance node.**
-- [ ] **Step 3: Verify Li Qinggele and Wang Bo see all business requests and can perform audited approval actions without System Manager UI/permissions.**
+- [ ] **Step 3: Verify Li Qinggele and Wang Yansong see all business requests and can perform audited approval actions without System Manager UI/permissions.**
 - [ ] **Step 4: Exercise Finance classification save, approve, targeted reject, repeated add-sign, invoice/attachment preview, and close/reopen. Use disposable test requests only and restore/withdraw them afterward.**
 - [ ] **Step 5: Check 1366x768 and a narrow viewport for horizontal overflow, clipped controls, sticky footer behavior, readable amounts, and console errors. Capture screenshots.**
 - [ ] **Step 6: Run full backend/frontend suites again after deployment and inspect deployed asset hashes.**

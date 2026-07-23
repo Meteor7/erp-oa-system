@@ -16,9 +16,11 @@ def test_account_specs_preserve_admin_system_manager_and_limit_business_executiv
     assert specs["person065@legacy.example.invalid"]["employee"] == "HR-EMP-90016"
     assert specs["person072@legacy.example.invalid"]["employee"] == "HR-EMP-90007"
     assert specs["person046@business.example.invalid"]["employee"] == "HR-EMP-90004"
-    assert specs["person058@legacy.example.invalid"]["employee"] is None
+    assert specs["person060@legacy.example.invalid"]["employee"] == "HR-EMP-90003"
+    assert specs["person060@legacy.example.invalid"]["legacy_user_id"] == "person058@legacy.example.invalid"
+    assert "person058@legacy.example.invalid" not in specs
     assert specs["admin@legacy-business.example.invalid"]["roles"] == ("System Manager",)
-    for user in ("person046@business.example.invalid", "person058@legacy.example.invalid"):
+    for user in ("person046@business.example.invalid", "person060@legacy.example.invalid"):
         assert "System Manager" not in specs[user]["roles"]
         assert bootstrap.BUSINESS_EXECUTIVE_ROLE in specs[user]["roles"]
 
@@ -43,6 +45,32 @@ def test_build_account_plan_is_idempotent_and_additive():
     assert plan[0]["create_user"] is False
     assert plan[0]["link_employee"] is False
     assert plan[0]["roles_to_add"] == []
+    assert plan[0]["conflicts"] == []
+
+
+def test_build_account_plan_renames_legacy_user_instead_of_creating_duplicate():
+    specs = [
+        {
+            "user_id": "person060@legacy.example.invalid",
+            "legacy_user_id": "person058@legacy.example.invalid",
+            "full_name": "\u6f14\u793a\u5458\u5de529",
+            "employee": "HR-EMP-90003",
+            "employee_name": "\u6f14\u793a\u5458\u5de529",
+            "roles": ("Employee", "Rayher Business Executive"),
+        }
+    ]
+    plan = bootstrap.build_account_plan(
+        specs,
+        existing_users={"person058@legacy.example.invalid"},
+        employees={"HR-EMP-90003": {"employee_name": "\u6f14\u793a\u5458\u5de529", "status": "Active", "user_id": None}},
+        roles_by_user={"person058@legacy.example.invalid": {"Rayher Business Executive"}},
+        employee_by_user={},
+    )
+
+    assert plan[0]["create_user"] is False
+    assert plan[0]["rename_user"] is True
+    assert plan[0]["roles_to_add"] == ["Employee"]
+    assert plan[0]["link_employee"] is True
     assert plan[0]["conflicts"] == []
 
 
@@ -96,3 +124,45 @@ def test_ensure_business_accounts_aborts_on_preflight_conflict(monkeypatch):
 
     with pytest.raises(ValueError, match="collision"):
         bootstrap.ensure_business_accounts(dry_run=False)
+
+
+def test_ensure_business_accounts_renames_legacy_user_and_updates_identity(monkeypatch):
+    events = []
+    plan = [{
+        "user_id": "person060@legacy.example.invalid",
+        "legacy_user_id": "person058@legacy.example.invalid",
+        "full_name": "\u6f14\u793a\u5458\u5de529",
+        "conflicts": [],
+        "create_user": False,
+        "rename_user": True,
+        "link_employee": False,
+        "roles_to_add": [],
+    }]
+
+    class User:
+        email = "person058@legacy.example.invalid"
+        first_name = "\u6f14\u793a\u5458\u5de528"
+        middle_name = None
+        last_name = None
+
+        def save(self, **_kwargs):
+            events.append(("save", self.email, self.first_name))
+
+    monkeypatch.setattr(bootstrap, "plan_business_accounts", lambda: plan)
+    monkeypatch.setattr(
+        bootstrap,
+        "frappe",
+        SimpleNamespace(
+            rename_doc=lambda doctype, old, new, **_kwargs: events.append(("rename", doctype, old, new)),
+            get_doc=lambda doctype, name: User(),
+            db=SimpleNamespace(commit=lambda: events.append("commit"), rollback=lambda: events.append("rollback")),
+        ),
+    )
+
+    bootstrap.ensure_business_accounts(dry_run=False)
+
+    assert events == [
+        ("rename", "User", "person058@legacy.example.invalid", "person060@legacy.example.invalid"),
+        ("save", "person060@legacy.example.invalid", "\u6f14\u793a\u5458\u5de529"),
+        "commit",
+    ]
