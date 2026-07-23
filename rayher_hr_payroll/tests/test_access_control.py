@@ -52,7 +52,8 @@ def test_role_profile_idempotent_no_save_when_roles_match(monkeypatch):
             self.role = role
 
     class FakeDoc:
-        def __init__(self, roles):
+        def __init__(self, name, roles):
+            self.name = name
             self.roles = [Row(r) for r in roles]
 
         def set(self, field, val):
@@ -62,11 +63,14 @@ def test_role_profile_idempotent_no_save_when_roles_match(monkeypatch):
             self.roles.append(Row(val["role"]))
 
         def save(self, **k):
-            saved.append(True)
+            saved.append(self.name)
 
-    desired = list(ac.ROLE_PROFILES[0]["roles"])
+    docs = {
+        profile["role_profile"]: FakeDoc(profile["role_profile"], profile["roles"])
+        for profile in ac.ROLE_PROFILES
+    }
     monkeypatch.setattr(ac.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
-    monkeypatch.setattr(ac.frappe, "get_doc", lambda *a, **k: FakeDoc(desired))
+    monkeypatch.setattr(ac.frappe, "get_doc", lambda _doctype, name: docs[name])
     ac._ensure_role_profiles()
     assert saved == []
 
@@ -82,7 +86,8 @@ def test_role_profile_rebuilds_when_roles_differ(monkeypatch):
             self.role = role
 
     class FakeDoc:
-        def __init__(self, roles):
+        def __init__(self, name, roles):
+            self.name = name
             self.roles = [Row(r) for r in roles]
 
         def set(self, field, val):
@@ -92,12 +97,20 @@ def test_role_profile_rebuilds_when_roles_differ(monkeypatch):
             self.roles.append(Row(val["role"]))
 
         def save(self, **k):
-            saved.append(True)
+            saved.append(self.name)
 
+    target = ac.ROLE_PROFILES[0]["role_profile"]
+    docs = {
+        profile["role_profile"]: FakeDoc(
+            profile["role_profile"],
+            ["System Manager"] if profile["role_profile"] == target else profile["roles"],
+        )
+        for profile in ac.ROLE_PROFILES
+    }
     monkeypatch.setattr(ac.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
-    monkeypatch.setattr(ac.frappe, "get_doc", lambda *a, **k: FakeDoc(["System Manager"]))
+    monkeypatch.setattr(ac.frappe, "get_doc", lambda _doctype, name: docs[name])
     ac._ensure_role_profiles()
-    assert saved == [True]
+    assert saved == [target]
 
 
 def test_custom_role_reconciles_stale_flags(monkeypatch):

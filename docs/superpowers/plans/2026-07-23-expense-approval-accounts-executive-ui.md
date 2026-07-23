@@ -69,7 +69,8 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
     assert specs["person072@legacy.example.invalid"]["employee"] == "HR-EMP-90007"
     assert specs["person046@business.example.invalid"]["employee"] == "HR-EMP-90004"
     assert specs["person058@legacy.example.invalid"]["employee"] is None
-    assert all("System Manager" not in row["roles"] for row in specs.values())
+    assert specs["admin@legacy-business.example.invalid"]["roles"] == ("System Manager",)
+    assert all("System Manager" not in specs[user]["roles"] for user in ("person046@business.example.invalid", "person058@legacy.example.invalid"))
 ```
 
 - [ ] **Step 2: Add failing adapter tests proving dry-run makes no writes, existing users/passwords remain untouched, new users are enabled System Users, exact Employees are linked, role additions are idempotent, and collisions abort before any commit.**
@@ -117,7 +118,7 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
 - Extends request summary with `is_override_actor` and `action_scope`
 
 - [ ] **Step 1: Add failing migration tests for Ye Liwei, Ren Feifan, Qing Bo, Wang Bo, and legacy joint Qing Bo/Wang Bo mappings. Assert completed steps return no change and repeated execution is a no-op.**
-- [ ] **Step 2: Add failing capability/action tests for ordinary assigned approver, unrelated user, `Administrator`, `admin@legacy-business.example.invalid` with `Rayher Business Executive`, Finance classification at Finance audit, all-mode override completion, stale/completed denial, and real `action_by` audit identity.**
+- [ ] **Step 2: Add failing capability/action tests for ordinary assigned approver, unrelated user, `Administrator`, `admin@legacy-business.example.invalid` with its existing `System Manager`, a `Rayher Business Executive`, Finance classification at Finance audit, all-mode override completion, stale/completed denial, and real `action_by` audit identity.**
 - [ ] **Step 3: Run focused tests and confirm the new cases fail.**
 - [ ] **Step 4: Implement the unresolved-only migration patch with dry-run counts, unresolved diagnostics, and no historical-field mutation.**
 - [ ] **Step 5: Implement `_is_oa_override_user`, capability metadata, and override-aware checks in approve, targeted reject, add-sign, and Finance classification. Preserve all existing transaction locks and validation.**

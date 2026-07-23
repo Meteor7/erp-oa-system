@@ -2419,14 +2419,18 @@ def test_serialize_route_steps_resolves_dynamic_supervisor(monkeypatch):
     assert rows[0]["approvers"] == ["person054@legacy.example.invalid"]
 
 
-def test_business_executive_and_framework_administrator_are_oa_override_users(monkeypatch):
+def test_business_executive_system_manager_and_framework_administrator_are_oa_override_users(monkeypatch):
     monkeypatch.setattr(
         frappe_stub,
         "get_roles",
-        lambda user=None: ["Rayher Business Executive"] if user != "ordinary@example.com" else ["Employee"],
+        lambda user=None: {
+            "admin@legacy-business.example.invalid": ["System Manager"],
+            "executive@example.com": ["Rayher Business Executive"],
+        }.get(user, ["Employee"]),
     )
 
     assert oa_entry._is_oa_override_user("admin@legacy-business.example.invalid") is True
+    assert oa_entry._is_oa_override_user("executive@example.com") is True
     assert oa_entry._is_oa_override_user("Administrator") is True
     assert oa_entry._is_oa_override_user("ordinary@example.com") is False
 

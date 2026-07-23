@@ -9,7 +9,7 @@ def specs_by_user():
     return {row["user_id"]: row for row in bootstrap.ACCOUNT_SPECS}
 
 
-def test_account_specs_cover_finance_admin_and_executives_without_system_manager():
+def test_account_specs_preserve_admin_system_manager_and_limit_business_executives():
     specs = specs_by_user()
     assert specs["admin@legacy-business.example.invalid"]["employee"] is None
     assert specs["person067@legacy.example.invalid"]["employee"] == "HR-EMP-90008"
@@ -17,8 +17,9 @@ def test_account_specs_cover_finance_admin_and_executives_without_system_manager
     assert specs["person072@legacy.example.invalid"]["employee"] == "HR-EMP-90007"
     assert specs["person046@business.example.invalid"]["employee"] == "HR-EMP-90004"
     assert specs["person058@legacy.example.invalid"]["employee"] is None
-    assert all("System Manager" not in row["roles"] for row in specs.values())
-    for user in ("admin@legacy-business.example.invalid", "person046@business.example.invalid", "person058@legacy.example.invalid"):
+    assert specs["admin@legacy-business.example.invalid"]["roles"] == ("System Manager",)
+    for user in ("person046@business.example.invalid", "person058@legacy.example.invalid"):
+        assert "System Manager" not in specs[user]["roles"]
         assert bootstrap.BUSINESS_EXECUTIVE_ROLE in specs[user]["roles"]
 
 

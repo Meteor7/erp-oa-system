@@ -23,7 +23,7 @@ ACCOUNT_SPECS = (
         "full_name": "Rayher Admin",
         "employee": None,
         "employee_name": None,
-        "roles": (BUSINESS_EXECUTIVE_ROLE,),
+        "roles": ("System Manager",),
     },
     {
         "user_id": "person067@legacy.example.invalid",

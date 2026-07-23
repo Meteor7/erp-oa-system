@@ -18,11 +18,12 @@ Create a custom `Rayher Business Executive` role. Users with this role can view 
 
 Assign the role to:
 
-- `admin@legacy-business.example.invalid`, so the named business administrator can see and handle all OA requests.
 - Vice General Manager Li Qinggele through the existing `person046@business.example.invalid` account.
 - General Manager Wang Bo through a new internal `person058@legacy.example.invalid` account.
 
-Li Qinggele and Wang Bo receive the same business role bundle: Employee, HR Manager, Accounts User, Department Manager, All Project Access, and Rayher Business Executive. They do not receive System Manager.
+Li Qinggele receives Employee, HR Manager, Accounts User, Department Manager, All Project Access, and Rayher Business Executive. Wang Bo receives the same business role bundle except Employee until a verified Employee record exists. Neither executive receives System Manager.
+
+`admin@legacy-business.example.invalid` already has the existing `总控 Owner` role profile, including System Manager. The OA override check recognizes that existing System Manager role instead of trying to add a custom role that the Role Profile would immediately remove.
 
 The framework `Administrator` account remains an emergency system account and also receives an OA action override in code, without changing its stored roles.
 

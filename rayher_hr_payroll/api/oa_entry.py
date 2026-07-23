@@ -567,9 +567,11 @@ def _actor_names(user=None):
 
 def _is_oa_override_user(user=None):
     user = _clean(user or frappe.session.user)
+    roles = set(frappe.get_roles(user))
     return bool(
         user == "Administrator"
-        or BUSINESS_EXECUTIVE_ROLE in set(frappe.get_roles(user))
+        or "System Manager" in roles
+        or BUSINESS_EXECUTIVE_ROLE in roles
     )
 def _matched_approvers(step, user=None):
     actors = _actor_names(user)
