@@ -9,6 +9,7 @@ from frappe.utils import now_datetime
 
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
 from rayher_hr_payroll import expense_attachments
+from rayher_hr_payroll.access_control import BUSINESS_EXECUTIVE_ROLE
 from rayher_hr_payroll.oa_approval import (
     ADMIN_ASSET,
     IT_ASSET,
@@ -564,6 +565,12 @@ def _actor_names(user=None):
     return {str(name).strip() for name in names if str(name or "").strip()}
 
 
+def _is_oa_override_user(user=None):
+    user = _clean(user or frappe.session.user)
+    return bool(
+        user == "Administrator"
+        or BUSINESS_EXECUTIVE_ROLE in set(frappe.get_roles(user))
+    )
 def _matched_approvers(step, user=None):
     actors = _actor_names(user)
     return [name for name in _parse_json_list(step.approvers) if name in actors]
@@ -581,14 +588,19 @@ def _can_act_on_current_step(doc, user=None):
     if doc.workflow_status not in ACTIVE_STATUSES:
         return False
     step = _current_step(doc)
-    return bool(step and _matched_approvers(step, user))
+    return bool(step and (_matched_approvers(step, user) or _is_oa_override_user(user)))
 
 
 def _request_capabilities(doc, user=None):
     step = _current_step(doc)
     can_act = _can_act_on_current_step(doc, user)
+    is_override = bool(can_act and _is_oa_override_user(user))
     classification_ready = _classification_ready(doc)
-    finance_edit = bool(can_act and _is_finance_user(user) and _is_finance_audit_step(step))
+    finance_edit = bool(
+        can_act
+        and _is_finance_audit_step(step)
+        and (_is_finance_user(user) or is_override)
+    )
     can_approve = bool(can_act and (not finance_edit or classification_ready))
     return {
         "can_approve": can_approve,
@@ -596,6 +608,8 @@ def _request_capabilities(doc, user=None):
         "can_add_sign": bool(can_act),
         "can_edit_expense_items": finance_edit,
         "classification_ready": classification_ready,
+        "is_override_actor": is_override,
+        "action_scope": "override" if is_override else ("assigned" if can_act else ""),
     }
 
 
@@ -1313,7 +1327,11 @@ def save_finance_expense_items(name, lines):
         step = _current_step(doc)
         if doc.request_type != REQUEST_EXPENSE_PAYMENT or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("The request is not at an editable Finance approval step."))
-        if not _is_finance_user() or not _is_finance_audit_step(step) or not _matched_approvers(step):
+        if (
+            not _is_finance_audit_step(step)
+            or not _can_act_on_current_step(doc)
+            or not (_is_finance_user() or _is_oa_override_user())
+        ):
             frappe.throw(frappe._("Only the active Finance approver may classify expense items."))
         current_lines = list(getattr(doc, "expense_lines", []) or [])
         by_key = {_clean(getattr(line, "line_key", None)): line for line in current_lines if _clean(getattr(line, "line_key", None))}
@@ -1963,9 +1981,10 @@ def action_request(name, action="approve", note=None, reject_target=None):
         if not step or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("\u5f53\u524d\u7533\u8bf7\u4e0d\u5728\u53ef\u5904\u7406\u72b6\u6001\u3002"))
         matched = _matched_approvers(step)
-        if not matched:
+        is_override = _is_oa_override_user()
+        if not matched and not is_override:
             frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
-        actor = sorted(_actor_names())[0]
+        actor = _clean(frappe.session.user)
         if action == "reject":
             _reject_to_target(doc, step, reject_target, actor, note)
             doc.save(ignore_permissions=True)
@@ -1974,9 +1993,13 @@ def action_request(name, action="approve", note=None, reject_target=None):
             frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
         _validate_finance_classification(doc, step)
         approved_by = set(_parse_json_list(step.approved_by))
-        approved_by.update(matched)
+        approved_by.update([actor] if is_override else matched)
         step.approved_by = _json_list(sorted(approved_by))
-        if step.mode == "all" and not set(_parse_json_list(step.approvers)).issubset(approved_by):
+        if (
+            step.mode == "all"
+            and not is_override
+            and not set(_parse_json_list(step.approvers)).issubset(approved_by)
+        ):
             step.action_by = actor
             step.acted_on = now_datetime()
             if note:

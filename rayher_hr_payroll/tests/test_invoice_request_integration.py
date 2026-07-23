@@ -2100,6 +2100,8 @@ def test_request_capabilities_are_server_authoritative_for_finance(monkeypatch):
         "can_add_sign": True,
         "can_edit_expense_items": True,
         "classification_ready": False,
+        "is_override_actor": False,
+        "action_scope": "assigned",
     }
 
 
@@ -2415,3 +2417,85 @@ def test_serialize_route_steps_resolves_dynamic_supervisor(monkeypatch):
     )
 
     assert rows[0]["approvers"] == ["person054@legacy.example.invalid"]
+
+
+def test_business_executive_and_framework_administrator_are_oa_override_users(monkeypatch):
+    monkeypatch.setattr(
+        frappe_stub,
+        "get_roles",
+        lambda user=None: ["Rayher Business Executive"] if user != "ordinary@example.com" else ["Employee"],
+    )
+
+    assert oa_entry._is_oa_override_user("admin@legacy-business.example.invalid") is True
+    assert oa_entry._is_oa_override_user("Administrator") is True
+    assert oa_entry._is_oa_override_user("ordinary@example.com") is False
+
+
+def test_override_capabilities_expose_finance_classification_and_action_scope(monkeypatch):
+    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513", mode="approve", approvers='["person067@legacy.example.invalid"]')
+    doc = Row(
+        request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
+        workflow_status=oa_entry.STATUS_PENDING,
+        expense_lines=[Row(expense_item="")],
+        current_step_index=1,
+        steps=[step],
+    )
+    step.step_index = 1
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: [])
+    monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: True)
+    monkeypatch.setattr(oa_entry, "_is_finance_user", lambda user=None: False)
+
+    capabilities = oa_entry._request_capabilities(doc, "admin@legacy-business.example.invalid")
+
+    assert capabilities == {
+        "can_approve": False,
+        "can_reject": True,
+        "can_add_sign": True,
+        "can_edit_expense_items": True,
+        "classification_ready": False,
+        "is_override_actor": True,
+        "action_scope": "override",
+    }
+
+
+def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    step = Row(
+        step_index=1,
+        step_key="executive-all",
+        label="\u6f14\u793a\u5458\u5de521\u3001\u6f14\u793a\u5458\u5de528",
+        mode="all",
+        approvers='["person046@business.example.invalid", "person058@legacy.example.invalid"]',
+        approved_by="[]",
+        status=oa_entry.STATUS_PENDING,
+        action_by="",
+        acted_on=None,
+        note="",
+    )
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-EXEC-OVERRIDE",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "current_step_index": 1,
+            "current_step_label": step.label,
+            "expense_lines": [Row(expense_item="travel")],
+            "steps": [step],
+            "operation_log": "[]",
+        },
+    )
+    environment.committed[doc.name] = doc
+    frappe_stub.session.user = "admin@legacy-business.example.invalid"
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: [])
+    monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: True)
+
+    oa_entry.action_request(doc.name, "approve", note="business override")
+
+    assert doc.workflow_status == oa_entry.STATUS_COMPLETED
+    assert step.action_by == "admin@legacy-business.example.invalid"
+    assert json.loads(step.approved_by) == ["admin@legacy-business.example.invalid"]
+    assert "person046@business.example.invalid" not in json.loads(step.approved_by)
