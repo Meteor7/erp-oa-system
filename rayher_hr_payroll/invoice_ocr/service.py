@@ -26,6 +26,7 @@ MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_OCR_PAYLOAD_BYTES = 1024 * 1024
 MAX_ERROR_CHARS = 300
 MAX_EDIT_PAYLOAD_BYTES = 32 * 1024
+MAX_EXPENSE_DESCRIPTION_LENGTH = 1000
 PROCESSING_STALE_SECONDS = 15 * 60
 PREVIEW_TOKEN_TTL_SECONDS = 60
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -33,7 +34,7 @@ CANONICAL_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "ima
 EDITABLE_FIELDS = {"invoice_category", "project_name", "issue_date", "invoice_number", "amount_before_tax", "tax_amount", "total_amount"}
 MONEY_FIELDS = {"amount_before_tax", "tax_amount", "total_amount"}
 _MANUAL_PRESENCE_PREFIX = "manual-field-presence:"
-REQUEST_RECORD_FIELDS = ["name", "batch", "recognition_status", "invoice_category", "project_name", "invoice_number", "total_amount", "ocr_payload", "field_warnings", "request", "expense_line_key"]
+REQUEST_RECORD_FIELDS = ["name", "batch", "recognition_status", "invoice_category", "project_name", "invoice_number", "total_amount", "expense_description", "ocr_payload", "field_warnings", "request", "expense_line_key"]
 REQUEST_SEARCH_LIMIT = 2000
 REQUEST_REASON_LIMIT = 1000
 FINANCE_ROLES = {"System Manager", "Accounts User"}
@@ -818,7 +819,37 @@ def update_invoice(invoice_name, values):
             _throw("当前发票状态不允许修改识别字段。")
         _apply_supplied_fields(record, supplied)
         _save(record)
-        return _serialize_record(record)
+        return _serialize_record(record, include_attachments=True)
+
+
+def _normalize_expense_description(value):
+    description = str(value or "").strip()
+    if "\x00" in description or len(description) > MAX_EXPENSE_DESCRIPTION_LENGTH:
+        _throw("费用说明格式无效或内容过长。")
+    return description
+
+
+def update_expense_context(invoice_name, expense_description):
+    name = str(invoice_name)
+    with _transaction_lock("record", name):
+        record = _require_record(name, write=True, current=True)
+        if str(_get(record, "request") or "").strip():
+            _throw("发票已经下推，请先撤回下推后再修改费用说明或附件。")
+        if _get(record, "recognition_status") not in {"待确认", "疑似重复", "已确认"}:
+            _throw("当前发票状态不允许修改费用说明。")
+        old_description = str(_get(record, "expense_description") or "").strip()
+        description = _normalize_expense_description(expense_description)
+        _set(record, "expense_description", description)
+        if description != old_description:
+            _append_record_event(
+                record,
+                "费用说明修改",
+                _get(record, "recognition_status"),
+                _get(record, "recognition_status"),
+                description,
+            )
+        _save(record)
+        return _serialize_record(record, include_attachments=True)
 
 
 def _resolution_prefix(key):
@@ -866,6 +897,12 @@ def confirm_invoice(invoice_name, values=None):
             _throw("当前发票状态不允许确认。")
         if supplied:
             _apply_supplied_fields(record, supplied)
+        description = _normalize_expense_description(
+            _get(record, "expense_description")
+        )
+        if not description:
+            _throw("确认发票前必须填写费用说明。")
+        _set(record, "expense_description", description)
         key, _duplicate = _business_duplicate(record)
         if key and not _resolution_applies(record, key):
             with _transaction_lock("business", key):
@@ -877,15 +914,19 @@ def confirm_invoice(invoice_name, values=None):
                     _set(record, "duplicate_reason", "发票号码、开票日期和合计金额与已确认发票相同")
                     _save(record)
                     _recompute_record_batch(record)
-                    result = _serialize_record(record)
+                    result = _serialize_record(
+                        record, include_attachments=True
+                    )
                     result["conflict"] = {"code": "duplicate", "duplicate_of": duplicate_name}
                     return result
                 _confirm(record)
                 _recompute_record_batch(record)
-                return _serialize_record(record)
+                return _serialize_record(
+                    record, include_attachments=True
+                )
         _confirm(record)
         _recompute_record_batch(record)
-        return _serialize_record(record)
+        return _serialize_record(record, include_attachments=True)
 
 
 def list_workbench_invoices(view="mine", status=None, limit=200, include_pushed=False):
@@ -927,7 +968,9 @@ def list_workbench_invoices(view="mine", status=None, limit=200, include_pushed=
             continue
         record = frappe.get_doc(RECORD_DOCTYPE, name)
         if can_read_invoice(record, user):
-            rows.append(_serialize_record(record))
+            rows.append(
+                _serialize_record(record, include_attachments=True)
+            )
     return rows
 
 
@@ -947,7 +990,7 @@ def unconfirm_invoice(invoice_name, note=None):
         _append_record_event(record, "撤回确认", status, "待确认", note)
         _save(record)
         _recompute_record_batch(record)
-        return _serialize_record(record)
+        return _serialize_record(record, include_attachments=True)
 
 
 def _as_datetime(value):
@@ -981,7 +1024,7 @@ def retry_invoice(invoice_name):
         _save(record)
         _recompute_record_batch(record)
         _enqueue_recognition_after_commit(_get(record, "name"))
-        return _serialize_record(record)
+        return _serialize_record(record, include_attachments=True)
 
 
 def exclude_invoice(invoice_name, reason):
@@ -1001,7 +1044,7 @@ def exclude_invoice(invoice_name, reason):
         _set(record, "processing_claim_id", "")
         _save(record)
         _recompute_record_batch(record)
-        return _serialize_record(record)
+        return _serialize_record(record, include_attachments=True)
 
 
 def resolve_duplicate(invoice_name, reason):
@@ -1024,7 +1067,7 @@ def resolve_duplicate(invoice_name, reason):
         _set(record, "processing_claim_id", "")
         _save(record)
         _recompute_record_batch(record)
-        return _serialize_record(record)
+        return _serialize_record(record, include_attachments=True)
 
 
 def _request_invoice_records(request_name, *, current=False):
@@ -1403,7 +1446,9 @@ def link_invoice(invoice_name, request, expense_line_key):
                     _set(batch, "request", request_name)
                     _save(batch)
                 _apply_request_invoice_summary(request_doc, save=True)
-                return _serialize_record(record)
+                return _serialize_record(
+                    record, include_attachments=True
+                )
 
 
 
@@ -1420,7 +1465,10 @@ def get_batch(batch):
     batch_doc = _require_batch(str(batch)); records = []
     for row in _get_all(RECORD_DOCTYPE, filters={"batch": _get(batch_doc, "name")}, fields=["name"]):
         record = frappe.get_doc(RECORD_DOCTYPE, _get(row, "name"))
-        if can_read_invoice(record, _user()): records.append(_serialize_record(record))
+        if can_read_invoice(record, _user()):
+            records.append(
+                _serialize_record(record, include_attachments=True)
+            )
     result = _serialize_batch(batch_doc)
     if _get(batch_doc, "owner") != _user():
         result.pop("temporary_token", None)
@@ -1436,7 +1484,9 @@ def get_request_invoices(request):
     for row in _request_invoice_records(_get(request_doc, "name")):
         record = frappe.get_doc(RECORD_DOCTYPE, _get(row, "name"))
         if can_read_invoice(record, user):
-            result.append(_serialize_record(record))
+            result.append(
+                _serialize_record(record, include_attachments=True)
+            )
     return result
 
 
@@ -1576,15 +1626,26 @@ def _serialize_batch(batch):
     }
 
 
-def _serialize_record(record):
-    return {
+from rayher_hr_payroll import invoice_supplemental_attachments
+
+
+def _serialize_record(record, include_attachments=False):
+    result = {
         "name": _get(record, "name"), "batch": _get(record, "batch"), "original_filename": _get(record, "original_filename"),
         "mime_type": _get(record, "mime_type"), "file_size": int(_get(record, "file_size") or 0), "recognition_status": _get(record, "recognition_status"),
         "invoice_category": _get(record, "invoice_category") or "", "project_name": _get(record, "project_name") or "", "issue_date": _get(record, "issue_date"),
         "invoice_number": _get(record, "invoice_number") or "", "amount_before_tax": _record_money(record, "amount_before_tax"), "tax_amount": _record_money(record, "tax_amount"),
         "total_amount": _record_money(record, "total_amount"), "field_warnings": _public_field_warnings(record), "is_duplicate": bool(_get(record, "duplicate_of")),
+        "expense_description": _get(record, "expense_description") or "",
         "duplicate_reason": _get(record, "duplicate_reason") or "", "request": _get(record, "request") or "", "expense_line_key": _get(record, "expense_line_key") or "",
         "processing_started_on": _get(record, "processing_started_on"), "processing_error": _get(record, "processing_error") or "",
         "retry_count": int(_get(record, "retry_count") or 0),
         "confirmed_by": _get(record, "confirmed_by") or "", "confirmed_on": _get(record, "confirmed_on"),
     }
+    if include_attachments:
+        result["supplemental_attachments"] = (
+            invoice_supplemental_attachments.list_attachments_for_record(
+                record
+            )
+        )
+    return result

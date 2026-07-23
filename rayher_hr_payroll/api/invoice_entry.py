@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import frappe
 
+from rayher_hr_payroll import invoice_supplemental_attachments
 from rayher_hr_payroll.invoice_ocr import service
 
 
@@ -54,6 +55,20 @@ def get_batch(batch):
 def update_invoice(invoice_name, values):
     _authenticated()
     return service.update_invoice(_bounded(invoice_name, "发票标识", 140), values)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_expense_context(invoice_name, expense_description):
+    _authenticated()
+    return service.update_expense_context(
+        _bounded(invoice_name, "发票标识", 140),
+        _bounded(
+            expense_description,
+            "费用说明",
+            1000,
+            required=False,
+        ),
+    )
 
 
 @frappe.whitelist(methods=["POST"])
@@ -126,6 +141,40 @@ def get_request_invoices(request):
 def preview_invoice(invoice_name):
     _authenticated()
     return service.preview_invoice(_bounded(invoice_name, "发票标识", 140))
+
+
+@frappe.whitelist(methods=["POST"])
+def upload_supplemental_attachment(invoice_name, file_url):
+    _authenticated()
+    return invoice_supplemental_attachments.register_attachment(
+        _bounded(invoice_name, "发票标识", 140),
+        _bounded(file_url, "文件地址", 500),
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_supplemental_attachment(invoice_name, attachment):
+    _authenticated()
+    return invoice_supplemental_attachments.delete_attachment(
+        _bounded(invoice_name, "发票标识", 140),
+        _bounded(attachment, "附件标识", 140),
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def preview_supplemental_attachment(attachment):
+    _authenticated()
+    return invoice_supplemental_attachments.preview_attachment(
+        _bounded(attachment, "附件标识", 140)
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def serve_supplemental_attachment_preview(token):
+    _authenticated()
+    return invoice_supplemental_attachments.serve_attachment_preview(
+        _bounded(token, "预览凭证", 200)
+    )
 
 
 @frappe.whitelist(methods=["POST"])

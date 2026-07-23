@@ -1,0 +1,43 @@
+{
+  "actions": [],
+  "autoname": "format:OISA-{YYYY}-{#####}",
+  "creation": "2026-07-23 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "invoice_record",
+    "file",
+    "file_url",
+    "original_filename",
+    "mime_type",
+    "file_size",
+    "file_sha256",
+    "uploaded_by",
+    "uploaded_on"
+  ],
+  "fields": [
+    {"fieldname": "invoice_record", "fieldtype": "Link", "label": "Invoice Record", "options": "OA Invoice Record", "read_only": 1, "reqd": 1, "search_index": 1},
+    {"fieldname": "file", "fieldtype": "Link", "label": "Private File", "options": "File", "read_only": 1, "reqd": 1, "unique": 1},
+    {"fieldname": "file_url", "fieldtype": "Data", "label": "Private File URL", "read_only": 1, "reqd": 1},
+    {"fieldname": "original_filename", "fieldtype": "Data", "label": "Original Filename", "read_only": 1, "reqd": 1},
+    {"fieldname": "mime_type", "fieldtype": "Data", "label": "MIME Type", "read_only": 1, "reqd": 1},
+    {"fieldname": "file_size", "fieldtype": "Int", "label": "File Size", "read_only": 1, "reqd": 1},
+    {"fieldname": "file_sha256", "fieldtype": "Data", "label": "SHA-256", "read_only": 1, "reqd": 1},
+    {"fieldname": "uploaded_by", "fieldtype": "Link", "label": "Uploaded By", "options": "User", "read_only": 1, "reqd": 1},
+    {"fieldname": "uploaded_on", "fieldtype": "Datetime", "label": "Uploaded On", "read_only": 1, "reqd": 1}
+  ],
+  "istable": 0,
+  "links": [],
+  "modified": "2026-07-23 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Invoice Supplemental Attachment",
+  "owner": "Administrator",
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "print": 1}
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1
+}

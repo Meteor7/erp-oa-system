@@ -23,6 +23,7 @@
     "amount_before_tax",
     "tax_amount",
     "total_amount",
+    "expense_description",
     "ocr_section",
     "ocr_payload",
     "field_warnings",
@@ -155,6 +156,11 @@
       "in_list_view": 1,
       "label": "Total Amount",
       "precision": "2"
+    },
+    {
+      "fieldname": "expense_description",
+      "fieldtype": "Small Text",
+      "label": "Expense Description"
     },
     {
       "fieldname": "ocr_section",

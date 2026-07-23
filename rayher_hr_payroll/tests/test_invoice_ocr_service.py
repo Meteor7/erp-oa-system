@@ -254,7 +254,7 @@ class Environment:
         return doc
 
     def add_record(self, name="INV-1", **values):
-        defaults = dict(doctype=service.RECORD_DOCTYPE, name=name, owner="alice@example.com", batch="BATCH-1", uploaded_by="alice@example.com", invoice_file="/private/files/invoice.pdf", original_filename="invoice.pdf", mime_type="application/pdf", file_size=9, file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(), recognition_status="待确认", invoice_category="", project_name="", issue_date=None, invoice_number="", amount_before_tax=None, tax_amount=None, total_amount=None, ocr_payload="", field_warnings="[]", duplicate_of="", duplicate_reason="", request="", expense_line_key="", confirmed_by="", confirmed_on=None, processing_started_on=None, processing_claim_id="", processing_error="", retry_count=0)
+        defaults = dict(doctype=service.RECORD_DOCTYPE, name=name, owner="alice@example.com", batch="BATCH-1", uploaded_by="alice@example.com", invoice_file="/private/files/invoice.pdf", original_filename="invoice.pdf", mime_type="application/pdf", file_size=9, file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(), recognition_status="待确认", invoice_category="", project_name="", issue_date=None, invoice_number="", amount_before_tax=None, tax_amount=None, total_amount=None, expense_description="测试费用说明", ocr_payload="", field_warnings="[]", duplicate_of="", duplicate_reason="", request="", expense_line_key="", confirmed_by="", confirmed_on=None, processing_started_on=None, processing_claim_id="", processing_error="", retry_count=0)
         defaults.update(values)
         doc = Doc(self, defaults); self.docs[service.RECORD_DOCTYPE][name] = doc; return doc
 
@@ -709,7 +709,7 @@ def test_job_is_idempotent_for_terminal_record(env, monkeypatch):
 def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monkeypatch):
     import inspect
     api = importlib.import_module("rayher_hr_payroll.api.invoice_entry")
-    expected = {"create_batch", "register_file", "get_batch", "update_invoice", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice", "list_workbench", "unconfirm_invoice"}
+    expected = {"create_batch", "register_file", "get_batch", "update_invoice", "update_expense_context", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice", "list_workbench", "unconfirm_invoice", "upload_supplemental_attachment", "delete_supplemental_attachment", "preview_supplemental_attachment", "serve_supplemental_attachment_preview"}
     for name in expected:
         function = getattr(api, name)
         assert all(parameter.kind not in {inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL} for parameter in inspect.signature(function).parameters.values())
@@ -723,10 +723,62 @@ def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monk
 
 def test_api_source_whitelists_only_public_endpoints():
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 15
+    assert source.count("@frappe.whitelist") == 20
     assert "@frappe.whitelist\ndef _" not in source
-    assert source.count('methods=["POST"]') == 13
+    assert source.count('methods=["POST"]') == 18
     assert source.count('methods=["GET"]') == 0
+
+
+def test_expense_context_and_attachment_apis_delegate_to_bounded_services(
+    env, monkeypatch
+):
+    api = importlib.import_module("rayher_hr_payroll.api.invoice_entry")
+    calls = []
+    monkeypatch.setattr(
+        api.service,
+        "update_expense_context",
+        lambda invoice, description: calls.append(
+            ("context", invoice, description)
+        )
+        or {"name": invoice},
+    )
+    monkeypatch.setattr(
+        api.invoice_supplemental_attachments,
+        "register_attachment",
+        lambda invoice, file_url: calls.append(
+            ("upload", invoice, file_url)
+        )
+        or {"name": "ISA-1"},
+    )
+    monkeypatch.setattr(
+        api.invoice_supplemental_attachments,
+        "delete_attachment",
+        lambda invoice, attachment: calls.append(
+            ("delete", invoice, attachment)
+        )
+        or {"deleted": attachment},
+    )
+    monkeypatch.setattr(
+        api.invoice_supplemental_attachments,
+        "preview_attachment",
+        lambda attachment: calls.append(("preview", attachment))
+        or {"token": "token"},
+    )
+
+    assert api.update_expense_context("INV-1", "客户拜访")["name"] == "INV-1"
+    assert api.upload_supplemental_attachment(
+        "INV-1", "/private/files/a.pdf"
+    )["name"] == "ISA-1"
+    assert api.delete_supplemental_attachment(
+        "INV-1", "ISA-1"
+    )["deleted"] == "ISA-1"
+    assert api.preview_supplemental_attachment("ISA-1")["token"] == "token"
+    assert calls == [
+        ("context", "INV-1", "客户拜访"),
+        ("upload", "INV-1", "/private/files/a.pdf"),
+        ("delete", "INV-1", "ISA-1"),
+        ("preview", "ISA-1"),
+    ]
 
 
 def test_register_holds_reservations_for_top_level_auto_commit(env):
@@ -814,15 +866,20 @@ def test_duplicate_resolution_is_bound_to_reviewed_business_key(env):
 def test_every_whitelisted_api_rejects_guest_before_delegation(env, monkeypatch):
     api = importlib.import_module("rayher_hr_payroll.api.invoice_entry")
     frappe_stub_module.session.user = "Guest"
-    for name in ["create_batch", "register_file", "get_batch", "update_invoice", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice"]:
+    for name in ["create_batch", "register_file", "get_batch", "update_invoice", "update_expense_context", "confirm_invoice", "retry_invoice", "exclude_invoice", "link_invoice", "resolve_duplicate", "get_request_invoices", "preview_invoice"]:
         monkeypatch.setattr(api.service, name, Mock(return_value={"leaked": True}))
     monkeypatch.setattr(api.service, "list_workbench_invoices", Mock(return_value={"leaked": True}))
     monkeypatch.setattr(api.service, "unconfirm_invoice", Mock(return_value={"leaked": True}))
+    monkeypatch.setattr(api.invoice_supplemental_attachments, "register_attachment", Mock(return_value={"leaked": True}))
+    monkeypatch.setattr(api.invoice_supplemental_attachments, "delete_attachment", Mock(return_value={"leaked": True}))
+    monkeypatch.setattr(api.invoice_supplemental_attachments, "preview_attachment", Mock(return_value={"leaked": True}))
+    monkeypatch.setattr(api.invoice_supplemental_attachments, "serve_attachment_preview", Mock(return_value={"leaked": True}))
     calls = [
         lambda: api.create_batch(),
         lambda: api.register_file("BATCH-1", "/private/files/a.pdf"),
         lambda: api.get_batch("BATCH-1"),
         lambda: api.update_invoice("INV-1", {}),
+        lambda: api.update_expense_context("INV-1", "description"),
         lambda: api.confirm_invoice("INV-1", {}),
         lambda: api.retry_invoice("INV-1"),
         lambda: api.exclude_invoice("INV-1", "reason"),
@@ -832,6 +889,10 @@ def test_every_whitelisted_api_rejects_guest_before_delegation(env, monkeypatch)
         lambda: api.preview_invoice("INV-1"),
         lambda: api.list_workbench(),
         lambda: api.unconfirm_invoice("INV-1"),
+        lambda: api.upload_supplemental_attachment("INV-1", "/private/files/a.pdf"),
+        lambda: api.delete_supplemental_attachment("INV-1", "ISA-1"),
+        lambda: api.preview_supplemental_attachment("ISA-1"),
+        lambda: api.serve_supplemental_attachment_preview("x" * 32),
     ]
     for function in calls:
         with pytest.raises(ValidationError, match="登录"):
@@ -1689,7 +1750,7 @@ def test_preview_serve_api_is_explicit_post_and_bounded(env, monkeypatch):
     api_module.serve_invoice_preview("x" * 43)
     delegated.assert_called_once_with("x" * 43)
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 15
+    assert source.count("@frappe.whitelist") == 20
     assert 'methods=["POST"]' in source
     assert 'methods=["GET"]' not in source
 
@@ -3277,3 +3338,71 @@ def test_serialized_record_exposes_total_derived_from_ocr_components(env):
         ),
     )
     assert service._serialize_record(record)["total_amount"] == Decimal("711.57")
+
+
+def test_confirm_requires_nonblank_expense_description(env):
+    env.add_batch()
+    record = env.add_record(expense_description="  ")
+
+    with pytest.raises(ValidationError, match="费用说明"):
+        service.confirm_invoice(record.name)
+
+    assert record.recognition_status == "待确认"
+
+
+def test_expense_context_can_change_until_push_but_not_after(env):
+    env.add_batch()
+    pending = env.add_record(name="INV-PENDING", expense_description="")
+    confirmed = env.add_record(
+        name="INV-CONFIRMED",
+        recognition_status="已确认",
+        expense_description="旧说明",
+    )
+
+    pending_result = service.update_expense_context(
+        pending.name, "  客户拜访交通费  "
+    )
+    confirmed_result = service.update_expense_context(
+        confirmed.name, "差旅住宿费"
+    )
+
+    assert pending_result["expense_description"] == "客户拜访交通费"
+    assert confirmed_result["expense_description"] == "差旅住宿费"
+    confirmed.request = "OA-2026-00001"
+    with pytest.raises(ValidationError, match="撤回"):
+        service.update_expense_context(confirmed.name, "不可修改")
+
+
+def test_serialized_record_exposes_expense_description(env):
+    env.add_batch()
+    record = env.add_record(expense_description="样品寄送快递费")
+
+    assert service._serialize_record(record)["expense_description"] == "样品寄送快递费"
+
+
+def test_serialized_workbench_record_exposes_supplemental_attachments(
+    env, monkeypatch
+):
+    env.add_batch()
+    record = env.add_record(expense_description="客户拜访")
+    monkeypatch.setattr(
+        service.invoice_supplemental_attachments,
+        "list_attachments_for_record",
+        lambda value: [
+            {
+                "name": "ISA-1",
+                "invoice_record": value.name,
+                "original_filename": "行程单.pdf",
+            }
+        ],
+    )
+
+    result = service._serialize_record(record, include_attachments=True)
+
+    assert result["supplemental_attachments"] == [
+        {
+            "name": "ISA-1",
+            "invoice_record": record.name,
+            "original_filename": "行程单.pdf",
+        }
+    ]
