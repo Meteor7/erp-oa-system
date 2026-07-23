@@ -10,6 +10,7 @@ from frappe.utils import now_datetime
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
 from rayher_hr_payroll import expense_attachments
 from rayher_hr_payroll.access_control import BUSINESS_EXECUTIVE_ROLE
+from rayher_hr_payroll.expense_accounts import account_options
 from rayher_hr_payroll.oa_approval import (
     ADMIN_ASSET,
     IT_ASSET,
@@ -1061,6 +1062,7 @@ def get_options():
         "request_types": REQUEST_TYPES,
         "asset_categories": ASSET_CATEGORIES,
         "expense_categories": EXPENSE_CATEGORIES,
+        "expense_account_tree": account_options(),
         "departments": DEPARTMENTS,
         "doc_types": DOC_TYPES,
         "urgencies": URGENCY,

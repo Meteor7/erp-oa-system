@@ -2507,3 +2507,30 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
     assert step.action_by == "admin@legacy-business.example.invalid"
     assert json.loads(step.approved_by) == ["admin@legacy-business.example.invalid"]
     assert "person046@business.example.invalid" not in json.loads(step.approved_by)
+
+
+def test_get_options_exposes_canonical_two_level_expense_accounts(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda: {"employee": "HR-EMP-90001", "employee_name": "测试员工"},
+    )
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Employee"])
+    frappe_stub.session.user = "employee@example.com"
+
+    options = oa_entry.get_options()
+
+    assert options["expense_account_tree"][0] == {
+        "level_1": "差旅费",
+        "level_2": [
+            "飞机票",
+            "高铁\\火车票",
+            "市内交通费",
+            "乘车费",
+            "住宿费",
+            "出差补助",
+            "过路/停车费",
+            "Philippe",
+            "Sabri",
+        ],
+    }
