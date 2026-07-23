@@ -1,11 +1,14 @@
 import frappe
 
+BUSINESS_EXECUTIVE_ROLE = "Rayher Business Executive"
+
 # Four-tier role model. 员工=Employee, HR=HR User/HR Manager, 财务=Accounts User
 # all reuse stock roles; only "Department Manager" is new — it gates the OA *approval*
 # layer: the Expense Claim workflow manager stage and per-document request visibility
 # (员工只见自己 / 经理只见指派给自己的, in request_visibility). The R&D 工时/看板 APIs stay
 # scoped to the finance/R&D-manage roles (RD_MANAGE_ROLES), not Department Manager.
 CUSTOM_ROLES = [
+    {"role_name": BUSINESS_EXECUTIVE_ROLE, "desk_access": 1},
     {"role_name": "Department Manager", "desk_access": 1},
     {"role_name": "Project Owner", "desk_access": 1},
     {"role_name": "All Project Access", "desk_access": 1},
@@ -17,6 +20,17 @@ CUSTOM_ROLES = [
 # is created here; assigning it to her user is a manual one-time step (not done
 # here) — never use the Administrator account (Frappe anti-pattern).
 ROLE_PROFILES = [
+    {
+        "role_profile": BUSINESS_EXECUTIVE_ROLE,
+        "roles": [
+            "Employee",
+            "HR Manager",
+            "Accounts User",
+            "Department Manager",
+            "All Project Access",
+            BUSINESS_EXECUTIVE_ROLE,
+        ],
+    },
     {
         "role_profile": "总控 Owner",
         "roles": ["System Manager", "HR Manager", "Accounts User", "Department Manager"],

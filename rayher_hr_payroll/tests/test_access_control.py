@@ -163,3 +163,22 @@ def test_link_targets_created_before_install_and_migrate():
     assert hooks.before_migrate == "rayher_hr_payroll.install.ensure_link_targets"
     src = inspect.getsource(install.ensure_link_targets)
     assert "ensure_access_control" in src and "ensure_workflow_masters" in src
+
+
+def test_business_executive_role_is_business_wide_but_not_system_admin():
+    import rayher_hr_payroll.access_control as ac
+
+    assert ac.BUSINESS_EXECUTIVE_ROLE in {row["role_name"] for row in ac.CUSTOM_ROLES}
+    profile = next(
+        row for row in ac.ROLE_PROFILES
+        if row["role_profile"] == ac.BUSINESS_EXECUTIVE_ROLE
+    )
+    assert {
+        "Employee",
+        "HR Manager",
+        "Accounts User",
+        "Department Manager",
+        "All Project Access",
+        ac.BUSINESS_EXECUTIVE_ROLE,
+    } <= set(profile["roles"])
+    assert "System Manager" not in profile["roles"]
