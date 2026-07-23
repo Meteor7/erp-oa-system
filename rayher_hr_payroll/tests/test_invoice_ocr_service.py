@@ -3210,3 +3210,64 @@ def test_unconfirm_invoice_requires_unlinked_confirmed_record_and_audits(env):
     record.request = "OA-1"
     with pytest.raises(ValidationError, match="下推"):
         service.unconfirm_invoice(record.name)
+
+
+def test_normalized_fields_derives_blank_total_from_complete_components():
+    values = service._normalized_fields(
+        {
+            "invoice_category": "",
+            "project_name": "",
+            "issue_date": None,
+            "invoice_number": "",
+            "amount_before_tax": "690.84",
+            "tax_amount": "20.73",
+            "total_amount": None,
+        }
+    )
+    assert values["total_amount"] == Decimal("711.57")
+
+
+def test_normalized_fields_preserves_supplied_total_and_total_only_invoice():
+    supplied = service._normalized_fields(
+        {
+            "invoice_category": "",
+            "project_name": "",
+            "issue_date": None,
+            "invoice_number": "",
+            "amount_before_tax": "100.00",
+            "tax_amount": "6.00",
+            "total_amount": "105.00",
+        }
+    )
+    total_only = service._normalized_fields(
+        {
+            "invoice_category": "",
+            "project_name": "",
+            "issue_date": None,
+            "invoice_number": "",
+            "amount_before_tax": None,
+            "tax_amount": None,
+            "total_amount": "874.00",
+        }
+    )
+    assert supplied["total_amount"] == Decimal("105.00")
+    assert total_only["total_amount"] == Decimal("874.00")
+
+
+def test_serialized_record_exposes_total_derived_from_ocr_components(env):
+    env.add_batch()
+    record = env.add_record(
+        amount_before_tax=Decimal("690.84"),
+        tax_amount=Decimal("20.73"),
+        total_amount=Decimal("711.57"),
+        ocr_payload=json.dumps(
+            {
+                "fields": {
+                    "amount_before_tax": "690.84",
+                    "tax_amount": "20.73",
+                    "total_amount": None,
+                }
+            }
+        ),
+    )
+    assert service._serialize_record(record)["total_amount"] == Decimal("711.57")

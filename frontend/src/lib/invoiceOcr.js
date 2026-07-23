@@ -129,6 +129,16 @@ export function moneyToCents(value) {
   return cents;
 }
 
+export function deriveInvoiceTotal(invoice = {}) {
+  const supplied = invoice?.total_amount;
+  if (supplied !== null && supplied !== undefined && String(supplied).trim() !== '') return String(supplied).trim();
+  const beforeTax = invoice?.amount_before_tax;
+  const tax = invoice?.tax_amount;
+  if (beforeTax === null || beforeTax === undefined || String(beforeTax).trim() === '') return '';
+  if (tax === null || tax === undefined || String(tax).trim() === '') return '';
+  return ((moneyToCents(beforeTax) + moneyToCents(tax)) / 100).toFixed(2);
+}
+
 export function invoiceFieldWarnings(value) {
   let warnings = value;
   if (typeof warnings === 'string') {

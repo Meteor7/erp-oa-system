@@ -667,3 +667,53 @@ def test_oa_consumption_detail_write_permission_is_limited_to_finance():
     assert permissions["Employee"]["create"] == 1
     assert permissions["Employee"]["if_owner"] == 1
     assert permissions["Department Manager"]["if_owner"] == 1
+
+
+def test_expense_approval_dynamic_schema_contract():
+    line = load_doctype("oa_approval_expense_line")
+    line_fields = _fields_by_name(line)
+    assert line_fields["expense_description"]["fieldtype"] == "Small Text"
+    assert line_fields["expense_description"].get("reqd") != 1
+
+    step = load_doctype("oa_approval_step")
+    step_fields = _fields_by_name(step)
+    expected_step_fields = {
+        "step_key": ("Data", None),
+        "origin": ("Select", "base\nadd_sign"),
+        "parent_step_key": ("Data", None),
+        "add_sign_position": ("Select", "before\nafter"),
+        "add_sign_opinion": ("Small Text", None),
+        "added_by": ("Link", "User"),
+        "added_on": ("Datetime", None),
+    }
+    for name, (fieldtype, options) in expected_step_fields.items():
+        assert step_fields[name]["fieldtype"] == fieldtype
+        assert step_fields[name].get("options") == options
+        assert step_fields[name].get("read_only") == 1
+    assert step_fields["step_key"].get("search_index") == 1
+    assert step_fields["step_key"].get("unique") == 1
+
+    attachment = load_doctype("oa_expense_line_attachment")
+    attachment_fields = _fields_by_name(attachment)
+    assert attachment["istable"] == 0
+    expected_attachment_fields = {
+        "request": ("Link", "OA Approval Request"),
+        "expense_line_key": ("Data", None),
+        "file": ("Link", "File"),
+        "file_url": ("Data", None),
+        "original_filename": ("Data", None),
+        "mime_type": ("Data", None),
+        "file_size": ("Int", None),
+        "file_sha256": ("Data", None),
+        "uploaded_by": ("Link", "User"),
+        "uploaded_on": ("Datetime", None),
+    }
+    for name, (fieldtype, options) in expected_attachment_fields.items():
+        assert attachment_fields[name]["fieldtype"] == fieldtype
+        assert attachment_fields[name].get("options") == options
+        assert attachment_fields[name].get("read_only") == 1
+    assert attachment_fields["request"].get("search_index") == 1
+    assert attachment_fields["expense_line_key"].get("search_index") == 1
+    assert attachment_fields["file"].get("unique") == 1
+    assert {permission["role"] for permission in attachment["permissions"]} == {"System Manager"}
+    _assert_exact_field_order(attachment)

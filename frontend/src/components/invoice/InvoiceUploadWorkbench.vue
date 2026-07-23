@@ -5,6 +5,7 @@ import {
   ACTIVE_RECOGNITION_STATUSES,
   confirmInvoice,
   createInvoiceBatch,
+  deriveInvoiceTotal,
   excludeInvoice,
   listWorkbenchInvoices,
   invoiceFieldWarnings,
@@ -78,6 +79,12 @@ const stats = computed(() => ({
   pushed: rows.value.filter((row) => Boolean(row.request)).length,
   duplicate: rows.value.filter((row) => row.recognition_status === '疑似重复').length,
 }));
+
+function syncDerivedTotal(row, field) {
+  if (!['amount_before_tax', 'tax_amount'].includes(field)) return;
+  const derived = deriveInvoiceTotal(row);
+  if (derived) row.total_amount = derived;
+}
 
 function cleanError(error, fallback) {
   return String(error?.message || fallback).replace(/<[^>]*>/g, '').trim();
@@ -455,7 +462,7 @@ onBeforeUnmount(() => {
             <div class="grid gap-3 sm:grid-cols-2">
               <label v-for="[name, label, type] in fields" :key="name" class="text-xs font-medium text-gray-500" :class="name === 'project_name' || name === 'invoice_category' ? 'sm:col-span-2' : ''">
                 {{ label }}
-                <input v-model="selectedRow[name]" :type="type" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-600" />
+                <input v-model="selectedRow[name]" :type="type" @input="syncDerivedTotal(selectedRow, name)" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-600" />
               </label>
             </div>
             <div v-if="invoiceFieldWarnings(selectedRow.field_warnings).length" class="break-words rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">

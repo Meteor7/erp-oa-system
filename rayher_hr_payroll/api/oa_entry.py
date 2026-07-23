@@ -8,6 +8,7 @@ import frappe
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
+from rayher_hr_payroll import expense_attachments
 from rayher_hr_payroll.oa_approval import (
     ADMIN_ASSET,
     IT_ASSET,
@@ -362,6 +363,13 @@ def _serialize_route_steps(steps, active=True):
 def _serialize_doc_step(step):
     return {
         "step_index": int(step.step_index or 0),
+        "step_key": getattr(step, "step_key", None) or "",
+        "origin": getattr(step, "origin", None) or "base",
+        "parent_step_key": getattr(step, "parent_step_key", None) or "",
+        "add_sign_position": getattr(step, "add_sign_position", None) or "",
+        "add_sign_opinion": getattr(step, "add_sign_opinion", None) or "",
+        "added_by": getattr(step, "added_by", None) or "",
+        "added_on": getattr(step, "added_on", None),
         "label": step.label,
         "mode": step.mode,
         "approvers": _parse_json_list(step.approvers),
@@ -382,6 +390,7 @@ def _source_value(source, fieldname, default=None):
 def _serialize_expense_line(row):
     legacy_category = getattr(row, "category", None)
     legacy_description = getattr(row, "description", None)
+    expense_description = getattr(row, "expense_description", None) or legacy_description or ""
     legacy_date = getattr(row, "start_date", None)
     legacy_amount = getattr(row, "amount", 0)
     invoice_category = getattr(row, "invoice_category", None) or legacy_category
@@ -408,10 +417,12 @@ def _serialize_expense_line(row):
         "end_date": getattr(row, "end_date", None),
         "category": legacy_category,
         "amount": legacy_amount,
-        "description": legacy_description,
+        "description": legacy_description or expense_description,
+        "expense_description": expense_description,
         "attachment_count": getattr(row, "attachment_count", 0),
         "invoice_status": getattr(row, "invoice_status", None),
     }
+
 
 def _group_money(value):
     if value in (None, ""):
@@ -549,6 +560,21 @@ def _can_act_on_current_step(doc, user=None):
     return bool(step and _matched_approvers(step, user))
 
 
+def _request_capabilities(doc, user=None):
+    step = _current_step(doc)
+    can_act = _can_act_on_current_step(doc, user)
+    classification_ready = _classification_ready(doc)
+    finance_edit = bool(can_act and _is_finance_user(user) and _is_finance_audit_step(step))
+    can_approve = bool(can_act and (not finance_edit or classification_ready))
+    return {
+        "can_approve": can_approve,
+        "can_reject": bool(can_act),
+        "can_add_sign": bool(can_act),
+        "can_edit_expense_items": finance_edit,
+        "classification_ready": classification_ready,
+    }
+
+
 def _kanban_status(workflow_status):
     if workflow_status == STATUS_DRAFT:
         return "draft"
@@ -563,10 +589,29 @@ def _kanban_status(workflow_status):
     return "pending"
 
 
+def _with_expense_attachments(doc, lines):
+    if not lines:
+        return []
+    attachments = expense_attachments.list_attachments(getattr(doc, "name", None))
+    by_line = {}
+    for attachment in attachments:
+        by_line.setdefault(_clean(attachment.get("expense_line_key")), []).append(attachment)
+    result = []
+    for source in lines:
+        line = dict(source)
+        line_attachments = list(by_line.get(_clean(line.get("line_key")), []))
+        line["attachments"] = line_attachments
+        line["attachment_count"] = len(line_attachments)
+        result.append(line)
+    return result
+
+
 def _summarize_doc(doc):
     step = _current_step(doc)
     invoice_summary = invoice_service.request_invoice_summary(doc)
-    expense_lines = [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
+    expense_lines = _with_expense_attachments(doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])])
+    capabilities = _request_capabilities(doc)
+    workflow_metadata = _workflow_metadata(doc)
     return {
         "name": doc.name,
         "request_type": doc.request_type,
@@ -600,7 +645,9 @@ def _summarize_doc(doc):
         "current_step_index": doc.current_step_index,
         "current_step_label": doc.current_step_label,
         "current_step_mode": step.mode if step else "",
-        "can_act": _can_act_on_current_step(doc),
+        "can_act": capabilities["can_approve"] or capabilities["can_reject"],
+        **capabilities,
+        **workflow_metadata,
         "can_mark_paid": doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_COMPLETED and _is_finance_user(),
         "can_withdraw": doc.workflow_status not in {STATUS_DRAFT, STATUS_PAID} and invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user),
         "can_withdraw_payment": doc.workflow_status == STATUS_PAID and _is_finance_user(),
@@ -687,6 +734,13 @@ def _append_steps(doc, steps):
             "steps",
             {
                 "step_index": step["step_index"],
+                "step_key": step.get("step_key") or str(uuid4()),
+                "origin": step.get("origin") or "base",
+                "parent_step_key": step.get("parent_step_key") or "",
+                "add_sign_position": step.get("add_sign_position") or "",
+                "add_sign_opinion": step.get("add_sign_opinion") or "",
+                "added_by": step.get("added_by") or "",
+                "added_on": step.get("added_on"),
                 "label": step["label"],
                 "mode": step["mode"],
                 "approvers": _json_list(step["approvers"]),
@@ -754,14 +808,17 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
         source_invoice = _clean(row.get("source_invoice"))
         total_value = row.get("total_amount")
         if total_value in (None, ""):
-            total_value = row.get("amount")
+            derived_total = invoice_service.derive_total_amount(
+                row.get("amount_before_tax"), row.get("tax_amount"), None
+            )
+            total_value = derived_total if derived_total is not None else row.get("amount")
         amount = _money(total_value)
         if amount <= 0 and not source_invoice:
             continue
         invoice_category = _clean(row.get("invoice_category"))
         project_name = _clean(row.get("project_name"))
         expense_item = _clean(row.get("expense_item"))
-        description = _clean(row.get("description") or row.get("desc"))
+        description = _clean(row.get("expense_description") or row.get("description") or row.get("desc"))
         issue_date = row.get("issue_date") or row.get("start_date") or row.get("expense_date")
         category = invoice_category or expense_item or _clean(row.get("category")) or project_name or REQUEST_EXPENSE_PAYMENT
         normalized.append(
@@ -782,7 +839,8 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
                 "end_date": row.get("end_date") or issue_date,
                 "category": category,
                 "amount": amount,
-                "description": (project_name if source_invoice else description) or project_name,
+                "description": description or (project_name if not source_invoice else ""),
+                "expense_description": description or (project_name if not source_invoice else ""),
                 "attachment_count": int(row.get("attachment_count") or row.get("invoice_count") or (1 if source_invoice else 0)),
                 "invoice_status": _clean(row.get("invoice_status")) or (INVOICE_CONFIRMED if source_invoice else (INVOICE_UPLOADED if row.get("attachment_count") else "")),
                 "invoice_difference_reason": _difference_reason(row.get("invoice_difference_reason")),
@@ -883,12 +941,12 @@ def _validate_expense_project_groups(doc):
     groups = _group_expense_sources(sources)
     for group in groups:
         if not _clean(group.get("project_name")):
-            frappe.throw(frappe._("提交前必须填写每项费用的项目名称。"))
-        if group.get("needs_expense_item"):
-            frappe.throw(frappe._("提交前必须为每个项目填写一致的费用项目。"))
+            frappe.throw(frappe._("\u63d0\u4ea4\u524d\u5fc5\u987b\u586b\u5199\u6bcf\u9879\u8d39\u7528\u7684\u9879\u76ee\u540d\u79f0\u3002"))
     for source in sources:
+        if not _clean(source.get("expense_description")):
+            frappe.throw(frappe._("\u63d0\u4ea4\u524d\u5fc5\u987b\u586b\u5199\u6bcf\u9879\u8d39\u7528\u7684\u8d39\u7528\u8bf4\u660e\u3002"))
         if not _clean(source.get("source_invoice")) and not _clean(source.get("no_invoice_reason")):
-            frappe.throw(frappe._("手工费用提交前必须填写无票原因。"))
+            frappe.throw(frappe._("\u624b\u5de5\u8d39\u7528\u63d0\u4ea4\u524d\u5fc5\u987b\u586b\u5199\u65e0\u7968\u539f\u56e0\u3002"))
     return groups
 
 
@@ -979,7 +1037,6 @@ def preview_route(request_type, department=None, supervisor=None, asset_category
     except ApprovalRouteError as exc:
         frappe.throw(str(exc))
 
-
 @frappe.whitelist(methods=["POST"])
 def create_request(
     request_type,
@@ -1057,7 +1114,7 @@ def _manual_expense_source(payload, existing=None):
     source = dict(existing or {})
     for fieldname in (
         "project_name", "expense_item", "issue_date", "total_amount",
-        "description", "no_invoice_reason", "line_key",
+        "expense_description", "description", "no_invoice_reason", "line_key",
     ):
         if fieldname in payload:
             source[fieldname] = payload.get(fieldname)
@@ -1065,12 +1122,10 @@ def _manual_expense_source(payload, existing=None):
     expense_item = _bounded_optional_text(source.get("expense_item"), "费用项目", 140)
     issue_date = _clean(source.get("issue_date"))
     total_amount = _optional_money(source.get("total_amount"))
-    description = _bounded_optional_text(source.get("description"), "费用说明", 1000)
+    description = _bounded_optional_text(source.get("expense_description") or source.get("description"), "Expense description", 1000)
     no_invoice_reason = _bounded_optional_text(source.get("no_invoice_reason"), "无票原因", 1000)
     if not project_name:
         frappe.throw(frappe._("手工费用必须填写项目名称。"))
-    if not expense_item:
-        frappe.throw(frappe._("手工费用必须填写费用项目。"))
     if not issue_date:
         frappe.throw(frappe._("手工费用必须填写日期。"))
     if total_amount is None or total_amount <= 0:
@@ -1092,9 +1147,10 @@ def _manual_expense_source(payload, existing=None):
             "amount_before_tax": None,
             "tax_amount": None,
             "total_amount": total_amount,
-            "category": expense_item,
+            "category": expense_item or REQUEST_EXPENSE_PAYMENT,
             "amount": total_amount,
             "description": description,
+            "expense_description": description,
             "start_date": issue_date,
             "end_date": issue_date,
             "attachment_count": 0,
@@ -1112,10 +1168,18 @@ def _updated_invoice_source(existing, payload):
     source = dict(existing)
     project_value = payload.get("project_name") if "project_name" in payload else source.get("project_name")
     item_value = payload.get("expense_item") if "expense_item" in payload else source.get("expense_item")
-    source["project_name"] = _bounded_optional_text(project_value, "项目名称", 1000)
-    source["expense_item"] = _bounded_optional_text(item_value, "费用项目", 140)
+    if "expense_description" in payload:
+        description_value = payload.get("expense_description")
+    elif "description" in payload:
+        description_value = payload.get("description")
+    else:
+        description_value = source.get("expense_description") or source.get("description")
+    source["project_name"] = _bounded_optional_text(project_value, "Project name", 1000)
+    source["expense_item"] = _bounded_optional_text(item_value, "Expense item", 140)
+    description = _bounded_optional_text(description_value, "Expense description", 1000)
+    source["expense_description"] = description
+    source["description"] = description
     source["no_invoice_reason"] = ""
-    source["description"] = source["project_name"]
     return source
 
 
@@ -1195,6 +1259,61 @@ def save_draft_expense_sources(name, source_lines):
             return _summarize_doc(doc)
 
 
+
+FINANCE_AUDIT_LABEL_PREFIX = "\u8d22\u52a1\u5ba1\u8ba1"
+
+
+def _is_finance_audit_step(step):
+    return bool(step and getattr(step, "mode", None) == "approve" and _clean(getattr(step, "label", None)).startswith(FINANCE_AUDIT_LABEL_PREFIX))
+
+
+def _classification_ready(doc):
+    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT:
+        return True
+    return all(_clean(getattr(line, "expense_item", None)) for line in list(getattr(doc, "expense_lines", []) or []))
+
+
+def _validate_finance_classification(doc, step):
+    if _is_finance_audit_step(step) and not _classification_ready(doc):
+        frappe.throw(frappe._("\u8d22\u52a1\u5ba1\u6279\u524d\u5fc5\u987b\u4e3a\u6240\u6709\u8d39\u7528\u660e\u7ec6\u9009\u62e9\u8d39\u7528\u9879\u76ee\u3002"))
+
+
+@frappe.whitelist(methods=["POST"])
+def save_finance_expense_items(name, lines):
+    request_name = _bounded_optional_text(name, "Request", 140)
+    payload_rows = _draft_source_rows(lines)
+    if not payload_rows:
+        frappe.throw(frappe._("No expense classification was supplied."))
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        step = _current_step(doc)
+        if doc.request_type != REQUEST_EXPENSE_PAYMENT or doc.workflow_status not in ACTIVE_STATUSES:
+            frappe.throw(frappe._("The request is not at an editable Finance approval step."))
+        if not _is_finance_user() or not _is_finance_audit_step(step) or not _matched_approvers(step):
+            frappe.throw(frappe._("Only the active Finance approver may classify expense items."))
+        current_lines = list(getattr(doc, "expense_lines", []) or [])
+        by_key = {_clean(getattr(line, "line_key", None)): line for line in current_lines if _clean(getattr(line, "line_key", None))}
+        assignments = {}
+        seen = set()
+        for payload in payload_rows:
+            if set(payload) - {"line_key", "expense_item"}:
+                frappe.throw(frappe._("Finance classification may change expense items only."))
+            line_key = _clean(payload.get("line_key"))
+            if not line_key or line_key in seen or line_key not in by_key:
+                frappe.throw(frappe._("The expense line is invalid or no longer belongs to this request."))
+            seen.add(line_key)
+            item = _bounded_optional_text(payload.get("expense_item"), "Expense item", 140)
+            project = _clean(getattr(by_key[line_key], "project_name", None))
+            if project in assignments and assignments[project] != item:
+                frappe.throw(frappe._("The same project must use one consistent expense item."))
+            assignments[project] = item
+        for line in current_lines:
+            project = _clean(getattr(line, "project_name", None))
+            if project in assignments:
+                line.expense_item = assignments[project]
+        _append_request_event(doc, "Finance expense classification", doc.workflow_status, doc.workflow_status, details={"project_count": len(assignments), "line_count": len(seen)})
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
 @frappe.whitelist(methods=["POST"])
 def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reasons=None):
     request_name = _bounded_optional_text(name, "\u7533\u8bf7\u5355\u53f7", 140)
@@ -1812,7 +1931,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
 
 
 @frappe.whitelist(methods=["POST"])
-def action_request(name, action="approve", note=None):
+def action_request(name, action="approve", note=None, reject_target=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
@@ -1824,13 +1943,12 @@ def action_request(name, action="approve", note=None):
             frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
         actor = sorted(_actor_names())[0]
         if action == "reject":
-            _set_step_action(step, STATUS_REJECTED, actor, note)
-            doc.workflow_status = STATUS_REJECTED
-            doc.current_step_label = ""
+            _reject_to_target(doc, step, reject_target, actor, note)
             doc.save(ignore_permissions=True)
             return _summarize_doc(doc)
         if action != "approve":
             frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
+        _validate_finance_classification(doc, step)
         approved_by = set(_parse_json_list(step.approved_by))
         approved_by.update(matched)
         step.approved_by = _json_list(sorted(approved_by))
@@ -2064,3 +2182,244 @@ def withdraw_invoice_push(invoice_names, note=None):
             doc.save(ignore_permissions=True)
             results.append(_summarize_doc(doc))
         return results[0] if len(results) == 1 else {"requests": results, "invoice_names": names}
+
+
+@frappe.whitelist(methods=["POST"])
+def upload_expense_attachment(name, line_key, file_url):
+    return expense_attachments.register_attachment(name, line_key, file_url)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_expense_attachment(name, attachment):
+    return expense_attachments.delete_attachment(name, attachment)
+
+
+@frappe.whitelist(methods=["POST"])
+def preview_expense_attachment(attachment):
+    return expense_attachments.preview_attachment(attachment)
+
+
+@frappe.whitelist(methods=["POST"])
+def serve_expense_attachment_preview(token):
+    return expense_attachments.serve_attachment_preview(token)
+
+
+MAX_ADD_SIGN_OPERATIONS = 20
+
+
+def _reset_approval_step(step, status=STATUS_WAIT_FLOW):
+    step.status = status
+    step.approved_by = _json_list([])
+    step.action_by = ""
+    step.acted_on = None
+    step.note = ""
+
+
+def _eligible_rejection_targets(doc):
+    current_index = int(getattr(doc, "current_step_index", 0) or 0)
+    targets = [{"target": "applicant", "label": "\u7533\u8bf7\u4eba"}]
+    completed = {STATUS_APPROVED, STATUS_HANDLED}
+    for step in sorted(list(getattr(doc, "steps", []) or []), key=lambda row: int(getattr(row, "step_index", 0) or 0)):
+        index = int(getattr(step, "step_index", 0) or 0)
+        step_key = _clean(getattr(step, "step_key", None))
+        if step_key and index < current_index and getattr(step, "status", None) in completed:
+            targets.append({"target": step_key, "label": getattr(step, "label", None) or step_key, "step_index": index})
+    return targets
+
+
+def _reject_to_target(doc, current_step, target, actor, note):
+    reason = _bounded_optional_text(note, "Reject reason", 1000)
+    if not reason:
+        frappe.throw(frappe._("A rejection reason is required."))
+    target = _clean(target)
+    eligible = {item["target"]: item for item in _eligible_rejection_targets(doc)}
+    if target not in eligible:
+        frappe.throw(frappe._("The rejection target is invalid or no longer eligible."))
+    old_status = doc.workflow_status
+    rows = sorted(list(getattr(doc, "steps", []) or []), key=lambda row: int(getattr(row, "step_index", 0) or 0))
+    if target == "applicant":
+        for step in rows:
+            _reset_approval_step(step)
+        doc.workflow_status = STATUS_DRAFT
+        doc.current_step_index = 0
+        doc.current_step_label = ""
+    else:
+        target_step = next((step for step in rows if _clean(getattr(step, "step_key", None)) == target), None)
+        if not target_step:
+            frappe.throw(frappe._("The rejection target no longer exists."))
+        target_index = int(target_step.step_index or 0)
+        for step in rows:
+            if int(step.step_index or 0) >= target_index:
+                _reset_approval_step(step)
+        target_step.status = STATUS_WAIT_HANDLE if target_step.mode == "handle" else STATUS_PENDING
+        doc.workflow_status = target_step.status
+        doc.current_step_index = target_index
+        doc.current_step_label = target_step.label
+    _append_request_event(
+        doc,
+        "Targeted rejection",
+        old_status,
+        doc.workflow_status,
+        reason,
+        {"actor": actor, "source_step_key": _clean(getattr(current_step, "step_key", None)), "target": target},
+    )
+    return doc
+
+
+def _approval_step_values(step):
+    return {
+        "step_index": int(getattr(step, "step_index", 0) or 0),
+        "step_key": _clean(getattr(step, "step_key", None)) or str(uuid4()),
+        "origin": _clean(getattr(step, "origin", None)) or "base",
+        "parent_step_key": _clean(getattr(step, "parent_step_key", None)),
+        "add_sign_position": _clean(getattr(step, "add_sign_position", None)),
+        "add_sign_opinion": _clean(getattr(step, "add_sign_opinion", None)),
+        "added_by": _clean(getattr(step, "added_by", None)),
+        "added_on": getattr(step, "added_on", None),
+        "label": getattr(step, "label", None) or "",
+        "mode": getattr(step, "mode", None) or "approve",
+        "approvers": getattr(step, "approvers", None) or _json_list([]),
+        "status": getattr(step, "status", None) or STATUS_WAIT_FLOW,
+        "approved_by": getattr(step, "approved_by", None) or _json_list([]),
+        "action_by": getattr(step, "action_by", None) or "",
+        "acted_on": getattr(step, "acted_on", None),
+        "note": getattr(step, "note", None) or "",
+    }
+
+
+def _insert_add_sign_step(doc, current_step, approver, position, opinion, actor):
+    approver = _bounded_optional_text(approver, "Add-sign approver", 140)
+    opinion = _bounded_optional_text(opinion, "Add-sign opinion", 1000)
+    position = _clean(position)
+    if position not in {"before", "after"}:
+        frappe.throw(frappe._("Add-sign position must be before or after the current approver."))
+    if not approver or not opinion:
+        frappe.throw(frappe._("Add-sign approver and opinion are required."))
+    if approver == _clean(actor):
+        frappe.throw(frappe._("You cannot add yourself as an approver."))
+    rows = sorted(list(getattr(doc, "steps", []) or []), key=lambda row: int(getattr(row, "step_index", 0) or 0))
+    if sum(1 for step in rows if _clean(getattr(step, "origin", None)) == "add_sign") >= MAX_ADD_SIGN_OPERATIONS:
+        frappe.throw(frappe._("Each request supports at most 20 add-sign operations."))
+    unresolved = {STATUS_PENDING, STATUS_WAIT_HANDLE, STATUS_WAIT_FLOW}
+    for step in rows:
+        if getattr(step, "status", None) in unresolved and approver in _parse_json_list(getattr(step, "approvers", None)):
+            frappe.throw(frappe._("This approver already exists in the unresolved approval chain."))
+    current_key = _clean(getattr(current_step, "step_key", None))
+    current_position = next((index for index, step in enumerate(rows) if _clean(getattr(step, "step_key", None)) == current_key), None)
+    if current_position is None:
+        frappe.throw(frappe._("The current approval step has changed. Please refresh and retry."))
+    if position == "before":
+        current_step.status = STATUS_WAIT_FLOW
+        insert_at = current_position
+        new_status = STATUS_WAIT_HANDLE if current_step.mode == "handle" else STATUS_PENDING
+    else:
+        insert_at = current_position + 1
+        new_status = STATUS_WAIT_FLOW
+    new_values = {
+        "step_index": 0,
+        "step_key": str(uuid4()),
+        "origin": "add_sign",
+        "parent_step_key": current_key,
+        "add_sign_position": position,
+        "add_sign_opinion": opinion,
+        "added_by": actor,
+        "added_on": now_datetime(),
+        "label": "\u52a0\u7b7e\uff1a" + approver,
+        "mode": "approve",
+        "approvers": _json_list([approver]),
+        "status": new_status,
+        "approved_by": _json_list([]),
+        "action_by": "",
+        "acted_on": None,
+        "note": "",
+    }
+    values = [_approval_step_values(step) for step in rows]
+    values.insert(insert_at, new_values)
+    doc.set("steps", [])
+    inserted = None
+    for index, value in enumerate(values, start=1):
+        value["step_index"] = index
+        child = doc.append("steps", value)
+        if value["step_key"] == new_values["step_key"]:
+            inserted = child
+    if position == "before":
+        doc.current_step_index = inserted.step_index
+        doc.current_step_label = inserted.label
+        doc.workflow_status = inserted.status
+    else:
+        current = next(step for step in doc.steps if step.step_key == current_key)
+        doc.current_step_index = current.step_index
+        doc.current_step_label = current.label
+    return inserted
+
+
+def _resolve_add_sign_approver(value):
+    candidate = _bounded_optional_text(value, "Add-sign approver", 140)
+    if not candidate:
+        frappe.throw(frappe._("An add-sign approver is required."))
+    user = frappe.db.get_value("User", {"name": candidate, "enabled": 1}, "name")
+    if not user:
+        employee_user = frappe.db.get_value("Employee", {"name": candidate, "status": "Active"}, "user_id")
+        if employee_user:
+            user = frappe.db.get_value("User", {"name": employee_user, "enabled": 1}, "name")
+    if not user:
+        frappe.throw(frappe._("The selected add-sign approver is not an enabled user."))
+    return str(user)
+
+
+@frappe.whitelist()
+def list_approval_people(query="", limit=20):
+    query = _bounded_optional_text(query, "Search", 100)
+    try:
+        limit = max(1, min(int(limit or 20), 50))
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("Search limit is invalid."))
+    filters = {"enabled": 1, "user_type": "System User"}
+    or_filters = None
+    if query:
+        like = "%" + query + "%"
+        or_filters = {"name": ["like", like], "full_name": ["like", like]}
+    rows = frappe.get_all("User", filters=filters, or_filters=or_filters, fields=["name", "full_name"], order_by="full_name asc", limit_page_length=limit)
+    current_names = _actor_names()
+    return [
+        {"user": _source_value(row, "name"), "label": _source_value(row, "full_name") or _source_value(row, "name")}
+        for row in rows
+        if _source_value(row, "name") not in current_names and _source_value(row, "name") not in {"Guest", "Administrator"}
+    ]
+
+
+@frappe.whitelist(methods=["POST"])
+def add_sign_request(name, approver, position, opinion):
+    request_name = _bounded_optional_text(name, "Request", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        step = _current_step(doc)
+        if not step or doc.workflow_status not in ACTIVE_STATUSES:
+            frappe.throw(frappe._("The request is not at an active approval step."))
+        if not _matched_approvers(step):
+            frappe.throw(frappe._("Only the current approver may add an approver."))
+        resolved = _resolve_add_sign_approver(approver)
+        actor_names = _actor_names()
+        if resolved in actor_names:
+            frappe.throw(frappe._("You cannot add yourself as an approver."))
+        actor = _clean(getattr(frappe.session, "user", None)) or sorted(actor_names)[0]
+        inserted = _insert_add_sign_step(doc, step, resolved, position, opinion, actor)
+        _append_request_event(
+            doc,
+            "Add-sign",
+            doc.workflow_status,
+            doc.workflow_status,
+            _clean(opinion),
+            {"actor": actor, "approver": resolved, "position": _clean(position), "step_key": inserted.step_key, "parent_step_key": inserted.parent_step_key},
+        )
+        doc.save(ignore_permissions=True)
+        return _summarize_doc(doc)
+
+
+def _workflow_metadata(doc):
+    count = sum(1 for step in list(getattr(doc, "steps", []) or []) if _clean(getattr(step, "origin", None)) == "add_sign")
+    return {
+        "rejection_targets": _eligible_rejection_targets(doc) if getattr(doc, "workflow_status", None) in ACTIVE_STATUSES else [],
+        "add_sign_count": count,
+        "add_sign_remaining": max(0, MAX_ADD_SIGN_OPERATIONS - count),
+    }

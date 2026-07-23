@@ -684,6 +684,15 @@ def _normalize_money(value):
     return result
 
 
+def derive_total_amount(amount_before_tax, tax_amount, total_amount):
+    before_tax = _normalize_money(amount_before_tax)
+    tax = _normalize_money(tax_amount)
+    total = _normalize_money(total_amount)
+    if total is None and before_tax is not None and tax is not None:
+        total = (before_tax + tax).quantize(Decimal("0.01"))
+    return total
+
+
 def _normalized_fields(values):
     return {
         "invoice_category": _normalize_text("invoice_category", values.get("invoice_category")),
@@ -692,7 +701,7 @@ def _normalized_fields(values):
         "invoice_number": _normalize_text("invoice_number", values.get("invoice_number")),
         "amount_before_tax": _normalize_money(values.get("amount_before_tax")),
         "tax_amount": _normalize_money(values.get("tax_amount")),
-        "total_amount": _normalize_money(values.get("total_amount")),
+        "total_amount": derive_total_amount(values.get("amount_before_tax"), values.get("tax_amount"), values.get("total_amount")),
     }
 
 
@@ -773,7 +782,15 @@ def _money_presence(record, field):
 
 
 def _record_money(record, field):
-    return None if _money_presence(record, field) is False else _get(record, field)
+    presence = _money_presence(record, field)
+    if field == "total_amount" and presence is False:
+        components_present = (
+            _money_presence(record, "amount_before_tax") is True
+            and _money_presence(record, "tax_amount") is True
+        )
+        if components_present and _get(record, field) is not None:
+            return _get(record, field)
+    return None if presence is False else _get(record, field)
 
 
 def _public_field_warnings(record):

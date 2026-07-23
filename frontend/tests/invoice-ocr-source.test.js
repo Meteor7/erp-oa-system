@@ -5,6 +5,7 @@ import test from 'node:test';
 const lib = readFileSync(new URL('../src/lib/invoiceOcr.js', import.meta.url), 'utf8');
 const panel = readFileSync(new URL('../src/components/invoice/InvoiceRecognitionPanel.vue', import.meta.url), 'utf8');
 const preview = readFileSync(new URL('../src/components/invoice/InvoicePreviewDrawer.vue', import.meta.url), 'utf8');
+const workbench = readFileSync(new URL('../src/components/invoice/InvoiceUploadWorkbench.vue', import.meta.url), 'utf8');
 
 test('invoice API contract is private, bounded and controlled', () => {
   assert.match(lib, /MAX_FILES\s*=\s*20/);
@@ -35,9 +36,22 @@ test('panel and drawer expose lifecycle, field and preview protections', () => {
   assert.match(preview, /URL\.createObjectURL/);
   assert.match(preview, /URL\.revokeObjectURL/);
   assert.match(preview, /AbortController/);
+  assert.match(preview, /pdfjs-dist/);
+  assert.match(preview, /shallowRef/);
+  assert.match(preview, /const pdfDocument = shallowRef\(null\)/);
+  assert.match(preview, /getDocument/);
+  assert.match(preview, /renderTask/);
+  assert.match(preview, /cancelPdfRender/);
+  assert.doesNotMatch(preview, /<iframe|sandbox/);
   assert.match(preview, /close/);
   assert.match(preview, /watermark/i);
   assert.doesNotMatch(preview, /<a\b|download|:src=['"]invoice/);
 });
 
 test('invoice upload control uses supported palette', () => { assert.match(panel, /bg-blue-600/); assert.doesNotMatch(panel, /bg-sky-600/); });
+
+test('invoice edit panel derives total immediately when money components change', () => {
+  assert.match(workbench, /deriveInvoiceTotal/);
+  assert.match(workbench, /syncDerivedTotal/);
+  assert.match(workbench, /@input="syncDerivedTotal/);
+});

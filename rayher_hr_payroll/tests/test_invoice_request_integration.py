@@ -1035,7 +1035,7 @@ def test_normalize_preserves_exact_seven_invoice_fields_and_compatibility_values
         "total_amount": 35.98,
     }
     assert row["category"] == "电子发票（普通发票）"
-    assert row["description"] == "文具印章"
+    assert row["description"] == ""
     assert row["start_date"] == row["end_date"] == "2026-07-14"
     assert row["amount"] == 35.98
     assert UUID(row["line_key"]).version == 5
@@ -1252,7 +1252,6 @@ def test_save_draft_expense_sources_updates_invoice_adds_and_deletes_manual_sour
     ("override", "message"),
     [
         ({"project_name": ""}, "项目名称"),
-        ({"expense_item": ""}, "费用项目"),
         ({"issue_date": ""}, "日期"),
         ({"total_amount": "0"}, "金额"),
         ({"description": ""}, "说明"),
@@ -1456,9 +1455,9 @@ def test_withdraw_one_invoice_keeps_other_source_in_same_project_group(monkeypat
 @pytest.mark.parametrize(
     ("line", "message"),
     [
-        ({"line_key": "a", "source_invoice": "INV-1", "project_name": "", "expense_item": "交通费", "total_amount": 10}, "项目名称"),
-        ({"line_key": "a", "source_invoice": "INV-1", "project_name": "项目甲", "expense_item": "", "total_amount": 10}, "费用项目"),
-        ({"line_key": "a", "source_invoice": None, "project_name": "项目甲", "expense_item": "差旅补贴", "total_amount": 80, "no_invoice_reason": ""}, "无票原因"),
+        ({"line_key": "a", "source_invoice": "INV-1", "project_name": "", "expense_item": "travel", "expense_description": "provided", "total_amount": 10}, "\u9879\u76ee\u540d\u79f0"),
+        ({"line_key": "a", "source_invoice": "INV-1", "project_name": "project-a", "expense_item": "", "expense_description": "", "total_amount": 10}, "\u8d39\u7528\u8bf4\u660e"),
+        ({"line_key": "a", "source_invoice": None, "project_name": "project-a", "expense_item": "", "expense_description": "provided", "total_amount": 80, "no_invoice_reason": ""}, "\u65e0\u7968\u539f\u56e0"),
     ],
 )
 def test_validate_expense_project_groups_blocks_incomplete_submission(line, message):
@@ -1921,3 +1920,462 @@ def test_every_legacy_consumption_mutation_enforces_row_scope(monkeypatch):
         oa_entry.add_invoice(foreign.name, "foreign.pdf")
     with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
         oa_entry.push_consumption_to_request([foreign.name])
+
+
+def test_expense_normalization_derives_blank_total_before_request_sum():
+    rows, total = oa_entry._normalize_expense_lines(
+        [
+            {
+                "source_invoice": "INV-DERIVED",
+                "project_name": "project-a",
+                "amount_before_tax": "690.84",
+                "tax_amount": "20.73",
+                "total_amount": None,
+            }
+        ]
+    )
+    assert Decimal(str(rows[0]["total_amount"])) == Decimal("711.57")
+    assert Decimal(str(rows[0]["amount"])) == Decimal("711.57")
+    assert Decimal(str(total)) == Decimal("711.57")
+
+
+def test_employee_submission_allows_blank_expense_item_but_requires_description():
+    valid = Row(
+        request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
+        expense_lines=[
+            Row(
+                line_key="line-a",
+                source_invoice="INV-1",
+                project_name="project-a",
+                expense_item="",
+                expense_description="client visit",
+                total_amount=10,
+            )
+        ],
+    )
+    oa_entry._validate_expense_project_groups(valid)
+    valid.expense_lines[0].expense_description = ""
+    valid.expense_lines[0].description = ""
+    with pytest.raises(ValidationError, match="\u8d39\u7528\u8bf4\u660e"):
+        oa_entry._validate_expense_project_groups(valid)
+
+
+def test_expense_normalization_keeps_new_and_legacy_description_coherent():
+    rows, _total = oa_entry._normalize_expense_lines(
+        [
+            {
+                "source_invoice": "INV-1",
+                "project_name": "project-a",
+                "expense_item": "",
+                "expense_description": "client visit",
+                "total_amount": 10,
+            }
+        ]
+    )
+    assert rows[0]["expense_description"] == "client visit"
+    assert rows[0]["description"] == "client visit"
+
+
+def test_finance_classification_updates_only_expense_items(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    line = Row(
+        line_key="11111111-1111-4111-8111-111111111111",
+        source_invoice="INV-1",
+        project_name="project-a",
+        expense_item="",
+        expense_description="client visit",
+        description="client visit",
+        total_amount=10,
+        amount=10,
+    )
+    step = Row(
+        step_index=1,
+        step_key="step-finance",
+        label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance",
+        mode="approve",
+        approvers='["finance@example.com"]',
+        approved_by="[]",
+        status=oa_entry.STATUS_PENDING,
+    )
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-FINANCE",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "current_step_index": 1,
+            "current_step_label": step.label,
+            "expense_lines": [line],
+            "steps": [step],
+            "operation_log": "[]",
+        },
+    )
+    environment.committed[doc.name] = doc
+    frappe_stub.session.user = "finance@example.com"
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["finance@example.com"])
+
+    oa_entry.save_finance_expense_items(
+        doc.name,
+        [{"line_key": line.line_key, "expense_item": "travel"}],
+    )
+    assert line.expense_item == "travel"
+    assert line.total_amount == 10
+    assert line.expense_description == "client visit"
+    with pytest.raises(ValidationError):
+        oa_entry.save_finance_expense_items(
+            doc.name,
+            [{"line_key": line.line_key, "expense_item": "office", "total_amount": 999}],
+        )
+
+
+def test_finance_approval_is_blocked_until_all_expense_items_are_classified(monkeypatch):
+    line = Row(line_key="line-a", expense_item="", expense_description="client visit")
+    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance", mode="approve")
+    doc = Row(request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, expense_lines=[line])
+    with pytest.raises(ValidationError, match="\u8d39\u7528\u9879\u76ee"):
+        oa_entry._validate_finance_classification(doc, step)
+    line.expense_item = "travel"
+    oa_entry._validate_finance_classification(doc, step)
+
+
+def test_action_request_enforces_finance_classification_before_approve(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    line = Row(line_key="line-a", project_name="project-a", expense_item="", expense_description="client visit")
+    step = Row(
+        step_index=1,
+        step_key="step-finance",
+        label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance",
+        mode="approve",
+        approvers='["finance@example.com"]',
+        approved_by="[]",
+        status=oa_entry.STATUS_PENDING,
+        action_by="",
+        acted_on=None,
+        note="",
+    )
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-FINANCE-BLOCK",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "current_step_index": 1,
+            "current_step_label": step.label,
+            "expense_lines": [line],
+            "steps": [step],
+            "operation_log": "[]",
+        },
+    )
+    environment.committed[doc.name] = doc
+    frappe_stub.session.user = "finance@example.com"
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["finance@example.com"])
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"finance@example.com"})
+    with pytest.raises(ValidationError, match="\u8d39\u7528\u9879\u76ee"):
+        oa_entry.action_request(doc.name, "approve")
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+
+
+def test_request_capabilities_are_server_authoritative_for_finance(monkeypatch):
+    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance", mode="approve")
+    doc = Row(
+        request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
+        workflow_status=oa_entry.STATUS_PENDING,
+        expense_lines=[Row(expense_item="")],
+    )
+    monkeypatch.setattr(oa_entry, "_current_step", lambda _doc: step)
+    monkeypatch.setattr(oa_entry, "_can_act_on_current_step", lambda _doc, user=None: True)
+    monkeypatch.setattr(oa_entry, "_is_finance_user", lambda user=None: True)
+    capabilities = oa_entry._request_capabilities(doc)
+    assert capabilities == {
+        "can_approve": False,
+        "can_reject": True,
+        "can_add_sign": True,
+        "can_edit_expense_items": True,
+        "classification_ready": False,
+    }
+
+
+def test_new_route_steps_receive_stable_identity_and_origin():
+    environment = RequestEnvironment()
+    doc = RequestDocument(environment, {"steps": []})
+    oa_entry._append_steps(
+        doc,
+        [
+            {
+                "step_index": 1,
+                "label": "finance",
+                "mode": "approve",
+                "approvers": ["finance@example.com"],
+                "status": oa_entry.STATUS_PENDING,
+            }
+        ],
+    )
+    step = doc.steps[0]
+    assert _uuid4(step.step_key)
+    assert step.origin == "base"
+    serialized = oa_entry._serialize_doc_step(step)
+    assert serialized["step_key"] == step.step_key
+    assert serialized["origin"] == "base"
+
+
+def test_supplemental_attachment_content_validation_is_bounded_and_signature_based():
+    validator = oa_entry.expense_attachments.validate_attachment_content
+    pdf = validator("receipt.pdf", b"%PDF-1.7\nbody")
+    jpg = validator("photo.jpg", b"\xff\xd8\xffbody")
+    png = validator("scan.png", b"\x89PNG\r\n\x1a\nbody")
+    assert pdf["mime_type"] == "application/pdf"
+    assert jpg["mime_type"] == "image/jpeg"
+    assert png["mime_type"] == "image/png"
+    assert len(pdf["sha256"]) == 64
+    with pytest.raises(ValidationError):
+        validator("receipt.pdf", b"not-a-pdf")
+    with pytest.raises(ValidationError):
+        validator("receipt.exe", b"MZ")
+    with pytest.raises(ValidationError):
+        validator("too-large.pdf", b"%PDF-" + b"x" * (10 * 1024 * 1024))
+
+
+def test_supplemental_attachment_capacity_is_ten_per_line():
+    oa_entry.expense_attachments.validate_capacity(9)
+    with pytest.raises(ValidationError, match="10"):
+        oa_entry.expense_attachments.validate_capacity(10)
+
+
+def test_supplemental_attachment_requires_request_line_membership():
+    request = Row(expense_lines=[Row(line_key="line-a")])
+    assert oa_entry.expense_attachments.validate_line_membership(request, "line-a").line_key == "line-a"
+    with pytest.raises(ValidationError):
+        oa_entry.expense_attachments.validate_line_membership(request, "line-b")
+
+
+def test_supplemental_attachment_requires_private_unclaimed_owner_file(monkeypatch):
+    valid = Row(
+        owner="alice@example.com",
+        is_private=1,
+        attached_to_doctype="",
+        attached_to_name="",
+        file_url="/private/files/receipt.pdf",
+    )
+    assert oa_entry.expense_attachments.validate_file_registration(valid, "alice@example.com") is valid
+    for override in (
+        {"is_private": 0},
+        {"owner": "mallory@example.com"},
+        {"attached_to_doctype": "Other"},
+        {"file_url": "/files/public.pdf"},
+    ):
+        invalid = Row(valid)
+        invalid.update(override)
+        with pytest.raises(ValidationError):
+            oa_entry.expense_attachments.validate_file_registration(invalid, "alice@example.com")
+
+
+def test_expense_attachment_api_contract_delegates_to_hardened_service(monkeypatch):
+    calls = []
+    monkeypatch.setattr(oa_entry.expense_attachments, "register_attachment", lambda name, line_key, file_url: calls.append(("register", name, line_key, file_url)) or {"name": "ATT-1"}, raising=False)
+    monkeypatch.setattr(oa_entry.expense_attachments, "delete_attachment", lambda name, attachment: calls.append(("delete", name, attachment)) or {"deleted": attachment}, raising=False)
+    monkeypatch.setattr(oa_entry.expense_attachments, "preview_attachment", lambda attachment: calls.append(("preview", attachment)) or {"token": "x"}, raising=False)
+    assert oa_entry.upload_expense_attachment("REQ-1", "line-a", "/private/files/a.pdf")["name"] == "ATT-1"
+    assert oa_entry.delete_expense_attachment("REQ-1", "ATT-1")["deleted"] == "ATT-1"
+    assert oa_entry.preview_expense_attachment("ATT-1")["token"] == "x"
+    assert calls == [
+        ("register", "REQ-1", "line-a", "/private/files/a.pdf"),
+        ("delete", "REQ-1", "ATT-1"),
+        ("preview", "ATT-1"),
+    ]
+
+
+def test_request_expense_lines_include_supplemental_attachment_metadata(monkeypatch):
+    doc = Row(name="REQ-1")
+    lines = [{"line_key": "line-a", "attachment_count": 0}]
+    monkeypatch.setattr(
+        oa_entry.expense_attachments,
+        "list_attachments",
+        lambda request_name, current=False: [
+            {"name": "ATT-1", "expense_line_key": "line-a", "original_filename": "receipt.pdf"}
+        ],
+    )
+    result = oa_entry._with_expense_attachments(doc, lines)
+    assert result[0]["attachment_count"] == 1
+    assert result[0]["attachments"][0]["name"] == "ATT-1"
+
+
+def _dynamic_workflow_doc(steps, current_index):
+    environment = RequestEnvironment()
+    return RequestDocument(
+        environment,
+        {
+            "name": "REQ-DYNAMIC",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "current_step_index": current_index,
+            "current_step_label": steps[current_index - 1].label,
+            "steps": steps,
+            "expense_lines": [],
+            "operation_log": "[]",
+        },
+    )
+
+
+def _workflow_step(index, key, label, status, approver, origin="base"):
+    return Row(
+        step_index=index,
+        step_key=key,
+        origin=origin,
+        parent_step_key="",
+        add_sign_position="",
+        add_sign_opinion="",
+        added_by="",
+        added_on=None,
+        label=label,
+        mode="approve",
+        approvers=json.dumps([approver]),
+        approved_by=json.dumps([approver]) if status == oa_entry.STATUS_APPROVED else "[]",
+        status=status,
+        action_by=approver if status == oa_entry.STATUS_APPROVED else "",
+        acted_on="2026-07-23 10:00:00" if status == oa_entry.STATUS_APPROVED else None,
+        note="",
+    )
+
+
+def test_rejection_targets_include_applicant_and_completed_earlier_steps_only():
+    steps = [
+        _workflow_step(1, "step-1", "finance", oa_entry.STATUS_APPROVED, "finance@example.com"),
+        _workflow_step(2, "step-2", "manager", oa_entry.STATUS_APPROVED, "manager@example.com"),
+        _workflow_step(3, "step-3", "director", oa_entry.STATUS_PENDING, "director@example.com"),
+        _workflow_step(4, "step-4", "pay", oa_entry.STATUS_WAIT_FLOW, "pay@example.com"),
+    ]
+    targets = oa_entry._eligible_rejection_targets(_dynamic_workflow_doc(steps, 3))
+    assert [target["target"] for target in targets] == ["applicant", "step-1", "step-2"]
+
+
+def test_reject_to_earlier_step_preserves_prior_history_and_resets_downstream():
+    steps = [
+        _workflow_step(1, "step-1", "finance", oa_entry.STATUS_APPROVED, "finance@example.com"),
+        _workflow_step(2, "step-2", "manager", oa_entry.STATUS_APPROVED, "manager@example.com"),
+        _workflow_step(3, "step-3", "director", oa_entry.STATUS_PENDING, "director@example.com"),
+    ]
+    doc = _dynamic_workflow_doc(steps, 3)
+    oa_entry._reject_to_target(doc, steps[2], "step-2", "director@example.com", "needs revision")
+    assert steps[0].status == oa_entry.STATUS_APPROVED
+    assert steps[0].action_by == "finance@example.com"
+    assert steps[1].status == oa_entry.STATUS_PENDING
+    assert steps[1].approved_by == "[]"
+    assert steps[2].status == oa_entry.STATUS_WAIT_FLOW
+    assert doc.current_step_index == 2
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+
+
+def test_reject_to_applicant_returns_editable_draft_and_resets_all_steps():
+    steps = [
+        _workflow_step(1, "step-1", "finance", oa_entry.STATUS_APPROVED, "finance@example.com"),
+        _workflow_step(2, "step-2", "manager", oa_entry.STATUS_PENDING, "manager@example.com"),
+    ]
+    doc = _dynamic_workflow_doc(steps, 2)
+    oa_entry._reject_to_target(doc, steps[1], "applicant", "manager@example.com", "fix details")
+    assert doc.workflow_status == oa_entry.STATUS_DRAFT
+    assert doc.current_step_index == 0
+    assert all(step.status == oa_entry.STATUS_WAIT_FLOW for step in steps)
+    assert all(step.approved_by == "[]" and not step.action_by for step in steps)
+
+
+def test_add_sign_before_and_after_reindexes_with_stable_parent_identity():
+    before_steps = [_workflow_step(1, "base-1", "manager", oa_entry.STATUS_PENDING, "manager@example.com")]
+    before_doc = _dynamic_workflow_doc(before_steps, 1)
+    inserted = oa_entry._insert_add_sign_step(before_doc, before_steps[0], "user-a@example.com", "before", "review first", "manager@example.com")
+    assert inserted.step_index == 1
+    assert inserted.parent_step_key == "base-1"
+    assert inserted.origin == "add_sign"
+    assert before_doc.steps[1].step_index == 2
+    assert before_doc.steps[1].status == oa_entry.STATUS_WAIT_FLOW
+    assert before_doc.current_step_index == 1
+
+    after_steps = [_workflow_step(1, "base-2", "manager", oa_entry.STATUS_PENDING, "manager@example.com")]
+    after_doc = _dynamic_workflow_doc(after_steps, 1)
+    inserted_after = oa_entry._insert_add_sign_step(after_doc, after_steps[0], "user-b@example.com", "after", "review next", "manager@example.com")
+    assert inserted_after.step_index == 2
+    assert after_doc.steps[0].status == oa_entry.STATUS_PENDING
+    assert after_doc.current_step_index == 1
+
+
+def test_add_sign_rejects_self_duplicate_and_more_than_twenty_operations():
+    base = _workflow_step(1, "base", "manager", oa_entry.STATUS_PENDING, "manager@example.com")
+    doc = _dynamic_workflow_doc([base], 1)
+    with pytest.raises(ValidationError):
+        oa_entry._insert_add_sign_step(doc, base, "manager@example.com", "after", "self", "manager@example.com")
+    duplicate = _workflow_step(2, "added", "added", oa_entry.STATUS_WAIT_FLOW, "user-a@example.com", origin="add_sign")
+    duplicate.parent_step_key = "base"
+    doc.steps.append(duplicate)
+    with pytest.raises(ValidationError):
+        oa_entry._insert_add_sign_step(doc, base, "user-a@example.com", "after", "duplicate", "manager@example.com")
+    many = [base] + [
+        _workflow_step(index + 2, f"added-{index}", "added", oa_entry.STATUS_APPROVED, f"user-{index}@example.com", origin="add_sign")
+        for index in range(20)
+    ]
+    limit_doc = _dynamic_workflow_doc(many, 1)
+    with pytest.raises(ValidationError, match="20"):
+        oa_entry._insert_add_sign_step(limit_doc, base, "new@example.com", "after", "too many", "manager@example.com")
+
+
+def test_action_request_requires_target_and_reopens_earlier_step(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    steps = [
+        _workflow_step(1, "step-1", "finance", oa_entry.STATUS_APPROVED, "finance@example.com"),
+        _workflow_step(2, "step-2", "manager", oa_entry.STATUS_PENDING, "manager@example.com"),
+    ]
+    doc = _dynamic_workflow_doc(steps, 2)
+    object.__setattr__(doc, "environment", environment)
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["manager@example.com"])
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"manager@example.com"})
+    with pytest.raises(ValidationError):
+        oa_entry.action_request(doc.name, "reject", "fix it")
+    result = oa_entry.action_request(doc.name, "reject", "fix it", "step-1")
+    assert doc.current_step_index == 1
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+    assert result["status"] == oa_entry.STATUS_PENDING
+
+
+def test_add_sign_request_inserts_resolved_enabled_user_under_request_lock(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    steps = [_workflow_step(1, "step-1", "manager", oa_entry.STATUS_PENDING, "manager@example.com")]
+    doc = _dynamic_workflow_doc(steps, 1)
+    object.__setattr__(doc, "environment", environment)
+    environment.committed[doc.name] = doc
+    locks = []
+
+    @contextmanager
+    def request_lock(category, name):
+        locks.append((category, name))
+        yield object()
+
+    monkeypatch.setattr(service, "_transaction_lock", request_lock)
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["manager@example.com"])
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"manager@example.com"})
+    monkeypatch.setattr(oa_entry, "_resolve_add_sign_approver", lambda value: "user-a@example.com", raising=False)
+    result = oa_entry.add_sign_request(doc.name, "user-a@example.com", "after", "please review")
+    assert locks == [("request", doc.name)]
+    assert len(doc.steps) == 2
+    assert doc.steps[1].origin == "add_sign"
+    assert result["status"] == oa_entry.STATUS_PENDING
+
+
+def test_workflow_metadata_reports_targets_and_add_sign_allowance():
+    steps = [
+        _workflow_step(1, "base-1", "finance", oa_entry.STATUS_APPROVED, "finance@example.com"),
+        _workflow_step(2, "added-1", "added", oa_entry.STATUS_PENDING, "added@example.com", origin="add_sign"),
+    ]
+    doc = _dynamic_workflow_doc(steps, 2)
+    metadata = oa_entry._workflow_metadata(doc)
+    assert metadata["rejection_targets"][0]["target"] == "applicant"
+    assert metadata["rejection_targets"][1]["target"] == "base-1"
+    assert metadata["add_sign_count"] == 1
+    assert metadata["add_sign_remaining"] == 19
