@@ -222,6 +222,8 @@ class Environment:
                 actual = doc.get(key)
                 if isinstance(wanted, (list, tuple)) and wanted and wanted[0] == "!=":
                     matched = actual != wanted[1]
+                elif isinstance(wanted, (list, tuple)) and list(wanted) == ["is", "not set"]:
+                    matched = actual in (None, "")
                 else:
                     matched = actual == wanted
                 if not matched:
@@ -3175,6 +3177,7 @@ def test_workbench_listing_scopes_owner_and_bounds_filters(env):
     env.add_batch()
     env.add_record(name="INV-OWN-CONFIRMED", recognition_status="已确认")
     env.add_record(name="INV-OWN-PENDING", recognition_status="待确认")
+    env.add_record(name="INV-OWN-PUSHED", recognition_status="已确认", request="OA-1")
     env.add_record(name="INV-OTHER", owner="other@example.com", uploaded_by="other@example.com", recognition_status="已确认")
     rows = service.list_workbench_invoices()
     assert {row["name"] for row in rows} == {"INV-OWN-CONFIRMED", "INV-OWN-PENDING"}
@@ -3184,6 +3187,9 @@ def test_workbench_listing_scopes_owner_and_bounds_filters(env):
     frappe_stub_module.session.user = "finance@example.com"
     assert {row["name"] for row in service.list_workbench_invoices(view="all")} == {
         "INV-OWN-CONFIRMED", "INV-OWN-PENDING", "INV-OTHER",
+    }
+    assert {row["name"] for row in service.list_workbench_invoices(view="all", include_pushed=True)} == {
+        "INV-OWN-CONFIRMED", "INV-OWN-PENDING", "INV-OWN-PUSHED", "INV-OTHER",
     }
     with pytest.raises(ValidationError, match="状态"):
         service.list_workbench_invoices(status="伪造状态")

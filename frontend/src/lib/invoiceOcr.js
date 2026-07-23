@@ -234,8 +234,12 @@ export function getRequestInvoices(request, options) {
   return invoiceApi('get_request_invoices', { request }, options);
 }
 
-export function listWorkbenchInvoices({ view = 'mine', status = '', limit = 200 } = {}, options) {
-  return invoiceApi('list_workbench', { view, status, limit }, options);
+export function listWorkbenchInvoices({
+  view = 'mine', status = '', limit = 200, includePushed = false,
+} = {}, options) {
+  return invoiceApi('list_workbench', {
+    view, status, limit, include_pushed: includePushed ? 1 : 0,
+  }, options);
 }
 
 export function unconfirmInvoice(invoiceName, note = '', options) {

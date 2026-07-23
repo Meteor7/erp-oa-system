@@ -1,7 +1,9 @@
 <script setup>
 import { Button, FeatherIcon, createResource } from 'frappe-ui';
 import { computed, reactive, ref, watch } from 'vue';
-import { getRequestInvoices, invoicesForLine, newLineKey } from '../lib/invoiceOcr.js';
+import {
+  getRequestInvoices, invoicesForLine, newLineKey, withdrawInvoicePush,
+} from '../lib/invoiceOcr.js';
 import {
   addSignRequest, deleteExpenseAttachment, fetchExpenseAttachmentPreview, listApprovalPeople,
   rejectRequest, saveFinanceExpenseItems, uploadExpenseAttachment, validateExpenseAttachments,
@@ -85,7 +87,7 @@ const blankLine = () => ({
 const expenseLines = ref([blankLine()]);
 const requestForm = reactive({
   subject: '', company: '', department: '', supervisor: '', doc_type: '', urgency: '',
-  asset_category: ASSET_OTHER, payment_type: '', payment_method: '', bank_name: '',
+  asset_category: ASSET_OTHER, payment_type: '支付个人', payment_method: '', bank_name: '',
   payee_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
 });
 
@@ -127,6 +129,11 @@ const paymentMethods = computed(() => options.data?.payment_methods || []);
 const expenseCategories = computed(() => options.data?.expense_categories || []);
 const isDraftDetail = computed(() => selectedRequest.value?.kanban_status === 'draft');
 const canEditExpenseItems = computed(() => Boolean(isDraftDetail.value || selectedRequest.value?.can_edit_expense_items));
+const canWithdrawInvoicePush = computed(() => Boolean(
+  isDraftDetail.value
+  && selectedRequest.value?.from_invoice_push
+  && detailInvoices.value.length,
+));
 const detailSources = computed(() => (isDraftDetail.value ? draftSources.value : financeSources.value));
 const detailGroups = computed(() => groupSources(detailSources.value));
 const detailGroupTotal = computed(() => detailGroups.value.reduce((sum, group) => sum + Number(group.total_amount || 0), 0));
@@ -467,6 +474,27 @@ async function withdrawPayment(row) {
     await reload();
   } catch (error) {
     errorMessage.value = apiError(error, '撤回付款失败');
+  }
+}
+
+async function withdrawPushedInvoices(row) {
+  if (!canWithdrawInvoicePush.value) return;
+  if (!window.confirm('撤回下推会解除这些发票与报销草稿的关联，发票将重新回到上传发票页面，是否继续？')) return;
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    await withdrawInvoicePush(
+      detailInvoices.value.map((invoice) => invoice.name),
+      actionNote.value.trim() || '从报销草稿撤回发票下推',
+    );
+    actionNote.value = '';
+    message.value = '已撤回下推，发票已重新回到上传发票页面。';
+    await reload();
+    await loadInvoices(row.name);
+  } catch (error) {
+    errorMessage.value = apiError(error, '撤回下推失败');
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -837,6 +865,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
             <Button variant="subtle" @click="detailRequestName = ''">&#x5173;&#x95ED;</Button>
             <Button v-if="selectedRequest.can_withdraw" variant="subtle" @click="withdrawRequest(selectedRequest)">&#x64A4;&#x56DE;&#x7533;&#x8BF7;</Button>
             <Button v-if="selectedRequest.can_withdraw_payment" variant="subtle" @click="withdrawPayment(selectedRequest)">&#x64A4;&#x56DE;&#x4ED8;&#x6B3E;</Button>
+            <Button v-if="canWithdrawInvoicePush" variant="subtle" :loading="saving" @click="withdrawPushedInvoices(selectedRequest)">撤回下推</Button>
             <Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" :loading="saving" @click="submitDraft(selectedRequest)">&#x63D0;&#x4EA4;&#x5BA1;&#x6279;</Button>
             <Button v-if="selectedRequest.can_edit_expense_items" variant="subtle" :loading="saving" @click="saveFinanceClassification">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
             <Button v-if="selectedRequest.can_add_sign" variant="subtle" @click="openAddSign"><FeatherIcon name="user-plus" class="h-4 w-4" />&#x52A0;&#x7B7E;</Button>

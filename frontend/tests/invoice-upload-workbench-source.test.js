@@ -14,6 +14,7 @@ test('invoice upload workspace exposes record-driven reversible APIs', () => {
   assert.match(lib, /unconfirm_invoice/);
   assert.match(lib, /push_invoices_to_request/);
   assert.match(lib, /withdraw_invoice_push/);
+  assert.match(lib, /include_pushed/);
 });
 
 test('invoice upload workspace provides batch review selection detail push and preview', () => {
@@ -24,9 +25,12 @@ test('invoice upload workspace provides batch review selection detail push and p
   for (const label of ['发票类别', '项目名称', '开票日期', '发票号码', '税前金额', '税额', '合计金额']) {
     assert.ok(source.includes(label), label);
   }
-  for (const action of ['确认内容', '撤回确认', '下推到费用报销流', '撤回下推', '查看发票']) {
+  for (const action of ['确认内容', '撤回确认', '下推到费用报销流', '查看发票']) {
     assert.ok(source.includes(action), action);
   }
+  assert.ok(expense.includes('撤回下推'));
+  assert.doesNotMatch(source, />撤回下推</);
+  assert.doesNotMatch(source, /\['已下推',\s*stats\.pushed/);
   assert.match(source, /InvoicePreviewDrawer/);
   assert.match(source, /ACTIVE_RECOGNITION_STATUSES/);
   assert.match(source, /clearTimeout/);
@@ -41,6 +45,7 @@ test('invoice push form uses readonly current applicant and canonical payment la
   assert.doesNotMatch(source, /v-model="pushForm\.supervisor"/);
   assert.doesNotMatch(source, />部门主管</);
   assert.ok(source.includes('付款类型'));
+  assert.match(source, /payment_type:\s*['"]支付个人['"]/);
   assert.ok(source.includes('支付方式'));
   const payee = source.indexOf('收款人');
   const method = source.indexOf('支付方式');

@@ -88,7 +88,8 @@ test('upload page supports batch upload confirmation pushdown and private previe
   assert.match(uploadSource, /confirmInvoice/);
   assert.match(uploadSource, /unconfirmInvoice/);
   assert.match(uploadSource, /pushInvoices/);
-  assert.match(uploadSource, /withdrawInvoicePush/);
+  assert.doesNotMatch(uploadSource, /withdrawInvoicePush/);
+  assert.match(workbenchSource, /withdrawInvoicePush/);
   assert.match(uploadSource, /InvoicePreviewDrawer/);
   assert.doesNotMatch(uploadSource, /download\s*=|target="_blank"/);
   assert.match(invoiceLibSource, /\/api\/method\/upload_file/);

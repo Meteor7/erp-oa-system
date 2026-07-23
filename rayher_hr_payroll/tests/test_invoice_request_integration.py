@@ -1560,6 +1560,8 @@ def test_get_options_exposes_current_applicant_and_canonical_payment_types(monke
     result = oa_entry.get_options()
 
     assert result["payment_types"] == ["支付个人", "对公支付"]
+    assert "总经办" in result["departments"]
+    assert "总经理室" not in result["departments"]
     assert result["current_applicant"] == {
         "employee": "EMP-1",
         "employee_name": "Alice",
@@ -1570,6 +1572,7 @@ def test_get_options_exposes_current_applicant_and_canonical_payment_types(monke
 def test_legacy_personal_payment_type_is_displayed_canonically(monkeypatch):
     doc = _report_request("REQ-LEGACY")
     doc.payment_type = "付款申请"
+    doc.department = "总经理室"
     monkeypatch.setattr(
         service,
         "request_invoice_summary",
@@ -1582,6 +1585,7 @@ def test_legacy_personal_payment_type_is_displayed_canonically(monkeypatch):
     result = oa_entry._summarize_doc(doc)
 
     assert result["payment_type"] == "支付个人"
+    assert result["department"] == "总经办"
 
 
 def _install_report_requests(monkeypatch, docs):

@@ -63,9 +63,14 @@ def confirm_invoice(invoice_name, values=None):
 
 
 @frappe.whitelist(methods=["POST"])
-def list_workbench(view="mine", status=None, limit=200):
+def list_workbench(view="mine", status=None, limit=200, include_pushed=0):
     _authenticated()
-    return service.list_workbench_invoices(view=view, status=status, limit=limit)
+    return service.list_workbench_invoices(
+        view=view,
+        status=status,
+        limit=limit,
+        include_pushed=include_pushed,
+    )
 
 
 @frappe.whitelist(methods=["POST"])

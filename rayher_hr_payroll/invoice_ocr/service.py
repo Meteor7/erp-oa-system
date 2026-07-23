@@ -888,7 +888,7 @@ def confirm_invoice(invoice_name, values=None):
         return _serialize_record(record)
 
 
-def list_workbench_invoices(view="mine", status=None, limit=200):
+def list_workbench_invoices(view="mine", status=None, limit=200, include_pushed=False):
     user = _user()
     roles = _roles(user)
     view = str(view or "mine").strip()
@@ -906,6 +906,13 @@ def list_workbench_invoices(view="mine", status=None, limit=200):
         filters["owner"] = user
     if status:
         filters["recognition_status"] = status
+    include_pushed = (
+        include_pushed
+        if isinstance(include_pushed, bool)
+        else str(include_pushed or "").strip().lower() in {"1", "true", "yes"}
+    )
+    if not include_pushed:
+        filters["request"] = ""
     names = _get_all(
         RECORD_DOCTYPE,
         filters=filters,

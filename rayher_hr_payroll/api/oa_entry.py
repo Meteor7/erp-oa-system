@@ -89,7 +89,7 @@ DEPARTMENTS = [
     "\u4ed3\u5e93",
     "\u9500\u552e\u90e8",
     "\u77e5\u8bc6\u4ea7\u6743\u90e8",
-    "\u603b\u7ecf\u7406\u5ba4",
+    "\u603b\u7ecf\u529e",
     "PMC",
     "\u8d28\u91cf\u90e8",
 ]
@@ -104,6 +104,8 @@ PAYMENT_PERSONAL_LEGACY = "付款申请"
 PAYMENT_TYPES = [PAYMENT_PERSONAL, "对公支付"]
 PAYMENT_METHODS = ["\u94f6\u884c\u8f6c\u8d26", "\u73b0\u91d1\u652f\u4ed8"]
 COMPANIES = ["\u67d0\u67d0\u5149\u534a\u5bfc\u4f53\u79d1\u6280\u6709\u9650\u516c\u53f8", "\u793a\u4f8b\u4f01\u4e1a025\u4e0a\u6d77\u6709\u9650\u516c\u53f8"]
+DEPARTMENT_EXECUTIVE_OFFICE = "\u603b\u7ecf\u529e"
+DEPARTMENT_EXECUTIVE_OFFICE_LEGACY = "\u603b\u7ecf\u7406\u5ba4"
 
 
 def _clean(value):
@@ -118,6 +120,19 @@ def _display_payment_type(value):
 def _canonical_payment_type(value):
     value = _display_payment_type(value)
     return value if value in PAYMENT_TYPES else PAYMENT_TYPES[0]
+
+
+def _display_department(value):
+    value = _clean(value)
+    return (
+        DEPARTMENT_EXECUTIVE_OFFICE
+        if value == DEPARTMENT_EXECUTIVE_OFFICE_LEGACY
+        else value
+    )
+
+
+def _canonical_department(value):
+    return _display_department(value)
 
 
 def _bounded_optional_text(value, label, limit):
@@ -330,14 +345,14 @@ def _employee_context(user=None):
     return {
         "employee": row.name,
         "employee_name": row.employee_name or row.name,
-        "department": row.department or "",
+        "department": _display_department(row.department),
         "supervisor": supervisor,
     }
 
 
 def _route_context(department=None, supervisor=None, asset_category=None):
     ctx = _employee_context()
-    ctx["department"] = department or ctx.get("department") or ""
+    ctx["department"] = _canonical_department(department or ctx.get("department"))
     ctx["supervisor"] = supervisor or ctx.get("supervisor") or ""
     ctx["asset_category"] = asset_category or OTHER_ASSET
     return ctx
@@ -538,7 +553,7 @@ def _serialize_consumption(doc):
         "title": doc.title,
         "employee": doc.employee,
         "employee_name": doc.employee_name,
-        "department": doc.department,
+        "department": _display_department(doc.department),
         "expense_date": doc.expense_date,
         "category": doc.category,
         "amount": doc.amount,
@@ -657,7 +672,7 @@ def _summarize_doc(doc):
         "request_type": doc.request_type,
         "employee": doc.employee,
         "employee_name": doc.employee_name,
-        "department": doc.department,
+        "department": _display_department(doc.department),
         "supervisor": doc.supervisor,
         "company": getattr(doc, "company", None),
         "subject": doc.subject,

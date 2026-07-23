@@ -17,7 +17,6 @@ import {
   updateInvoice,
   uploadInvoiceFiles,
   validateInvoiceFiles,
-  withdrawInvoicePush,
 } from '../../lib/invoiceOcr.js';
 import InvoicePreviewDrawer from './InvoicePreviewDrawer.vue';
 
@@ -44,7 +43,7 @@ const pushForm = reactive({
    asset_category: '其它',
   doc_type: '',
   urgency: '',
-  payment_type: '',
+  payment_type: '支付个人',
   payment_method: '',
   bank_name: '',
   payee_name: '',
@@ -76,7 +75,6 @@ const stats = computed(() => ({
   total: rows.value.length,
   pending: rows.value.filter((row) => row.recognition_status === '待确认').length,
   confirmed: rows.value.filter((row) => row.recognition_status === '已确认').length,
-  pushed: rows.value.filter((row) => Boolean(row.request)).length,
   duplicate: rows.value.filter((row) => row.recognition_status === '疑似重复').length,
 }));
 
@@ -332,21 +330,6 @@ async function submitPush() {
   }
 }
 
-async function undoPush(row) {
-  if (!window.confirm('撤回下推会将关联报销单退回草稿，并解除这张发票的费用明细，是否继续？')) return;
-  busy.value = true;
-  errorMessage.value = '';
-  try {
-    await withdrawInvoicePush([row.name], '用户操作失误撤回下推');
-    message.value = '已撤回下推，发票可重新选择。';
-    await reload(false);
-  } catch (error) {
-    errorMessage.value = cleanError(error, '撤回下推失败');
-  } finally {
-    busy.value = false;
-  }
-}
-
 onMounted(() => reload());
 onBeforeUnmount(() => {
   disposed = true;
@@ -384,7 +367,6 @@ onBeforeUnmount(() => {
         ['发票总数', stats.total, 'bg-blue-500'],
         ['待确认', stats.pending, 'bg-amber-500'],
         ['已确认', stats.confirmed, 'bg-emerald-500'],
-        ['已下推', stats.pushed, 'bg-cyan-500'],
         ['疑似重复', stats.duplicate, 'bg-red-500'],
       ]" :key="item[0]" class="relative overflow-hidden rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
         <div class="absolute inset-y-0 left-0 w-1" :class="item[2]"></div>
@@ -432,7 +414,7 @@ onBeforeUnmount(() => {
                   <div class="mt-1 truncate text-[11px] text-gray-400">{{ row.name }}</div>
                 </td>
                 <td class="px-3 py-3.5">
-                  <span class="inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(row.recognition_status)">{{ row.request ? '已下推' : row.recognition_status }}</span>
+                  <span class="inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(row.recognition_status)">{{ row.recognition_status }}</span>
                   <p v-if="selectionReason(row)" class="mt-1.5 max-w-[190px] text-[11px] leading-4 text-gray-500">{{ selectionReason(row) }}</p>
                 </td>
                 <td class="max-w-[190px] truncate px-3 py-3.5 text-gray-700">{{ row.invoice_category || '-' }}</td>
@@ -455,7 +437,7 @@ onBeforeUnmount(() => {
                 <h3 class="truncate font-semibold text-gray-900" :title="selectedRow.original_filename">{{ selectedRow.original_filename }}</h3>
                 <p class="mt-1 truncate text-xs text-gray-500">{{ selectedRow.name }}</p>
               </div>
-              <span class="shrink-0 rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(selectedRow.recognition_status)">{{ selectedRow.request ? '已下推' : selectedRow.recognition_status }}</span>
+              <span class="shrink-0 rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(selectedRow.recognition_status)">{{ selectedRow.recognition_status }}</span>
             </div>
           </header>
           <div class="space-y-4 p-5">
@@ -469,7 +451,6 @@ onBeforeUnmount(() => {
               <div class="mb-1 font-semibold">请检查识别结果</div>
               <div v-for="warning in invoiceFieldWarnings(selectedRow.field_warnings)" :key="String(warning)">{{ warningText(warning) }}</div>
             </div>
-            <div v-if="selectedRow.request" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm leading-5 text-blue-700">已下推到费用报销流：{{ selectedRow.request }}</div>
             <div class="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
               <Button variant="subtle" @click="previewRow = selectedRow"><FeatherIcon name="eye" class="h-4 w-4" />查看发票</Button>
               <Button v-if="isEditable(selectedRow)" variant="subtle" :disabled="busy" @click="saveFields(selectedRow)">保存修改</Button>
@@ -477,7 +458,6 @@ onBeforeUnmount(() => {
               <Button v-if="selectedRow.recognition_status === '已确认' && !selectedRow.request" variant="subtle" :disabled="busy" @click="undoConfirm(selectedRow)">撤回确认</Button>
               <Button v-if="selectedRow.recognition_status === '失败'" variant="solid" :disabled="busy" @click="retryRow(selectedRow)">重新识别</Button>
               <Button v-if="selectedRow.recognition_status === '疑似重复'" variant="solid" :disabled="busy" @click="resolveRow(selectedRow)">解除重复</Button>
-              <Button v-if="selectedRow.request" variant="subtle" :disabled="busy" @click="undoPush(selectedRow)">撤回下推</Button>
               <Button v-if="['待确认','疑似重复','失败'].includes(selectedRow.recognition_status)" variant="subtle" :disabled="busy" @click="excludeRow(selectedRow)">排除</Button>
             </div>
           </div>
