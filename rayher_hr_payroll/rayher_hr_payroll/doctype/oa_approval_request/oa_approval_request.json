@@ -171,7 +171,7 @@
       "fieldname": "payment_type",
       "fieldtype": "Select",
       "label": "Payment Type",
-      "options": "付款申请\n对公支付"
+      "options": "支付个人\n对公支付"
     },
     {
       "fieldname": "payment_method",

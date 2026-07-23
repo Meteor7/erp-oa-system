@@ -207,6 +207,7 @@ def test_oa_approval_doctypes_define_request_and_steps():
         'payee_name', 'branch', 'account_no', 'paid_by', 'paid_on', 'expense_lines', 'steps'
     }.issubset(request_fields)
     assert request_fields['expense_lines']['options'] == 'OA Approval Expense Line'
+    assert request_fields['payment_type']['options'].split('\n') == ['支付个人', '对公支付']
     assert {
         '\u8349\u7a3f', '\u5f85\u5ba1\u6279', '\u5f85\u529e\u7406', '\u5df2\u5b8c\u6210',
         '\u5df2\u62d2\u7edd', '\u5df2\u4ed8\u6b3e'
