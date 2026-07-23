@@ -152,7 +152,7 @@ class FakeDB:
     def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
         if doctype == "File":
             for doc in self.environment.docs[doctype].values():
-                if isinstance(filters, dict) and doc.get("file_url") == filters.get("file_url"):
+                if isinstance(filters, dict) and all(doc.get(key) == value for key, value in filters.items()):
                     return doc.get(fieldname)
         if doctype == service.LINE_DOCTYPE:
             for doc in self.environment.docs[doctype].values():
@@ -616,6 +616,26 @@ def test_preview_logs_view_and_never_returns_disk_path(env):
     assert "file_url" not in result and "full_path" not in result
     assert "/private/files/" not in result["preview_url"]
     assert not env.docs[service.VIEW_LOG_DOCTYPE]
+
+
+def test_preview_selects_record_attachment_when_file_url_has_legacy_duplicate(env):
+    env.add_batch()
+    legacy_file = env.add_file(filename="shared.pdf")
+    legacy_file.attached_to_doctype = service.REQUEST_DOCTYPE
+    legacy_file.attached_to_name = "REQ-OLD"
+    record_file = env.add_file(filename="shared.pdf")
+    record = env.add_record(
+        invoice_file=record_file.file_url,
+        original_filename=record_file.file_name,
+        file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(),
+    )
+    record_file.attached_to_doctype = service.RECORD_DOCTYPE
+    record_file.attached_to_name = record.name
+    record_file.attached_to_field = "invoice_file"
+
+    result = service.preview_invoice(record.name)
+
+    assert result["preview_method"] == "POST"
 
 
 def test_guest_is_rejected_before_any_insert(env):

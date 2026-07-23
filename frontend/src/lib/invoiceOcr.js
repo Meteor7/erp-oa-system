@@ -187,7 +187,9 @@ export function invoiceBlockers(invoices) {
 export function invoiceSelectionReason(invoice) {
   if (invoice?.request) return `已下推到 ${invoice.request}`;
   const status = invoice?.recognition_status;
-  if (status === '已确认') return '';
+  if (status === '已确认') {
+    return String(invoice?.expense_description || '').trim() ? '' : '请先填写费用说明';
+  }
   if (status === '待确认') return '请先确认发票内容';
   if (status === '疑似重复') return '疑似重复发票不能下推';
   if (status === '失败') return '识别失败，不能下推';
@@ -305,6 +307,50 @@ export function updateInvoice(invoiceName, values, options) {
   return invoiceApi('update_invoice', { invoice_name: invoiceName, values: editableInvoiceValues(values) }, options);
 }
 
+export function updateInvoiceExpenseContext(invoiceName, expenseDescription, options) {
+  return invoiceApi('update_expense_context', {
+    invoice_name: invoiceName,
+    expense_description: String(expenseDescription || '').trim(),
+  }, options);
+}
+
+export async function uploadInvoiceSupplementalAttachment(invoiceName, file, {
+  signal,
+  upload = uploadInvoicePrivateFile,
+} = {}) {
+  validateInvoiceFiles([file]);
+  const uploaded = await upload(file, { signal });
+  return invoiceApi('upload_supplemental_attachment', {
+    invoice_name: invoiceName,
+    file_url: uploaded.file_url,
+  }, { signal });
+}
+
+export function deleteInvoiceSupplementalAttachment(invoiceName, attachmentName, options) {
+  return invoiceApi('delete_supplemental_attachment', {
+    invoice_name: invoiceName,
+    attachment_name: attachmentName,
+  }, options);
+}
+
+async function uploadInvoicePrivateFile(file, { signal } = {}) {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('is_private', '1');
+  const response = await fetch('/api/method/upload_file', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: csrfHeaders(),
+    body,
+    signal,
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* bounded error below */ }
+  const fileUrl = payload?.message?.file_url;
+  if (!response.ok || !fileUrl) throw new Error(errorText(payload, '补充附件上传失败'));
+  return { file_url: fileUrl };
+}
+
 export function confirmInvoice(invoiceName, values, options) {
   return invoiceApi('confirm_invoice', { invoice_name: invoiceName, values: editableInvoiceValues(values) }, options);
 }
@@ -353,6 +399,29 @@ export async function fetchInvoicePreview(invoiceName, { signal } = {}) {
   }
   if (responseMime && metadataMime && responseMime !== metadataMime) {
     throw new Error('\u53d1\u7968\u9884\u89c8\u6587\u4ef6\u7c7b\u578b\u4e0d\u4e00\u81f4');
+  }
+  return { metadata, blob };
+}
+
+export async function fetchInvoiceSupplementalAttachmentPreview(attachmentName, { signal } = {}) {
+  const metadata = await invoiceApi('preview_supplemental_attachment', {
+    attachment_name: attachmentName,
+  }, { signal });
+  if (metadata?.preview_method !== 'POST' || !metadata?.token || !metadata?.preview_url) {
+    throw new Error('补充附件预览凭证无效');
+  }
+  const response = await fetch(metadata.preview_url, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ token: metadata.token }),
+    signal,
+  });
+  if (!response.ok) throw new Error('补充附件预览加载失败');
+  const blob = await response.blob();
+  const mime = String(blob.type || metadata.mime_type || '').split(';')[0].trim().toLowerCase();
+  if (!new Set(['application/pdf', 'image/jpeg', 'image/png']).has(mime)) {
+    throw new Error('补充附件只支持 PDF、JPEG 或 PNG 格式');
   }
   return { metadata, blob };
 }

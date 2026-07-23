@@ -292,10 +292,21 @@ def _safe_file_url(file_url) -> str:
     return value
 
 
-def _file_doc(file_url: str, *, current=False):
+def _file_doc(
+    file_url: str,
+    *,
+    current=False,
+    attached_to_doctype=None,
+    attached_to_name=None,
+):
     lookup_kwargs = {"for_update": True} if current else {}
+    filters = {"file_url": file_url}
+    if attached_to_doctype:
+        filters["attached_to_doctype"] = attached_to_doctype
+    if attached_to_name:
+        filters["attached_to_name"] = attached_to_name
     name = frappe.db.get_value(
-        "File", {"file_url": file_url}, "name", **lookup_kwargs
+        "File", filters, "name", **lookup_kwargs
     )
     if not name:
         _throw("找不到已上传的发票文件。")
@@ -1330,16 +1341,28 @@ def validate_request_invoices(request_doc, submitting: bool):
     summary = request_invoice_summary(request_doc)
     if not submitting or _get(request_doc, "request_type") != "费用付款申请":
         return summary
+    request_lines = list(_get(request_doc, "expense_lines") or [])
+    explicit_manual_lines = {
+        str(_get(row, "line_key") or "").strip()
+        for row in request_lines
+        if not str(_get(row, "source_invoice") or "").strip()
+        and str(_get(row, "expense_account_level_1") or "").strip()
+        and str(_get(row, "expense_description") or "").strip()
+    }
     records = _request_invoice_records(_request_name(request_doc))
     included = [row for row in records if _get(row, "recognition_status") != "已排除"]
-    blockers = submission_blockers(included, _request_reason(request_doc))
+    reason = _request_reason(request_doc)
+    blockers = submission_blockers(
+        included,
+        reason or ("已填写手工费用明细" if explicit_manual_lines else ""),
+    )
     if blockers:
         _throw("；".join(blockers))
     if not included:
         return summary
     lines = {
         str(_get(row, "line_key") or "").strip(): row
-        for row in list(_get(request_doc, "expense_lines") or [])
+        for row in request_lines
         if str(_get(row, "line_key") or "").strip()
     }
     totals = {key: Decimal("0.00") for key in lines}
@@ -1370,6 +1393,8 @@ def validate_request_invoices(request_doc, submitting: bool):
             messages.append("费用明细金额无效")
             continue
         if linked_counts[line_key] == 0 and line_key not in missing_totals:
+            if line_key in explicit_manual_lines:
+                continue
             if not reason:
                 messages.append("费用明细未关联发票，请填写差异说明")
             continue
@@ -1453,7 +1478,13 @@ def link_invoice(invoice_name, request, expense_line_key):
 
 
 def _read_private_record(record, *, current=False):
-    file_url = _safe_file_url(_get(record, "invoice_file")); file_doc = _file_doc(file_url, current=current)
+    file_url = _safe_file_url(_get(record, "invoice_file"))
+    file_doc = _file_doc(
+        file_url,
+        current=current,
+        attached_to_doctype=RECORD_DOCTYPE,
+        attached_to_name=_get(record, "name"),
+    )
     if int(_get(file_doc, "is_private") or 0) != 1: _throw("发票文件不再是私有文件。")
     if _get(file_doc, "attached_to_doctype") != RECORD_DOCTYPE or _get(file_doc, "attached_to_name") != _get(record, "name"): _throw("发票文件关联已失效。")
     content = _read_limited(file_doc); digest = hashlib.sha256(content).hexdigest()

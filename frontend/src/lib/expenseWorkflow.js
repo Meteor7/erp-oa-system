@@ -79,7 +79,8 @@ export function deleteExpenseAttachment(name, attachment, { api = oaApi, signal 
 export function saveFinanceExpenseItems(name, lines, { api = oaApi, signal } = {}) {
   const values = Array.from(lines || []).map((line) => ({
     line_key: String(line?.line_key || '').trim(),
-    expense_item: String(line?.expense_item || '').trim(),
+    expense_account_level_1: String(line?.expense_account_level_1 || '').trim(),
+    expense_account_level_2: String(line?.expense_account_level_2 || '').trim(),
   }));
   return api('save_finance_expense_items', { name, lines: JSON.stringify(values) }, { signal });
 }

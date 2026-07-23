@@ -8,6 +8,7 @@ import {
   createOperationContext,
   editableInvoiceValues,
   fetchInvoicePreview,
+  fetchInvoiceSupplementalAttachmentPreview,
   getRequestInvoices,
   hasRegisteredInvoiceUpload,
   invoiceBlockers,
@@ -18,6 +19,8 @@ import {
   moneyToCents,
   newLineKey,
   persistInvoiceRequest,
+  updateInvoiceExpenseContext,
+  uploadInvoiceSupplementalAttachment,
   validateInvoiceFiles,
 } from '../src/lib/invoiceOcr.js';
 
@@ -38,11 +41,67 @@ test('blocks unconfirmed and duplicate records', () => {
 });
 
 test('explains why an invoice can or cannot be selected for pushdown', () => {
-  assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: '' }), '');
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: '', expense_description: '客户拜访' }), '');
+  assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: '', expense_description: ' ' }), '请先填写费用说明');
   assert.equal(invoiceSelectionReason({ recognition_status: '\u5f85\u786e\u8ba4', request: '' }), '\u8bf7\u5148\u786e\u8ba4\u53d1\u7968\u5185\u5bb9');
   assert.equal(invoiceSelectionReason({ recognition_status: '\u7591\u4f3c\u91cd\u590d', request: '' }), '\u7591\u4f3c\u91cd\u590d\u53d1\u7968\u4e0d\u80fd\u4e0b\u63a8');
   assert.equal(invoiceSelectionReason({ recognition_status: '\u5931\u8d25', request: '' }), '\u8bc6\u522b\u5931\u8d25\uff0c\u4e0d\u80fd\u4e0b\u63a8');
   assert.equal(invoiceSelectionReason({ recognition_status: '\u5df2\u786e\u8ba4', request: 'OA-2026-0001' }), '\u5df2\u4e0b\u63a8\u5230 OA-2026-0001');
+});
+
+test('invoice context and supplemental attachments use synchronized backend endpoints', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    if (url === '/api/method/upload_file') {
+      return { ok: true, json: async () => ({ message: { file_url: '/private/files/route.pdf' } }) };
+    }
+    return { ok: true, json: async () => ({ message: { name: 'ISA-1' } }) };
+  };
+  try {
+    await updateInvoiceExpenseContext('INV-1', '客户拜访交通费');
+    const attachment = Object.assign(new Blob(['route']), { name: 'route.pdf' });
+    await uploadInvoiceSupplementalAttachment('INV-1', attachment);
+    assert.match(calls[0].url, /update_expense_context$/);
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      invoice_name: 'INV-1',
+      expense_description: '客户拜访交通费',
+    });
+    assert.equal(calls[1].url, '/api/method/upload_file');
+    assert.match(calls[2].url, /upload_supplemental_attachment$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('supplemental attachment preview consumes a POST token', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        ok: true,
+        json: async () => ({
+          message: {
+            token: 'secure-token',
+            preview_method: 'POST',
+            preview_url: '/supplemental-preview',
+            mime_type: 'application/pdf',
+          },
+        }),
+      };
+    }
+    assert.equal(options.method, 'POST');
+    return { ok: true, blob: async () => new Blob(['%PDF-'], { type: 'application/pdf' }) };
+  };
+  try {
+    const result = await fetchInvoiceSupplementalAttachmentPreview('ISA-1');
+    assert.equal(result.blob.type, 'application/pdf');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('normalizes JSON warning payloads without rendering brackets as warnings', () => {

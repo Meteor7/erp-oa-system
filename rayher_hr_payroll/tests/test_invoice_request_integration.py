@@ -31,6 +31,9 @@ sys.modules["frappe.utils"] = frappe_stub.utils
 
 service = importlib.import_module("rayher_hr_payroll.invoice_ocr.service")
 oa_entry = importlib.import_module("rayher_hr_payroll.api.oa_entry")
+backfill_invoice_expense_context = importlib.import_module(
+    "rayher_hr_payroll.patches.v1_0.backfill_invoice_expense_context"
+)
 
 sys.modules.pop("rayher_hr_payroll.api.oa_entry", None)
 sys.modules.pop("rayher_hr_payroll.invoice_ocr.service", None)
@@ -1188,7 +1191,9 @@ def _draft_source_edit_request(environment, record, *, status=None):
                     invoice_number=record.invoice_number, amount_before_tax=record.amount_before_tax,
                     tax_amount=record.tax_amount, total_amount=record.total_amount,
                     amount=record.total_amount, category=record.invoice_category,
-                    description=record.project_name, start_date=record.issue_date,
+                    description=record.expense_description,
+                    expense_description=record.expense_description,
+                    start_date=record.issue_date,
                     end_date=record.issue_date, attachment_count=1, invoice_status="已确认",
                     invoice_difference_reason="",
                 )
@@ -1204,15 +1209,21 @@ def _source_edit_payload(line_key, **manual_overrides):
     manual = {
         "line_key": "",
         "project_name": "项目甲",
-        "expense_item": "差旅补贴",
+        "expense_account_level_1": "差旅费",
+        "expense_account_level_2": "出差补助",
         "issue_date": "2026-07-22",
         "total_amount": "80.00",
         "description": "出差津贴",
-        "no_invoice_reason": "出差津贴无发票",
     }
     manual.update(manual_overrides)
     return [
-        {"line_key": line_key, "source_invoice": "INV-1", "project_name": "项目甲", "expense_item": "交通费"},
+        {
+            "line_key": line_key,
+            "source_invoice": "INV-1",
+            "project_name": "被篡改的项目",
+            "expense_item": "被篡改的科目",
+            "expense_description": "被篡改的说明",
+        },
         manual,
     ]
 
@@ -1230,13 +1241,19 @@ def test_save_draft_expense_sources_updates_invoice_adds_and_deletes_manual_sour
     manual = next(line for line in request.expense_lines if not line.source_invoice)
     assert _uuid4(manual.line_key)
     assert manual.project_name == "项目甲"
-    assert manual.expense_item == "差旅补贴"
+    assert manual.expense_account_level_1 == "差旅费"
+    assert manual.expense_account_level_2 == "出差补助"
+    assert manual.expense_item == "差旅费 / 出差补助"
     assert manual.description == "出差津贴"
-    assert manual.no_invoice_reason == "出差津贴无发票"
-    assert records["INV-1"].project_name == "项目甲"
-    assert len(result["project_groups"]) == 1
-    assert result["project_groups"][0]["manual_source_count"] == 1
-    assert result["project_groups"][0]["total_amount"] == Decimal("115.98")
+    assert manual.no_invoice_reason == ""
+    invoice_line = next(line for line in request.expense_lines if line.source_invoice)
+    assert invoice_line.project_name == records["INV-1"].project_name
+    assert invoice_line.expense_item == ""
+    assert invoice_line.expense_description == records["INV-1"].expense_description
+    assert len(result["project_groups"]) == 2
+    manual_group = next(group for group in result["project_groups"] if group["project_name"] == "项目甲")
+    assert manual_group["manual_source_count"] == 1
+    assert manual_group["total_amount"] == Decimal("80.00")
     assert locks[:2] == [("request", request.name), ("record", "INV-1")]
     assert result["operation_log"][-1]["action"] == "编辑报销草稿"
 
@@ -1256,7 +1273,8 @@ def test_save_draft_expense_sources_updates_invoice_adds_and_deletes_manual_sour
         ({"issue_date": ""}, "日期"),
         ({"total_amount": "0"}, "金额"),
         ({"description": ""}, "说明"),
-        ({"no_invoice_reason": ""}, "无票原因"),
+        ({"expense_account_level_1": ""}, "一级费用科目"),
+        ({"expense_account_level_2": ""}, "二级费用科目"),
     ],
 )
 def test_save_draft_expense_sources_validates_manual_required_fields(monkeypatch, override, message):
@@ -1476,7 +1494,6 @@ def test_withdraw_one_invoice_keeps_other_source_in_same_project_group(monkeypat
     [
         ({"line_key": "a", "source_invoice": "INV-1", "project_name": "", "expense_item": "travel", "expense_description": "provided", "total_amount": 10}, "\u9879\u76ee\u540d\u79f0"),
         ({"line_key": "a", "source_invoice": "INV-1", "project_name": "project-a", "expense_item": "", "expense_description": "", "total_amount": 10}, "\u8d39\u7528\u8bf4\u660e"),
-        ({"line_key": "a", "source_invoice": None, "project_name": "project-a", "expense_item": "", "expense_description": "provided", "total_amount": 80, "no_invoice_reason": ""}, "\u65e0\u7968\u539f\u56e0"),
     ],
 )
 def test_validate_expense_project_groups_blocks_incomplete_submission(line, message):
@@ -1983,6 +2000,54 @@ def test_employee_submission_allows_blank_expense_item_but_requires_description(
         oa_entry._validate_expense_project_groups(valid)
 
 
+def test_canonical_manual_expense_does_not_require_legacy_no_invoice_reason(monkeypatch):
+    request = Row(
+        name="REQ-MANUAL",
+        request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
+        no_invoice_reason="",
+        expense_lines=[
+            Row(
+                line_key="line-manual",
+                source_invoice="",
+                project_name="project-a",
+                expense_account_level_1="差旅费",
+                expense_account_level_2="出差补助",
+                expense_description="出差津贴",
+                amount=80,
+            )
+        ],
+    )
+    monkeypatch.setattr(service, "_request_invoice_records", lambda *_args, **_kwargs: [])
+
+    service.validate_request_invoices(request, submitting=True)
+
+
+def test_invoice_expense_context_backfill_only_copies_nonblank_linked_descriptions(monkeypatch):
+    updates = []
+    fake_db = Row(
+        table_exists=lambda *_args, **_kwargs: True,
+        sql=lambda *_args, **_kwargs: [
+            Row(name="INV-1", expense_description="客户拜访"),
+            Row(name="INV-2", expense_description="   "),
+        ],
+        set_value=lambda doctype, name, field, value, **_kwargs: updates.append(
+            (doctype, name, field, value)
+        ),
+    )
+    fake_frappe = Row(
+        db=fake_db,
+        reload_doc=lambda *_args, **_kwargs: None,
+        logger=lambda *_args, **_kwargs: Row(info=lambda *_args, **_kwargs: None),
+    )
+    monkeypatch.setattr(backfill_invoice_expense_context, "frappe", fake_frappe)
+
+    backfill_invoice_expense_context.execute()
+
+    assert updates == [
+        ("OA Invoice Record", "INV-1", "expense_description", "客户拜访")
+    ]
+
+
 def test_expense_normalization_keeps_new_and_legacy_description_coherent():
     rows, _total = oa_entry._normalize_expense_lines(
         [
@@ -1999,7 +2064,7 @@ def test_expense_normalization_keeps_new_and_legacy_description_coherent():
     assert rows[0]["description"] == "client visit"
 
 
-def test_finance_classification_updates_only_expense_items(monkeypatch):
+def test_finance_classification_updates_only_expense_accounts(monkeypatch):
     environment = _install_request_environment(monkeypatch)
     line = Row(
         line_key="11111111-1111-4111-8111-111111111111",
@@ -2043,26 +2108,97 @@ def test_finance_classification_updates_only_expense_items(monkeypatch):
 
     oa_entry.save_finance_expense_items(
         doc.name,
-        [{"line_key": line.line_key, "expense_item": "travel"}],
+        [
+            {
+                "line_key": line.line_key,
+                "expense_account_level_1": "差旅费",
+                "expense_account_level_2": "住宿费",
+            }
+        ],
     )
-    assert line.expense_item == "travel"
+    assert line.expense_account_level_1 == "差旅费"
+    assert line.expense_account_level_2 == "住宿费"
+    assert line.expense_item == "差旅费 / 住宿费"
     assert line.total_amount == 10
     assert line.expense_description == "client visit"
     with pytest.raises(ValidationError):
         oa_entry.save_finance_expense_items(
             doc.name,
-            [{"line_key": line.line_key, "expense_item": "office", "total_amount": 999}],
+            [
+                {
+                    "line_key": line.line_key,
+                    "expense_account_level_1": "办公费",
+                    "expense_account_level_2": "",
+                    "total_amount": 999,
+                }
+            ],
         )
 
 
 def test_finance_approval_is_blocked_until_all_expense_items_are_classified(monkeypatch):
-    line = Row(line_key="line-a", expense_item="", expense_description="client visit")
+    line = Row(
+        line_key="line-a",
+        expense_item="",
+        expense_account_level_1="",
+        expense_account_level_2="",
+        expense_description="client visit",
+    )
     step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance", mode="approve")
     doc = Row(request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, expense_lines=[line])
-    with pytest.raises(ValidationError, match="\u8d39\u7528\u9879\u76ee"):
+    with pytest.raises(ValidationError, match="\u8d39\u7528\u79d1\u76ee"):
         oa_entry._validate_finance_classification(doc, step)
-    line.expense_item = "travel"
+    line.expense_account_level_1 = "办公费"
+    line.expense_item = "办公费"
     oa_entry._validate_finance_classification(doc, step)
+
+
+def test_finance_classification_rejects_mismatched_account_levels(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    line = Row(
+        line_key="11111111-1111-4111-8111-111111111111",
+        project_name="project-a",
+        expense_account_level_1="",
+        expense_account_level_2="",
+        expense_item="",
+    )
+    step = Row(
+        step_index=1,
+        label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance",
+        mode="approve",
+        approvers='["finance@example.com"]',
+        approved_by="[]",
+        status=oa_entry.STATUS_PENDING,
+    )
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-FINANCE-INVALID",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "current_step_index": 1,
+            "expense_lines": [line],
+            "steps": [step],
+            "operation_log": "[]",
+        },
+    )
+    environment.committed[doc.name] = doc
+    frappe_stub.session.user = "finance@example.com"
+    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["finance@example.com"])
+
+    with pytest.raises(ValidationError, match="不匹配"):
+        oa_entry.save_finance_expense_items(
+            doc.name,
+            [
+                {
+                    "line_key": line.line_key,
+                    "expense_account_level_1": "差旅费",
+                    "expense_account_level_2": "餐饮费",
+                }
+            ],
+        )
 
 
 def test_action_request_enforces_finance_classification_before_approve(monkeypatch):
@@ -2101,7 +2237,7 @@ def test_action_request_enforces_finance_classification_before_approve(monkeypat
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["finance@example.com"])
     monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"finance@example.com"})
-    with pytest.raises(ValidationError, match="\u8d39\u7528\u9879\u76ee"):
+    with pytest.raises(ValidationError, match="\u8d39\u7528\u79d1\u76ee"):
         oa_entry.action_request(doc.name, "approve")
     assert doc.workflow_status == oa_entry.STATUS_PENDING
 

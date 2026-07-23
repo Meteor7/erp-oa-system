@@ -29,13 +29,27 @@ test('exports stable workflow position choices', () => {
 test('workflow API wrappers send the synchronized backend payload', async () => {
   const calls = [];
   const api = async (action, args) => { calls.push({ action, args }); return { ok: true }; };
-  await saveFinanceExpenseItems('OA-1', [{ line_key: 'L1', expense_item: 'Travel' }], { api });
+  await saveFinanceExpenseItems('OA-1', [{
+    line_key: 'L1',
+    expense_account_level_1: '差旅费',
+    expense_account_level_2: '住宿费',
+  }], { api });
   await rejectRequest('OA-1', 'applicant', 'Fix it', { api });
   await addSignRequest('OA-1', 'finance@example.com', 'before', 'Review tax', { api });
   await listApprovalPeople('fin', { api });
   await deleteExpenseAttachment('OA-1', 'ATT-1', { api });
   assert.deepEqual(calls, [
-    { action: 'save_finance_expense_items', args: { name: 'OA-1', lines: JSON.stringify([{ line_key: 'L1', expense_item: 'Travel' }]) } },
+    {
+      action: 'save_finance_expense_items',
+      args: {
+        name: 'OA-1',
+        lines: JSON.stringify([{
+          line_key: 'L1',
+          expense_account_level_1: '差旅费',
+          expense_account_level_2: '住宿费',
+        }]),
+      },
+    },
     { action: 'action_request', args: { name: 'OA-1', action: 'reject', note: 'Fix it', reject_target: 'applicant' } },
     { action: 'add_sign_request', args: { name: 'OA-1', approver: 'finance@example.com', position: 'before', opinion: 'Review tax' } },
     { action: 'list_approval_people', args: { query: 'fin', limit: 20 } },

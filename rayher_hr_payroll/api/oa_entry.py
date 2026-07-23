@@ -10,7 +10,7 @@ from frappe.utils import now_datetime
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
 from rayher_hr_payroll import expense_attachments, invoice_supplemental_attachments
 from rayher_hr_payroll.access_control import BUSINESS_EXECUTIVE_ROLE
-from rayher_hr_payroll.expense_accounts import account_options
+from rayher_hr_payroll.expense_accounts import account_options, normalize_account_pair
 from rayher_hr_payroll.oa_approval import (
     ADMIN_ASSET,
     IT_ASSET,
@@ -446,6 +446,8 @@ def _serialize_expense_line(row):
         "line_key": getattr(row, "line_key", None),
         "invoice_category": invoice_category or "",
         "project_name": project_name or "",
+        "expense_account_level_1": _source_value(row, "expense_account_level_1") or "",
+        "expense_account_level_2": _source_value(row, "expense_account_level_2") or "",
         "expense_item": _source_value(row, "expense_item") or "",
         "no_invoice_reason": _source_value(row, "no_invoice_reason") or "",
         "issue_date": issue_date,
@@ -883,7 +885,13 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
             continue
         invoice_category = _clean(row.get("invoice_category"))
         project_name = _clean(row.get("project_name"))
+        account_level_1 = _clean(row.get("expense_account_level_1"))
+        account_level_2 = _clean(row.get("expense_account_level_2"))
         expense_item = _clean(row.get("expense_item"))
+        if account_level_1 or account_level_2:
+            account_level_1, account_level_2, expense_item = _expense_account_pair(
+                account_level_1, account_level_2, required=True
+            )
         description = _clean(row.get("expense_description") or row.get("description") or row.get("desc"))
         issue_date = row.get("issue_date") or row.get("start_date") or row.get("expense_date")
         category = invoice_category or expense_item or _clean(row.get("category")) or project_name or REQUEST_EXPENSE_PAYMENT
@@ -894,6 +902,8 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
                 "line_key": _expense_line_key(row, seen_line_keys),
                 "invoice_category": invoice_category,
                 "project_name": project_name,
+                "expense_account_level_1": account_level_1,
+                "expense_account_level_2": account_level_2,
                 "expense_item": expense_item,
                 "no_invoice_reason": _bounded_optional_text(row.get("no_invoice_reason"), "无票原因", 1000),
                 "issue_date": issue_date,
@@ -1011,8 +1021,6 @@ def _validate_expense_project_groups(doc):
     for source in sources:
         if not _clean(source.get("expense_description")):
             frappe.throw(frappe._("\u63d0\u4ea4\u524d\u5fc5\u987b\u586b\u5199\u6bcf\u9879\u8d39\u7528\u7684\u8d39\u7528\u8bf4\u660e\u3002"))
-        if not _clean(source.get("source_invoice")) and not _clean(source.get("no_invoice_reason")):
-            frappe.throw(frappe._("\u624b\u5de5\u8d39\u7528\u63d0\u4ea4\u524d\u5fc5\u987b\u586b\u5199\u65e0\u7968\u539f\u56e0\u3002"))
     return groups
 
 
@@ -1177,20 +1185,35 @@ def _draft_source_rows(source_lines):
     return rows
 
 
+def _expense_account_pair(level_1, level_2, *, required=False):
+    level_1 = _clean(level_1)
+    level_2 = _clean(level_2)
+    if not required and not level_1 and not level_2:
+        return "", "", ""
+    try:
+        return normalize_account_pair(level_1, level_2)
+    except ValueError as error:
+        frappe.throw(frappe._(str(error)))
+
+
 def _manual_expense_source(payload, existing=None):
     source = dict(existing or {})
     for fieldname in (
-        "project_name", "expense_item", "issue_date", "total_amount",
-        "expense_description", "description", "no_invoice_reason", "line_key",
+        "project_name", "expense_account_level_1", "expense_account_level_2",
+        "issue_date", "total_amount", "expense_description", "description",
+        "line_key",
     ):
         if fieldname in payload:
             source[fieldname] = payload.get(fieldname)
     project_name = _bounded_optional_text(source.get("project_name"), "项目名称", 1000)
-    expense_item = _bounded_optional_text(source.get("expense_item"), "费用项目", 140)
+    account_level_1, account_level_2, expense_item = _expense_account_pair(
+        source.get("expense_account_level_1"),
+        source.get("expense_account_level_2"),
+        required=True,
+    )
     issue_date = _clean(source.get("issue_date"))
     total_amount = _optional_money(source.get("total_amount"))
     description = _bounded_optional_text(source.get("expense_description") or source.get("description"), "Expense description", 1000)
-    no_invoice_reason = _bounded_optional_text(source.get("no_invoice_reason"), "无票原因", 1000)
     if not project_name:
         frappe.throw(frappe._("手工费用必须填写项目名称。"))
     if not issue_date:
@@ -1199,15 +1222,15 @@ def _manual_expense_source(payload, existing=None):
         frappe.throw(frappe._("手工费用金额必须大于 0。"))
     if not description:
         frappe.throw(frappe._("手工费用必须填写费用说明。"))
-    if not no_invoice_reason:
-        frappe.throw(frappe._("手工费用必须填写无票原因。"))
     source.update(
         {
             "source_invoice": None,
             "source_consumption": None,
             "project_name": project_name,
+            "expense_account_level_1": account_level_1,
+            "expense_account_level_2": account_level_2,
             "expense_item": expense_item,
-            "no_invoice_reason": no_invoice_reason,
+            "no_invoice_reason": "",
             "invoice_category": "",
             "issue_date": issue_date,
             "invoice_number": "",
@@ -1233,19 +1256,14 @@ def _manual_expense_source(payload, existing=None):
 
 def _updated_invoice_source(existing, payload):
     source = dict(existing)
-    project_value = payload.get("project_name") if "project_name" in payload else source.get("project_name")
-    item_value = payload.get("expense_item") if "expense_item" in payload else source.get("expense_item")
-    if "expense_description" in payload:
-        description_value = payload.get("expense_description")
-    elif "description" in payload:
-        description_value = payload.get("description")
-    else:
-        description_value = source.get("expense_description") or source.get("description")
-    source["project_name"] = _bounded_optional_text(project_value, "Project name", 1000)
-    source["expense_item"] = _bounded_optional_text(item_value, "Expense item", 140)
-    description = _bounded_optional_text(description_value, "Expense description", 1000)
-    source["expense_description"] = description
-    source["description"] = description
+    source["project_name"] = _bounded_optional_text(source.get("project_name"), "Project name", 1000)
+    source["expense_item"] = _bounded_optional_text(source.get("expense_item"), "Expense item", 140)
+    source["expense_description"] = _bounded_optional_text(
+        source.get("expense_description") or source.get("description"),
+        "Expense description",
+        1000,
+    )
+    source["description"] = source["expense_description"]
     source["no_invoice_reason"] = ""
     return source
 
@@ -1302,12 +1320,6 @@ def save_draft_expense_sources(name, source_lines):
                 record = records[invoice_name]
                 if _clean(getattr(record, "request", None)) != doc.name or _clean(getattr(record, "expense_line_key", None)) != _clean(source.get("line_key")):
                     frappe.throw(frappe._("发票关联已变化，请刷新后重试。"))
-                project_name = _clean(source.get("project_name"))
-                if _clean(getattr(record, "project_name", None)) != project_name:
-                    old_status = getattr(record, "recognition_status", None)
-                    record.project_name = project_name
-                    invoice_service._append_record_event(record, "报销草稿调整", old_status, old_status, doc.name)
-                    invoice_service._save(record)
             _set_expense_lines(doc, prepared)
             doc.amount = round(sum(_money(row.get("total_amount")) for row in prepared), 2)
             _append_request_event(
@@ -1337,12 +1349,20 @@ def _is_finance_audit_step(step):
 def _classification_ready(doc):
     if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT:
         return True
-    return all(_clean(getattr(line, "expense_item", None)) for line in list(getattr(doc, "expense_lines", []) or []))
+    for line in list(getattr(doc, "expense_lines", []) or []):
+        try:
+            normalize_account_pair(
+                getattr(line, "expense_account_level_1", None),
+                getattr(line, "expense_account_level_2", None),
+            )
+        except ValueError:
+            return False
+    return True
 
 
 def _validate_finance_classification(doc, step):
     if _is_finance_audit_step(step) and not _classification_ready(doc):
-        frappe.throw(frappe._("\u8d22\u52a1\u5ba1\u6279\u524d\u5fc5\u987b\u4e3a\u6240\u6709\u8d39\u7528\u660e\u7ec6\u9009\u62e9\u8d39\u7528\u9879\u76ee\u3002"))
+        frappe.throw(frappe._("财务审批前必须为所有费用明细选择完整的费用科目。"))
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1367,21 +1387,32 @@ def save_finance_expense_items(name, lines):
         assignments = {}
         seen = set()
         for payload in payload_rows:
-            if set(payload) - {"line_key", "expense_item"}:
-                frappe.throw(frappe._("Finance classification may change expense items only."))
+            if set(payload) - {
+                "line_key",
+                "expense_account_level_1",
+                "expense_account_level_2",
+            }:
+                frappe.throw(frappe._("财务归类只能修改费用科目。"))
             line_key = _clean(payload.get("line_key"))
             if not line_key or line_key in seen or line_key not in by_key:
                 frappe.throw(frappe._("The expense line is invalid or no longer belongs to this request."))
             seen.add(line_key)
-            item = _bounded_optional_text(payload.get("expense_item"), "Expense item", 140)
+            account = _expense_account_pair(
+                payload.get("expense_account_level_1"),
+                payload.get("expense_account_level_2"),
+                required=True,
+            )
             project = _clean(getattr(by_key[line_key], "project_name", None))
-            if project in assignments and assignments[project] != item:
-                frappe.throw(frappe._("The same project must use one consistent expense item."))
-            assignments[project] = item
+            if project in assignments and assignments[project] != account:
+                frappe.throw(frappe._("同一项目必须使用一致的费用科目。"))
+            assignments[project] = account
         for line in current_lines:
             project = _clean(getattr(line, "project_name", None))
             if project in assignments:
-                line.expense_item = assignments[project]
+                level_1, level_2, display = assignments[project]
+                line.expense_account_level_1 = level_1
+                line.expense_account_level_2 = level_2
+                line.expense_item = display
         _append_request_event(doc, "Finance expense classification", doc.workflow_status, doc.workflow_status, details={"project_count": len(assignments), "line_count": len(seen)})
         doc.save(ignore_permissions=True)
         return _summarize_doc(doc)

@@ -22,7 +22,7 @@ test('invoice upload workspace provides batch review selection detail push and p
   const source = readFileSync(componentUrl, 'utf8');
   assert.match(source, /multiple/);
   assert.match(source, /accept=["'][^"']*\.pdf[^"']*\.jpg[^"']*\.jpeg[^"']*\.png/i);
-  for (const label of ['发票类别', '项目名称', '开票日期', '发票号码', '税前金额', '税额', '合计金额']) {
+  for (const label of ['发票类别', '项目名称', '开票日期', '发票号码', '税前金额', '税额', '合计金额', '费用说明', '补充附件']) {
     assert.ok(source.includes(label), label);
   }
   for (const action of ['确认内容', '撤回确认', '下推到费用报销流', '查看发票']) {
@@ -32,6 +32,9 @@ test('invoice upload workspace provides batch review selection detail push and p
   assert.doesNotMatch(source, />撤回下推</);
   assert.doesNotMatch(source, /\['已下推',\s*stats\.pushed/);
   assert.match(source, /InvoicePreviewDrawer/);
+  assert.match(source, /updateInvoiceExpenseContext/);
+  assert.match(source, /uploadInvoiceSupplementalAttachment/);
+  assert.match(source, /fetchInvoiceSupplementalAttachmentPreview/);
   assert.match(source, /ACTIVE_RECOGNITION_STATUSES/);
   assert.match(source, /clearTimeout/);
   assert.doesNotMatch(source, /<a\b|download/);
@@ -69,7 +72,7 @@ test('expense workbench uses four first-class pages and exact seven-column detai
   for (const label of ['发票类别', '项目名称', '开票日期', '发票号码', '税前金额', '税额', '合计金额']) {
     assert.ok(expense.includes(label), label);
   }
-  assert.match(expense, /无票原因/);
+  assert.doesNotMatch(expense, />无票原因</);
   assert.match(expense, /查看发票/);
   assert.match(expense, /withdraw_request/);
   assert.match(expense, /withdraw_payment/);

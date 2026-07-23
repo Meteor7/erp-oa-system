@@ -2,11 +2,12 @@
 import { Button, FeatherIcon, createResource } from 'frappe-ui';
 import { computed, reactive, ref, watch } from 'vue';
 import {
-  getRequestInvoices, invoicesForLine, newLineKey, withdrawInvoicePush,
+  fetchInvoiceSupplementalAttachmentPreview, getRequestInvoices, invoicesForLine,
+  newLineKey, withdrawInvoicePush,
 } from '../lib/invoiceOcr.js';
 import {
-  addSignRequest, deleteExpenseAttachment, fetchExpenseAttachmentPreview, listApprovalPeople,
-  rejectRequest, saveFinanceExpenseItems, uploadExpenseAttachment, validateExpenseAttachments,
+  addSignRequest, fetchExpenseAttachmentPreview, listApprovalPeople,
+  rejectRequest, saveFinanceExpenseItems,
 } from '../lib/expenseWorkflow.js';
 // Backend response compatibility: project_groups are regrouped from expense_lines so per-line descriptions and attachments remain intact.
 // const fields = [
@@ -51,7 +52,6 @@ const detailInvoices = ref([]);
 const previewInvoiceRow = ref(null);
 const previewAttachmentRow = ref(null);
 const financeSources = ref([]);
-const attachmentBusy = ref({});
 const showRejectDialog = ref(false);
 const rejectTarget = ref('');
 const rejectReason = ref('');
@@ -65,14 +65,16 @@ const approvalView = ref(null);
 const draftSources = ref([]);
 const showManualExpense = ref(false);
 const manualExpense = reactive({
-  project_name: '', expense_item: '', issue_date: '', total_amount: '',
-  expense_description: '', description: '', no_invoice_reason: '',
+  project_name: '', expense_account_level_1: '', expense_account_level_2: '',
+  issue_date: '', total_amount: '', expense_description: '', description: '',
 });
 
 const blankLine = () => ({
   line_key: newLineKey(),
   invoice_category: '',
   project_name: '',
+  expense_account_level_1: '',
+  expense_account_level_2: '',
   expense_item: '',
   issue_date: '',
   invoice_number: '',
@@ -81,7 +83,6 @@ const blankLine = () => ({
   total_amount: '',
   expense_description: '',
   description: '',
-  no_invoice_reason: '',
   invoice_difference_reason: '',
 });
 const expenseLines = ref([blankLine()]);
@@ -126,9 +127,14 @@ const urgencies = computed(() => options.data?.urgencies || []);
 const assetCategories = computed(() => options.data?.asset_categories || [ASSET_OTHER]);
 const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
-const expenseCategories = computed(() => options.data?.expense_categories || []);
+const expenseAccountTree = computed(() => options.data?.expense_account_tree || []);
 const isDraftDetail = computed(() => selectedRequest.value?.kanban_status === 'draft');
-const canEditExpenseItems = computed(() => Boolean(isDraftDetail.value || selectedRequest.value?.can_edit_expense_items));
+const canEditExpenseItems = computed(() => Boolean(selectedRequest.value?.can_edit_expense_items));
+const previewAttachmentLoader = computed(() => (
+  previewAttachmentRow.value?.attachment_source === 'invoice'
+    ? fetchInvoiceSupplementalAttachmentPreview
+    : fetchExpenseAttachmentPreview
+));
 const canWithdrawInvoicePush = computed(() => Boolean(
   isDraftDetail.value
   && selectedRequest.value?.from_invoice_push
@@ -205,10 +211,14 @@ function groupSources(sources) {
   });
   return [...groups.values()].map((group) => {
     const items = uniqueValues(group.source_lines.map((source) => source.expense_item));
+    const level1Values = uniqueValues(group.source_lines.map((source) => source.expense_account_level_1));
+    const level2Values = uniqueValues(group.source_lines.map((source) => source.expense_account_level_2));
     return {
       ...group,
       source_count: group.source_lines.length,
       expense_item: items.length === 1 ? items[0] : '',
+      expense_account_level_1: level1Values.length === 1 ? level1Values[0] : '',
+      expense_account_level_2: level2Values.length === 1 ? level2Values[0] : '',
       needs_expense_item: items.length !== 1,
       invoice_category: uniqueValues(group.source_lines.map((source) => source.invoice_category)).join('、'),
       issue_date: uniqueValues(group.source_lines.map((source) => source.issue_date)).join('、'),
@@ -231,6 +241,15 @@ function updateGroupField(group, field, value) {
     keys.has(clean(source.line_key)) ? { ...source, [field]: value } : source
   ));
 }
+function accountChildren(level1) {
+  return expenseAccountTree.value.find((item) => item.level_1 === clean(level1))?.level_2 || [];
+}
+function updateGroupAccount(group, level, value) {
+  updateGroupField(group, level, value);
+  if (level === 'expense_account_level_1') {
+    updateGroupField(group, 'expense_account_level_2', '');
+  }
+}
 function updateSourceField(lineKey, field, value) {
   const target = isDraftDetail.value ? draftSources : financeSources;
   target.value = target.value.map((source) => (
@@ -239,15 +258,19 @@ function updateSourceField(lineKey, field, value) {
       : source
   ));
 }
-function attachmentKey(lineKey) { return clean(lineKey); }
-function setAttachmentBusy(lineKey, value) {
-  attachmentBusy.value = { ...attachmentBusy.value, [attachmentKey(lineKey)]: value };
-}
 function invoicesForGroup(group) {
   return (group?.source_line_keys || []).flatMap((lineKey) => invoicesForLine(detailInvoices.value, lineKey));
 }
+function invoiceForSource(source) {
+  return detailInvoices.value.find((invoice) => invoice.name === source?.source_invoice)
+    || invoicesForLine(detailInvoices.value, source?.line_key)?.[0]
+    || null;
+}
 function resetManualExpense() {
-  Object.assign(manualExpense, { project_name: '', expense_item: '', issue_date: '', total_amount: '', expense_description: '', description: '', no_invoice_reason: '' });
+  Object.assign(manualExpense, {
+    project_name: '', expense_account_level_1: '', expense_account_level_2: '',
+    issue_date: '', total_amount: '', expense_description: '', description: '',
+  });
 }
 function openManualExpense() {
   resetManualExpense();
@@ -276,13 +299,16 @@ async function saveDraftSources(silent = false) {
 async function addManualExpense() {
   const row = {
     line_key: '', source_invoice: null, invoice_category: '',
-    project_name: clean(manualExpense.project_name), expense_item: clean(manualExpense.expense_item),
+    project_name: clean(manualExpense.project_name),
+    expense_account_level_1: clean(manualExpense.expense_account_level_1),
+    expense_account_level_2: clean(manualExpense.expense_account_level_2),
     issue_date: manualExpense.issue_date, invoice_number: '', amount_before_tax: null, tax_amount: null,
     total_amount: Number(manualExpense.total_amount || 0), expense_description: clean(manualExpense.expense_description), description: clean(manualExpense.expense_description),
-    no_invoice_reason: clean(manualExpense.no_invoice_reason),
   };
-  if (!row.project_name || !row.issue_date || row.total_amount <= 0 || !row.expense_description || !row.no_invoice_reason) {
-    errorMessage.value = 'Please complete all required expense fields; Finance may add the expense category later.';
+  const children = accountChildren(row.expense_account_level_1);
+  if (!row.project_name || !row.expense_account_level_1 || (children.length && !row.expense_account_level_2)
+    || !row.issue_date || row.total_amount <= 0 || !row.expense_description) {
+    errorMessage.value = '请完整填写项目名称、费用科目、日期、税后金额和费用说明。';
     return;
   }
   draftSources.value.push(row);
@@ -338,13 +364,14 @@ async function saveRequest(submit) {
   const valid = expenseLines.value.filter((line) => Number(line.total_amount || 0) > 0);
   const hasIncompleteLine = expenseLines.value.some((line) => (
     !clean(line.project_name)
+    || !clean(line.expense_account_level_1)
+    || (accountChildren(line.expense_account_level_1).length && !clean(line.expense_account_level_2))
     || !line.issue_date
     || Number(line.total_amount || 0) <= 0
     || !clean(line.expense_description || line.description)
-    || !clean(line.no_invoice_reason)
   ));
   if (!requestForm.department || hasIncompleteLine) {
-    errorMessage.value = 'Please complete all required expense fields; Finance may add the expense category later.';
+    errorMessage.value = '请完整填写申请部门、项目名称、费用科目、日期、金额和费用说明。';
     return;
   }
   saving.value = true;
@@ -373,8 +400,7 @@ async function saveRequest(submit) {
       payee_name: requestForm.payee_name,
       branch: requestForm.branch,
       account_no: requestForm.account_no,
-      no_invoice_reason: requestForm.no_invoice_reason.trim()
-        || uniqueValues(valid.map((line) => line.no_invoice_reason)).join('；'),
+      no_invoice_reason: '',
     });
     showRequestForm.value = false;
     activeView.value = 'board';
@@ -498,49 +524,8 @@ async function withdrawPushedInvoices(row) {
   }
 }
 
-async function handleExpenseAttachments(source, event) {
-  const input = event?.target;
-  const files = Array.from(input?.files || []);
-  if (!files.length || !selectedRequest.value) return;
-  const lineKey = clean(source?.line_key);
-  try {
-    validateExpenseAttachments(files, source?.attachments?.length || 0);
-  } catch (error) {
-    errorMessage.value = apiError(error, '\u9644\u4ef6\u6821\u9a8c\u5931\u8d25');
-    if (input) input.value = '';
-    return;
-  }
-  setAttachmentBusy(lineKey, true);
-  errorMessage.value = '';
-  try {
-    if (isDraftDetail.value && !(await saveDraftSources(true))) return;
-    for (const file of files) await uploadExpenseAttachment(selectedRequest.value.name, lineKey, file);
-    message.value = '\u8865\u5145\u9644\u4ef6\u5df2\u5b89\u5168\u4e0a\u4f20\u3002';
-    await reload();
-  } catch (error) {
-    errorMessage.value = apiError(error, '\u8865\u5145\u9644\u4ef6\u4e0a\u4f20\u5931\u8d25');
-  } finally {
-    setAttachmentBusy(lineKey, false);
-    if (input) input.value = '';
-  }
-}
 function openExpenseAttachment(attachment) {
   previewAttachmentRow.value = attachment ? { ...attachment } : null;
-}
-async function removeExpenseAttachment(attachment) {
-  if (!selectedRequest.value || !attachment) return;
-  if (!window.confirm('\u786e\u8ba4\u5220\u9664\u8be5\u8865\u5145\u9644\u4ef6\u5417\uff1f')) return;
-  const lineKey = clean(attachment.expense_line_key);
-  setAttachmentBusy(lineKey, true);
-  try {
-    await deleteExpenseAttachment(selectedRequest.value.name, attachment.name);
-    message.value = '\u8865\u5145\u9644\u4ef6\u5df2\u5220\u9664\u3002';
-    await reload();
-  } catch (error) {
-    errorMessage.value = apiError(error, '\u8865\u5145\u9644\u4ef6\u5220\u9664\u5931\u8d25');
-  } finally {
-    setAttachmentBusy(lineKey, false);
-  }
 }
 async function saveFinanceClassification() {
   if (!selectedRequest.value?.can_edit_expense_items) return false;
@@ -548,11 +533,11 @@ async function saveFinanceClassification() {
   errorMessage.value = '';
   try {
     await saveFinanceExpenseItems(selectedRequest.value.name, financeSources.value);
-    message.value = '\u8d39\u7528\u9879\u76ee\u5df2\u4fdd\u5b58\uff0c\u73b0\u5728\u53ef\u4ee5\u5ba1\u6279\u901a\u8fc7\u3002';
+    message.value = '\u8d39\u7528\u79d1\u76ee\u5df2\u4fdd\u5b58\uff0c\u73b0\u5728\u53ef\u4ee5\u5ba1\u6279\u901a\u8fc7\u3002';
     await reload();
     return true;
   } catch (error) {
-    errorMessage.value = apiError(error, '\u8d39\u7528\u9879\u76ee\u4fdd\u5b58\u5931\u8d25');
+    errorMessage.value = apiError(error, '\u8d39\u7528\u79d1\u76ee\u4fdd\u5b58\u5931\u8d25');
     return false;
   } finally {
     saving.value = false;
@@ -635,7 +620,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
 
       <section v-else-if="activeView === 'board'" class="space-y-4">
         <header class="flex items-center justify-between">
-          <div><h2 class="text-xl font-bold">费用报销流</h2><p class="mt-1 text-sm text-gray-500">报销审批看板与七字段费用明细</p></div>
+          <div><h2 class="text-xl font-bold">费用报销流</h2><p class="mt-1 text-sm text-gray-500">报销审批看板与逐票费用明细</p></div>
           <Button variant="subtle" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
         </header>
         <div class="grid gap-3 md:grid-cols-5">
@@ -676,7 +661,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
     <div v-if="showRequestForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showRequestForm = false">
       <div role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded bg-white shadow-xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
-          <div><h3 class="font-semibold">无票新建费用报销单</h3><p class="mt-1 text-xs text-gray-500">无票报销保留；提交前必须填写无票原因。</p></div>
+          <div><h3 class="font-semibold">无票新建费用报销单</h3><p class="mt-1 text-xs text-gray-500">用于出差津贴等无发票费用，按费用科目表选择一级、二级科目。</p></div>
           <button title="关闭" @click="showRequestForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
         </header>
         <div class="flex-1 space-y-5 overflow-y-auto p-5">
@@ -694,22 +679,22 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
           </section>
           <section>
             <div class="mb-3 flex items-center justify-between">
-              <div><h4 class="text-sm font-semibold">费用明细（无票/手工）</h4><p class="mt-1 text-xs text-gray-500">每行填写项目、费用项目、日期、税后金额、费用说明和无票原因。</p></div>
+              <div><h4 class="text-sm font-semibold">费用明细（无票/手工）</h4><p class="mt-1 text-xs text-gray-500">每行填写项目、一级/二级费用科目、日期、税后金额和费用说明。</p></div>
               <button class="text-sm text-blue-700" @click="addLine">＋ 添加明细</button>
             </div>
             <div class="overflow-x-auto rounded border border-gray-200">
-              <table class="w-full min-w-[1320px] text-sm">
-                <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-2 text-left">项目名称</th><th class="px-3 py-2 text-left">费用项目</th><th class="px-3 py-2 text-left">日期</th><th class="px-3 py-2 text-right">税后金额</th><th class="px-3 py-2 text-left">费用说明</th><th class="px-3 py-2 text-left">无票原因</th><th class="w-10"></th></tr></thead>
+              <table class="w-full min-w-[1240px] text-sm">
+                <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-2 text-left">项目名称</th><th class="px-3 py-2 text-left">一级费用科目</th><th class="px-3 py-2 text-left">二级费用科目</th><th class="px-3 py-2 text-left">日期</th><th class="px-3 py-2 text-right">税后金额</th><th class="px-3 py-2 text-left">费用说明</th><th class="w-10"></th></tr></thead>
                 <tbody><tr v-for="(line,index) in expenseLines" :key="line.line_key" class="border-b last:border-0">
                   <td class="p-2"><input v-model="line.project_name" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="必填" /></td>
-                  <td class="p-2"><input v-model="line.expense_item" list="expense-item-options" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="可下拉或填写" /></td>
+                  <td class="p-2"><select v-model="line.expense_account_level_1" class="w-full rounded border border-gray-300 px-2 py-1.5" @change="line.expense_account_level_2 = ''"><option value="">请选择</option><option v-for="item in expenseAccountTree" :key="item.level_1" :value="item.level_1">{{ item.level_1 }}</option></select></td>
+                  <td class="p-2"><select v-model="line.expense_account_level_2" class="w-full rounded border border-gray-300 px-2 py-1.5" :disabled="!accountChildren(line.expense_account_level_1).length"><option value="">{{ accountChildren(line.expense_account_level_1).length ? '请选择' : '无二级科目' }}</option><option v-for="item in accountChildren(line.expense_account_level_1)" :key="item" :value="item">{{ item }}</option></select></td>
                   <td class="p-2"><input v-model="line.issue_date" type="date" class="w-full rounded border border-gray-300 px-2 py-1.5" /></td>
                   <td class="p-2"><input v-model="line.total_amount" type="number" min="0.01" step="0.01" class="w-full rounded border border-gray-300 px-2 py-1.5 text-right" /></td>
                   <td class="p-2"><input v-model="line.expense_description" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="费用说明" /></td>
-                  <td class="p-2"><input v-model="line.no_invoice_reason" class="w-full rounded border border-gray-300 px-2 py-1.5" placeholder="例如：出差津贴" /></td>
                   <td class="p-2"><button title="删除明细" :disabled="expenseLines.length === 1" class="text-red-600 disabled:text-gray-300" @click="removeLine(index)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button></td>
                 </tr></tbody>
-                <tfoot class="border-t bg-gray-50"><tr><td colspan="3" class="px-3 py-3 text-right font-medium">总费用发生额</td><td class="px-3 py-3 text-right text-base font-semibold text-red-600">{{ money(total) }}</td><td colspan="3"></td></tr></tfoot>
+                <tfoot class="border-t bg-gray-50"><tr><td colspan="4" class="px-3 py-3 text-right font-medium">总费用发生额</td><td class="px-3 py-3 text-right text-base font-semibold text-red-600">{{ money(total) }}</td><td colspan="2"></td></tr></tfoot>
               </table>
             </div>
           </section>
@@ -723,7 +708,6 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
               <label class="text-xs text-gray-500">支行<input v-model="requestForm.branch" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500">收款账号<input v-model="requestForm.account_no" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500 md:col-span-3">情况说明/备注<textarea v-model="requestForm.reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
-              <label class="text-xs text-gray-500 md:col-span-3">整单无票补充说明（可选）<textarea v-model="requestForm.no_invoice_reason" rows="2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
             </div>
           </section>
         </div>
@@ -736,7 +720,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
     </div>
 
     <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-3 sm:p-4" @click.self="detailRequestName = ''">
-      <div data-testid="expense-detail-workbench" role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-[1180px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/5">
+      <div data-testid="expense-detail-workbench" role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/5">
         <header class="sticky top-0 z-20 flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
@@ -790,7 +774,10 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
                 <div data-testid="finance-classification" class="border-b px-4 py-4" :class="selectedRequest.can_edit_expense_items ? 'border-amber-200 bg-amber-50/70' : 'border-gray-100 bg-white'">
                   <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div><div class="text-sm font-semibold text-gray-900">&#x8D39;&#x7528;&#x79D1;&#x76EE;</div><div class="mt-1 text-xs text-gray-500">{{ selectedRequest.can_edit_expense_items ? '&#x7531;&#x8D22;&#x52A1;&#x5728;&#x5F53;&#x524D;&#x5BA1;&#x6279;&#x8282;&#x70B9;&#x9009;&#x62E9;' : '&#x5458;&#x5DE5;&#x53EF;&#x7559;&#x7A7A;&#xFF0C;&#x8D22;&#x52A1;&#x5BA1;&#x6279;&#x65F6;&#x5F52;&#x7C7B;' }}</div></div>
-                    <input v-if="canEditExpenseItems" :value="group.expense_item" list="expense-item-options" class="w-full rounded-lg border bg-white px-3 py-2 text-sm sm:max-w-xs" :class="selectedRequest.can_edit_expense_items && !group.expense_item ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-300'" placeholder="&#x9009;&#x62E9;&#x6216;&#x586B;&#x5199;&#x8D39;&#x7528;&#x79D1;&#x76EE;" @input="updateGroupField(group, 'expense_item', $event.target.value)" />
+                    <div v-if="canEditExpenseItems" class="grid w-full gap-2 sm:max-w-xl sm:grid-cols-2">
+                      <select :value="group.expense_account_level_1" class="w-full rounded-lg border bg-white px-3 py-2 text-sm" :class="!group.expense_account_level_1 ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-300'" @change="updateGroupAccount(group, 'expense_account_level_1', $event.target.value)"><option value="">选择一级科目</option><option v-for="item in expenseAccountTree" :key="item.level_1" :value="item.level_1">{{ item.level_1 }}</option></select>
+                      <select :value="group.expense_account_level_2" class="w-full rounded-lg border bg-white px-3 py-2 text-sm" :class="accountChildren(group.expense_account_level_1).length && !group.expense_account_level_2 ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-300'" :disabled="!accountChildren(group.expense_account_level_1).length" @change="updateGroupAccount(group, 'expense_account_level_2', $event.target.value)"><option value="">{{ accountChildren(group.expense_account_level_1).length ? '选择二级科目' : '无二级科目' }}</option><option v-for="item in accountChildren(group.expense_account_level_1)" :key="item" :value="item">{{ item }}</option></select>
+                    </div>
                     <span v-else class="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800">{{ group.expense_item || '&#x5F85;&#x8D22;&#x52A1;&#x5F52;&#x7C7B;' }}</span>
                   </div>
                 </div>
@@ -808,14 +795,14 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
                 <div class="space-y-3 border-t border-gray-100 bg-gray-50/50 px-4 py-4">
                   <div v-for="(source, sourceIndex) in group.source_lines" :key="source.line_key" class="rounded-lg border border-gray-200 bg-white p-3">
                     <div class="flex flex-col gap-3 lg:grid lg:grid-cols-[120px_minmax(0,1fr)_minmax(240px,0.9fr)]">
-                      <div class="min-w-0"><div class="text-xs font-medium text-gray-700">&#x539F;&#x59CB;&#x660E;&#x7EC6; {{ sourceIndex + 1 }}</div><div class="mt-1 truncate text-xs text-gray-500">{{ source.invoice_number || source.invoice_category || source.project_name || '-' }}</div></div>
+                      <div class="min-w-0"><div class="text-xs font-medium text-gray-700">&#x539F;&#x59CB;&#x660E;&#x7EC6; {{ sourceIndex + 1 }}</div><div class="mt-1 truncate text-xs text-gray-500">{{ source.invoice_number || source.invoice_category || source.project_name || '-' }}</div><button v-if="invoiceForSource(source)" class="mt-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoiceForSource(source)"><FeatherIcon name="eye" class="mr-1 h-3.5 w-3.5" />&#x67E5;&#x770B;&#x53D1;&#x7968;</button></div>
                       <label class="text-xs text-gray-500">&#x8D39;&#x7528;&#x8BF4;&#x660E;
-                        <input v-if="isDraftDetail" :value="source.expense_description || source.description" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="&#x5458;&#x5DE5;&#x5FC5;&#x586B;&#x8D39;&#x7528;&#x8BF4;&#x660E;" @input="updateSourceField(source.line_key, 'expense_description', $event.target.value)" />
+                        <input v-if="isDraftDetail && !source.source_invoice" :value="source.expense_description || source.description" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="&#x5458;&#x5DE5;&#x5FC5;&#x586B;&#x8D39;&#x7528;&#x8BF4;&#x660E;" @input="updateSourceField(source.line_key, 'expense_description', $event.target.value)" />
                         <div v-else class="mt-1 min-h-9 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-800">{{ source.expense_description || source.description || '-' }}</div>
                       </label>
                       <div class="text-xs text-gray-500">
-                        <div class="flex items-center justify-between gap-2"><span>&#x8865;&#x5145;&#x9644;&#x4EF6; ({{ source.attachments?.length || 0 }}/10)</span><label v-if="isDraftDetail" class="cursor-pointer rounded-md bg-gray-100 px-2 py-1 font-medium text-gray-700 hover:bg-gray-200"><span v-if="attachmentBusy[attachmentKey(source.line_key)]">&#x4E0A;&#x4F20;&#x4E2D;...</span><span v-else>&#x6DFB;&#x52A0;&#x9644;&#x4EF6;</span><input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple class="hidden" :disabled="attachmentBusy[attachmentKey(source.line_key)]" @change="handleExpenseAttachments(source, $event)" /></label></div>
-                        <div class="mt-2 flex min-h-8 flex-wrap gap-1"><span v-if="!source.attachments?.length" class="py-1 text-gray-400">&#x6682;&#x65E0;&#x8865;&#x5145;&#x9644;&#x4EF6;</span><span v-for="attachment in source.attachments || []" :key="attachment.name" class="inline-flex max-w-full items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-blue-700"><button class="truncate" :title="attachment.original_filename" @click="openExpenseAttachment(attachment)">{{ attachment.original_filename }}</button><button v-if="isDraftDetail" class="text-red-600" title="Delete" @click="removeExpenseAttachment(attachment)">&times;</button></span></div>
+                        <div class="flex items-center justify-between gap-2"><span>&#x8865;&#x5145;&#x9644;&#x4EF6; ({{ source.attachments?.length || 0 }})</span></div>
+                        <div class="mt-2 flex min-h-8 flex-wrap gap-1"><span v-if="!source.attachments?.length" class="py-1 text-gray-400">&#x6682;&#x65E0;&#x8865;&#x5145;&#x9644;&#x4EF6;</span><span v-for="attachment in source.attachments || []" :key="attachment.name" class="inline-flex max-w-full items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-blue-700"><button class="truncate" :title="attachment.original_filename" @click="openExpenseAttachment(attachment)">{{ attachment.original_filename }}</button></span></div>
                       </div>
                     </div>
                   </div>
@@ -880,16 +867,16 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
     <div v-if="showManualExpense" class="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 p-4" @click.self="showManualExpense = false">
       <div role="dialog" aria-modal="true" class="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
-          <div><h3 class="font-semibold">手动增加费用</h3><p class="mt-1 text-xs text-gray-500">用于出差津贴等没有发票的费用，六项内容均需填写。</p></div>
+          <div><h3 class="font-semibold">手动增加费用</h3><p class="mt-1 text-xs text-gray-500">用于出差津贴等没有发票的费用，费用科目按一级、二级选择。</p></div>
           <button title="关闭" @click="showManualExpense = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
         </header>
         <div class="grid gap-4 p-5 md:grid-cols-2">
           <label class="text-xs text-gray-500">项目名称<input v-model="manualExpense.project_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="必填" /></label>
-          <label class="text-xs text-gray-500">费用项目<input v-model="manualExpense.expense_item" list="expense-item-options" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="可下拉或填写" /></label>
+          <label class="text-xs text-gray-500">一级费用科目<select v-model="manualExpense.expense_account_level_1" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" @change="manualExpense.expense_account_level_2 = ''"><option value="">请选择</option><option v-for="item in expenseAccountTree" :key="item.level_1" :value="item.level_1">{{ item.level_1 }}</option></select></label>
+          <label class="text-xs text-gray-500">二级费用科目<select v-model="manualExpense.expense_account_level_2" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" :disabled="!accountChildren(manualExpense.expense_account_level_1).length"><option value="">{{ accountChildren(manualExpense.expense_account_level_1).length ? '请选择' : '无二级科目' }}</option><option v-for="item in accountChildren(manualExpense.expense_account_level_1)" :key="item" :value="item">{{ item }}</option></select></label>
           <label class="text-xs text-gray-500">日期<input v-model="manualExpense.issue_date" type="date" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
           <label class="text-xs text-gray-500">税后金额<input v-model="manualExpense.total_amount" type="number" min="0.01" step="0.01" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm text-right" /></label>
           <label class="text-xs text-gray-500 md:col-span-2">费用说明<input v-model="manualExpense.expense_description" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="例如：深圳出差津贴" /></label>
-          <label class="text-xs text-gray-500 md:col-span-2">无票原因<textarea v-model="manualExpense.no_invoice_reason" rows="3" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="说明为什么没有发票"></textarea></label>
         </div>
         <footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showManualExpense = false">取消</Button><Button variant="solid" :loading="saving" @click="addManualExpense">确认添加</Button></footer>
       </div>
@@ -919,8 +906,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
   </div>
 </div>
 
-    <datalist id="expense-item-options"><option v-for="item in expenseCategories" :key="item" :value="item"></option></datalist>
     <InvoicePreviewDrawer :open="Boolean(previewInvoiceRow)" :invoice="previewInvoiceRow" @close="previewInvoiceRow = null" />
-    <InvoicePreviewDrawer :open="Boolean(previewAttachmentRow)" :invoice="previewAttachmentRow" :preview-loader="fetchExpenseAttachmentPreview" title="Expense attachment preview" @close="previewAttachmentRow = null" />
+    <InvoicePreviewDrawer :open="Boolean(previewAttachmentRow)" :invoice="previewAttachmentRow" :preview-loader="previewAttachmentLoader" title="补充附件预览" @close="previewAttachmentRow = null" />
   </div>
 </template>

@@ -5,19 +5,24 @@ import {
   ACTIVE_RECOGNITION_STATUSES,
   confirmInvoice,
   createInvoiceBatch,
+  deleteInvoiceSupplementalAttachment,
   deriveInvoiceTotal,
   excludeInvoice,
   listWorkbenchInvoices,
   invoiceFieldWarnings,
   invoiceSelectionReason,
+  fetchInvoiceSupplementalAttachmentPreview,
   pushInvoices,
   resolveDuplicate,
   retryInvoice,
   unconfirmInvoice,
   updateInvoice,
+  updateInvoiceExpenseContext,
   uploadInvoiceFiles,
+  uploadInvoiceSupplementalAttachment,
   validateInvoiceFiles,
 } from '../../lib/invoiceOcr.js';
+import { validateExpenseAttachments } from '../../lib/expenseWorkflow.js';
 import InvoicePreviewDrawer from './InvoicePreviewDrawer.vue';
 
 const props = defineProps({
@@ -34,6 +39,8 @@ const uploadText = ref('');
 const errorMessage = ref('');
 const message = ref('');
 const previewRow = ref(null);
+const previewSupplementalRow = ref(null);
+const attachmentBusy = ref(false);
 const showPush = ref(false);
 const statusFilter = ref('');
 const pushForm = reactive({
@@ -109,6 +116,10 @@ function isEditable(row) {
   return ['待确认', '疑似重复'].includes(row?.recognition_status);
 }
 
+function isContextEditable(row) {
+  return !row?.request && ['待确认', '疑似重复', '已确认'].includes(row?.recognition_status);
+}
+
 function selectionReason(row) {
   return invoiceSelectionReason(row);
 }
@@ -176,9 +187,13 @@ async function saveFields(row) {
   busy.value = true;
   errorMessage.value = '';
   try {
-    const updated = await updateInvoice(row.name, Object.fromEntries(fields.map(([name]) => [name, row[name]])));
+    let updated = row;
+    if (isEditable(row)) {
+      updated = await updateInvoice(row.name, Object.fromEntries(fields.map(([name]) => [name, row[name]])));
+    }
+    updated = await updateInvoiceExpenseContext(updated.name, row.expense_description);
     rows.value = rows.value.map((item) => item.name === updated.name ? updated : item);
-    message.value = '识别内容已保存。';
+    message.value = '识别内容、费用说明和附件状态已保存。';
   } catch (error) {
     errorMessage.value = cleanError(error, '识别内容保存失败');
   } finally {
@@ -190,6 +205,8 @@ async function confirmRow(row) {
   busy.value = true;
   errorMessage.value = '';
   try {
+    if (!String(row.expense_description || '').trim()) throw new Error('请先填写费用说明。');
+    await updateInvoiceExpenseContext(row.name, row.expense_description);
     const updated = await confirmInvoice(row.name, Object.fromEntries(fields.map(([name]) => [name, row[name]])));
     rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
     message.value = updated.conflict ? '检测到疑似重复发票，请财务复核。' : '发票内容已确认，可勾选下推。';
@@ -197,6 +214,49 @@ async function confirmRow(row) {
     errorMessage.value = cleanError(error, '发票确认失败');
   } finally {
     busy.value = false;
+  }
+}
+
+async function handleSupplementalAttachments(row, event) {
+  const input = event?.target;
+  const files = Array.from(input?.files || []);
+  if (!files.length || !row) return;
+  try {
+    validateExpenseAttachments(files, row.supplemental_attachments?.length || 0);
+  } catch (error) {
+    errorMessage.value = cleanError(error, '补充附件校验失败');
+    if (input) input.value = '';
+    return;
+  }
+  attachmentBusy.value = true;
+  errorMessage.value = '';
+  try {
+    const attachments = [...(row.supplemental_attachments || [])];
+    for (const file of files) {
+      attachments.push(await uploadInvoiceSupplementalAttachment(row.name, file));
+    }
+    row.supplemental_attachments = attachments;
+    message.value = '补充附件已安全上传。';
+  } catch (error) {
+    errorMessage.value = cleanError(error, '补充附件上传失败');
+  } finally {
+    attachmentBusy.value = false;
+    if (input) input.value = '';
+  }
+}
+
+async function removeSupplementalAttachment(row, attachment) {
+  if (!row || !attachment || !window.confirm('确认删除该补充附件吗？')) return;
+  attachmentBusy.value = true;
+  try {
+    await deleteInvoiceSupplementalAttachment(row.name, attachment.name);
+    row.supplemental_attachments = (row.supplemental_attachments || [])
+      .filter((item) => item.name !== attachment.name);
+    message.value = '补充附件已删除。';
+  } catch (error) {
+    errorMessage.value = cleanError(error, '补充附件删除失败');
+  } finally {
+    attachmentBusy.value = false;
   }
 }
 
@@ -342,7 +402,7 @@ onBeforeUnmount(() => {
     <header class="sticky top-0 z-10 -mx-1 flex flex-col gap-4 border-b border-gray-200 bg-white/95 px-1 py-3 backdrop-blur md:flex-row md:items-center md:justify-between">
       <div class="min-w-0">
         <h2 class="text-xl font-bold tracking-tight text-gray-900">上传发票</h2>
-        <p class="mt-1 text-sm leading-5 text-gray-500">批量上传后由本地 OCR 识别，人工确认七项内容，再下推到费用报销流。</p>
+        <p class="mt-1 text-sm leading-5 text-gray-500">批量上传后由本地 OCR 识别，核对七项内容并填写费用说明、补充附件，再下推到费用报销流。</p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-2">
         <div v-if="checkedNames.length" class="mr-1 text-right text-xs text-gray-500">
@@ -447,13 +507,36 @@ onBeforeUnmount(() => {
                 <input v-model="selectedRow[name]" :type="type" @input="syncDerivedTotal(selectedRow, name)" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-600" />
               </label>
             </div>
+            <section class="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+              <label class="block text-xs font-semibold text-gray-700">
+                费用说明 <span class="text-red-500">*</span>
+                <textarea v-model="selectedRow.expense_description" rows="3" maxlength="1000" :disabled="!isContextEditable(selectedRow)" class="mt-2 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50" placeholder="请填写本次费用用途，例如：客户拜访往返交通费"></textarea>
+              </label>
+              <div class="mt-4 flex items-center justify-between gap-3">
+                <div>
+                  <div class="text-xs font-semibold text-gray-700">补充附件（选填）</div>
+                  <p class="mt-1 text-[11px] text-gray-500">可上传行程单、凭证等，最多 10 个。</p>
+                </div>
+                <label v-if="isContextEditable(selectedRow)" class="inline-flex h-8 cursor-pointer items-center rounded-lg border border-blue-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50">
+                  {{ attachmentBusy ? '上传中...' : '添加附件' }}
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple class="hidden" :disabled="attachmentBusy" @change="handleSupplementalAttachments(selectedRow, $event)" />
+                </label>
+              </div>
+              <div class="mt-3 flex min-h-8 flex-wrap gap-2">
+                <span v-if="!selectedRow.supplemental_attachments?.length" class="text-xs text-gray-400">暂无补充附件</span>
+                <span v-for="attachment in selectedRow.supplemental_attachments || []" :key="attachment.name" class="inline-flex max-w-full items-center gap-1 rounded-lg border border-blue-100 bg-white px-2.5 py-1.5 text-xs text-blue-700">
+                  <button type="button" class="max-w-[230px] truncate" :title="attachment.original_filename" @click="previewSupplementalRow = attachment">{{ attachment.original_filename }}</button>
+                  <button v-if="isContextEditable(selectedRow)" type="button" class="ml-1 text-red-500" title="删除附件" @click="removeSupplementalAttachment(selectedRow, attachment)">&times;</button>
+                </span>
+              </div>
+            </section>
             <div v-if="invoiceFieldWarnings(selectedRow.field_warnings).length" class="break-words rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
               <div class="mb-1 font-semibold">请检查识别结果</div>
               <div v-for="warning in invoiceFieldWarnings(selectedRow.field_warnings)" :key="String(warning)">{{ warningText(warning) }}</div>
             </div>
             <div class="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
               <Button variant="subtle" @click="previewRow = selectedRow"><FeatherIcon name="eye" class="h-4 w-4" />查看发票</Button>
-              <Button v-if="isEditable(selectedRow)" variant="subtle" :disabled="busy" @click="saveFields(selectedRow)">保存修改</Button>
+              <Button v-if="isContextEditable(selectedRow)" variant="subtle" :disabled="busy || attachmentBusy" @click="saveFields(selectedRow)">保存修改</Button>
               <Button v-if="selectedRow.recognition_status === '待确认'" variant="solid" :disabled="busy" @click="confirmRow(selectedRow)">确认内容</Button>
               <Button v-if="selectedRow.recognition_status === '已确认' && !selectedRow.request" variant="subtle" :disabled="busy" @click="undoConfirm(selectedRow)">撤回确认</Button>
               <Button v-if="selectedRow.recognition_status === '失败'" variant="solid" :disabled="busy" @click="retryRow(selectedRow)">重新识别</Button>
@@ -500,5 +583,6 @@ onBeforeUnmount(() => {
     </div>
 
     <InvoicePreviewDrawer :open="Boolean(previewRow)" :invoice="previewRow" @close="previewRow = null" />
+    <InvoicePreviewDrawer :open="Boolean(previewSupplementalRow)" :invoice="previewSupplementalRow" :preview-loader="fetchInvoiceSupplementalAttachmentPreview" title="补充附件预览" @close="previewSupplementalRow = null" />
   </div>
 </template>

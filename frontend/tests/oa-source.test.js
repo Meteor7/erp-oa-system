@@ -107,8 +107,8 @@ test('OCR details and manual rows preserve their required fields', () => {
   assert.match(workbenchSource, /getRequestInvoices/);
   assert.match(workbenchSource, /invoicesForLine/);
   assert.ok(workbenchSource.includes(C.viewInvoice));
-  assert.match(workbenchSource, /no_invoice_reason/);
-  assert.ok(workbenchSource.includes(C.noInvoiceReason));
+  assert.match(uploadSource, /expense_description/);
+  assert.match(uploadSource, /supplemental_attachments/);
 });
 
 
@@ -118,10 +118,12 @@ test('reimbursement draft edits project groups and manual no-invoice sources', (
   assert.match(workbenchSource, /draftSources/);
   assert.match(workbenchSource, /project_groups/);
   assert.match(workbenchSource, /expense_item/);
-  assert.match(workbenchSource, /datalist/);
-  assert.ok(workbenchSource.includes('费用项目'));
+  assert.match(workbenchSource, /expense_account_level_1/);
+  assert.match(workbenchSource, /expense_account_level_2/);
+  assert.ok(workbenchSource.includes('一级费用科目'));
+  assert.ok(workbenchSource.includes('二级费用科目'));
   assert.ok(workbenchSource.includes('手动增加'));
-  for (const label of ['项目名称', '费用项目', '日期', '税后金额', '费用说明', '无票原因']) {
+  for (const label of ['项目名称', '一级费用科目', '二级费用科目', '日期', '税后金额', '费用说明']) {
     assert.ok(workbenchSource.includes(label), label);
   }
   assert.match(workbenchSource, /invoicesForGroup/);

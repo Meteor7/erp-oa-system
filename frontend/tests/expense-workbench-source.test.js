@@ -11,11 +11,13 @@ test('employee draft keeps classification optional but requires descriptions', (
   assert.match(workbench, /canEditExpenseItems/);
   assert.match(workbench, /can_edit_expense_items/);
   assert.match(workbench, /saveFinanceClassification/);
+  assert.match(workbench, /expense_account_level_1/);
+  assert.match(workbench, /expense_account_level_2/);
+  assert.doesNotMatch(workbench, /manualExpense\.no_invoice_reason/);
 });
 
 test('expense lines expose private supplemental attachments', () => {
-  assert.match(workbench, /handleExpenseAttachments/);
-  assert.match(workbench, /accept="\.pdf,\.jpg,\.jpeg,\.png"/);
+  assert.doesNotMatch(workbench, /handleExpenseAttachments/);
   assert.match(workbench, /fetchExpenseAttachmentPreview/);
   assert.match(workbench, /:preview-loader=/);
   assert.match(workflow, /body\.append\('is_private', '1'\)/);
