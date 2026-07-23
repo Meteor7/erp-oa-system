@@ -707,100 +707,147 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
       <div class="rounded bg-white px-6 py-5 text-sm text-gray-600 shadow-xl">正在加载报销单详情...</div>
     </div>
 
-    <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="detailRequestName = ''">
-      <div role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded bg-white shadow-xl">
-        <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4"><div><h3 class="font-semibold">{{ selectedRequest.name }} - 费用报销详情</h3><p class="mt-1 text-xs text-gray-500">{{ selectedRequest.subject }} · {{ sourceLabel(selectedRequest) }}</p></div><button title="关闭" @click="detailRequestName = ''"><FeatherIcon name="x" class="h-5 w-5" /></button></header>
-        <div class="flex-1 space-y-5 overflow-y-auto p-5">
-          <section><div class="mb-3 flex items-center justify-between"><h4 class="text-sm font-semibold">基本信息</h4><span class="rounded px-2 py-1 text-xs" :class="statusMeta(selectedRequest.kanban_status).badge">{{ statusMeta(selectedRequest.kanban_status).label }}</span></div><dl class="grid gap-3 text-sm md:grid-cols-4"><div><dt class="text-xs text-gray-500">公司</dt><dd class="mt-1">{{ selectedRequest.company || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请部门</dt><dd class="mt-1">{{ selectedRequest.department || '-' }}</dd></div><div><dt class="text-xs text-gray-500">申请人</dt><dd class="mt-1">{{ selectedRequest.employee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">来源</dt><dd class="mt-1">{{ sourceLabel(selectedRequest) }}</dd></div></dl></section>
-          <section>
-<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-  <div>
-    <h4 class="text-sm font-semibold">&#x8D39;&#x7528;&#x660E;&#x7EC6;&#xFF08;&#x6309;&#x9879;&#x76EE;&#x540D;&#x79F0;&#x6C47;&#x603B;&#xFF09;</h4>
-    <p class="mt-1 text-xs text-gray-500">&#x540C;&#x4E00;&#x9879;&#x76EE;&#x540D;&#x79F0;&#x6C47;&#x603B;&#x4E3A;&#x4E00;&#x7EC4;&#xFF1B;&#x8D39;&#x7528;&#x8BF4;&#x660E;&#x548C;&#x8865;&#x5145;&#x9644;&#x4EF6;&#x4ECD;&#x4FDD;&#x7559;&#x5728;&#x6BCF;&#x6761;&#x539F;&#x59CB;&#x660E;&#x7EC6;&#x4E0A;&#x3002;</p>
-  </div>
-  <div class="flex flex-wrap gap-2">
-    <Button v-if="isDraftDetail" variant="subtle" @click="openManualExpense"><FeatherIcon name="plus" class="h-4 w-4" />&#x624B;&#x52A8;&#x589E;&#x52A0;</Button>
-    <Button v-if="isDraftDetail" variant="solid" :loading="saving" @click="saveDraftSources(false)">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x660E;&#x7EC6;</Button>
-    <Button v-if="selectedRequest.can_edit_expense_items" variant="solid" :loading="saving" @click="saveFinanceClassification">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
-  </div>
-</div>
-<div v-if="selectedRequest.can_edit_expense_items && !selectedRequest.classification_ready" class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-  &#x8D22;&#x52A1;&#x5BA1;&#x6279;&#x524D;&#x9700;&#x8981;&#x4E3A;&#x6240;&#x6709;&#x9879;&#x76EE;&#x9009;&#x62E9;&#x8D39;&#x7528;&#x79D1;&#x76EE;&#xFF0C;&#x4FDD;&#x5B58;&#x540E;&#x5373;&#x53EF;&#x5BA1;&#x6279;&#x901A;&#x8FC7;&#x3002;
-</div>
-<div class="overflow-x-auto rounded-lg border border-gray-200">
-  <table class="w-full min-w-[1500px] text-sm">
-    <thead class="border-b bg-gray-50 text-gray-500"><tr><th class="px-3 py-2 text-left">&#x53D1;&#x7968;&#x7C7B;&#x522B;</th><th class="px-3 py-2 text-left">&#x9879;&#x76EE;&#x540D;&#x79F0;</th><th class="px-3 py-2 text-left">&#x8D39;&#x7528;&#x79D1;&#x76EE;</th><th class="px-3 py-2 text-left">&#x5F00;&#x7968;&#x65E5;&#x671F;</th><th class="px-3 py-2 text-left">&#x53D1;&#x7968;&#x53F7;&#x7801;</th><th class="px-3 py-2 text-right">&#x7A0E;&#x524D;&#x91D1;&#x989D;</th><th class="px-3 py-2 text-right">&#x7A0E;&#x989D;</th><th class="px-3 py-2 text-right">&#x5408;&#x8BA1;&#x91D1;&#x989D;</th><th class="px-3 py-2 text-left">&#x53D1;&#x7968;&#x6587;&#x4EF6;</th></tr></thead>
-    <tbody>
-      <template v-for="group in detailGroups" :key="group.group_key">
-        <tr class="border-b bg-white align-top">
-          <td class="px-3 py-3">{{ group.invoice_category || '-' }}</td>
-          <td class="px-3 py-2">
-            <input v-if="isDraftDetail" :value="group.project_name" class="w-full min-w-[160px] rounded border border-gray-300 px-2 py-1.5" placeholder="&#x8BC6;&#x522B;&#x4E3A;&#x7A7A;&#x65F6;&#x8BF7;&#x586B;&#x5199;" @change="updateGroupField(group, 'project_name', $event.target.value)" />
-            <span v-else>{{ group.project_name || '-' }}</span>
-          </td>
-          <td class="px-3 py-2">
-            <input v-if="canEditExpenseItems" :value="group.expense_item" list="expense-item-options" class="w-full min-w-[170px] rounded border px-2 py-1.5" :class="selectedRequest.can_edit_expense_items && !group.expense_item ? 'border-amber-400 bg-amber-50' : 'border-gray-300'" placeholder="&#x9009;&#x62E9;&#x6216;&#x586B;&#x5199;&#xFF0C;&#x8D22;&#x52A1;&#x5BA1;&#x6279;&#x524D;&#x5FC5;&#x586B;" @input="updateGroupField(group, 'expense_item', $event.target.value)" />
-            <span v-else>{{ group.expense_item || '-' }}</span>
-          </td>
-          <td class="px-3 py-3">{{ group.issue_date || '-' }}</td>
-          <td class="px-3 py-3">{{ group.invoice_number || '-' }}</td>
-          <td class="px-3 py-3 text-right">{{ money(group.amount_before_tax, true) }}</td>
-          <td class="px-3 py-3 text-right">{{ money(group.tax_amount, true) }}</td>
-          <td class="px-3 py-3 text-right font-semibold text-red-600">{{ money(group.total_amount, true) }}</td>
-          <td class="px-3 py-3"><div class="flex min-w-[120px] flex-wrap gap-1"><button v-for="(invoice,index) in invoicesForGroup(group)" :key="invoice.name" class="rounded bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoice">&#x67E5;&#x770B;&#x53D1;&#x7968; {{ index + 1 }}</button><span v-if="!invoicesForGroup(group).length" class="text-gray-400">&#x65E0;&#x7968;</span></div></td>
-        </tr>
-        <tr class="border-b bg-gray-50/60">
-          <td colspan="9" class="px-3 py-3">
-            <div class="space-y-2">
-              <div v-for="(source, sourceIndex) in group.source_lines" :key="source.line_key" class="grid gap-3 rounded-lg border border-gray-200 bg-white p-3 lg:grid-cols-[minmax(160px,0.8fr)_minmax(260px,1.3fr)_minmax(320px,1.5fr)]">
-                <div class="min-w-0">
-                  <div class="text-xs font-medium text-gray-700">&#x539F;&#x59CB;&#x660E;&#x7EC6; {{ sourceIndex + 1 }}</div>
-                  <div class="mt-1 truncate text-[11px] text-gray-500">{{ source.invoice_number || source.invoice_category || source.project_name || '-' }}</div>
+    <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-3 sm:p-4" @click.self="detailRequestName = ''">
+      <div data-testid="expense-detail-workbench" role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-[1180px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/5">
+        <header class="sticky top-0 z-20 flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="truncate text-lg font-semibold text-gray-900">{{ selectedRequest.name }} - &#x8D39;&#x7528;&#x62A5;&#x9500;&#x8BE6;&#x60C5;</h3>
+              <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusMeta(selectedRequest.kanban_status).badge">{{ statusMeta(selectedRequest.kanban_status).label }}</span>
+              <span v-if="selectedRequest.action_scope === 'override'" class="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700">&#x4E1A;&#x52A1;&#x7BA1;&#x7406;&#x4EE3;&#x529E;</span>
+            </div>
+            <p class="mt-1 truncate text-sm text-gray-500">{{ selectedRequest.subject }} &middot; {{ sourceLabel(selectedRequest) }}</p>
+          </div>
+          <button class="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900" title="&#x5173;&#x95ED;" @click="detailRequestName = ''"><FeatherIcon name="x" class="h-5 w-5" /></button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto bg-gray-50/70">
+          <section data-testid="expense-summary" class="grid gap-px border-b border-gray-200 bg-gray-200 sm:grid-cols-2 xl:grid-cols-6">
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x516C;&#x53F8;</div><div class="mt-1 truncate text-sm font-medium text-gray-900" :title="selectedRequest.company">{{ selectedRequest.company || '-' }}</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x7533;&#x8BF7;&#x4EBA;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ selectedRequest.employee_name || '-' }}</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x7533;&#x8BF7;&#x90E8;&#x95E8;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ selectedRequest.department || '-' }}</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x5F53;&#x524D;&#x8282;&#x70B9;</div><div class="mt-1 truncate text-sm font-medium text-gray-900" :title="selectedRequest.current_step_label">{{ selectedRequest.current_step_label || '-' }}</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x53D1;&#x7968;&#x6570;&#x91CF;</div><div class="mt-1 text-sm font-semibold text-gray-900">{{ selectedRequest.invoice_count || 0 }} &#x5F20;</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x62A5;&#x9500;&#x603B;&#x989D;</div><div class="mt-1 text-base font-semibold text-red-600">{{ money(detailGroupTotal || selectedRequest.amount) }}</div></div>
+          </section>
+
+          <div class="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
+            <main class="min-w-0 space-y-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h4 class="text-base font-semibold text-gray-900">&#x8D39;&#x7528;&#x660E;&#x7EC6;</h4>
+                  <p class="mt-1 text-xs leading-5 text-gray-500">&#x6309;&#x9879;&#x76EE;&#x540D;&#x79F0;&#x6C47;&#x603B;&#xFF0C;&#x53D1;&#x7968;&#x3001;&#x8BF4;&#x660E;&#x548C;&#x9644;&#x4EF6;&#x4ECD;&#x4FDD;&#x7559;&#x5728;&#x5BF9;&#x5E94;&#x660E;&#x7EC6;&#x4E2D;&#x3002;</p>
                 </div>
-                <label class="text-xs text-gray-500">&#x8D39;&#x7528;&#x8BF4;&#x660E;
-                  <input v-if="isDraftDetail" :value="source.expense_description || source.description" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="&#x5458;&#x5DE5;&#x5FC5;&#x586B;&#x8D39;&#x7528;&#x8BF4;&#x660E;" @input="updateSourceField(source.line_key, 'expense_description', $event.target.value)" />
-                  <div v-else class="mt-1 min-h-8 rounded bg-gray-50 px-2 py-1.5 text-sm text-gray-700">{{ source.expense_description || source.description || '-' }}</div>
-                </label>
-                <div class="text-xs text-gray-500">
-                  <div class="flex items-center justify-between gap-2"><span>&#x8865;&#x5145;&#x9644;&#x4EF6; ({{ source.attachments?.length || 0 }}/10)</span><label v-if="isDraftDetail" class="cursor-pointer rounded bg-gray-100 px-2 py-1 text-gray-700 hover:bg-gray-200"><span v-if="attachmentBusy[attachmentKey(source.line_key)]">&#x4E0A;&#x4F20;&#x4E2D;...</span><span v-else>&#x6DFB;&#x52A0;&#x9644;&#x4EF6;</span><input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple class="hidden" :disabled="attachmentBusy[attachmentKey(source.line_key)]" @change="handleExpenseAttachments(source, $event)" /></label></div>
-                  <div class="mt-2 flex min-h-8 flex-wrap gap-1">
-                    <span v-if="!source.attachments?.length" class="py-1 text-gray-400">&#x6682;&#x65E0;&#x8865;&#x5145;&#x9644;&#x4EF6;</span>
-                    <span v-for="attachment in source.attachments || []" :key="attachment.name" class="inline-flex max-w-[240px] items-center gap-1 rounded bg-blue-50 px-2 py-1 text-blue-700"><button class="truncate" :title="attachment.original_filename" @click="openExpenseAttachment(attachment)">{{ attachment.original_filename }}</button><button v-if="isDraftDetail" class="text-red-600" title="Delete" @click="removeExpenseAttachment(attachment)">&times;</button></span>
-                  </div>
+                <div v-if="isDraftDetail" class="flex shrink-0 flex-wrap gap-2">
+                  <Button variant="subtle" @click="openManualExpense"><FeatherIcon name="plus" class="h-4 w-4" />&#x624B;&#x52A8;&#x589E;&#x52A0;</Button>
+                  <Button variant="solid" :loading="saving" @click="saveDraftSources(false)">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x660E;&#x7EC6;</Button>
                 </div>
               </div>
-            </div>
-          </td>
-        </tr>
-      </template>
-      <tr v-if="!detailGroups.length"><td colspan="9" class="px-3 py-10 text-center text-gray-400">&#x6682;&#x65E0;&#x8D39;&#x7528;&#x660E;&#x7EC6;</td></tr>
-    </tbody>
-    <tfoot class="border-t bg-gray-50"><tr><td colspan="7" class="px-3 py-3 text-right font-medium">&#x603B;&#x989D;</td><td class="px-3 py-3 text-right text-base font-semibold text-red-600">{{ money(detailGroupTotal) }}</td><td></td></tr></tfoot>
-  </table>
-</div>
-          </section>
-          <section><h4 class="mb-3 text-sm font-semibold">付款信息</h4><dl class="grid gap-3 text-sm md:grid-cols-3"><div><dt class="text-xs text-gray-500">付款类型</dt><dd class="mt-1">{{ selectedRequest.payment_type || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款方式</dt><dd class="mt-1">{{ selectedRequest.payment_method || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款人</dt><dd class="mt-1">{{ selectedRequest.payee_name || '-' }}</dd></div><div><dt class="text-xs text-gray-500">开户行/支行</dt><dd class="mt-1">{{ [selectedRequest.bank_name,selectedRequest.branch].filter(Boolean).join(' / ') || '-' }}</dd></div><div><dt class="text-xs text-gray-500">收款账号</dt><dd class="mt-1">{{ selectedRequest.account_no || '-' }}</dd></div><div><dt class="text-xs text-gray-500">付款时间</dt><dd class="mt-1">{{ dateText(selectedRequest.paid_on) }}</dd></div></dl></section>
-          <section v-if="selectedRequest.no_invoice_reason"><h4 class="mb-2 text-sm font-semibold">无票原因</h4><p class="rounded bg-gray-50 p-3 text-sm text-gray-600 whitespace-pre-wrap">{{ selectedRequest.no_invoice_reason }}</p></section>
-          <section><h4 class="mb-4 text-sm font-semibold">&#x5BA1;&#x6279;&#x8BB0;&#x5F55;</h4><div class="flex min-w-[760px] items-start overflow-x-auto"><template v-for="(step,index) in selectedRequest.steps || []" :key="step.step_key || step.step_index"><div class="w-40 shrink-0 text-center"><div class="mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold" :class="['&#x5DF2;&#x901A;&#x8FC7;','&#x5DF2;&#x529E;&#x7406;'].includes(step.status) ? 'bg-emerald-600 text-white' : step.status === '&#x5DF2;&#x62D2;&#x7EDD;' ? 'bg-red-600 text-white' : step.step_index === selectedRequest.current_step_index ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-600'">{{ step.step_index }}</div><div class="mt-2 text-xs font-medium">{{ step.label }}</div><div class="mt-1 text-[11px] text-gray-500">{{ step.approvers.join(' / ') }}</div><div v-if="step.origin === 'add_sign'" class="mt-1 text-[10px] font-medium text-blue-700">&#x52A0;&#x7B7E;&#x8282;&#x70B9;</div><div v-if="step.acted_on" class="mt-1 text-[10px] text-gray-400">{{ dateText(step.acted_on) }}</div><div v-if="step.note" class="mt-1 text-[10px] text-gray-500">{{ step.note }}</div><div v-if="step.add_sign_opinion" class="mt-1 rounded bg-blue-50 px-2 py-1 text-[10px] text-blue-700">&#x52A0;&#x7B7E;&#x610F;&#x89C1;&#xFF1A;{{ step.add_sign_opinion }}</div></div><div v-if="index < selectedRequest.steps.length - 1" class="mt-4 flex-1 border-t-2 border-dashed border-gray-300"></div></template></div></section>
-          <section v-if="selectedRequest.operation_log?.length"><h4 class="mb-2 text-sm font-semibold">撤回/下推操作记录</h4><div class="space-y-2"><div v-for="(event,index) in selectedRequest.operation_log" :key="index" class="rounded bg-gray-50 p-3 text-xs text-gray-600"><span class="font-medium">{{ event.action }}</span> · {{ event.actor }} · {{ dateText(event.acted_on) }} · {{ event.from_status }} → {{ event.to_status }}<span v-if="event.note"> · {{ event.note }}</span></div></div></section>
+
+              <div v-if="selectedRequest.can_edit_expense_items && !selectedRequest.classification_ready" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div class="font-medium">&#x5F85;&#x8D22;&#x52A1;&#x5F52;&#x7C7B;</div>
+                <div class="mt-1 text-xs leading-5">&#x8BF7;&#x4E3A;&#x6BCF;&#x4E2A;&#x9879;&#x76EE;&#x9009;&#x62E9;&#x8D39;&#x7528;&#x79D1;&#x76EE;&#x5E76;&#x4FDD;&#x5B58;&#xFF0C;&#x5168;&#x90E8;&#x5B8C;&#x6574;&#x540E;&#x624D;&#x80FD;&#x5BA1;&#x6279;&#x901A;&#x8FC7;&#x3002;</div>
+              </div>
+
+              <section v-for="(group, groupIndex) in detailGroups" :key="group.group_key" data-testid="expense-group" class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <div class="flex flex-col gap-3 border-b border-gray-200 bg-gray-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="min-w-0">
+                    <div class="text-xs font-medium text-gray-500">&#x8D39;&#x7528;&#x7EC4; {{ groupIndex + 1 }}</div>
+                    <input v-if="isDraftDetail" :value="group.project_name" class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium" placeholder="&#x8BC6;&#x522B;&#x4E3A;&#x7A7A;&#x65F6;&#x8BF7;&#x586B;&#x5199;&#x9879;&#x76EE;&#x540D;&#x79F0;" @change="updateGroupField(group, 'project_name', $event.target.value)" />
+                    <div v-else class="mt-1 truncate text-base font-semibold text-gray-900">{{ group.project_name || '&#x672A;&#x586B;&#x9879;&#x76EE;&#x540D;&#x79F0;' }}</div>
+                  </div>
+                  <div class="shrink-0 text-left sm:text-right"><div class="text-xs text-gray-500">&#x5C0F;&#x8BA1;</div><div class="mt-1 text-lg font-semibold text-red-600">{{ money(group.total_amount, true) }}</div></div>
+                </div>
+
+                <div data-testid="finance-classification" class="border-b px-4 py-4" :class="selectedRequest.can_edit_expense_items ? 'border-amber-200 bg-amber-50/70' : 'border-gray-100 bg-white'">
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div><div class="text-sm font-semibold text-gray-900">&#x8D39;&#x7528;&#x79D1;&#x76EE;</div><div class="mt-1 text-xs text-gray-500">{{ selectedRequest.can_edit_expense_items ? '&#x7531;&#x8D22;&#x52A1;&#x5728;&#x5F53;&#x524D;&#x5BA1;&#x6279;&#x8282;&#x70B9;&#x9009;&#x62E9;' : '&#x5458;&#x5DE5;&#x53EF;&#x7559;&#x7A7A;&#xFF0C;&#x8D22;&#x52A1;&#x5BA1;&#x6279;&#x65F6;&#x5F52;&#x7C7B;' }}</div></div>
+                    <input v-if="canEditExpenseItems" :value="group.expense_item" list="expense-item-options" class="w-full rounded-lg border bg-white px-3 py-2 text-sm sm:max-w-xs" :class="selectedRequest.can_edit_expense_items && !group.expense_item ? 'border-amber-400 ring-2 ring-amber-100' : 'border-gray-300'" placeholder="&#x9009;&#x62E9;&#x6216;&#x586B;&#x5199;&#x8D39;&#x7528;&#x79D1;&#x76EE;" @input="updateGroupField(group, 'expense_item', $event.target.value)" />
+                    <span v-else class="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800">{{ group.expense_item || '&#x5F85;&#x8D22;&#x52A1;&#x5F52;&#x7C7B;' }}</span>
+                  </div>
+                </div>
+
+                <div class="grid gap-x-5 gap-y-4 px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div><div class="text-xs text-gray-500">&#x53D1;&#x7968;&#x7C7B;&#x522B;</div><div class="mt-1 text-sm text-gray-900">{{ group.invoice_category || '-' }}</div></div>
+                  <div><div class="text-xs text-gray-500">&#x5F00;&#x7968;&#x65E5;&#x671F;</div><div class="mt-1 text-sm text-gray-900">{{ group.issue_date || '-' }}</div></div>
+                  <div class="sm:col-span-2"><div class="text-xs text-gray-500">&#x53D1;&#x7968;&#x53F7;&#x7801;</div><div class="mt-1 break-all text-sm text-gray-900">{{ group.invoice_number || '-' }}</div></div>
+                  <div><div class="text-xs text-gray-500">&#x7A0E;&#x524D;&#x91D1;&#x989D;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ money(group.amount_before_tax, true) }}</div></div>
+                  <div><div class="text-xs text-gray-500">&#x7A0E;&#x989D;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ money(group.tax_amount, true) }}</div></div>
+                  <div><div class="text-xs text-gray-500">&#x5408;&#x8BA1;&#x91D1;&#x989D;</div><div class="mt-1 text-sm font-semibold text-red-600">{{ money(group.total_amount, true) }}</div></div>
+                  <div><div class="text-xs text-gray-500">&#x53D1;&#x7968;&#x6587;&#x4EF6;</div><div class="mt-1 flex flex-wrap gap-1"><button v-for="(invoice,index) in invoicesForGroup(group)" :key="invoice.name" class="rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoice"><FeatherIcon name="eye" class="mr-1 inline h-3.5 w-3.5" />&#x67E5;&#x770B;&#x53D1;&#x7968; {{ index + 1 }}</button><span v-if="!invoicesForGroup(group).length" class="text-sm text-gray-400">&#x65E0;&#x7968;</span></div></div>
+                </div>
+
+                <div class="space-y-3 border-t border-gray-100 bg-gray-50/50 px-4 py-4">
+                  <div v-for="(source, sourceIndex) in group.source_lines" :key="source.line_key" class="rounded-lg border border-gray-200 bg-white p-3">
+                    <div class="flex flex-col gap-3 lg:grid lg:grid-cols-[120px_minmax(0,1fr)_minmax(240px,0.9fr)]">
+                      <div class="min-w-0"><div class="text-xs font-medium text-gray-700">&#x539F;&#x59CB;&#x660E;&#x7EC6; {{ sourceIndex + 1 }}</div><div class="mt-1 truncate text-xs text-gray-500">{{ source.invoice_number || source.invoice_category || source.project_name || '-' }}</div></div>
+                      <label class="text-xs text-gray-500">&#x8D39;&#x7528;&#x8BF4;&#x660E;
+                        <input v-if="isDraftDetail" :value="source.expense_description || source.description" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="&#x5458;&#x5DE5;&#x5FC5;&#x586B;&#x8D39;&#x7528;&#x8BF4;&#x660E;" @input="updateSourceField(source.line_key, 'expense_description', $event.target.value)" />
+                        <div v-else class="mt-1 min-h-9 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-800">{{ source.expense_description || source.description || '-' }}</div>
+                      </label>
+                      <div class="text-xs text-gray-500">
+                        <div class="flex items-center justify-between gap-2"><span>&#x8865;&#x5145;&#x9644;&#x4EF6; ({{ source.attachments?.length || 0 }}/10)</span><label v-if="isDraftDetail" class="cursor-pointer rounded-md bg-gray-100 px-2 py-1 font-medium text-gray-700 hover:bg-gray-200"><span v-if="attachmentBusy[attachmentKey(source.line_key)]">&#x4E0A;&#x4F20;&#x4E2D;...</span><span v-else>&#x6DFB;&#x52A0;&#x9644;&#x4EF6;</span><input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple class="hidden" :disabled="attachmentBusy[attachmentKey(source.line_key)]" @change="handleExpenseAttachments(source, $event)" /></label></div>
+                        <div class="mt-2 flex min-h-8 flex-wrap gap-1"><span v-if="!source.attachments?.length" class="py-1 text-gray-400">&#x6682;&#x65E0;&#x8865;&#x5145;&#x9644;&#x4EF6;</span><span v-for="attachment in source.attachments || []" :key="attachment.name" class="inline-flex max-w-full items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-blue-700"><button class="truncate" :title="attachment.original_filename" @click="openExpenseAttachment(attachment)">{{ attachment.original_filename }}</button><button v-if="isDraftDetail" class="text-red-600" title="Delete" @click="removeExpenseAttachment(attachment)">&times;</button></span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div v-if="!detailGroups.length" class="rounded-xl border border-dashed border-gray-300 bg-white px-5 py-12 text-center text-sm text-gray-400">&#x6682;&#x65E0;&#x8D39;&#x7528;&#x660E;&#x7EC6;</div>
+            </main>
+
+            <aside class="min-w-0 space-y-4 xl:sticky xl:top-4">
+              <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                <h4 class="text-sm font-semibold text-gray-900">&#x4ED8;&#x6B3E;&#x4FE1;&#x606F;</h4>
+                <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-1">
+                  <div><dt class="text-xs text-gray-500">&#x4ED8;&#x6B3E;&#x7C7B;&#x578B;</dt><dd class="mt-1 text-gray-900">{{ selectedRequest.payment_type || '-' }}</dd></div>
+                  <div><dt class="text-xs text-gray-500">&#x4ED8;&#x6B3E;&#x65B9;&#x5F0F;</dt><dd class="mt-1 text-gray-900">{{ selectedRequest.payment_method || '-' }}</dd></div>
+                  <div><dt class="text-xs text-gray-500">&#x6536;&#x6B3E;&#x4EBA;</dt><dd class="mt-1 text-gray-900">{{ selectedRequest.payee_name || '-' }}</dd></div>
+                  <div><dt class="text-xs text-gray-500">&#x5F00;&#x6237;&#x884C; / &#x652F;&#x884C;</dt><dd class="mt-1 break-words text-gray-900">{{ [selectedRequest.bank_name,selectedRequest.branch].filter(Boolean).join(' / ') || '-' }}</dd></div>
+                  <div><dt class="text-xs text-gray-500">&#x6536;&#x6B3E;&#x8D26;&#x53F7;</dt><dd class="mt-1 break-all text-gray-900">{{ selectedRequest.account_no || '-' }}</dd></div>
+                  <div><dt class="text-xs text-gray-500">&#x4ED8;&#x6B3E;&#x65F6;&#x95F4;</dt><dd class="mt-1 text-gray-900">{{ dateText(selectedRequest.paid_on) }}</dd></div>
+                </dl>
+              </section>
+
+              <section v-if="selectedRequest.no_invoice_reason" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"><h4 class="text-sm font-semibold text-gray-900">&#x65E0;&#x7968;&#x539F;&#x56E0;</h4><p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{{ selectedRequest.no_invoice_reason }}</p></section>
+
+              <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                <h4 class="text-sm font-semibold text-gray-900">&#x5BA1;&#x6279;&#x8FDB;&#x5EA6;</h4>
+                <ol class="mt-4 space-y-0">
+                  <li v-for="(step,index) in selectedRequest.steps || []" :key="step.step_key || step.step_index" class="relative flex gap-3 pb-5 last:pb-0">
+                    <div v-if="index < selectedRequest.steps.length - 1" class="absolute left-[15px] top-8 h-[calc(100%-1rem)] border-l border-dashed border-gray-300"></div>
+                    <div class="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold" :class="['&#x5DF2;&#x901A;&#x8FC7;','&#x5DF2;&#x529E;&#x7406;'].includes(step.status) ? 'bg-emerald-600 text-white' : step.status === '&#x5DF2;&#x62D2;&#x7EDD;' ? 'bg-red-600 text-white' : step.step_index === selectedRequest.current_step_index ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-600'">{{ step.step_index }}</div>
+                    <div class="min-w-0 pt-0.5"><div class="text-sm font-medium text-gray-900">{{ step.label }}</div><div class="mt-1 break-all text-xs text-gray-500">{{ step.approvers.join(' / ') }}</div><div v-if="step.origin === 'add_sign'" class="mt-1 text-xs font-medium text-blue-700">&#x52A0;&#x7B7E;&#x8282;&#x70B9; &middot; {{ step.add_sign_position === 'before' ? '&#x5728;&#x524D;' : '&#x5728;&#x540E;' }}</div><div v-if="step.acted_on" class="mt-1 text-xs text-gray-400">{{ dateText(step.acted_on) }}</div><div v-if="step.note" class="mt-1 text-xs text-gray-600">{{ step.note }}</div><div v-if="step.add_sign_opinion" class="mt-2 rounded-md bg-blue-50 px-2 py-1.5 text-xs text-blue-700">&#x52A0;&#x7B7E;&#x610F;&#x89C1;&#xFF1A;{{ step.add_sign_opinion }}</div></div>
+                  </li>
+                </ol>
+              </section>
+
+              <section v-if="selectedRequest.operation_log?.length" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                <h4 class="text-sm font-semibold text-gray-900">&#x64CD;&#x4F5C;&#x8BB0;&#x5F55;</h4>
+                <div class="mt-3 max-h-52 space-y-2 overflow-y-auto"><div v-for="(event,index) in selectedRequest.operation_log" :key="index" class="rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-600"><div class="font-medium text-gray-800">{{ event.action }}</div><div>{{ event.actor }} &middot; {{ dateText(event.acted_on) }}</div><div>{{ event.from_status }} &rarr; {{ event.to_status }}<span v-if="event.note"> &middot; {{ event.note }}</span></div></div></div>
+              </section>
+            </aside>
+          </div>
         </div>
-<footer class="flex flex-col gap-2 border-t bg-gray-50 px-5 py-3 md:flex-row md:items-center">
-  <input v-model="actionNote" class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-sm" placeholder="&#x5BA1;&#x6279;&#x3001;&#x4ED8;&#x6B3E;&#x6216;&#x64A4;&#x56DE;&#x5907;&#x6CE8;" />
-  <div class="flex flex-wrap justify-end gap-2">
-    <Button variant="subtle" @click="detailRequestName = ''">&#x5173;&#x95ED;</Button>
-    <Button v-if="selectedRequest.can_withdraw" variant="subtle" @click="withdrawRequest(selectedRequest)">&#x64A4;&#x56DE;&#x7533;&#x8BF7;</Button>
-    <Button v-if="selectedRequest.can_withdraw_payment" variant="subtle" @click="withdrawPayment(selectedRequest)">&#x64A4;&#x56DE;&#x4ED8;&#x6B3E;</Button>
-    <Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" :loading="saving" @click="submitDraft(selectedRequest)">&#x63D0;&#x4EA4;&#x5BA1;&#x6279;</Button>
-    <Button v-if="selectedRequest.can_add_sign" variant="subtle" @click="openAddSign">&#x52A0;&#x7B7E;</Button>
-    <Button v-if="selectedRequest.can_reject && selectedRequest.current_step_mode !== 'handle'" variant="subtle" @click="openReject(selectedRequest)">&#x9A73;&#x56DE;</Button>
-    <Button v-if="selectedRequest.can_approve" variant="solid" :loading="saving" @click="act(selectedRequest,'approve')"><span v-if="selectedRequest.current_step_mode === 'handle'">&#x529E;&#x7406;&#x5B8C;&#x6210;</span><span v-else>&#x5BA1;&#x6279;&#x901A;&#x8FC7;</span></Button>
-    <Button v-else-if="selectedRequest.can_act && selectedRequest.current_step_mode !== 'handle'" variant="subtle" disabled title="Finance classification required">&#x8BF7;&#x5148;&#x8865;&#x5168;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
-    <Button v-if="selectedRequest.can_mark_paid" variant="solid" @click="markPaid(selectedRequest)">&#x6807;&#x8BB0;&#x5DF2;&#x4ED8;&#x6B3E;</Button>
-  </div>
-</footer>
+
+        <footer data-testid="approval-actions" class="sticky bottom-0 z-20 flex shrink-0 flex-col gap-3 border-t border-gray-200 bg-white px-5 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] sm:px-6 lg:flex-row lg:items-center">
+          <input v-model="actionNote" class="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm" placeholder="&#x5BA1;&#x6279;&#x3001;&#x4ED8;&#x6B3E;&#x6216;&#x64A4;&#x56DE;&#x5907;&#x6CE8;" />
+          <div class="flex flex-wrap justify-end gap-2">
+            <Button variant="subtle" @click="detailRequestName = ''">&#x5173;&#x95ED;</Button>
+            <Button v-if="selectedRequest.can_withdraw" variant="subtle" @click="withdrawRequest(selectedRequest)">&#x64A4;&#x56DE;&#x7533;&#x8BF7;</Button>
+            <Button v-if="selectedRequest.can_withdraw_payment" variant="subtle" @click="withdrawPayment(selectedRequest)">&#x64A4;&#x56DE;&#x4ED8;&#x6B3E;</Button>
+            <Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" :loading="saving" @click="submitDraft(selectedRequest)">&#x63D0;&#x4EA4;&#x5BA1;&#x6279;</Button>
+            <Button v-if="selectedRequest.can_edit_expense_items" variant="subtle" :loading="saving" @click="saveFinanceClassification">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
+            <Button v-if="selectedRequest.can_add_sign" variant="subtle" @click="openAddSign"><FeatherIcon name="user-plus" class="h-4 w-4" />&#x52A0;&#x7B7E;</Button>
+            <Button v-if="selectedRequest.can_reject && selectedRequest.current_step_mode !== 'handle'" variant="subtle" @click="openReject(selectedRequest)"><FeatherIcon name="corner-up-left" class="h-4 w-4" />&#x5B9A;&#x5411;&#x9A73;&#x56DE;</Button>
+            <Button v-if="selectedRequest.can_approve" variant="solid" :loading="saving" @click="act(selectedRequest,'approve')"><FeatherIcon name="check" class="h-4 w-4" /><span v-if="selectedRequest.current_step_mode === 'handle'">&#x529E;&#x7406;&#x5B8C;&#x6210;</span><span v-else>&#x5BA1;&#x6279;&#x901A;&#x8FC7;</span></Button>
+            <Button v-else-if="selectedRequest.can_act && selectedRequest.current_step_mode !== 'handle'" variant="subtle" disabled title="Finance classification required">&#x8BF7;&#x5148;&#x8865;&#x5168;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
+            <Button v-if="selectedRequest.can_mark_paid" variant="solid" @click="markPaid(selectedRequest)">&#x6807;&#x8BB0;&#x5DF2;&#x4ED8;&#x6B3E;</Button>
+          </div>
+        </footer>
       </div>
     </div>
-
     <div v-if="showManualExpense" class="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 p-4" @click.self="showManualExpense = false">
       <div role="dialog" aria-modal="true" class="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">

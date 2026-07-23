@@ -31,3 +31,20 @@ test('approval actions are capability driven with targeted rejection and repeate
   assert.match(workbench, /add_sign_opinion/);
   assert.doesNotMatch(workbench, /act\(selectedRequest,'reject'\)/);
 });
+
+test('reimbursement detail is a responsive approval workbench with visible actions', () => {
+  assert.doesNotMatch(workbench, /min-w-\[1500px\]/);
+  for (const marker of [
+    'data-testid="expense-detail-workbench"',
+    'data-testid="expense-summary"',
+    'data-testid="expense-group"',
+    'data-testid="finance-classification"',
+    'data-testid="approval-actions"',
+  ]) {
+    assert.match(workbench, new RegExp(marker));
+  }
+  assert.match(workbench, /sticky top-0/);
+  assert.match(workbench, /sticky bottom-0/);
+  assert.match(workbench, /action_scope/);
+  assert.match(workbench, /&#x5B9A;&#x5411;&#x9A73;&#x56DE;/);
+});
