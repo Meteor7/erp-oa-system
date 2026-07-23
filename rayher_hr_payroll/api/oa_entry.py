@@ -346,13 +346,37 @@ def _step_pending_status(step):
     return STATUS_WAIT_HANDLE if step.get("mode") == "handle" else STATUS_PENDING
 
 
+def _resolve_route_approver(value):
+    candidate = _clean(value)
+    if not candidate:
+        return ""
+    if "@" in candidate:
+        return candidate.lower()
+    user = frappe.db.get_value(
+        "User", {"full_name": candidate, "enabled": 1}, "name"
+    )
+    if user:
+        return str(user)
+    for filters in (
+        {"employee_name": candidate, "status": "Active"},
+        {"name": candidate, "status": "Active"},
+    ):
+        employee_user = frappe.db.get_value("Employee", filters, "user_id")
+        if not employee_user:
+            continue
+        enabled_user = frappe.db.get_value(
+            "User", {"name": employee_user, "enabled": 1}, "name"
+        )
+        if enabled_user:
+            return str(enabled_user)
+    return candidate
 def _serialize_route_steps(steps, active=True):
     return [
         {
             "step_index": idx,
             "label": step["label"],
             "mode": step["mode"],
-            "approvers": step["approvers"],
+            "approvers": [_resolve_route_approver(value) for value in step["approvers"]],
             "status": _step_pending_status(step) if active and idx == 1 else STATUS_WAIT_FLOW,
             "approved_by": [],
         }

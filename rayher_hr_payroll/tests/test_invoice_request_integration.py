@@ -2379,3 +2379,39 @@ def test_workflow_metadata_reports_targets_and_add_sign_allowance():
     assert metadata["rejection_targets"][1]["target"] == "base-1"
     assert metadata["add_sign_count"] == 1
     assert metadata["add_sign_remaining"] == 19
+
+
+def test_resolve_route_approver_prefers_enabled_user_and_employee_link(monkeypatch):
+    calls = []
+
+    def get_value(doctype, filters, fieldname, **_kwargs):
+        calls.append((doctype, filters, fieldname))
+        if doctype == "User" and filters == {"full_name": "Supervisor", "enabled": 1}:
+            return None
+        if doctype == "Employee" and filters == {"employee_name": "Supervisor", "status": "Active"}:
+            return "person054@legacy.example.invalid"
+        if doctype == "User" and filters == {"name": "person054@legacy.example.invalid", "enabled": 1}:
+            return "person054@legacy.example.invalid"
+        return None
+
+    monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(get_value=get_value), raising=False)
+
+    assert oa_entry._resolve_route_approver("person054@legacy.example.invalid") == "person054@legacy.example.invalid"
+    assert oa_entry._resolve_route_approver("Supervisor") == "person054@legacy.example.invalid"
+    assert oa_entry._resolve_route_approver("Unknown") == "Unknown"
+    assert any(call[0] == "Employee" for call in calls)
+
+
+def test_serialize_route_steps_resolves_dynamic_supervisor(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_resolve_route_approver",
+        lambda value: "person054@legacy.example.invalid" if value == "Supervisor" else value,
+    )
+
+    rows = oa_entry._serialize_route_steps(
+        [{"label": "Supervisor", "mode": "approve", "approvers": ["Supervisor"]}],
+        active=True,
+    )
+
+    assert rows[0]["approvers"] == ["person054@legacy.example.invalid"]
