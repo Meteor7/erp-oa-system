@@ -24,6 +24,19 @@ test('expense lines expose private supplemental attachments', () => {
   assert.match(workflow, /MAX_EXPENSE_ATTACHMENTS\s*=\s*10/);
 });
 
+test('each invoice keeps its attachments immediately to the right in pending detail', () => {
+  const rowStart = workbench.indexOf('data-testid="expense-source-row"');
+  const rowEnd = workbench.indexOf('</section>', rowStart);
+  assert.ok(rowStart >= 0 && rowEnd > rowStart);
+  const rowSource = workbench.slice(rowStart, rowEnd);
+  const invoiceIndex = rowSource.indexOf('data-testid="source-invoice"');
+  const attachmentIndex = rowSource.indexOf('data-testid="source-attachments"');
+  const descriptionIndex = rowSource.indexOf('data-testid="source-description"');
+  assert.ok(invoiceIndex >= 0);
+  assert.ok(attachmentIndex > invoiceIndex);
+  assert.ok(descriptionIndex > attachmentIndex);
+});
+
 test('approval actions are capability driven with targeted rejection and repeated add-sign', () => {
   for (const contract of ['can_approve', 'can_reject', 'can_add_sign', 'rejection_targets', 'add_sign_remaining']) {
     assert.match(workbench, new RegExp(contract));

@@ -789,21 +789,28 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
                   <div><div class="text-xs text-gray-500">&#x7A0E;&#x524D;&#x91D1;&#x989D;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ money(group.amount_before_tax, true) }}</div></div>
                   <div><div class="text-xs text-gray-500">&#x7A0E;&#x989D;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ money(group.tax_amount, true) }}</div></div>
                   <div><div class="text-xs text-gray-500">&#x5408;&#x8BA1;&#x91D1;&#x989D;</div><div class="mt-1 text-sm font-semibold text-red-600">{{ money(group.total_amount, true) }}</div></div>
-                  <div><div class="text-xs text-gray-500">&#x53D1;&#x7968;&#x6587;&#x4EF6;</div><div class="mt-1 flex flex-wrap gap-1"><button v-for="(invoice,index) in invoicesForGroup(group)" :key="invoice.name" class="rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoice"><FeatherIcon name="eye" class="mr-1 inline h-3.5 w-3.5" />&#x67E5;&#x770B;&#x53D1;&#x7968; {{ index + 1 }}</button><span v-if="!invoicesForGroup(group).length" class="text-sm text-gray-400">&#x65E0;&#x7968;</span></div></div>
                 </div>
 
                 <div class="space-y-3 border-t border-gray-100 bg-gray-50/50 px-4 py-4">
-                  <div v-for="(source, sourceIndex) in group.source_lines" :key="source.line_key" class="rounded-lg border border-gray-200 bg-white p-3">
-                    <div class="flex flex-col gap-3 lg:grid lg:grid-cols-[120px_minmax(0,1fr)_minmax(240px,0.9fr)]">
-                      <div class="min-w-0"><div class="text-xs font-medium text-gray-700">&#x539F;&#x59CB;&#x660E;&#x7EC6; {{ sourceIndex + 1 }}</div><div class="mt-1 truncate text-xs text-gray-500">{{ source.invoice_number || source.invoice_category || source.project_name || '-' }}</div><button v-if="invoiceForSource(source)" class="mt-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoiceForSource(source)"><FeatherIcon name="eye" class="mr-1 h-3.5 w-3.5" />&#x67E5;&#x770B;&#x53D1;&#x7968;</button></div>
-                      <label class="text-xs text-gray-500">&#x8D39;&#x7528;&#x8BF4;&#x660E;
+                  <div v-for="(source, sourceIndex) in group.source_lines" :key="source.line_key" data-testid="expense-source-row" class="rounded-lg border border-gray-200 bg-white p-3">
+                    <div class="grid gap-3 lg:grid-cols-[minmax(230px,0.75fr)_minmax(260px,1fr)_minmax(0,1.2fr)] lg:items-start">
+                      <div data-testid="source-invoice" class="min-w-0">
+                        <div class="text-xs font-medium text-gray-700">&#x539F;&#x59CB;&#x660E;&#x7EC6; {{ sourceIndex + 1 }}</div>
+                        <div class="mt-1 truncate text-xs text-gray-500">{{ source.invoice_number || source.invoice_category || source.project_name || '-' }}</div>
+                        <button v-if="invoiceForSource(source)" class="mt-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100" @click="previewInvoiceRow = invoiceForSource(source)"><FeatherIcon name="eye" class="mr-1 h-3.5 w-3.5" />&#x67E5;&#x770B;&#x53D1;&#x7968;</button>
+                        <span v-else class="mt-2 inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500">&#x65E0;&#x7968;&#x660E;&#x7EC6;</span>
+                      </div>
+                      <div data-testid="source-attachments" class="min-w-0 text-xs text-gray-500 lg:border-l lg:border-gray-100 lg:pl-3">
+                        <div>&#x8865;&#x5145;&#x9644;&#x4EF6; ({{ source.attachments?.length || 0 }})</div>
+                        <div class="mt-2 flex min-h-8 flex-wrap gap-1">
+                          <span v-if="!source.attachments?.length" class="py-1 text-gray-400">&#x6682;&#x65E0;&#x8865;&#x5145;&#x9644;&#x4EF6;</span>
+                          <span v-for="attachment in source.attachments || []" :key="attachment.name" class="inline-flex max-w-full items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-blue-700"><button class="truncate" :title="attachment.original_filename" @click="openExpenseAttachment(attachment)">{{ attachment.original_filename }}</button></span>
+                        </div>
+                      </div>
+                      <label data-testid="source-description" class="text-xs text-gray-500 lg:border-l lg:border-gray-100 lg:pl-3">&#x8D39;&#x7528;&#x8BF4;&#x660E;
                         <input v-if="isDraftDetail && !source.source_invoice" :value="source.expense_description || source.description" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="&#x5458;&#x5DE5;&#x5FC5;&#x586B;&#x8D39;&#x7528;&#x8BF4;&#x660E;" @input="updateSourceField(source.line_key, 'expense_description', $event.target.value)" />
                         <div v-else class="mt-1 min-h-9 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-800">{{ source.expense_description || source.description || '-' }}</div>
                       </label>
-                      <div class="text-xs text-gray-500">
-                        <div class="flex items-center justify-between gap-2"><span>&#x8865;&#x5145;&#x9644;&#x4EF6; ({{ source.attachments?.length || 0 }})</span></div>
-                        <div class="mt-2 flex min-h-8 flex-wrap gap-1"><span v-if="!source.attachments?.length" class="py-1 text-gray-400">&#x6682;&#x65E0;&#x8865;&#x5145;&#x9644;&#x4EF6;</span><span v-for="attachment in source.attachments || []" :key="attachment.name" class="inline-flex max-w-full items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-blue-700"><button class="truncate" :title="attachment.original_filename" @click="openExpenseAttachment(attachment)">{{ attachment.original_filename }}</button></span></div>
-                      </div>
                     </div>
                   </div>
                 </div>
