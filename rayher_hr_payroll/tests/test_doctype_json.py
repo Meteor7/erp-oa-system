@@ -718,3 +718,13 @@ def test_expense_approval_dynamic_schema_contract():
     assert attachment_fields["file"].get("unique") == 1
     assert {permission["role"] for permission in attachment["permissions"]} == {"System Manager"}
     _assert_exact_field_order(attachment)
+
+
+def test_oa_request_asset_category_select_matches_six_stage_workflow():
+    fields = {field["fieldname"]: field for field in load_doctype("oa_approval_request")["fields"]}
+
+    assert fields["asset_category"]["options"].split("\n") == [
+        "非电子类固定资产（人事/行政）",
+        "电子类固定资产（IT）",
+        "其他",
+    ]

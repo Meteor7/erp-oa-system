@@ -127,7 +127,7 @@
       "fieldname": "asset_category",
       "fieldtype": "Select",
       "label": "Asset Category",
-      "options": "行政固定资产\nIT类固定资产\n其它"
+      "options": "非电子类固定资产（人事/行政）\n电子类固定资产（IT）\n其他"
     },
     {
       "fieldname": "source_type",
