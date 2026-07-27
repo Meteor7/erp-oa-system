@@ -20,6 +20,11 @@ from rayher_hr_payroll.oa_approval import (
     ApprovalRouteError,
     build_route,
 )
+from rayher_hr_payroll.oa_organization import (
+    DIRECT_SUPERVISOR_BY_EMPLOYEE,
+    OrganizationResolutionError,
+    resolve_stage_two_supervisor,
+)
 
 REQUEST_TYPES = [REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT]
 ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, OTHER_ASSET]
@@ -331,33 +336,87 @@ def _strict_reason_pairs(value):
     return pairs
 
 
+def _enabled_employee_user(employee_name):
+    candidate = _clean(employee_name)
+    if not candidate:
+        return ""
+    for filters in (
+        {"employee_name": candidate, "status": "Active"},
+        {"name": candidate, "status": "Active"},
+    ):
+        employee_user = frappe.db.get_value("Employee", filters, "user_id")
+        if not employee_user:
+            continue
+        enabled_user = frappe.db.get_value(
+            "User", {"name": employee_user, "enabled": 1}, "name"
+        )
+        if enabled_user:
+            return str(enabled_user)
+    return ""
+
+
 def _employee_context(user=None):
     user = user or frappe.session.user
     if user == "Guest":
-        frappe.throw(frappe._("\u8bf7\u5148\u767b\u5f55\u3002"))
+        frappe.throw(frappe._("请先登录。"))
     row = frappe.db.get_value(
         "Employee", {"user_id": user}, ["name", "employee_name", "department", "reports_to"], as_dict=True
     )
     if not row:
-        return {"employee": None, "employee_name": "", "department": "", "supervisor": ""}
-    supervisor = ""
-    if row.get("reports_to"):
-        supervisor = frappe.db.get_value("Employee", row.reports_to, "employee_name") or row.reports_to
-    return {
+        return {
+            "employee": None,
+            "employee_name": "",
+            "department": "",
+            "supervisor": "",
+            "supervisor_user": "",
+            "supervisor_decision": "",
+            "supervisor_path": [],
+        }
+
+    employee_name = _clean(row.employee_name or row.name)
+    context = {
         "employee": row.name,
-        "employee_name": row.employee_name or row.name,
+        "employee_name": employee_name,
         "department": _display_department(row.department),
-        "supervisor": supervisor,
+        "supervisor": "",
+        "supervisor_user": "",
+        "supervisor_decision": "",
+        "supervisor_path": [],
     }
+    if employee_name in DIRECT_SUPERVISOR_BY_EMPLOYEE:
+        try:
+            resolution = resolve_stage_two_supervisor(employee_name, _enabled_employee_user)
+        except OrganizationResolutionError as exc:
+            frappe.throw(str(exc))
+        context.update(
+            {
+                "supervisor": resolution.supervisor_name,
+                "supervisor_user": resolution.user_id,
+                "supervisor_decision": resolution.decision,
+                "supervisor_path": list(resolution.traversed),
+                "supervisor_reason": resolution.reason,
+            }
+        )
+        return context
+
+    # Compatibility for isolated fixtures and legacy Employees not yet in the chart.
+    if row.get("reports_to"):
+        context["supervisor"] = (
+            frappe.db.get_value("Employee", row.reports_to, "employee_name")
+            or row.reports_to
+        )
+    return context
 
 
 def _route_context(department=None, supervisor=None, asset_category=None):
     ctx = _employee_context()
-    ctx["department"] = _canonical_department(department or ctx.get("department"))
-    ctx["supervisor"] = supervisor or ctx.get("supervisor") or ""
+    organization_managed = bool(ctx.get("supervisor_decision"))
+    selected_department = ctx.get("department") if organization_managed else (department or ctx.get("department"))
+    ctx["department"] = _canonical_department(selected_department)
+    if not organization_managed:
+        ctx["supervisor"] = supervisor or ctx.get("supervisor") or ""
     ctx["asset_category"] = asset_category or OTHER_ASSET
     return ctx
-
 
 def _step_pending_status(step):
     return STATUS_WAIT_HANDLE if step.get("mode") == "handle" else STATUS_PENDING

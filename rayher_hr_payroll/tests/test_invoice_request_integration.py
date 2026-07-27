@@ -2754,3 +2754,60 @@ def test_assigned_executive_counts_as_one_cosigner_instead_of_override(monkeypat
     assert doc.current_step_index == 1
     assert step.status == oa_entry.STATUS_PENDING
     assert json.loads(step.approved_by) == ["person046@business.example.invalid"]
+
+
+
+def test_employee_context_resolves_department_supervisor_from_organization(monkeypatch):
+    class OrganizationDB:
+        def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
+            if doctype == "Employee" and as_dict:
+                return Row(
+                    name="HR-EMP-SOFTWARE",
+                    employee_name="演示员工150",
+                    department="研发部 - RAY",
+                    reports_to="",
+                )
+            if doctype == "Employee" and isinstance(filters, dict):
+                if filters.get("employee_name") == "演示员工132" and fieldname == "user_id":
+                    return "person024@business.example.invalid"
+                return None
+            if doctype == "User" and isinstance(filters, dict):
+                if filters.get("name") == "person024@business.example.invalid" and filters.get("enabled") == 1:
+                    return "person024@business.example.invalid"
+            return None
+
+    frappe_stub.db = OrganizationDB()
+
+    context = oa_entry._employee_context("software@example.com")
+
+    assert context["employee"] == "HR-EMP-SOFTWARE"
+    assert context["supervisor"] == "演示员工132"
+    assert context["supervisor_user"] == "person024@business.example.invalid"
+    assert context["supervisor_decision"] == "approve"
+    assert context["supervisor_path"] == ["演示员工132"]
+
+
+def test_route_context_ignores_caller_supplied_supervisor_for_mapped_employee(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {
+            "employee": "HR-EMP-SOFTWARE",
+            "employee_name": "演示员工150",
+            "department": "研发部 - RAY",
+            "supervisor": "演示员工132",
+            "supervisor_user": "person024@business.example.invalid",
+            "supervisor_decision": "approve",
+            "supervisor_path": ["演示员工132"],
+        },
+    )
+
+    context = oa_entry._route_context(
+        department="伪造部门",
+        supervisor="伪造审批人",
+        asset_category=oa_entry.OTHER_ASSET,
+    )
+
+    assert context["department"] == "研发部 - RAY"
+    assert context["supervisor"] == "演示员工132"
+    assert context["supervisor_user"] == "person024@business.example.invalid"
