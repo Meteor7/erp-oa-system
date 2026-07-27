@@ -2811,3 +2811,26 @@ def test_route_context_ignores_caller_supplied_supervisor_for_mapped_employee(mo
     assert context["department"] == "研发部 - RAY"
     assert context["supervisor"] == "演示员工132"
     assert context["supervisor_user"] == "person024@business.example.invalid"
+
+
+
+def test_preview_route_passes_resolved_supervisor_user_into_route_builder(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_route_context",
+        lambda **_kwargs: {
+            "employee": "HR-EMP-SOFTWARE",
+            "employee_name": "演示员工150",
+            "department": "研发部 - RAY",
+            "supervisor": "演示员工132",
+            "supervisor_user": "person024@business.example.invalid",
+            "supervisor_decision": "approve",
+            "supervisor_path": ["演示员工132"],
+            "asset_category": oa_entry.OTHER_ASSET,
+        },
+    )
+
+    result = oa_entry.preview_route(oa_entry.REQUEST_EXPENSE_PAYMENT)
+    supervisor_step = next(step for step in result["steps"] if step["label"] == "直属主管：演示员工132")
+
+    assert supervisor_step["approvers"] == ["person024@business.example.invalid"]

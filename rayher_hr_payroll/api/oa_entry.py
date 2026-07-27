@@ -1171,6 +1171,8 @@ def preview_route(request_type, department=None, supervisor=None, asset_category
             request_type,
             department=ctx["department"],
             supervisor=ctx["supervisor"],
+            supervisor_user=ctx.get("supervisor_user"),
+            supervisor_decision=ctx.get("supervisor_decision"),
             asset_category=ctx["asset_category"],
         )
         return {"context": ctx, "steps": _serialize_route_steps(steps, active=_to_bool(active))}
