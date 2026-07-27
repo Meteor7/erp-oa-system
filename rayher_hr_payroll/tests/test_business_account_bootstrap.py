@@ -15,6 +15,10 @@ def test_account_specs_preserve_admin_system_manager_and_limit_business_executiv
     assert specs["person067@legacy.example.invalid"]["employee"] == "HR-EMP-90008"
     assert specs["person065@legacy.example.invalid"]["employee"] == "HR-EMP-90016"
     assert specs["person072@legacy.example.invalid"]["employee"] == "HR-EMP-90007"
+    assert specs["person047@legacy.example.invalid"]["employee"] == "HR-EMP-90011"
+    assert specs["person068@legacy.example.invalid"]["employee"] == "HR-EMP-90012"
+    assert "Department Manager" in specs["person047@legacy.example.invalid"]["roles"]
+    assert "Department Manager" in specs["person068@legacy.example.invalid"]["roles"]
     assert specs["person046@business.example.invalid"]["employee"] == "HR-EMP-90004"
     assert specs["person060@legacy.example.invalid"]["employee"] == "HR-EMP-90003"
     assert specs["person060@legacy.example.invalid"]["legacy_user_id"] == "person058@legacy.example.invalid"

@@ -47,6 +47,20 @@ ACCOUNT_SPECS = (
         "roles": ("Employee", "Accounts User", "Department Manager"),
     },
     {
+        "user_id": "person047@legacy.example.invalid",
+        "full_name": "演示人员Heaf0f1",
+        "employee": "HR-EMP-90011",
+        "employee_name": "演示人员Heaf0f1",
+        "roles": ("Employee", "HR User", "Department Manager"),
+    },
+    {
+        "user_id": "person068@legacy.example.invalid",
+        "full_name": "演示人员H75c4e2",
+        "employee": "HR-EMP-90012",
+        "employee_name": "演示人员H75c4e2",
+        "roles": ("Employee", "Department Manager"),
+    },
+    {
         "user_id": "person046@business.example.invalid",
         "full_name": "\u6f14\u793a\u4eba\u5458Hf4b020",
         "employee": "HR-EMP-90004",
