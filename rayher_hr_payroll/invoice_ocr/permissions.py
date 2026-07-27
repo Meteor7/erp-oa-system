@@ -7,7 +7,7 @@ import frappe
 _BATCH = "OA Invoice Import Batch"
 _RECORD = "OA Invoice Record"
 _VIEW_LOG = "OA Invoice View Log"
-_HIGH_PRIVILEGE_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager"}
+_HIGH_PRIVILEGE_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager", "Rayher Business Executive"}
 
 
 def _get(doc, field, default=None):

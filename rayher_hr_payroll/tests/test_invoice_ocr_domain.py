@@ -79,6 +79,7 @@ def permissions_module(monkeypatch):
     roles = {
         "admin@example.com": ["System Manager"],
         "finance@example.com": ["Accounts User"],
+        "executive@example.com": ["Rayher Business Executive"],
         "hr@example.com": ["HR User"],
         "hr-manager@example.com": ["HR Manager"],
         "alice@example.com": ["Employee"],
@@ -419,6 +420,14 @@ def test_has_permission_matches_read_and_defers_nonread_to_doctype_permissions(p
     assert permissions.invoice_record_has_permission(record, "write", "stranger@example.com") is None
     assert permissions.invoice_record_has_permission(record, "create", "stranger@example.com") is None
     assert permissions.invoice_record_has_permission(record, "delete", "stranger@example.com") is None
+
+
+def test_business_executive_has_business_wide_invoice_read(permissions_module):
+    permissions, _frappe = permissions_module
+
+    assert permissions.invoice_record_query("executive@example.com") == ""
+    assert permissions.invoice_batch_query("executive@example.com") == ""
+    assert permissions.invoice_view_log_query("executive@example.com") == permissions.invoice_view_log_query("admin@example.com")
 
 
 def test_query_conditions_are_role_aware_and_escape_every_dynamic_identity(permissions_module):

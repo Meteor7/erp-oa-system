@@ -512,7 +512,7 @@ def _install_request_environment(monkeypatch):
     monkeypatch.setattr(
         oa_entry,
         "_summarize_doc",
-        lambda doc: {"name": doc.name, "status": doc.workflow_status},
+        lambda doc, authorized_expense_lines=None: {"name": doc.name, "status": doc.workflow_status},
     )
     return environment
 
@@ -843,7 +843,7 @@ def test_update_draft_invoice_details_only_changes_reason_fields(monkeypatch):
     environment.committed[doc.name] = doc
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current: {"name": current.name})
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current, authorized_expense_lines=None: {"name": current.name})
     result = oa_entry.update_draft_invoice_details(
         doc.name,
         no_invoice_reason="  无票说明  ",
@@ -913,7 +913,7 @@ def _install_draft_reason_doc(monkeypatch, line_count=1):
     environment.committed[doc.name] = doc
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current: {"name": current.name})
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current, authorized_expense_lines=None: {"name": current.name})
     return environment, doc
 
 
@@ -1522,7 +1522,7 @@ def test_paid_request_requires_finance_payment_withdrawal(monkeypatch):
     environment.committed[request.name] = request
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc: {"workflow_status": doc.workflow_status, "operation_log": json.loads(doc.operation_log or "[]")})
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc, authorized_expense_lines=None: {"workflow_status": doc.workflow_status, "operation_log": json.loads(doc.operation_log or "[]")})
     with pytest.raises(ValidationError, match="财务"):
         oa_entry.withdraw_request(request.name)
     frappe_stub.get_roles = lambda user=None: ["Accounts User"]
@@ -1668,7 +1668,7 @@ def test_list_requests_supports_exact_name_without_bypassing_visibility(monkeypa
         ),
     }
     _install_report_requests(monkeypatch, docs)
-    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc: {"name": doc.name})
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc, authorized_expense_lines=None: {"name": doc.name})
 
     result = oa_entry.list_requests(
         view="all", limit=1, request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, name="REQ-ALICE"
@@ -2676,6 +2676,7 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: [])
     monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: True)
+    monkeypatch.setattr(oa_entry, "_with_expense_attachments", lambda _doc, lines: lines)
 
     oa_entry.action_request(doc.name, "approve", note="business override")
 
@@ -2710,3 +2711,46 @@ def test_get_options_exposes_canonical_two_level_expense_accounts(monkeypatch):
             "Sabri",
         ],
     }
+
+
+def test_assigned_executive_counts_as_one_cosigner_instead_of_override(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    step = Row(
+        step_index=1,
+        step_key="executive-all-assigned",
+        label="演示员工21、演示员工29",
+        mode="all",
+        approvers=json.dumps(["person046@business.example.invalid", "person060@legacy.example.invalid"]),
+        approved_by="[]",
+        status=oa_entry.STATUS_PENDING,
+        action_by="",
+        acted_on=None,
+        note="",
+    )
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-EXEC-ASSIGNED",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_PENDING,
+            "current_step_index": 1,
+            "current_step_label": step.label,
+            "expense_lines": [],
+            "steps": [step],
+            "operation_log": "[]",
+        },
+    )
+    environment.committed[doc.name] = doc
+    frappe_stub.session.user = "person046@business.example.invalid"
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["person046@business.example.invalid"])
+    monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: True)
+
+    oa_entry.action_request(doc.name, "approve", note="first cosigner")
+
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+    assert doc.current_step_index == 1
+    assert step.status == oa_entry.STATUS_PENDING
+    assert json.loads(step.approved_by) == ["person046@business.example.invalid"]

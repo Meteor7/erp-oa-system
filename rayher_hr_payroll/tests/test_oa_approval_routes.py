@@ -34,13 +34,13 @@ def test_expense_payment_finance_department_route_with_admin_asset():
     assert labels(steps) == [
         "\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513",
         "\u76f4\u5c5e\u4e0a\u7ea7",
-        "\u6f14\u793a\u5458\u5de521",
+        "演示员工10",
         "\u6f14\u793a\u5458\u5de529",
         "\u8d22\u52a1\u529e\u7406\uff1a\u6f14\u793a\u5458\u5de513",
     ]
     assert modes(steps) == ["approve", "approve", "approve", "approve", "handle"]
     assert steps[0]["approvers"] == [FINANCE_AUDITOR_USER]
-    assert steps[2]["approvers"] == [VICE_MANAGER_USER]
+    assert steps[2]["approvers"] == ["person047@legacy.example.invalid"]
     assert steps[3]["approvers"] == [GENERAL_MANAGER_USER]
     assert steps[-1]["approvers"] == [FINANCE_AUDITOR_USER]
 

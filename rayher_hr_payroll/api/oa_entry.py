@@ -674,10 +674,16 @@ def _with_expense_attachments(doc, lines):
     return result
 
 
-def _summarize_doc(doc):
+def _summarize_doc(doc, authorized_expense_lines=None):
     step = _current_step(doc)
     invoice_summary = invoice_service.request_invoice_summary(doc)
-    expense_lines = _with_expense_attachments(doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])])
+    expense_lines = (
+        authorized_expense_lines
+        if authorized_expense_lines is not None
+        else _with_expense_attachments(
+            doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
+        )
+    )
     capabilities = _request_capabilities(doc)
     workflow_metadata = _workflow_metadata(doc)
     return {
@@ -2044,20 +2050,27 @@ def action_request(name, action="approve", note=None, reject_target=None):
         is_override = _is_oa_override_user()
         if not matched and not is_override:
             frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
+        acting_as_override = bool(is_override and not matched)
         actor = _clean(frappe.session.user)
         if action == "reject":
+            authorized_expense_lines = _with_expense_attachments(
+                doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
+            )
             _reject_to_target(doc, step, reject_target, actor, note)
             doc.save(ignore_permissions=True)
-            return _summarize_doc(doc)
+            return _summarize_doc(doc, authorized_expense_lines)
         if action != "approve":
             frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
         _validate_finance_classification(doc, step)
+        authorized_expense_lines = _with_expense_attachments(
+            doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
+        )
         approved_by = set(_parse_json_list(step.approved_by))
-        approved_by.update([actor] if is_override else matched)
+        approved_by.update([actor] if acting_as_override else matched)
         step.approved_by = _json_list(sorted(approved_by))
         if (
             step.mode == "all"
-            and not is_override
+            and not acting_as_override
             and not set(_parse_json_list(step.approvers)).issubset(approved_by)
         ):
             step.action_by = actor
@@ -2065,12 +2078,12 @@ def action_request(name, action="approve", note=None, reject_target=None):
             if note:
                 step.note = note
             doc.save(ignore_permissions=True)
-            return _summarize_doc(doc)
+            return _summarize_doc(doc, authorized_expense_lines)
         done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
         doc.save(ignore_permissions=True)
-        return _summarize_doc(doc)
+        return _summarize_doc(doc, authorized_expense_lines)
 
 
 @frappe.whitelist(methods=["POST"])

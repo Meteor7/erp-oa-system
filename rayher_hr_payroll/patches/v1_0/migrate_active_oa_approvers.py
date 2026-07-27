@@ -17,14 +17,15 @@ VICE = "\u6f14\u793a\u5458\u5de521"
 GENERAL = "\u6f14\u793a\u5458\u5de529"
 
 YE_USER = "person067@legacy.example.invalid"
+REN_USER = "person047@legacy.example.invalid"
 VICE_USER = "person046@business.example.invalid"
 LEGACY_GENERAL_USER = "person058@legacy.example.invalid"
 GENERAL_USER = "person060@legacy.example.invalid"
 
 LEGACY_USER_MAP = {
     YE: YE_USER,
-    REN: VICE_USER,
-    QING: GENERAL_USER,
+    REN: REN_USER,
+    QING: VICE_USER,
     WANG: GENERAL_USER,
     GENERAL: GENERAL_USER,
     LEGACY_GENERAL_USER: GENERAL_USER,
@@ -65,7 +66,7 @@ def build_step_migration(label, approvers, status):
         result = {"label": next_label, "approvers": next_approvers}
         return result if result != {"label": label, "approvers": approvers} else None
 
-    next_label = label.replace(REN, VICE).replace(QING, GENERAL).replace(WANG, GENERAL)
+    next_label = label.replace(QING, VICE).replace(WANG, GENERAL)
     next_approvers = list(dict.fromkeys(LEGACY_USER_MAP.get(value, value) for value in approvers))
     result = {"label": next_label, "approvers": next_approvers}
     return result if result != {"label": label, "approvers": approvers} else None

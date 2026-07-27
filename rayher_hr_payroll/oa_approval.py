@@ -8,6 +8,8 @@ VICE_MANAGER_USER = "person046@business.example.invalid"
 GENERAL_MANAGER_NAME = "\u6f14\u793a\u5458\u5de529"
 GENERAL_MANAGER_USER = "person060@legacy.example.invalid"
 IT_APPROVER_NAME = "\u6f14\u793a\u5458\u5de518"
+ADMIN_APPROVER_NAME = "\u6f14\u793a\u5458\u5de510"
+ADMIN_APPROVER_USER = "person047@legacy.example.invalid"
 
 FINANCE_AUDIT_LABEL = "\u8d22\u52a1\u5ba1\u8ba1\uff1a" + FINANCE_AUDITOR_NAME
 FINANCE_HANDLE_LABEL = "\u8d22\u52a1\u529e\u7406\uff1a" + FINANCE_AUDITOR_NAME
@@ -86,7 +88,7 @@ def build_expense_payment_route(department, supervisor, asset_category=OTHER_ASS
         _step(supervisor, approvers=[supervisor]),
     ]
     if asset == ADMIN_ASSET:
-        steps.append(_step(VICE_MANAGER_NAME, approvers=[VICE_MANAGER_USER]))
+        steps.append(_step(ADMIN_APPROVER_NAME, approvers=[ADMIN_APPROVER_USER]))
     elif asset == IT_ASSET:
         steps.append(_step(IT_APPROVER_NAME, approvers=[IT_APPROVER_NAME]))
     if dept == "sales":
