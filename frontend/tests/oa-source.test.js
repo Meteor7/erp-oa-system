@@ -10,6 +10,7 @@ const workbenchSource = readFileSync(new URL('../src/components/ExpenseWorkbench
 const uploadSource = readFileSync(new URL('../src/components/invoice/InvoiceUploadWorkbench.vue', import.meta.url), 'utf8');
 const invoiceLibSource = readFileSync(new URL('../src/lib/invoiceOcr.js', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../../rayher_hr_payroll/api/oa_entry.py', import.meta.url), 'utf8');
+const approvalRouteSource = readFileSync(new URL('../../rayher_hr_payroll/oa_approval.py', import.meta.url), 'utf8');
 const invoiceApiSource = readFileSync(new URL('../../rayher_hr_payroll/api/invoice_entry.py', import.meta.url), 'utf8');
 
 const C = {
@@ -155,4 +156,13 @@ test('reimbursement board supports approval payment and both withdrawal paths', 
   assert.ok(workbenchSource.includes(C.withdrawRequest));
   assert.ok(workbenchSource.includes(C.withdrawPayment));
   assert.match(workbenchSource, /operation_log/);
+});
+
+
+test('canonical reimbursement asset choices and payment confirmation are exposed', () => {
+  for (const value of ['非电子类固定资产（人事/行政）', '电子类固定资产（IT）', '其他']) {
+    assert.ok(approvalRouteSource.includes(value), `backend missing canonical asset: ${value}`);
+  }
+  assert.ok(workbenchSource.includes('确认付款'));
+  assert.match(apiSource, /确认付款/);
 });

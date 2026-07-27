@@ -6,9 +6,9 @@ import ExpenseWorkbench from '../components/ExpenseWorkbench.vue';
 
 const REQUEST_LEAVE = '\u8bf7\u5047\u7533\u8bf7';
 const REQUEST_EXPENSE_PAYMENT = '\u8d39\u7528\u4ed8\u6b3e\u7533\u8bf7';
-const ASSET_ADMIN = '\u884c\u653f\u56fa\u5b9a\u8d44\u4ea7';
-const ASSET_IT = '\u0049\u0054\u7c7b\u56fa\u5b9a\u8d44\u4ea7';
-const ASSET_OTHER = '\u5176\u5b83';
+const ASSET_ADMIN = '非电子类固定资产（人事/行政）';
+const ASSET_IT = '电子类固定资产（IT）';
+const ASSET_OTHER = '其他';
 
 const PAGE_CONFIG = {
   '/approval/leave': {
@@ -41,7 +41,7 @@ const T = {
   submitApproval: '\u63d0\u4ea4\u5ba1\u6279',
   approve: '\u901a\u8fc7',
   reject: '\u62d2\u7edd',
-  handle: '\u529e\u7406\u5b8c\u6210',
+  handle: '确认付款',
   markPaid: '\u6807\u8bb0\u5df2\u4ed8\u6b3e',
   note: '\u5907\u6ce8',
   status: '\u72b6\u6001',
@@ -355,7 +355,7 @@ function fmtAmount(value) {
 
 function modeLabel(mode) {
   if (mode === 'all') return '\u4f1a\u7b7e';
-  if (mode === 'handle') return '\u529e\u7406';
+  if (mode === 'handle') return '付款确认';
   return '\u5ba1\u6279';
 }
 

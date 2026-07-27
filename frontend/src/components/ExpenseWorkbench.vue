@@ -26,7 +26,10 @@ import InvoicePreviewDrawer from './invoice/InvoicePreviewDrawer.vue';
 import InvoiceUploadWorkbench from './invoice/InvoiceUploadWorkbench.vue';
 
 const REQUEST_TYPE = '费用付款申请';
-const ASSET_OTHER = '其它';
+const ASSET_ADMIN = '非电子类固定资产（人事/行政）';
+const ASSET_IT = '电子类固定资产（IT）';
+const ASSET_OTHER = '其他';
+const FALLBACK_ASSET_CATEGORIES = [ASSET_ADMIN, ASSET_IT, ASSET_OTHER];
 const NAV_ITEMS = [
   { key: 'invoices', label: '上传发票', icon: 'upload-cloud' },
   { key: 'board', label: '费用报销流', icon: 'trello' },
@@ -88,7 +91,7 @@ const blankLine = () => ({
 const expenseLines = ref([blankLine()]);
 const requestForm = reactive({
   subject: '', company: '', department: '', supervisor: '', doc_type: '', urgency: '',
-  asset_category: ASSET_OTHER, payment_type: '支付个人', payment_method: '', bank_name: '',
+  asset_category: '', payment_type: '支付个人', payment_method: '', bank_name: '',
   payee_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
 });
 
@@ -124,7 +127,7 @@ const departments = computed(() => options.data?.departments || []);
 const companies = computed(() => options.data?.companies || []);
 const docTypes = computed(() => options.data?.doc_types || []);
 const urgencies = computed(() => options.data?.urgencies || []);
-const assetCategories = computed(() => options.data?.asset_categories || [ASSET_OTHER]);
+const assetCategories = computed(() => options.data?.asset_categories || FALLBACK_ASSET_CATEGORIES);
 const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
 const expenseAccountTree = computed(() => options.data?.expense_account_tree || []);
@@ -334,7 +337,7 @@ function applyDefaults() {
 function resetForm() {
   Object.assign(requestForm, {
     subject: '', company: '', department: '', supervisor: '', doc_type: '', urgency: '',
-    asset_category: ASSET_OTHER, payment_type: '', payment_method: '', bank_name: '',
+    asset_category: '', payment_type: '', payment_method: '', bank_name: '',
     payee_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
   });
   expenseLines.value = [blankLine()];
@@ -370,7 +373,7 @@ async function saveRequest(submit) {
     || Number(line.total_amount || 0) <= 0
     || !clean(line.expense_description || line.description)
   ));
-  if (!requestForm.department || hasIncompleteLine) {
+  if (!requestForm.department || !requestForm.asset_category || hasIncompleteLine) {
     errorMessage.value = '请完整填写申请部门、项目名称、费用科目、日期、金额和费用说明。';
     return;
   }
@@ -380,7 +383,6 @@ async function saveRequest(submit) {
       request_type: REQUEST_TYPE,
       subject: requestForm.subject.trim() || valid[0].project_name || valid[0].invoice_category || '无票费用报销',
       department: requestForm.department,
-      supervisor: requestForm.supervisor,
       asset_category: requestForm.asset_category,
       amount: total.value,
       reason: requestForm.reason,
@@ -671,10 +673,10 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
               <label class="text-xs text-gray-500">主题<input v-model="requestForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500">公司<select v-model="requestForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in companies" :key="item">{{ item }}</option></select></label>
               <label class="text-xs text-gray-500">申请部门<select v-model="requestForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in departments" :key="item">{{ item }}</option></select></label>
-              <label class="text-xs text-gray-500">部门主管<input v-model="requestForm.supervisor" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+              <div data-testid="resolved-supervisor" class="text-xs text-gray-500">部门主管<div class="mt-1 min-h-9 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">{{ requestForm.supervisor || '由系统按组织架构判断' }}</div></div>
               <label class="text-xs text-gray-500">单据类型<select v-model="requestForm.doc_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in docTypes" :key="item">{{ item }}</option></select></label>
               <label class="text-xs text-gray-500">紧急程度<select v-model="requestForm.urgency" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in urgencies" :key="item">{{ item }}</option></select></label>
-              <label class="text-xs text-gray-500">资产类别<select v-model="requestForm.asset_category" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in assetCategories" :key="item">{{ item }}</option></select></label>
+              <label class="text-xs text-gray-500">资产类型（必选）<select v-model="requestForm.asset_category" data-testid="asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
             </div>
           </section>
           <section>
@@ -864,7 +866,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
             <Button v-if="selectedRequest.can_edit_expense_items" variant="subtle" :loading="saving" @click="saveFinanceClassification">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
             <Button v-if="selectedRequest.can_add_sign" variant="subtle" @click="openAddSign"><FeatherIcon name="user-plus" class="h-4 w-4" />&#x52A0;&#x7B7E;</Button>
             <Button v-if="selectedRequest.can_reject && selectedRequest.current_step_mode !== 'handle'" variant="subtle" @click="openReject(selectedRequest)"><FeatherIcon name="corner-up-left" class="h-4 w-4" />&#x5B9A;&#x5411;&#x9A73;&#x56DE;</Button>
-            <Button v-if="selectedRequest.can_approve" variant="solid" :loading="saving" @click="act(selectedRequest,'approve')"><FeatherIcon name="check" class="h-4 w-4" /><span v-if="selectedRequest.current_step_mode === 'handle'">&#x529E;&#x7406;&#x5B8C;&#x6210;</span><span v-else>&#x5BA1;&#x6279;&#x901A;&#x8FC7;</span></Button>
+            <Button v-if="selectedRequest.can_approve" variant="solid" :loading="saving" @click="act(selectedRequest,'approve')"><FeatherIcon name="check" class="h-4 w-4" /><span v-if="selectedRequest.current_step_mode === 'handle'">确认付款</span><span v-else>&#x5BA1;&#x6279;&#x901A;&#x8FC7;</span></Button>
             <Button v-else-if="selectedRequest.can_act && selectedRequest.current_step_mode !== 'handle'" variant="subtle" disabled title="Finance classification required">&#x8BF7;&#x5148;&#x8865;&#x5168;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
             <Button v-if="selectedRequest.can_mark_paid" variant="solid" @click="markPaid(selectedRequest)">&#x6807;&#x8BB0;&#x5DF2;&#x4ED8;&#x6B3E;</Button>
           </div>

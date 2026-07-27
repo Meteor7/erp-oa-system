@@ -2834,3 +2834,73 @@ def test_preview_route_passes_resolved_supervisor_user_into_route_builder(monkey
     supervisor_step = next(step for step in result["steps"] if step["label"] == "直属主管：演示员工132")
 
     assert supervisor_step["approvers"] == ["person024@business.example.invalid"]
+
+
+
+def test_submitting_expense_requires_explicit_asset_category(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-ASSET-REQUIRED",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_DRAFT,
+            "department": "研发部 - RAY",
+            "supervisor": "演示员工132",
+            "asset_category": "",
+            "expense_lines": [Row(project_name="项目甲", expense_description="打车", total_amount=20)],
+            "steps": [],
+            "operation_log": "[]",
+        },
+    )
+    monkeypatch.setattr(service, "validate_request_invoices", lambda *_args, **_kwargs: {})
+
+    with pytest.raises(ValidationError, match="资产类型"):
+        oa_entry._submit_draft(doc)
+
+
+def test_final_handle_step_confirms_payment_atomically(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    step = Row(
+        step_index=1,
+        step_key="confirm-payment",
+        label="确认付款：演示员工13",
+        mode="handle",
+        approvers=json.dumps(["person067@legacy.example.invalid"]),
+        approved_by="[]",
+        status=oa_entry.STATUS_WAIT_HANDLE,
+        action_by="",
+        acted_on=None,
+        note="",
+    )
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "REQ-CONFIRM-PAYMENT",
+            "owner": "alice@example.com",
+            "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+            "workflow_status": oa_entry.STATUS_WAIT_HANDLE,
+            "current_step_index": 1,
+            "current_step_label": step.label,
+            "expense_lines": [],
+            "steps": [step],
+            "operation_log": "[]",
+        },
+    )
+    environment.committed[doc.name] = doc
+    frappe_stub.session.user = "person067@legacy.example.invalid"
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["person067@legacy.example.invalid"])
+    monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: False)
+
+    oa_entry.action_request(doc.name, "approve", note="已核对付款")
+
+    assert doc.workflow_status == oa_entry.STATUS_PAID
+    assert doc.current_step_index == 0
+    assert step.status == oa_entry.STATUS_HANDLED
+    assert doc.paid_by == "person067@legacy.example.invalid"
+    assert doc.paid_on is not None
+    assert json.loads(doc.operation_log)[-1]["action"] == "确认付款"

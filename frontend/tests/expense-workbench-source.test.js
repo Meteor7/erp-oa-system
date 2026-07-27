@@ -63,3 +63,23 @@ test('reimbursement detail is a responsive approval workbench with visible actio
   assert.match(workbench, /action_scope/);
   assert.match(workbench, /&#x5B9A;&#x5411;&#x9A73;&#x56DE;/);
 });
+
+
+test('asset type is a required single select in manual and OCR push flows', () => {
+  const upload = readFileSync(new URL('../src/components/invoice/InvoiceUploadWorkbench.vue', import.meta.url), 'utf8');
+  for (const label of ['非电子类固定资产（人事/行政）', '电子类固定资产（IT）', '其他']) {
+    assert.ok(workbench.includes(label) || /assetCategories/.test(workbench), `missing asset option contract: ${label}`);
+  }
+  assert.match(workbench, /data-testid="asset-category-select"/);
+  assert.match(workbench, /!requestForm\.asset_category/);
+  assert.doesNotMatch(workbench, /supervisor:\s*requestForm\.supervisor/);
+  assert.doesNotMatch(workbench, /v-model="requestForm\.supervisor"/);
+  assert.match(upload, /data-testid="ocr-asset-category-select"/);
+  assert.match(upload, /props\.options\?\.asset_categories/);
+  assert.match(upload, /!pushForm\.asset_category/);
+});
+
+test('final handle action is explicitly confirmation of payment', () => {
+  assert.ok(workbench.includes('确认付款'));
+  assert.doesNotMatch(workbench, /办理完成/);
+});

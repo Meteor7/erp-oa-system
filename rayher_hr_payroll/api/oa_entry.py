@@ -19,6 +19,7 @@ from rayher_hr_payroll.oa_approval import (
     REQUEST_LEAVE,
     ApprovalRouteError,
     build_route,
+    normalize_asset_category,
 )
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
@@ -1089,6 +1090,15 @@ def _validate_expense_project_groups(doc):
     return groups
 
 
+def _required_asset_category(value):
+    if not _clean(value):
+        frappe.throw(frappe._("提交报销前必须选择资产类型。"))
+    try:
+        return normalize_asset_category(value)
+    except ApprovalRouteError as exc:
+        frappe.throw(str(exc))
+
+
 def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
@@ -1097,6 +1107,8 @@ def _submit_draft(doc):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT and not list(getattr(doc, "expense_lines", []) or []):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
+    if doc.request_type == REQUEST_EXPENSE_PAYMENT:
+        doc.asset_category = _required_asset_category(getattr(doc, "asset_category", None))
     _validate_expense_project_groups(doc)
     summary = invoice_service.validate_request_invoices(doc, submitting=True)
     if isinstance(summary, dict):
@@ -2071,7 +2083,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
         subject=info.get("subject") or ("\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8-" + first.title),
         department=info.get("department") or first.department,
         supervisor=info.get("supervisor"),
-        asset_category=info.get("asset_category") or OTHER_ASSET,
+        asset_category=_required_asset_category(info.get("asset_category")),
         amount=sum(_money(item["amount"]) for item in expense_lines),
         reason=info.get("reason") or "\u7531 {0} \u6761\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8\u751f\u6210".format(len(docs)),
         submit=False,
@@ -2141,8 +2153,14 @@ def action_request(name, action="approve", note=None, reject_target=None):
             doc.save(ignore_permissions=True)
             return _summarize_doc(doc, authorized_expense_lines)
         done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
+        from_status = doc.workflow_status
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
+        if step.mode == "handle" and doc.request_type == REQUEST_EXPENSE_PAYMENT:
+            doc.workflow_status = STATUS_PAID
+            doc.paid_by = actor
+            doc.paid_on = step.acted_on or now_datetime()
+            _append_request_event(doc, "确认付款", from_status, STATUS_PAID, note)
         doc.save(ignore_permissions=True)
         return _summarize_doc(doc, authorized_expense_lines)
 
