@@ -32,7 +32,7 @@ const ASSET_OTHER = '其他';
 const FALLBACK_ASSET_CATEGORIES = [ASSET_ADMIN, ASSET_IT, ASSET_OTHER];
 const NAV_ITEMS = [
   { key: 'invoices', label: '上传发票', icon: 'upload-cloud' },
-  { key: 'board', label: '费用报销流', icon: 'trello' },
+  { key: 'board', label: '费用报销流程', icon: 'trello' },
   { key: 'statistics', label: '费用统计', icon: 'bar-chart-2' },
   { key: 'audit', label: '审批记录', icon: 'clipboard' },
 ];
@@ -622,7 +622,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
 
       <section v-else-if="activeView === 'board'" class="space-y-4">
         <header class="flex items-center justify-between">
-          <div><h2 class="text-xl font-bold">费用报销流</h2><p class="mt-1 text-sm text-gray-500">报销审批看板与逐票费用明细</p></div>
+          <div><h2 class="text-xl font-bold">费用报销流程</h2><p class="mt-1 text-sm text-gray-500">报销审批看板与逐票费用明细</p></div>
           <Button variant="subtle" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
         </header>
         <div class="grid gap-3 md:grid-cols-5">

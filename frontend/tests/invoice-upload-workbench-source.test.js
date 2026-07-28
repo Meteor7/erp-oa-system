@@ -25,7 +25,7 @@ test('invoice upload workspace provides batch review selection detail push and p
   for (const label of ['发票类别', '项目名称', '开票日期', '发票号码', '税前金额', '税额', '合计金额', '费用说明', '补充附件']) {
     assert.ok(source.includes(label), label);
   }
-  for (const action of ['确认内容', '撤回确认', '下推到费用报销流', '查看发票']) {
+  for (const action of ['确认内容', '撤回确认', '下推到费用报销流程', '查看发票']) {
     assert.ok(source.includes(action), action);
   }
   assert.ok(expense.includes('撤回下推'));
@@ -60,7 +60,7 @@ test('invoice push form uses readonly current applicant and canonical payment la
 
 test('expense workbench uses four first-class pages and exact seven-column details', () => {
   assert.ok(expense.includes('上传发票'));
-  assert.ok(expense.includes('费用报销流'));
+  assert.ok(expense.includes('费用报销流程'));
   assert.ok(expense.includes('费用统计'));
   assert.ok(expense.includes('审批记录'));
   assert.match(expense, /ExpenseStatistics/);

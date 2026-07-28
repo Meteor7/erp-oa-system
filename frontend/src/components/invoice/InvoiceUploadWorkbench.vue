@@ -410,7 +410,7 @@ onBeforeUnmount(() => {
     <header class="sticky top-0 z-10 -mx-1 flex flex-col gap-4 border-b border-gray-200 bg-white/95 px-1 py-3 backdrop-blur md:flex-row md:items-center md:justify-between">
       <div class="min-w-0">
         <h2 class="text-xl font-bold tracking-tight text-gray-900">上传发票</h2>
-        <p class="mt-1 text-sm leading-5 text-gray-500">批量上传后由本地 OCR 识别，核对七项内容并填写费用说明、补充附件，再下推到费用报销流。</p>
+        <p class="mt-1 text-sm leading-5 text-gray-500">批量上传后由本地 OCR 识别，核对七项内容并填写费用说明、补充附件，再下推到费用报销流程。</p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-2">
         <div v-if="checkedNames.length" class="mr-1 text-right text-xs text-gray-500">
@@ -423,7 +423,7 @@ onBeforeUnmount(() => {
           <input class="hidden" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple :disabled="busy" @change="uploadFiles" />
         </label>
         <Button variant="subtle" :loading="loading" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
-        <Button variant="solid" :disabled="!checkedNames.length" @click="openPush">下推到费用报销流（{{ checkedNames.length }}）</Button>
+        <Button variant="solid" :disabled="!checkedNames.length" @click="openPush">下推到费用报销流程（{{ checkedNames.length }}）</Button>
       </div>
     </header>
 
@@ -565,7 +565,7 @@ onBeforeUnmount(() => {
       <div role="dialog" aria-modal="true" class="w-full max-w-4xl overflow-hidden rounded bg-white shadow-xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
           <div>
-            <h3 class="font-semibold">下推到费用报销流</h3>
+            <h3 class="font-semibold">下推到费用报销流程</h3>
             <p class="mt-1 text-xs text-gray-500">已选 {{ checkedNames.length }} 张发票，将生成一张报销草稿和 {{ checkedNames.length }} 行费用明细，合计 {{ money(selectedTotal) }}。</p>
           </div>
           <button title="关闭" @click="showPush = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
