@@ -1,5 +1,6 @@
 """Month-level R&D timesheet entry backed by generated ERPNext Timesheet rows."""
 
+import hashlib
 import json
 import uuid
 from calendar import monthrange
@@ -196,6 +197,20 @@ def _canonical_period(year: int, month: int) -> str:
     return f"{int(year):04d}-{int(month):02d}"
 
 
+def _monthly_revision(sources) -> str:
+    snapshot = [
+        {
+            "name": str(_value(source, "timesheet") or _value(source, "name") or ""),
+            "monthly_entry_id": str(_value(source, "monthly_entry_id") or _value(source, "rd_monthly_entry_id") or ""),
+            "modified": str(_value(source, "modified") or ""),
+        }
+        for source in (sources or [])
+    ]
+    snapshot.sort(key=lambda item: (item["name"], item["monthly_entry_id"], item["modified"]))
+    payload = json.dumps(snapshot, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _legacy_daily_exists(employee: str, year: int, month: int) -> bool:
     return bool(
         frappe.db.sql(
@@ -222,6 +237,7 @@ def _query_monthly_entries(period: str, employee=None) -> list:
         f"""
         select ts.rd_monthly_entry_id as monthly_entry_id,
                ts.name as timesheet,
+               ts.modified,
                ts.employee,
                e.employee_name,
                ts.rd_entry_period as period,
@@ -240,7 +256,7 @@ def _query_monthly_entries(period: str, employee=None) -> list:
            and coalesce(ts.rd_system_generated, 0) = 1
            and ts.rd_entry_period = %(period)s
            {employee_filter}
-         group by ts.name, ts.rd_monthly_entry_id, ts.employee, e.employee_name,
+         group by ts.name, ts.rd_monthly_entry_id, ts.modified, ts.employee, e.employee_name,
                   ts.rd_entry_period, ts.rd_occurrence_days, ts.rd_calculated_hours,
                   ts.rd_review_status
          order by e.employee_name, project_code, project_name
@@ -363,8 +379,9 @@ def list_monthly_entries(period, employee=None):
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
     year, month = parse_period(period)
     period_text = _canonical_period(year, month)
+    monthly_rows = _query_monthly_entries(period_text, employee)
     rows = _merge_monthly_entry_rows(
-        _query_monthly_entries(period_text, employee),
+        monthly_rows,
         _query_legacy_monthly_entries(period_text, employee),
         period_text,
     )
@@ -380,6 +397,7 @@ def list_monthly_entries(period, employee=None):
     return {
         "period": period_text,
         "employee": employee or None,
+        "revision": _monthly_revision(monthly_rows) if employee else None,
         "entries": rows,
         "total_days": total_days,
         "total_hours": total_hours,
@@ -424,9 +442,12 @@ def _replace_monthly_documents(
     month: int,
     rows: list[dict],
     company: str,
+    expected_revision: str,
     work_dates=None,
 ) -> None:
     existing = _load_existing_monthly_documents(employee, period)
+    if _monthly_revision(existing) != expected_revision:
+        frappe.throw(frappe._("\u6708\u5ea6\u5de5\u65f6\u6570\u636e\u5df2\u88ab\u5176\u4ed6\u7528\u6237\u66f4\u65b0\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002"))
     existing_ids = {str(doc.get("rd_monthly_entry_id") or "") for doc in existing}
     requested_ids = [row["monthly_entry_id"] for row in rows if row.get("monthly_entry_id")]
     if len(requested_ids) != len(set(requested_ids)):
@@ -467,13 +488,16 @@ def _replace_monthly_documents(
 
 
 @frappe.whitelist(methods=["POST"])
-def save_monthly_entries(period, employee, rows):
+def save_monthly_entries(period, employee, rows, expected_revision=None):
     require_rd_access(RD_MONTHLY_ENTRY_ROLES)
     year, month = parse_period(period)
     period_text = _canonical_period(year, month)
     employee = str(employee or "").strip()
     if not employee:
         frappe.throw(frappe._("请选择研发人员。"))
+    expected_revision = str(expected_revision or "").strip()
+    if not expected_revision:
+        frappe.throw(frappe._("\u6708\u5ea6\u5de5\u65f6\u6570\u636e\u7248\u672c\u5df2\u5931\u6548\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002"))
     daily = _daily_module()
     daily._require_visible_employee(employee)
     ensure_not_locked(period_text, "lock_timesheets", "工时")
@@ -513,6 +537,7 @@ def save_monthly_entries(period, employee, rows):
             month=month,
             rows=prepared,
             company=company,
+            expected_revision=expected_revision,
             work_dates=limit["work_dates"],
         )
     except Exception:

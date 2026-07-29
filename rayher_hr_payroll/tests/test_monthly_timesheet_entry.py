@@ -301,6 +301,7 @@ def test_save_monthly_entries_commits_one_atomic_replacement(monthly_module, mon
         "2026-07",
         "EMP-1",
         [{"project": "PROJ-1", "project_code": "RD14", "project_name": "ACONCA 7961", "occurrence_days": "2.35"}],
+        expected_revision="loaded-revision",
     )
 
     assert result["total_days"] == 2.35
@@ -329,6 +330,7 @@ def test_save_monthly_entries_rolls_back_complete_replacement_on_failure(monthly
             "2026-07",
             "EMP-1",
             [{"project": "PROJ-1", "project_code": "RD14", "project_name": "ACONCA 7961", "occurrence_days": "1"}],
+            expected_revision="loaded-revision",
         )
 
     assert ("rollback", "rd_monthly_timesheet") in frappe.db.events
@@ -426,6 +428,7 @@ def test_save_monthly_entries_rejects_total_above_resolved_workday_limit(monthly
             "2026-07",
             "EMP-1",
             [{"project": "PROJ-1", "project_code": "RD14", "project_name": "A", "occurrence_days": "20.01"}],
+            expected_revision="loaded-revision",
         )
 
 
@@ -491,6 +494,7 @@ def test_replace_monthly_documents_preserves_ids_and_submits_generated_parents(m
         year=2026,
         month=7,
         company="Rayher",
+        expected_revision=mod._monthly_revision([old_doc]),
         rows=[
             {
                 "monthly_entry_id": "keep-1",
@@ -605,3 +609,86 @@ def test_list_monthly_entries_returns_legacy_rows_and_employee_count(monthly_mod
     assert result["employee_count"] == 2
     assert result["has_legacy_sources"] is True
     assert result["legacy_daily_present"] is True
+
+
+def test_monthly_revision_is_deterministic_and_tracks_snapshot_changes(monthly_module):
+    mod, _frappe = monthly_module
+    first = {
+        "timesheet": "TS-1",
+        "monthly_entry_id": "entry-1",
+        "modified": "2026-07-29 10:00:00",
+    }
+    second = {
+        "timesheet": "TS-2",
+        "monthly_entry_id": "entry-2",
+        "modified": "2026-07-29 10:05:00",
+    }
+
+    assert mod._monthly_revision([]) == "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    assert mod._monthly_revision([first, second]) == mod._monthly_revision([second, first])
+    changed = {**second, "modified": "2026-07-29 10:06:00"}
+    assert mod._monthly_revision([first, changed]) != mod._monthly_revision([first, second])
+
+
+def test_save_monthly_entries_requires_loaded_revision(monthly_module, monkeypatch):
+    mod, frappe = monthly_module
+    _install_save_dependencies(monkeypatch, mod, frappe)
+
+    with pytest.raises(RuleError, match="\u5237\u65b0"):
+        mod.save_monthly_entries("2026-07", "EMP-1", [])
+
+
+def test_replace_monthly_documents_rejects_stale_revision_before_delete(monthly_module, monkeypatch):
+    mod, _frappe = monthly_module
+    current = types.SimpleNamespace(
+        name="TS-NEW",
+        rd_monthly_entry_id="entry-new",
+        modified="2026-07-29 10:05:00",
+    )
+    deleted = []
+    monkeypatch.setattr(mod, "_load_existing_monthly_documents", lambda *args: [current])
+    monkeypatch.setattr(mod, "_delete_monthly_document", lambda *args: deleted.append(args))
+
+    with pytest.raises(RuleError, match="\u5237\u65b0"):
+        mod._replace_monthly_documents(
+            employee="EMP-1",
+            period="2026-07",
+            year=2026,
+            month=7,
+            rows=[],
+            company="Rayher",
+            expected_revision="stale-revision",
+        )
+
+    assert deleted == []
+
+
+
+
+def test_replace_monthly_documents_allows_intentional_empty_save(monthly_module, monkeypatch):
+    mod, _frappe = monthly_module
+    deleted = []
+
+    class OldDoc:
+        name = "TS-OLD"
+        modified = "2026-07-29 10:00:00"
+
+        def get(self, key):
+            return {"rd_monthly_entry_id": "entry-1"}.get(key)
+
+    old_doc = OldDoc()
+    monkeypatch.setattr(mod, "_load_existing_monthly_documents", lambda *args: [old_doc])
+    monkeypatch.setattr(mod, "_delete_monthly_document", lambda *args: deleted.append(args))
+    monkeypatch.setattr(mod, "_daily_module", lambda: types.SimpleNamespace(_ensure_activity=lambda: None))
+
+    mod._replace_monthly_documents(
+        employee="EMP-1",
+        period="2026-07",
+        year=2026,
+        month=7,
+        rows=[],
+        company="Rayher",
+        expected_revision=mod._monthly_revision([old_doc]),
+    )
+
+    assert deleted == [(old_doc, "EMP-1", "2026-07")]
