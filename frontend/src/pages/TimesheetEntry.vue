@@ -34,6 +34,9 @@ const batchWorkbookInput = ref(null);
 const employees = computed(() => options.data?.employees || []);
 const projects = computed(() => options.data?.projects || []);
 const dayLimit = computed(() => Number(monthly.data?.day_limit || new Date(selectedYear.value, selectedMonth.value, 0).getDate() || 31));
+const hourLimit = computed(() => Number(monthly.data?.hour_limit ?? dayLimit.value * 8));
+const calendarSource = computed(() => String(monthly.data?.calendar_source || "weekday_fallback"));
+const usesWeekdayFallback = computed(() => calendarSource.value === "weekday_fallback");
 const isAllEmployees = computed(() => !selectedEmployee.value);
 const hasLegacySources = computed(() => Boolean(monthly.data?.has_legacy_sources));
 const canEditSelection = computed(() => Boolean(canEdit.value && selectedEmployee.value && !hasLegacySources.value));
@@ -300,13 +303,15 @@ watch(() => monthly.data, hydrateEntries);
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <span v-if="isAllEmployees" class="text-sm text-gray-500">员工：<strong class="font-medium text-gray-800">{{ employeeCount }} 人</strong></span>
-        <span class="text-sm text-gray-500">当月合计：<strong class="font-medium text-gray-800">{{ formatNumber(totalDays) }} 天 / {{ formatNumber(totalHours) }} 小时</strong><template v-if="!isAllEmployees"> / 上限 {{ formatNumber(dayLimit) }} 天</template></span>
+        <span class="text-sm text-gray-500">当前已填：<strong class="font-medium text-gray-800">{{ formatNumber(totalDays) }} 天 / {{ formatNumber(totalHours) }} 小时</strong></span>
+        <span class="rounded-md bg-amber-50 px-3 py-1.5 text-sm text-amber-800">本月上限：<strong class="font-semibold">{{ formatNumber(dayLimit) }} 天 / {{ formatNumber(hourLimit) }} 小时</strong></span>
         <Button v-if="canEditSelection" variant="subtle" @click="addRow">+ 新增一行</Button>
         <Button v-if="canEditSelection" variant="solid" :loading="saving" @click="saveRows">保存</Button>
         <Button variant="subtle" :loading="exporting" :disabled="!entries.length" @click="exportCurrent">导出Excel</Button>
       </div>
     </div>
 
+    <p v-if="usesWeekdayFallback" class="mx-5 mt-4 text-xs text-amber-700">未配置假日表，当前按周一至周五计算</p>
     <p v-if="errMsg" class="mx-5 mt-4 text-sm text-red-600">{{ errMsg }}</p>
     <p v-if="okMsg" class="mx-5 mt-4 text-sm text-green-700">{{ okMsg }}</p>
 

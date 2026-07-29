@@ -27,7 +27,7 @@ test("timesheet entry follows the team-leader monthly table layout", () => {
   assert.ok(source.includes("工时"));
   assert.ok(source.includes("备注"));
   assert.ok(source.includes("新增一行"));
-  assert.ok(source.includes("当月合计"));
+  assert.ok(source.includes("当前已填"));
   assert.ok(source.includes("上限"));
 });
 
@@ -77,4 +77,11 @@ test("legacy daily data and all employees render through the unified monthly vie
   assert.match(source, /v-if="isAllEmployees"/);
   assert.doesNotMatch(source, /该员工本月已有按日工时/);
   assert.doesNotMatch(source, /entries\.value = \[\];\s*return;/);
+});
+
+test("monthly work limit shows days hours and calendar fallback", () => {
+  assert.match(source, /hour_limit/);
+  assert.match(source, /calendar_source/);
+  assert.ok(source.includes("本月上限"));
+  assert.ok(source.includes("未配置假日表，当前按周一至周五计算"));
 });
