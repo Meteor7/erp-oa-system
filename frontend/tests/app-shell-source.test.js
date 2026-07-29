@@ -56,9 +56,9 @@ test('personnel, accommodation and expense reimbursement use the wide workspace'
   assert.match(source, /['"]\/approval\/purchase['"]/);
 });
 
-test('app shell keeps the Rayher subtitle readable', () => {
-  assert.ok(source.includes('Rayher &middot; frappe-ui'));
-  assert.doesNotMatch(source, /Rayher \? frappe-ui/);
+test('app shell uses the QIHENG DEMO brand', () => {
+  assert.ok(source.includes('QIHENG DEMO'));
+  assert.ok(source.includes('planck-semicon-logo.png'));
 });
 
 test('app shell exposes overseas commissioned R&D in the finance ledger nav', () => {

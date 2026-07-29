@@ -1,7 +1,7 @@
 app_name = "rayher_hr_payroll"
-app_title = "Rayher HR Payroll"
-app_publisher = "Rayher"
-app_description = "Rayher HR, R&D timesheet, and R&D cost allocation customizations"
+app_title = "QIHENG DEMO HR Payroll"
+app_publisher = "QIHENG DEMO"
+app_description = "QIHENG DEMO HR, R&D timesheet, and R&D cost allocation customizations"
 app_email = "admin@example.com"
 app_license = "MIT"
 
@@ -12,8 +12,8 @@ app_include_js = "/assets/rayher_hr_payroll/js/language_switcher.js"
 add_to_apps_screen = [
     {
         "name": "rayher_hr_payroll",
-        "logo": "/assets/rayher_hr_payroll/images/rayher-logo.svg",
-        "title": "Rayher",
+        "logo": "/assets/rayher_hr_payroll/images/planck-semicon-logo.png",
+        "title": "QIHENG DEMO",
         "route": "/rayher",
     }
 ]

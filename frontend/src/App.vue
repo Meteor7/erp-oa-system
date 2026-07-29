@@ -3,6 +3,7 @@ import { computed, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { createResource } from 'frappe-ui';
 import { canSee, currentUser, roleLabel } from './lib/access';
+const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo.png';
 
 const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
@@ -107,8 +108,9 @@ function logout() {
   <div class='flex min-h-screen bg-gray-50 text-gray-900'>
     <aside class='w-60 bg-gray-900 text-gray-300 flex flex-col'>
       <div class='px-5 py-5 border-b border-white/10'>
+        <img :src='companyLogo' alt='QIHENG DEMO' class='h-10 w-auto rounded bg-white object-contain mb-3' />
         <div class='text-white font-semibold'>&#x7814;&#x53d1;&#x6210;&#x672c;&#x7ba1;&#x7406;</div>
-        <div class='text-xs text-gray-500 mt-1'>Rayher &middot; frappe-ui</div>
+        <div class='text-xs text-gray-500 mt-1'>QIHENG DEMO</div>
       </div>
       <nav class='p-3 flex-1 overflow-y-auto'>
         <div v-for='g in visibleGroups' :key='g.label' class='mb-3'>
