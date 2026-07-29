@@ -55,13 +55,26 @@ def _validate_private_output_path(output_path):
     private_root = Path(frappe.get_site_path("private")).resolve()
     if private_root != output and private_root not in output.parents:
         raise ValueError("credential output must stay below the site private directory")
+    if output.exists() and output.is_dir():
+        raise IsADirectoryError(f"credential output is a directory: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     return output
 
 
+def _fsync_parent(path):
+    if os.name == "nt":
+        return
+    descriptor = os.open(Path(path).parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _write_delivery(path, plan):
     pending = path.with_suffix(path.suffix + ".pending")
-    with pending.open("w", encoding="utf-8-sig", newline="") as stream:
+    descriptor = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(
             stream,
             fieldnames=[
@@ -84,6 +97,7 @@ def _write_delivery(path, plan):
         stream.flush()
         os.fsync(stream.fileno())
     os.chmod(pending, 0o600)
+    _fsync_parent(pending)
     return pending
 
 
@@ -124,6 +138,7 @@ def deliver_enabled_system_user_passwords(
 
     output = _validate_private_output_path(output_path)
     pending = _write_delivery(output, plan)
+    committed = False
     try:
         for item in plan:
             if item["reset_required"]:
@@ -133,11 +148,11 @@ def deliver_enabled_system_user_passwords(
                     logout_all_sessions=True,
                 )
         frappe.db.commit()
+        committed = True
         os.replace(pending, output)
-        os.chmod(output, 0o600)
+        _fsync_parent(output)
     except Exception:
-        frappe.db.rollback()
-        if pending.exists():
-            pending.unlink()
+        if not committed:
+            frappe.db.rollback()
         raise
     return result
