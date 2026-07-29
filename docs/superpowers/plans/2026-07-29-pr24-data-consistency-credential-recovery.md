@@ -145,4 +145,3 @@ Push `HEAD` to `origin/feat/ocr-monthly-timesheet-integration` and verify PR #24
 - [ ] **Step 5: Re-read the two P1 threads**
 
 Confirm the resulting behavior addresses discussion threads `r3672149431` and `r3672149437`. Do not resolve or reply to threads unless explicitly requested.
-

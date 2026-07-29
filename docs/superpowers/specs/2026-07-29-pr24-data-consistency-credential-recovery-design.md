@@ -44,4 +44,3 @@ Tests will inject password-update failure, database-commit failure, and final-pu
 ## Delivery
 
 Implementation will be limited to the monthly timesheet backend, its frontend caller and production build output, the credential-delivery utility, and focused tests. The resulting commits will be pushed to `feat/ocr-monthly-timesheet-integration`, the existing PR #24 head branch.
-
