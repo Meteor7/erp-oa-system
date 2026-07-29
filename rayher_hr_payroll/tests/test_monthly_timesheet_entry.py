@@ -24,10 +24,24 @@ def monthly_module(monkeypatch):
 
     frappe.whitelist = whitelist
     frappe.utils = types.ModuleType("frappe.utils")
+    frappe.utils.getdate = lambda value: value if hasattr(value, "year") else datetime.fromisoformat(str(value)).date()
     monkeypatch.setitem(sys.modules, "frappe", frappe)
     monkeypatch.setitem(sys.modules, "frappe.utils", frappe.utils)
     sys.modules.pop("rayher_hr_payroll.api.monthly_timesheet_entry", None)
-    return importlib.import_module("rayher_hr_payroll.api.monthly_timesheet_entry"), frappe
+    mod = importlib.import_module("rayher_hr_payroll.api.monthly_timesheet_entry")
+    monkeypatch.setattr(
+        mod,
+        "resolve_monthly_work_limit",
+        lambda year, month, employee=None, company=None: {
+            "day_limit": 31,
+            "hour_limit": 248,
+            "calendar_source": "company_holiday_list",
+            "holiday_list": "Default Calendar",
+            "work_dates": [],
+        },
+        raising=False,
+    )
+    return mod, frappe
 
 
 def test_two_decimal_days_split_into_full_and_partial_hours(monthly_module):
@@ -111,6 +125,41 @@ def test_prepare_monthly_rows_rejects_total_above_month_limit(monthly_module):
             2,
             lambda code, name, selected: selected,
         )
+
+
+def test_prepare_monthly_rows_rejects_total_above_resolved_workday_limit(monthly_module):
+    mod, _frappe = monthly_module
+
+    with pytest.raises(RuleError):
+        mod.prepare_monthly_rows(
+            [
+                {"project": "PROJ-1", "project_code": "RD14", "project_name": "A", "occurrence_days": "20.01"},
+            ],
+            2026,
+            7,
+            lambda code, name, selected: selected,
+            day_limit=Decimal("20.00"),
+        )
+
+
+def test_technical_logs_use_only_resolved_work_dates(monthly_module):
+    mod, _frappe = monthly_module
+    allowed = [datetime(2026, 7, 2).date(), datetime(2026, 7, 6).date()]
+
+    rows = mod.build_technical_time_logs(
+        2026,
+        7,
+        [Decimal("8.00"), Decimal("4.00")],
+        project="PROJ-1",
+        project_code="RD14",
+        project_name="ACONCA 7961",
+        remark="calendar constrained",
+        occupied_hours={},
+        work_dates=allowed,
+    )
+
+    assert [row["from_time"].date() for row in rows] == allowed
+    assert [row["hours"] for row in rows] == [8.0, 4.0]
 
 
 def test_technical_logs_pack_full_and_partial_days_without_crossing_month(monthly_module):
@@ -327,6 +376,57 @@ def test_list_monthly_entries_returns_parent_rows_without_technical_dates(monthl
     assert result["day_limit"] == 31
     assert "work_date" not in result["entries"][0]
     assert "from_time" not in result["entries"][0]
+
+
+def test_list_monthly_entries_returns_resolved_day_and_hour_limits(monthly_module, monkeypatch):
+    mod, _frappe = monthly_module
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
+    monkeypatch.setattr(mod, "_query_monthly_entries", lambda *args: [], raising=False)
+    monkeypatch.setattr(mod, "_query_legacy_monthly_entries", lambda *args: [], raising=False)
+    monkeypatch.setattr(
+        mod,
+        "resolve_monthly_work_limit",
+        lambda year, month, employee=None, company=None: {
+            "day_limit": 22,
+            "hour_limit": 176,
+            "calendar_source": "company_holiday_list",
+            "holiday_list": "2026 Company Holidays",
+            "work_dates": [],
+        },
+    )
+    monkeypatch.setattr(mod, "_daily_module", lambda: types.SimpleNamespace(_company=lambda: "Planck"))
+
+    result = mod.list_monthly_entries("2026-07", employee="EMP-1")
+
+    assert result["day_limit"] == 22
+    assert result["hour_limit"] == 176
+    assert result["calendar_source"] == "company_holiday_list"
+    assert result["holiday_list"] == "2026 Company Holidays"
+
+
+def test_save_monthly_entries_rejects_total_above_resolved_workday_limit(monthly_module, monkeypatch):
+    mod, frappe = monthly_module
+    _install_save_dependencies(monkeypatch, mod, frappe)
+    monkeypatch.setattr(mod, "_legacy_daily_exists", lambda *args: False, raising=False)
+    monkeypatch.setattr(
+        mod,
+        "resolve_monthly_work_limit",
+        lambda year, month, employee=None, company=None: {
+            "day_limit": 20,
+            "hour_limit": 160,
+            "calendar_source": "employee_holiday_list",
+            "holiday_list": "Employee Calendar",
+            "work_dates": [],
+        },
+    )
+
+    with pytest.raises(RuleError):
+        mod.save_monthly_entries(
+            "2026-07",
+            "EMP-1",
+            [{"project": "PROJ-1", "project_code": "RD14", "project_name": "A", "occurrence_days": "20.01"}],
+        )
 
 
 def test_replace_monthly_documents_preserves_ids_and_submits_generated_parents(monthly_module, monkeypatch):

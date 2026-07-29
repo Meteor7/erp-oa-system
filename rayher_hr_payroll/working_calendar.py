@@ -52,6 +52,9 @@ def resolve_monthly_work_limit(year, month, employee=None, company=None):
         employee_holiday_list = str(_row_value(row, "holiday_list") or "")
         company = company or _row_value(row, "company")
 
+    if not company and hasattr(frappe.db, "get_single_value"):
+        company = frappe.db.get_single_value("Global Defaults", "default_company")
+
     company_holiday_list = ""
     if company:
         company_row = frappe.db.get_value(

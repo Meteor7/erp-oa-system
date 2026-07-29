@@ -15,6 +15,8 @@ from rayher_hr_payroll.api._guards import (
     require_rd_access,
 )
 
+from rayher_hr_payroll.working_calendar import resolve_monthly_work_limit
+
 
 DAY_QUANTUM = Decimal("0.01")
 HOUR_QUANTUM = Decimal("0.01")
@@ -56,7 +58,7 @@ def split_day_hours(days: Decimal) -> list[Decimal]:
     return result
 
 
-def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project) -> list[dict]:
+def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project, day_limit=None) -> list[dict]:
     prepared = []
     projects = set()
     total_days = Decimal("0.00")
@@ -85,7 +87,9 @@ def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project) -> li
             }
         )
 
-    day_limit = Decimal(monthrange(int(year), int(month))[1])
+    day_limit = Decimal(
+        str(day_limit if day_limit is not None else monthrange(int(year), int(month))[1])
+    )
     if total_days > day_limit:
         frappe.throw(frappe._("该员工当月累计发生天数不能超过所选月份的自然日天数。"))
     return prepared
@@ -101,9 +105,13 @@ def build_technical_time_logs(
     project_name: str,
     remark: str,
     occupied_hours: dict,
+    work_dates=None,
 ) -> list[dict]:
     logs = []
-    last_day = monthrange(int(year), int(month))[1]
+    eligible_dates = list(work_dates) if work_dates is not None else [
+        datetime(int(year), int(month), day).date()
+        for day in range(1, monthrange(int(year), int(month))[1] + 1)
+    ]
     project_key = f"{project_code} | {project_name}" if project_code and project_name else project_code or project_name
 
     for requested in hour_chunks:
@@ -111,8 +119,7 @@ def build_technical_time_logs(
         while remaining > 0:
             chosen_day = None
             used = Decimal("0.00")
-            for day in range(1, last_day + 1):
-                candidate = datetime(int(year), int(month), day).date()
+            for candidate in eligible_dates:
                 candidate_used = Decimal(str(occupied_hours.get(candidate, 0))).quantize(HOUR_QUANTUM)
                 if candidate_used < HOURS_PER_DAY:
                     chosen_day = candidate
@@ -365,6 +372,11 @@ def list_monthly_entries(period, employee=None):
     total_hours = round(sum(float(row["hours"]) for row in rows), 2)
     has_legacy_sources = any(row["source_kind"] in {"legacy_daily", "mixed"} for row in rows)
     employee_count = len({row["employee"] for row in rows if row["employee"]})
+    limit = resolve_monthly_work_limit(
+        year,
+        month,
+        employee=employee or None,
+    )
     return {
         "period": period_text,
         "employee": employee or None,
@@ -372,7 +384,10 @@ def list_monthly_entries(period, employee=None):
         "total_days": total_days,
         "total_hours": total_hours,
         "employee_count": employee_count,
-        "day_limit": monthrange(year, month)[1],
+        "day_limit": limit["day_limit"],
+        "hour_limit": limit["hour_limit"],
+        "calendar_source": limit["calendar_source"],
+        "holiday_list": limit["holiday_list"],
         "has_legacy_sources": has_legacy_sources,
         "legacy_daily_present": has_legacy_sources,
     }
@@ -402,7 +417,14 @@ def _delete_monthly_document(doc, employee: str, period: str) -> None:
 
 
 def _replace_monthly_documents(
-    *, employee: str, period: str, year: int, month: int, rows: list[dict], company: str
+    *,
+    employee: str,
+    period: str,
+    year: int,
+    month: int,
+    rows: list[dict],
+    company: str,
+    work_dates=None,
 ) -> None:
     existing = _load_existing_monthly_documents(employee, period)
     existing_ids = {str(doc.get("rd_monthly_entry_id") or "") for doc in existing}
@@ -428,6 +450,7 @@ def _replace_monthly_documents(
             project_name=row["project_name"],
             remark=row["remark"],
             occupied_hours=occupied_hours,
+            work_dates=work_dates,
         )
         payload = build_timesheet_payload(
             employee=employee,
@@ -454,6 +477,7 @@ def save_monthly_entries(period, employee, rows):
     daily = _daily_module()
     daily._require_visible_employee(employee)
     ensure_not_locked(period_text, "lock_timesheets", "工时")
+    limit = resolve_monthly_work_limit(year, month, employee=employee)
     if daily._period_has_submitted_allocation(year, month):
         frappe.throw(frappe._("本期已存在已提交的研发费用分摊，请先撤销分摊后再调整工时。"))
 
@@ -464,7 +488,13 @@ def save_monthly_entries(period, employee, rows):
             frappe.throw(frappe._("月度工时数据格式不正确。"))
     if not isinstance(rows, list):
         frappe.throw(frappe._("月度工时数据格式不正确。"))
-    prepared = prepare_monthly_rows(rows, year, month, daily._resolve_rd_project)
+    prepared = prepare_monthly_rows(
+        rows,
+        year,
+        month,
+        daily._resolve_rd_project,
+        day_limit=Decimal(str(limit["day_limit"])),
+    )
 
     lock_period_import(year, month)
     if daily._period_has_submitted_allocation(year, month):
@@ -483,6 +513,7 @@ def save_monthly_entries(period, employee, rows):
             month=month,
             rows=prepared,
             company=company,
+            work_dates=limit["work_dates"],
         )
     except Exception:
         frappe.db.rollback(save_point=MONTHLY_SAVEPOINT)
