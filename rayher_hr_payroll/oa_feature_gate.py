@@ -4,7 +4,7 @@ import frappe
 
 from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT, REQUEST_LEAVE
 
-ADMIN_USER = "Administrator"
+ADMIN_USERS = {"Administrator", "admin@staff.example.invalid"}
 FEATURE_CONFIG_BY_REQUEST_TYPE = {
     REQUEST_LEAVE: "leave_approval_admin_only",
     REQUEST_EXPENSE_PAYMENT: "expense_reimbursement_admin_only",
@@ -37,7 +37,7 @@ def is_admin_only(request_type):
 
 def can_access_request_type(request_type, user=None):
     user = user or getattr(getattr(frappe, "session", None), "user", "")
-    return user == ADMIN_USER or not is_admin_only(request_type)
+    return user in ADMIN_USERS or not is_admin_only(request_type)
 
 
 def require_request_type_access(request_type, user=None):

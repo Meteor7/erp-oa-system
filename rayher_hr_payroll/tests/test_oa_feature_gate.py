@@ -28,6 +28,8 @@ def test_truthy_switch_allows_only_exact_administrator(gate):
     frappe.conf.update(leave_approval_admin_only=1, expense_reimbursement_admin_only="true")
     assert module.can_access_request_type(module.REQUEST_LEAVE, "Administrator") is True
     assert module.can_access_request_type(module.REQUEST_EXPENSE_PAYMENT, "Administrator") is True
+    assert module.can_access_request_type(module.REQUEST_LEAVE, "admin@staff.example.invalid") is True
+    assert module.can_access_request_type(module.REQUEST_EXPENSE_PAYMENT, "admin@staff.example.invalid") is True
     assert module.can_access_request_type(module.REQUEST_LEAVE, "manager@example.com") is False
     assert module.can_access_request_type(module.REQUEST_EXPENSE_PAYMENT, "finance@example.com") is False
 

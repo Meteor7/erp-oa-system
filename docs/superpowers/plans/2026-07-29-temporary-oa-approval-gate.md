@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add two reversible site switches that make leave approval and expense reimbursement available only to the exact `Administrator` account while leaving other modules and stored OA data unchanged.
+**Goal:** Add two reversible site switches that make leave approval and expense reimbursement available only to the built-in `Administrator` and designated `admin@staff.example.invalid` management account while leaving other modules and stored OA data unchanged.
 
 **Architecture:** A new backend policy module owns both switches. The page boot payload exposes server-derived flags to the SPA, and OA/invoice entry points plus DocType permission hooks enforce the same decision server-side. Disabling a switch automatically restores the existing role and row-level rules.
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Independent keys: `leave_approval_admin_only` and `expense_reimbursement_admin_only`.
-- A truthy key allows only exact user `Administrator`; `System Manager` alone is insufficient.
+- A truthy key allows only the built-in `Administrator` and designated `admin@staff.example.invalid` management account; `System Manager` alone is insufficient.
 - A false or missing key defers to existing permissions.
 - Do not mutate or delete any existing leave, reimbursement, invoice, step, audit, or attachment data.
 - Do not change R&D timesheet, ledger, personnel, accommodation, project, or payroll permissions.
@@ -373,7 +373,7 @@ git commit -m "feat(oa): gate invoice paths with reimbursement switch"
 
 **Interfaces:**
 - Consumes all prior tasks.
-- Produces a deployed site where only `Administrator` can access either OA module and both can later be independently restored.
+- Produces a deployed site where only `Administrator` and `admin@staff.example.invalid` can access either OA module and both can later be independently restored.
 
 - [ ] **Step 1: Run full backend tests**
 
