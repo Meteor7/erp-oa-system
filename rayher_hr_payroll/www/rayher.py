@@ -1,5 +1,7 @@
 import frappe
 
+from rayher_hr_payroll.oa_feature_gate import boot_access_flags
+
 
 def get_context(context):
     if frappe.session.user == "Guest":
@@ -13,5 +15,6 @@ def get_context(context):
         "user": frappe.session.user,
         "full_name": frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user,
         "roles": frappe.get_roles(),
+        "oa_access": boot_access_flags(frappe.session.user),
     }
     return context

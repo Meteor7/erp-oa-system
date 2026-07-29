@@ -27,11 +27,24 @@ const PAGE_ROLES = {
   '/timesheet': TIME_VIEW,
 };
 
+const OA_FLAG_BY_PATH = {
+  '/approval/leave': 'leave_approval',
+  '/approval/purchase': 'expense_reimbursement',
+};
+
+function hasEnabledFeature(path) {
+  const flag = OA_FLAG_BY_PATH[path];
+  if (!flag) return true;
+  const access = (typeof window !== 'undefined' && window.oa_access) || {};
+  return access[flag] !== false;
+}
+
 function myRoles() {
   return (typeof window !== 'undefined' && Array.isArray(window.roles)) ? window.roles : [];
 }
 
 export function canSee(path) {
+  if (!hasEnabledFeature(path)) return false;
   const need = PAGE_ROLES[path] || MANAGE;
   return myRoles().some((role) => need.includes(role));
 }

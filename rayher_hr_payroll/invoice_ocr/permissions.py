@@ -4,6 +4,9 @@ import json
 
 import frappe
 
+from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT
+from rayher_hr_payroll.oa_feature_gate import can_access_request_type
+
 _BATCH = "OA Invoice Import Batch"
 _RECORD = "OA Invoice Record"
 _VIEW_LOG = "OA Invoice View Log"
@@ -160,6 +163,8 @@ def _record_doc(name, *, current=False):
 def can_read_invoice(doc, user=None, *, current=False):
     """Return whether ``user`` can read one batch, record, or immutable view log."""
     user = user or frappe.session.user
+    if not can_access_request_type(REQUEST_EXPENSE_PAYMENT, user):
+        return False
     if not user or user == "Guest":
         return False
     doctype = _get(doc, "doctype")
@@ -235,6 +240,9 @@ def _query_context(user):
 
 
 def invoice_batch_query(user=None):
+    requested_user = user or frappe.session.user
+    if not can_access_request_type(REQUEST_EXPENSE_PAYMENT, requested_user):
+        return "1=0"
     user, roles, identity = _query_context(user)
     if not user or user == "Guest":
         return "1=0"
@@ -256,6 +264,9 @@ def _record_access_sql(record_alias, user, roles, identity, batch_alias="batch_s
 
 
 def invoice_record_query(user=None):
+    requested_user = user or frappe.session.user
+    if not can_access_request_type(REQUEST_EXPENSE_PAYMENT, requested_user):
+        return "1=0"
     user, roles, identity = _query_context(user)
     if not user or user == "Guest":
         return "1=0"
@@ -265,6 +276,9 @@ def invoice_record_query(user=None):
 
 
 def invoice_view_log_query(user=None):
+    requested_user = user or frappe.session.user
+    if not can_access_request_type(REQUEST_EXPENSE_PAYMENT, requested_user):
+        return "1=0"
     user, roles, identity = _query_context(user)
     if not user or user == "Guest":
         return "1=0"
@@ -317,6 +331,8 @@ def can_read_request(request, user=None, *, current=False):
 def can_edit_request(request, user=None, *, current=False):
     """Only the request applicant/owner or a System Manager may edit invoice data."""
     user = user or frappe.session.user
+    if not can_access_request_type(REQUEST_EXPENSE_PAYMENT, user):
+        return False
     if not user or user == "Guest":
         return False
     roles = _roles(user)

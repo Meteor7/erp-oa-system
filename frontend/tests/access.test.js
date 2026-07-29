@@ -112,3 +112,20 @@ test("allocation dashboard is finance-only", () => {
   asRoles(["Employee"]);
   assert.equal(canSee("/allocation-dashboard"), false);
 });
+
+test("temporary OA flags hide both approval pages from non-admin roles", () => {
+  for (const roles of [["Employee"], ["Employee", "Department Manager"], ["Accounts User"], ["HR Manager"], ["System Manager"]]) {
+    globalThis.window = { roles, oa_access: { leave_approval: false, expense_reimbursement: false } };
+    assert.equal(canSee("/approval/leave"), false);
+    assert.equal(canSee("/approval/purchase"), false);
+  }
+});
+
+test("temporary OA flags restore modules independently", () => {
+  globalThis.window = { roles: ["Employee"], oa_access: { leave_approval: true, expense_reimbursement: false } };
+  assert.equal(canSee("/approval/leave"), true);
+  assert.equal(canSee("/approval/purchase"), false);
+  globalThis.window = { roles: ["Employee"], oa_access: { leave_approval: false, expense_reimbursement: true } };
+  assert.equal(canSee("/approval/leave"), false);
+  assert.equal(canSee("/approval/purchase"), true);
+});

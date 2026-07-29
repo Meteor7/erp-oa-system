@@ -21,6 +21,7 @@ from rayher_hr_payroll.oa_approval import (
     build_route,
     normalize_asset_category,
 )
+from rayher_hr_payroll.oa_feature_gate import require_request_type_access, visible_request_types
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
     OrganizationResolutionError,
@@ -1154,7 +1155,7 @@ def get_options():
     roles = set(frappe.get_roles(frappe.session.user))
     context = _employee_context()
     return {
-        "request_types": REQUEST_TYPES,
+        "request_types": visible_request_types(REQUEST_TYPES),
         "asset_categories": ASSET_CATEGORIES,
         "expense_categories": EXPENSE_CATEGORIES,
         "expense_account_tree": account_options(),
@@ -1177,6 +1178,7 @@ def get_options():
 
 @frappe.whitelist()
 def preview_route(request_type, department=None, supervisor=None, asset_category=None, active=True):
+    require_request_type_access(request_type)
     try:
         ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category)
         steps = build_route(
@@ -1216,6 +1218,7 @@ def create_request(
     invoice_batch=None,
     no_invoice_reason=None,
 ):
+    require_request_type_access(request_type)
     requested_submit = _to_bool(submit)
     batch_name = _bounded_optional_text(invoice_batch, "发票批次", 140)
     no_invoice_reason = _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
@@ -1349,6 +1352,7 @@ def _updated_invoice_source(existing, payload):
 
 @frappe.whitelist(methods=["POST"])
 def save_draft_expense_sources(name, source_lines):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     request_name = _bounded_optional_text(name, "申请单号", 140)
     payload_rows = _draft_source_rows(source_lines)
     with invoice_service._transaction_lock("request", request_name):
@@ -1446,6 +1450,7 @@ def _validate_finance_classification(doc, step):
 
 @frappe.whitelist(methods=["POST"])
 def save_finance_expense_items(name, lines):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     request_name = _bounded_optional_text(name, "Request", 140)
     payload_rows = _draft_source_rows(lines)
     if not payload_rows:
@@ -1497,6 +1502,7 @@ def save_finance_expense_items(name, lines):
         return _summarize_doc(doc)
 @frappe.whitelist(methods=["POST"])
 def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reasons=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     request_name = _bounded_optional_text(name, "\u7533\u8bf7\u5355\u53f7", 140)
     supplied_reason = (
         None
@@ -1570,6 +1576,7 @@ def submit_request(name, no_invoice_reason=None):
         supplied_reason = _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
         invoice_service._request_permission(doc, "edit", current=True)
         if doc.workflow_status != STATUS_DRAFT:
             frappe.throw(frappe._("\u53ea\u6709\u8349\u7a3f\u72b6\u6001\u53ef\u63d0\u4ea4\u3002"))
@@ -1582,6 +1589,12 @@ def submit_request(name, no_invoice_reason=None):
 
 @frappe.whitelist()
 def list_requests(view="mine", limit=50, request_type=None, name=None):
+    allowed_types = visible_request_types(REQUEST_TYPES)
+    if request_type:
+        require_request_type_access(request_type)
+        allowed_types = [request_type]
+    if not allowed_types:
+        return []
     if request_type and request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("不支持的 OA 申请类型。"))
     roles = set(frappe.get_roles(frappe.session.user))
@@ -1598,8 +1611,7 @@ def list_requests(view="mine", limit=50, request_type=None, name=None):
         filters = {}
     else:
         filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
-    if request_type:
-        filters["request_type"] = request_type
+    filters["request_type"] = request_type if request_type else ["in", allowed_types]
     if exact_name:
         filters["name"] = exact_name
     names = frappe.get_all(
@@ -1729,6 +1741,7 @@ def get_expense_statistics(
     source_type=None,
     limit=REPORT_LIMIT,
 ):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     report_limit = _bounded_report_limit(limit)
     category_filter = _report_text(invoice_category, "发票类别") if invoice_category is not None else ""
     expense_filter = _report_text(expense_item, "费用项目") if expense_item is not None else ""
@@ -1909,6 +1922,7 @@ def list_expense_approval_records(
     to_date=None,
     limit=REPORT_LIMIT,
 ):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     report_limit = _bounded_report_limit(limit)
     keyword = _report_text(request_keyword, "申请单关键字", 200).lower() if request_keyword is not None else ""
     approver_filter = _report_text(approver, "审批人") if approver is not None else ""
@@ -1977,6 +1991,7 @@ def list_expense_approval_records(
 
 @frappe.whitelist()
 def list_consumption_details(view="mine", status=None, limit=100):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     names = frappe.get_all(
         "OA Consumption Detail",
         filters=_consumption_filters(view=view, status=status),
@@ -1989,6 +2004,7 @@ def list_consumption_details(view="mine", status=None, limit=100):
 
 @frappe.whitelist(methods=["POST"])
 def save_consumption_detail(name=None, title=None, category=None, expense_date=None, amount=None, department=None, description=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     if not _clean(title) or not _clean(category) or not expense_date or _money(amount) <= 0:
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u6d88\u8d39\u660e\u7ec6\u7684\u6807\u9898\u3001\u8d39\u7528\u9879\u76ee\u3001\u65e5\u671f\u548c\u91d1\u989d\u3002"))
     ctx = _employee_context()
@@ -2026,6 +2042,7 @@ def add_invoice(
     invoice_status=INVOICE_UPLOADED,
     remark=None,
 ):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     doc = _load_consumption(consumption)
     _require_consumption_write_access(doc)
     if doc.status == CD_PUSHED:
@@ -2052,6 +2069,7 @@ def add_invoice(
 
 @frappe.whitelist(methods=["POST"])
 def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     names = _parse_json(consumption_names, [])
     if not names:
         frappe.throw(frappe._("\u8bf7\u9009\u62e9\u8981\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u3002"))
@@ -2116,6 +2134,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
         step = _current_step(doc)
         if not step or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("\u5f53\u524d\u7533\u8bf7\u4e0d\u5728\u53ef\u5904\u7406\u72b6\u6001\u3002"))
@@ -2167,6 +2186,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
 
 @frappe.whitelist(methods=["POST"])
 def mark_paid(name, note=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     _require_finance_user()
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
@@ -2210,6 +2230,7 @@ def _reset_request_to_draft(doc, note=""):
 
 @frappe.whitelist(methods=["POST"])
 def push_invoices_to_request(invoice_names, payment_info=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     names = _invoice_names(invoice_names)
     info = _parse_json(payment_info, {}) or {}
     if not isinstance(info, dict):
@@ -2284,6 +2305,7 @@ def withdraw_request(name, note=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
         invoice_service._request_permission(doc, "edit", current=True)
         if doc.workflow_status == STATUS_PAID:
             frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
@@ -2296,6 +2318,7 @@ def withdraw_request(name, note=None):
 
 @frappe.whitelist(methods=["POST"])
 def withdraw_payment(name, note=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     _require_finance_user()
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
@@ -2313,6 +2336,7 @@ def withdraw_payment(name, note=None):
 
 @frappe.whitelist(methods=["POST"])
 def withdraw_invoice_push(invoice_names, note=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     names = sorted(_invoice_names(invoice_names))
     note = _bounded_optional_text(note, "\u64cd\u4f5c\u8bf4\u660e", 500)
 
@@ -2389,21 +2413,25 @@ def withdraw_invoice_push(invoice_names, note=None):
 
 @frappe.whitelist(methods=["POST"])
 def upload_expense_attachment(name, line_key, file_url):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     return expense_attachments.register_attachment(name, line_key, file_url)
 
 
 @frappe.whitelist(methods=["POST"])
 def delete_expense_attachment(name, attachment):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     return expense_attachments.delete_attachment(name, attachment)
 
 
 @frappe.whitelist(methods=["POST"])
 def preview_expense_attachment(attachment):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     return expense_attachments.preview_attachment(attachment)
 
 
 @frappe.whitelist(methods=["POST"])
 def serve_expense_attachment_preview(token):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
     return expense_attachments.serve_attachment_preview(token)
 
 
@@ -2596,6 +2624,7 @@ def add_sign_request(name, approver, position, opinion):
     request_name = _bounded_optional_text(name, "Request", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
         step = _current_step(doc)
         if not step or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("The request is not at an active approval step."))

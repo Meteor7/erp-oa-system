@@ -5,6 +5,8 @@ from __future__ import annotations
 import frappe
 
 from rayher_hr_payroll import invoice_supplemental_attachments
+from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT
+from rayher_hr_payroll.oa_feature_gate import require_request_type_access
 from rayher_hr_payroll.invoice_ocr import service
 
 
@@ -12,6 +14,7 @@ def _authenticated():
     user = str(getattr(getattr(frappe, "session", None), "user", "") or "")
     if not user or user == "Guest":
         frappe.throw("请先登录后再操作发票。", frappe.ValidationError)
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
 
 
 def _bounded(value, label, maximum, *, required=True):

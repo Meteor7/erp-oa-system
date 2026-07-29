@@ -473,3 +473,16 @@ def test_hooks_register_query_and_direct_permission_for_all_invoice_doctypes():
         assert hooks.permission_query_conditions.get(doctype) == path
     for doctype, path in expected_direct.items():
         assert hooks.has_permission.get(doctype) == path
+
+
+def test_restricted_gate_blocks_invoice_query_and_read(permissions_module, monkeypatch):
+    permissions, frappe = permissions_module
+    monkeypatch.setattr(
+        permissions,
+        "can_access_request_type",
+        lambda request_type, user=None: user == "Administrator",
+    )
+    record = frappe.db.records["INV-1"]
+    assert permissions.invoice_record_query("employee@example.com") == "1=0"
+    assert permissions.can_read_invoice(record, "employee@example.com") is False
+    assert permissions.invoice_record_query("Administrator") == ""
