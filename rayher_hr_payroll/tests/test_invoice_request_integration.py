@@ -2571,15 +2571,15 @@ def test_resolve_route_approver_prefers_enabled_user_and_employee_link(monkeypat
         if doctype == "User" and filters == {"full_name": "Supervisor", "enabled": 1}:
             return None
         if doctype == "Employee" and filters == {"employee_name": "Supervisor", "status": "Active"}:
-            return "person054@legacy.example.invalid"
-        if doctype == "User" and filters == {"name": "person054@legacy.example.invalid", "enabled": 1}:
-            return "person054@legacy.example.invalid"
+            return "person054@staff.example.invalid"
+        if doctype == "User" and filters == {"name": "person054@staff.example.invalid", "enabled": 1}:
+            return "person054@staff.example.invalid"
         return None
 
     monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(get_value=get_value), raising=False)
 
-    assert oa_entry._resolve_route_approver("person054@legacy.example.invalid") == "person054@legacy.example.invalid"
-    assert oa_entry._resolve_route_approver("Supervisor") == "person054@legacy.example.invalid"
+    assert oa_entry._resolve_route_approver("person054@staff.example.invalid") == "person054@staff.example.invalid"
+    assert oa_entry._resolve_route_approver("Supervisor") == "person054@staff.example.invalid"
     assert oa_entry._resolve_route_approver("Unknown") == "Unknown"
     assert any(call[0] == "Employee" for call in calls)
 
@@ -2588,7 +2588,7 @@ def test_serialize_route_steps_resolves_dynamic_supervisor(monkeypatch):
     monkeypatch.setattr(
         oa_entry,
         "_resolve_route_approver",
-        lambda value: "person054@legacy.example.invalid" if value == "Supervisor" else value,
+        lambda value: "person054@staff.example.invalid" if value == "Supervisor" else value,
     )
 
     rows = oa_entry._serialize_route_steps(
@@ -2596,7 +2596,7 @@ def test_serialize_route_steps_resolves_dynamic_supervisor(monkeypatch):
         active=True,
     )
 
-    assert rows[0]["approvers"] == ["person054@legacy.example.invalid"]
+    assert rows[0]["approvers"] == ["person054@staff.example.invalid"]
 
 
 def test_business_executive_system_manager_and_framework_administrator_are_oa_override_users(monkeypatch):
@@ -2604,19 +2604,19 @@ def test_business_executive_system_manager_and_framework_administrator_are_oa_ov
         frappe_stub,
         "get_roles",
         lambda user=None: {
-            "admin@legacy-business.example.invalid": ["System Manager"],
+            "admin@staff.example.invalid": ["System Manager"],
             "executive@example.com": ["Rayher Business Executive"],
         }.get(user, ["Employee"]),
     )
 
-    assert oa_entry._is_oa_override_user("admin@legacy-business.example.invalid") is True
+    assert oa_entry._is_oa_override_user("admin@staff.example.invalid") is True
     assert oa_entry._is_oa_override_user("executive@example.com") is True
     assert oa_entry._is_oa_override_user("Administrator") is True
     assert oa_entry._is_oa_override_user("ordinary@example.com") is False
 
 
 def test_override_capabilities_expose_finance_classification_and_action_scope(monkeypatch):
-    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513", mode="approve", approvers='["person067@legacy.example.invalid"]')
+    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513", mode="approve", approvers='["person067@staff.example.invalid"]')
     doc = Row(
         request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
         workflow_status=oa_entry.STATUS_PENDING,
@@ -2629,7 +2629,7 @@ def test_override_capabilities_expose_finance_classification_and_action_scope(mo
     monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: True)
     monkeypatch.setattr(oa_entry, "_is_finance_user", lambda user=None: False)
 
-    capabilities = oa_entry._request_capabilities(doc, "admin@legacy-business.example.invalid")
+    capabilities = oa_entry._request_capabilities(doc, "admin@staff.example.invalid")
 
     assert capabilities == {
         "can_approve": False,
@@ -2649,7 +2649,7 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
         step_key="executive-all",
         label="\u6f14\u793a\u5458\u5de521\u3001\u6f14\u793a\u5458\u5de529",
         mode="all",
-        approvers='["person046@business.example.invalid", "person060@legacy.example.invalid"]',
+        approvers='["person046@business.example.invalid", "person060@staff.example.invalid"]',
         approved_by="[]",
         status=oa_entry.STATUS_PENDING,
         action_by="",
@@ -2672,7 +2672,7 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
         },
     )
     environment.committed[doc.name] = doc
-    frappe_stub.session.user = "admin@legacy-business.example.invalid"
+    frappe_stub.session.user = "admin@staff.example.invalid"
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: [])
     monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: True)
@@ -2681,8 +2681,8 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
     oa_entry.action_request(doc.name, "approve", note="business override")
 
     assert doc.workflow_status == oa_entry.STATUS_COMPLETED
-    assert step.action_by == "admin@legacy-business.example.invalid"
-    assert json.loads(step.approved_by) == ["admin@legacy-business.example.invalid"]
+    assert step.action_by == "admin@staff.example.invalid"
+    assert json.loads(step.approved_by) == ["admin@staff.example.invalid"]
     assert "person046@business.example.invalid" not in json.loads(step.approved_by)
 
 
@@ -2720,7 +2720,7 @@ def test_assigned_executive_counts_as_one_cosigner_instead_of_override(monkeypat
         step_key="executive-all-assigned",
         label="演示员工21、演示员工29",
         mode="all",
-        approvers=json.dumps(["person046@business.example.invalid", "person060@legacy.example.invalid"]),
+        approvers=json.dumps(["person046@business.example.invalid", "person060@staff.example.invalid"]),
         approved_by="[]",
         status=oa_entry.STATUS_PENDING,
         action_by="",
@@ -2868,7 +2868,7 @@ def test_final_handle_step_confirms_payment_atomically(monkeypatch):
         step_key="confirm-payment",
         label="确认付款：演示员工13",
         mode="handle",
-        approvers=json.dumps(["person067@legacy.example.invalid"]),
+        approvers=json.dumps(["person067@staff.example.invalid"]),
         approved_by="[]",
         status=oa_entry.STATUS_WAIT_HANDLE,
         action_by="",
@@ -2891,9 +2891,9 @@ def test_final_handle_step_confirms_payment_atomically(monkeypatch):
         },
     )
     environment.committed[doc.name] = doc
-    frappe_stub.session.user = "person067@legacy.example.invalid"
+    frappe_stub.session.user = "person067@staff.example.invalid"
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["person067@legacy.example.invalid"])
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["person067@staff.example.invalid"])
     monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: False)
 
     oa_entry.action_request(doc.name, "approve", note="已核对付款")
@@ -2901,6 +2901,6 @@ def test_final_handle_step_confirms_payment_atomically(monkeypatch):
     assert doc.workflow_status == oa_entry.STATUS_PAID
     assert doc.current_step_index == 0
     assert step.status == oa_entry.STATUS_HANDLED
-    assert doc.paid_by == "person067@legacy.example.invalid"
+    assert doc.paid_by == "person067@staff.example.invalid"
     assert doc.paid_on is not None
     assert json.loads(doc.operation_log)[-1]["action"] == "确认付款"

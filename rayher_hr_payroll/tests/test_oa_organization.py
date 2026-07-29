@@ -11,10 +11,10 @@ from rayher_hr_payroll.oa_organization import (
 USERS = {
     "演示员工132": "person024@business.example.invalid",
     "演示员工108": "person062@business.example.invalid",
-    "演示员工16": "person072@legacy.example.invalid",
-    "演示员工10": "person047@legacy.example.invalid",
+    "演示员工16": "person072@staff.example.invalid",
+    "演示员工10": "person047@staff.example.invalid",
     "演示员工21": "person046@business.example.invalid",
-    "演示员工29": "person060@legacy.example.invalid",
+    "演示员工29": "person060@staff.example.invalid",
 }
 
 
@@ -57,7 +57,7 @@ def test_finance_member_resolves_to_zhang_meng():
 
     assert result.decision == "approve"
     assert result.supervisor_name == "演示员工16"
-    assert result.user_id == "person072@legacy.example.invalid"
+    assert result.user_id == "person072@staff.example.invalid"
 
 
 def test_hr_admin_member_resolves_to_ren_feifan():
@@ -65,7 +65,7 @@ def test_hr_admin_member_resolves_to_ren_feifan():
 
     assert result.decision == "approve"
     assert result.supervisor_name == "演示员工10"
-    assert result.user_id == "person047@legacy.example.invalid"
+    assert result.user_id == "person047@staff.example.invalid"
 
 
 def test_algorithm_member_resolves_to_xi_he():

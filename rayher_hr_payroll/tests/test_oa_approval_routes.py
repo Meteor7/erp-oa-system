@@ -79,7 +79,7 @@ def test_manager_under_philippe_skips_stage_two_and_uses_ren_for_non_electronic_
         "确认付款：演示员工13",
     ]
     assert "直属主管：演示员工21" not in labels(steps)
-    assert steps[1]["approvers"] == ["person047@legacy.example.invalid"]
+    assert steps[1]["approvers"] == ["person047@staff.example.invalid"]
 
 
 def test_customer_service_is_sales_and_uses_electronic_asset_then_executive_cosign():

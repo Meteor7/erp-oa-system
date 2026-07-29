@@ -12,12 +12,12 @@ from rayher_hr_payroll.oa_organization import (
 
 
 REQUIRED_APPROVERS = {
-    "演示员工13": "person067@legacy.example.invalid",
-    "演示员工10": "person047@legacy.example.invalid",
-    "演示员工18": "person068@legacy.example.invalid",
-    "演示员工16": "person072@legacy.example.invalid",
+    "演示员工13": "person067@staff.example.invalid",
+    "演示员工10": "person047@staff.example.invalid",
+    "演示员工18": "person068@staff.example.invalid",
+    "演示员工16": "person072@staff.example.invalid",
     "演示员工21": "person046@business.example.invalid",
-    "演示员工29": "person060@legacy.example.invalid",
+    "演示员工29": "person060@staff.example.invalid",
 }
 
 

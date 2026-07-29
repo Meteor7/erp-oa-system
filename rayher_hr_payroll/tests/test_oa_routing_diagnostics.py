@@ -7,7 +7,7 @@ from rayher_hr_payroll.maintenance.oa_routing_diagnostics import (
 USERS = {
     "演示员工132": "person024@business.example.invalid",
     "演示员工21": "person046@business.example.invalid",
-    "演示员工29": "person060@legacy.example.invalid",
+    "演示员工29": "person060@staff.example.invalid",
 }
 
 
@@ -57,8 +57,8 @@ def test_accountless_excluded_manager_resolves_upward_without_error():
 
 def test_required_account_diagnostics_find_missing_or_disabled_links():
     required = {
-        "演示员工13": "person067@legacy.example.invalid",
-        "演示员工29": "person060@legacy.example.invalid",
+        "演示员工13": "person067@staff.example.invalid",
+        "演示员工29": "person060@staff.example.invalid",
     }
 
     report = build_diagnostics([], resolve_user, account_state, required_approvers=required)
@@ -71,10 +71,10 @@ def test_required_account_diagnostics_find_missing_or_disabled_links():
 
 def test_canonical_required_approvers_include_all_six_route_accounts():
     assert REQUIRED_APPROVERS == {
-        "演示员工13": "person067@legacy.example.invalid",
-        "演示员工10": "person047@legacy.example.invalid",
-        "演示员工18": "person068@legacy.example.invalid",
-        "演示员工16": "person072@legacy.example.invalid",
+        "演示员工13": "person067@staff.example.invalid",
+        "演示员工10": "person047@staff.example.invalid",
+        "演示员工18": "person068@staff.example.invalid",
+        "演示员工16": "person072@staff.example.invalid",
         "演示员工21": "person046@business.example.invalid",
-        "演示员工29": "person060@legacy.example.invalid",
+        "演示员工29": "person060@staff.example.invalid",
     }

@@ -316,7 +316,7 @@ def test_timesheet_entry_write_roles_are_manager_only_while_employee_and_finance
 def test_all_project_access_can_view_and_fill_every_rd_employee(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
 
-    frappe.session = SimpleNamespace(user="person070@legacy.example.invalid")
+    frappe.session = SimpleNamespace(user="person070@staff.example.invalid")
     frappe.get_roles = lambda user=None: ["Employee", "Project Owner", "All Project Access"]
     frappe.db.get_value = lambda *args, **kwargs: "EMP-ZHANG"
 
@@ -327,7 +327,7 @@ def test_all_project_access_can_view_and_fill_every_rd_employee(monkeypatch):
 def test_project_owner_without_all_project_access_remains_self_scoped(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
 
-    frappe.session = SimpleNamespace(user="history.4c1029697e@legacy.example.invalid")
+    frappe.session = SimpleNamespace(user="person041@staff.example.invalid")
     frappe.get_roles = lambda user=None: ["Employee", "Project Owner"]
     frappe.db.get_value = lambda *args, **kwargs: "EMP-OWNER"
 

@@ -6,8 +6,8 @@ import re
 
 import frappe
 
-USER_DOMAIN = "legacy.example.invalid"
-_GENERATED_USER_RE = re.compile(r"^hr-emp-\d+@legacy\.example\.invalid$", re.IGNORECASE)
+USER_DOMAIN = "staff.example.invalid"
+_GENERATED_USER_RE = re.compile(r"^hr-emp-\d+@staff\.example\.invalid$", re.IGNORECASE)
 
 
 def _romanize(value):
@@ -78,7 +78,7 @@ def build_rename_plan(employees, existing_users, romanize=None):
 def plan_generated_rd_user_renames():
     employees = frappe.get_all(
         "Employee",
-        filters={"status": "Active", "user_id": ["like", "history.ec94337428@legacy.example.invalid"]},
+        filters={"status": "Active", "user_id": ["like", "person016@staff.example.invalid"]},
         fields=["name", "employee_name", "user_id", "status"],
         order_by="name asc",
     )
