@@ -85,3 +85,9 @@ test("monthly work limit shows days hours and calendar fallback", () => {
   assert.ok(source.includes("本月上限"));
   assert.ok(source.includes("未配置假日表，当前按周一至周五计算"));
 });
+
+test("monthly saves submit the revision returned by the loaded snapshot", () => {
+  assert.match(source, /const loadedRevision = ref/);
+  assert.match(source, /loadedRevision\.value = String\(monthly\.data\?\.revision/);
+  assert.match(source, /expected_revision: loadedRevision\.value/);
+});

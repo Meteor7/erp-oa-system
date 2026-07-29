@@ -23,6 +23,7 @@ const selectedEmployee = ref("");
 const selectedYear = ref(Number(String(period.value).slice(0, 4)) || new Date().getFullYear());
 const selectedMonth = ref(Number(String(period.value).slice(5, 7)) || new Date().getMonth() + 1);
 const entries = ref([]);
+const loadedRevision = ref("");
 const saving = ref(false);
 const exporting = ref(false);
 const errMsg = ref("");
@@ -96,6 +97,7 @@ function recalculateRow(row) {
 }
 
 function hydrateEntries() {
+  loadedRevision.value = String(monthly.data?.revision || "");
   entries.value = (monthly.data?.entries || []).map((row) => ({
     ...row,
     key: row.monthly_entry_id,
@@ -162,7 +164,12 @@ async function saveRows() {
       occurrence_days: Number(row.occurrence_days).toFixed(2),
       remark: String(row.remark || "").trim(),
     }));
-    await saver.submit({ period: period.value, employee: selectedEmployee.value, rows: JSON.stringify(rows) });
+    await saver.submit({
+      period: period.value,
+      employee: selectedEmployee.value,
+      rows: JSON.stringify(rows),
+      expected_revision: loadedRevision.value,
+    });
     await loadEntries();
     okMsg.value = "月度工时保存成功";
   } catch (error) {
