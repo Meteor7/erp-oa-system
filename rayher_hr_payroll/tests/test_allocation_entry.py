@@ -107,6 +107,7 @@ def test_get_allocation_includes_project_and_stage_summaries(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
+    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: mod._zero_stage_totals())
     frappe.db.get_value = lambda *args, **kwargs: "ALLOC-1"
 
     frappe.get_doc = lambda doctype, name: SimpleNamespace(
@@ -169,6 +170,7 @@ def test_get_allocation_year_aggregates_submitted_months(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
+    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: mod._zero_stage_totals())
 
     def get_all(doctype, filters=None, fields=None, **kwargs):
         if doctype == "RD Cost Allocation":
@@ -203,6 +205,42 @@ def test_get_allocation_year_aggregates_submitted_months(monkeypatch):
         {"stage": "unknown", "label": "\u672a\u5224\u5b9a", "total": 1},
     ]
 
+
+
+def test_foreign_stage_totals_propagates_foreign_calculation_failure(monkeypatch):
+    mod, _frappe = _load_allocation_entry(monkeypatch)
+    api_package = importlib.import_module("rayher_hr_payroll.api")
+
+    def fail(year, month):
+        raise RuntimeError("foreign totals failed")
+
+    monkeypatch.setattr(
+        api_package,
+        "foreign_rd_entry",
+        SimpleNamespace(_get_foreign_rd_month=fail),
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="foreign totals failed"):
+        mod._foreign_stage_totals(2026, 6)
+
+
+def test_foreign_dashboard_lines_propagates_foreign_calculation_failure(monkeypatch):
+    mod, _frappe = _load_allocation_entry(monkeypatch)
+    module_name = (
+        "rayher_hr_payroll.rayher_hr_payroll.report."
+        "rd_allocation_matrix.rd_allocation_matrix"
+    )
+    report_module = types.ModuleType(module_name)
+
+    def fail(year, month):
+        raise RuntimeError("foreign dashboard failed")
+
+    report_module._foreign_matrix_lines_for_month = fail
+    monkeypatch.setitem(sys.modules, module_name, report_module)
+
+    with pytest.raises(RuntimeError, match="foreign dashboard failed"):
+        mod._foreign_dashboard_lines([(2026, 6)])
 
 
 def test_get_allocation_returns_foreign_totals_without_domestic_allocation(monkeypatch):

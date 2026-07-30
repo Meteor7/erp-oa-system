@@ -71,12 +71,9 @@ def _zero_stage_totals():
 
 
 def _foreign_stage_totals(year, month):
-    try:
-        from rayher_hr_payroll.api import foreign_rd_entry
+    from rayher_hr_payroll.api import foreign_rd_entry
 
-        payload = foreign_rd_entry._get_foreign_rd_month(int(year), int(month))
-    except Exception:
-        return _zero_stage_totals()
+    payload = foreign_rd_entry._get_foreign_rd_month(int(year), int(month))
     totals = _zero_stage_totals()
     for row in payload.get("foreign_stage_summaries", []) or []:
         stage = _value(row, "stage") or "unknown"
@@ -338,19 +335,13 @@ def _domestic_dashboard_lines(allocation_names, period_by_parent):
 def _foreign_dashboard_lines(periods):
     if not periods:
         return []
-    try:
-        from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
-            _foreign_matrix_lines_for_month,
-        )
-    except Exception:
-        return []
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
+        _foreign_matrix_lines_for_month,
+    )
 
     rows = []
     for year, month in periods:
-        try:
-            foreign_lines = _foreign_matrix_lines_for_month(year, month)
-        except Exception:
-            foreign_lines = []
+        foreign_lines = _foreign_matrix_lines_for_month(year, month)
         for line in foreign_lines:
             level_3 = _clean(_value(line, "account_level_3")) or "\u5883\u5916"
             level_4 = _clean(_value(line, "account_level_4"))
