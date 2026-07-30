@@ -176,7 +176,7 @@ async function exportCurrentAllocation() {
     });
     const filename = await exportAllocationWorkbook({
       period: `${displayPeriod.value}-${allocationModeLabel.value}`,
-      summary: viewSummary.value,
+      summary: summary.value,
       columns: columns.value,
       result: result.value,
       stageMatrices,

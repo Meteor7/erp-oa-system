@@ -26,6 +26,10 @@ test("allocation page supports month and year views with four top totals", () =>
   assert.match(source, /allocationEmptyState/);
   assert.match(source, /if \(!summary\.value\) return/);
   assert.match(source, /allocName \|\| displayPeriod/);
+  assert.match(source, /loadAllocationStageMatrices/);
+  assert.match(source, /const exportMatrixRes = createResource/);
+  assert.match(source, /stageMatrices = await loadAllocationStageMatrices/);
+  assert.match(source, /stageMatrices,/);
 });
 
 test("allocation ledger uses the shared summary capitalized and expensed views", () => {
@@ -54,7 +58,7 @@ test("allocation page can export the current allocation workbook", () => {
   assert.match(source, /const canExport = computed/);
   assert.match(source, /exportExcel/);
   assert.match(source, /:disabled="!canExport"/);
-  assert.match(source, /summary: viewSummary\.value/);
+  assert.match(source, /summary: summary\.value/);
   assert.match(source, /allocationModeLabel\.value/);
 });
 

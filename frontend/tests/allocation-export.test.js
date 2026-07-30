@@ -69,3 +69,52 @@ test("stage export recalculates each row total from the visible project columns"
   assert.deepEqual(sheets.expensedMatrix[0].slice(-2), ["RD15", "\u6c47\u603b"]);
   assert.equal(sheets.expensedMatrix[1].at(-1), 20);
 });
+
+test("annual stage sheets use independently filtered matrices when one project changes stage", () => {
+  const combinedColumns = [
+    { fieldname: "period", label: "\u65e5\u671f" },
+    { fieldname: "project_1", label: "RD01", fieldtype: "Currency", project: "RD01", project_stage: "capitalized" },
+    { fieldname: "row_total", label: "\u6c47\u603b", fieldtype: "Currency" },
+  ];
+  const combinedResult = [
+    { period: "2026-01", project_1: 100, row_total: 100 },
+    { period: "2026-02", project_1: 50, row_total: 50 },
+  ];
+  const capitalizedResult = [
+    { period: "2026-01", project_1: 100, row_total: 100 },
+  ];
+  const expensedColumns = [
+    { fieldname: "period", label: "\u65e5\u671f" },
+    { fieldname: "project_1", label: "RD01", fieldtype: "Currency", project: "RD01", project_stage: "expensed" },
+    { fieldname: "row_total", label: "\u6c47\u603b", fieldtype: "Currency" },
+  ];
+  const expensedResult = [
+    { period: "2026-02", project_1: 50, row_total: 50 },
+  ];
+
+  const sheets = buildAllocationExportSheets({
+    period: "2026\u5e74",
+    summary: { capitalized: 100, expensed: 50, unknown: 0 },
+    columns: combinedColumns,
+    result: combinedResult,
+    stageMatrices: {
+      all: { columns: combinedColumns, result: combinedResult },
+      capitalized: { columns: combinedColumns, result: capitalizedResult },
+      expensed: { columns: expensedColumns, result: expensedResult },
+    },
+  });
+
+  assert.deepEqual(sheets.matrix, [
+    ["\u65e5\u671f", "RD01", "\u6c47\u603b"],
+    ["2026-01", 100, 100],
+    ["2026-02", 50, 50],
+  ]);
+  assert.deepEqual(sheets.capitalizedMatrix, [
+    ["\u65e5\u671f", "RD01", "\u6c47\u603b"],
+    ["2026-01", 100, 100],
+  ]);
+  assert.deepEqual(sheets.expensedMatrix, [
+    ["\u65e5\u671f", "RD01", "\u6c47\u603b"],
+    ["2026-02", 50, 50],
+  ]);
+});

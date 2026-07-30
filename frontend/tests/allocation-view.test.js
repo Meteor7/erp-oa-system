@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
+import * as allocationView from "../src/lib/allocationView.js";
+
+const {
   allocationEmptyState,
   buildAllocationMatrixFilters,
   hasAllocationData,
-} from "../src/lib/allocationView.js";
+} = allocationView;
 
 test("foreign-only payload remains visible without a domestic allocation name", () => {
   assert.equal(hasAllocationData({
@@ -56,4 +58,31 @@ test("empty state distinguishes no business data from no matrix detail", () => {
   assert.equal(allocationEmptyState({ hasData: true, mode: "all" }), "no-detail");
   assert.equal(allocationEmptyState({ hasData: true, mode: "capitalized" }), "no-detail-for-mode");
   assert.equal(allocationEmptyState({ hasData: true, mode: "expensed" }), "no-detail-for-mode");
+});
+
+test("export loader requests independent all capitalized and expensed matrices", async () => {
+  assert.equal(typeof allocationView.loadAllocationStageMatrices, "function");
+  const calls = [];
+  const stageMatrices = await allocationView.loadAllocationStageMatrices({
+    scope: "year",
+    period: "2026-06",
+    allocation: null,
+    load: async (filters) => {
+      calls.push(filters);
+      return {
+        columns: [{ fieldname: `project_${filters.stage}` }],
+        result: [{ stage: filters.stage }],
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { year: 2026, stage: "all" },
+    { year: 2026, stage: "capitalized" },
+    { year: 2026, stage: "expensed" },
+  ]);
+  assert.deepEqual(stageMatrices.expensed, {
+    columns: [{ fieldname: "project_expensed" }],
+    result: [{ stage: "expensed" }],
+  });
 });
