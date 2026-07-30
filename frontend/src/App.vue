@@ -21,6 +21,7 @@ const groups = [
     { to: '/timesheet', step: '05', label: '\u7814\u53d1\u5de5\u65f6\u62a5\u8868' },
     { to: '/expense', step: '06', label: '\u7814\u53d1\u8d39\u7528\u5bfc\u5165' },
     { to: '/foreign-rd', step: '07', label: '\u5883\u5916\u59d4\u6258\u7814\u53d1\u5de5\u65f6' },
+    { to: '/foreign-rd-timesheet', step: '08', label: '\u5883\u5916\u7814\u53d1\u5de5\u65f6\u62a5\u8868' },
     { to: '/allocation', step: '08', label: '\u7814\u53d1\u8d39\u7528\u53f0\u8d26' },
     { to: '/allocation-dashboard', step: '09', label: '\u7814\u53d1\u8d39\u7528\u6c47\u603b' },
   ] },

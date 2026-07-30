@@ -300,3 +300,47 @@ def test_save_foreign_rd_reports_concurrent_first_save_without_overwrite(monkeyp
 def test_foreign_rd_allows_the_all_project_account_exception(monkeypatch):
     mod, _frappe = _load_foreign_rd_entry(monkeypatch)
     assert "All Project Access" in mod.RD_FOREIGN_FINANCE_ROLES
+
+
+def test_monthly_foreign_row_calculates_hours_from_occurrence_days(monkeypatch):
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    rows = [{
+        "foreign_entity": "QIHENG DEMO OVERSEAS",
+        "project": "RD06",
+        "project_code": "RD06",
+        "project_name": "MUSHI 7546",
+        "occurrence_days": 2.5,
+        "remark": "monthly input",
+    }]
+
+    allocated = mod._allocate_foreign_rows(1000, rows, _project_info(), year=2026, month=6)
+
+    assert allocated[0]["foreign_entity"] == "QIHENG DEMO OVERSEAS"
+    assert allocated[0]["occurrence_days"] == 2.5
+    assert allocated[0]["hours"] == 20.0
+    assert allocated[0]["work_date"] == "2026-06-01"
+    assert allocated[0]["ratio"] == 100.0
+    assert allocated[0]["allocated_amount"] == 1000.0
+    assert allocated[0]["description"] == "monthly input"
+
+
+def test_legacy_daily_rows_are_grouped_for_monthly_entry(monkeypatch):
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    rows = [
+        {"project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546", "work_date": "2026-06-03", "activity_type": "analysis", "hours": 8, "description": "a"},
+        {"project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546", "work_date": "2026-06-04", "activity_type": "design", "hours": 4, "description": "b"},
+    ]
+
+    monthly = mod._monthly_foreign_rows(rows, 2026, 6)
+
+    assert monthly == [{
+        "foreign_entity": "QIHENG DEMO OVERSEAS",
+        "project": "RD06",
+        "project_code": "RD06",
+        "project_name": "MUSHI 7546",
+        "work_date": "2026-06-01",
+        "activity_type": "analysis",
+        "occurrence_days": 1.5,
+        "hours": 12.0,
+        "description": "a\uFF1Bb",
+    }]

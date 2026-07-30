@@ -10,6 +10,21 @@
  "track_changes": 1,
  "fields": [
   {
+   "fieldname": "foreign_entity",
+   "label": "Foreign Entity",
+   "fieldtype": "Data",
+   "default": "QIHENG DEMO OVERSEAS",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "occurrence_days",
+   "label": "Occurrence Days",
+   "fieldtype": "Float",
+   "precision": "2",
+   "in_list_view": 1
+  },
+  {
    "fieldname": "work_date",
    "label": "Work Date",
    "fieldtype": "Date",
@@ -43,7 +58,6 @@
    "label": "Activity Type",
    "fieldtype": "Link",
    "options": "Activity Type",
-   "reqd": 1,
    "in_list_view": 1
   },
   {

@@ -12,6 +12,7 @@ from rayher_hr_payroll.rd_cost.frappe_adapter import (
 
 RD_FOREIGN_FINANCE_ROLES = (*RD_FINANCE_ROLES, "All Project Access")
 MAX_DAILY_HOURS = 8
+DEFAULT_FOREIGN_ENTITY = "QIHENG DEMO OVERSEAS"
 
 STAGE_ALIASES = {
     "capitalized": "capitalized", "Capitalized": "capitalized", "\u8d44\u672c\u5316": "capitalized",
@@ -62,6 +63,42 @@ def _parse_work_date(value):
     except ValueError:
         frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u65e5\u671f\u683c\u5f0f\u4e0d\u6b63\u786e\u3002"))
 
+
+def _monthly_foreign_rows(rows, year, month):
+    grouped = {}
+    for row in rows or []:
+        project = _clean(_value(row, "project"))
+        if not project:
+            continue
+        entity = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
+        hours = _number(_value(row, "hours"))
+        raw_days = _value(row, "occurrence_days", None)
+        occurrence_days = _number(raw_days) if raw_days not in (None, "") else hours / MAX_DAILY_HOURS
+        if raw_days not in (None, ""):
+            hours = occurrence_days * MAX_DAILY_HOURS
+        key = (entity, project)
+        description = _clean(_value(row, "remark")) or _clean(_value(row, "description"))
+        if key not in grouped:
+            grouped[key] = {
+                "foreign_entity": entity,
+                "project": project,
+                "project_code": _clean(_value(row, "project_code")) or project,
+                "project_name": _clean(_value(row, "project_name")) or project,
+                "work_date": f"{int(year):04d}-{int(month):02d}-01",
+                "activity_type": _clean(_value(row, "activity_type")),
+                "occurrence_days": 0.0,
+                "hours": 0.0,
+                "description": "",
+            }
+        item = grouped[key]
+        item["occurrence_days"] = item["occurrence_days"] + occurrence_days
+        item["hours"] = round(item["hours"] + hours, 2)
+        if description:
+            descriptions = [part for part in item["description"].split("\uFF1B") if part]
+            if description not in descriptions:
+                descriptions.append(description)
+            item["description"] = "\uFF1B".join(descriptions)
+    return list(grouped.values())
 
 def _foreign_project_info(project_names):
     names = sorted({name for name in project_names if name})
@@ -212,48 +249,42 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
     prepared = []
     for row in rows or []:
         project = _clean(_value(row, "project"))
-        hours = _number(_value(row, "hours"))
-        has_content = bool(
-            project
-            or _clean(_value(row, "project_code"))
-            or _clean(_value(row, "project_name"))
-            or _clean(_value(row, "activity_type"))
-            or _clean(_value(row, "description"))
-            or hours
-        )
+        raw_days = _value(row, "occurrence_days", None)
+        is_monthly = raw_days not in (None, "")
+        occurrence_days = _number(raw_days) if is_monthly else 0.0
+        hours = occurrence_days * MAX_DAILY_HOURS if is_monthly else _number(_value(row, "hours"))
+        description = _clean(_value(row, "remark")) or _clean(_value(row, "description"))
+        has_content = bool(project or _clean(_value(row, "project_code")) or _clean(_value(row, "project_name")) or _clean(_value(row, "activity_type")) or description or hours)
         if not has_content:
             continue
         if not project:
             frappe.throw(frappe._("\u8bf7\u9009\u62e9\u5883\u5916\u5de5\u65f6\u7684\u9879\u76ee\u3002"))
-        work_day = _parse_work_date(_value(row, "work_date"))
-        if year and month and (work_day.year != int(year) or work_day.month != int(month)):
-            frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u65e5\u671f\u5fc5\u987b\u5728\u5f53\u524d\u4f1a\u8ba1\u671f\u95f4\u5185\u3002"))
-        activity_type = _clean(_value(row, "activity_type"))
-        if not activity_type:
-            frappe.throw(frappe._("\u8bf7\u9009\u62e9\u5883\u5916\u5de5\u65f6\u7684\u6d3b\u52a8\u7c7b\u578b\u3002"))
-        description = _clean(_value(row, "description"))
-        if not description:
-            frappe.throw(frappe._("\u8bf7\u586b\u5199\u5883\u5916\u5de5\u65f6\u7684\u5de5\u4f5c\u5185\u5bb9\u3002"))
+        if is_monthly:
+            work_day = date(int(year), int(month), 1) if year and month else _parse_work_date(_value(row, "work_date"))
+            activity_type = _clean(_value(row, "activity_type"))
+        else:
+            work_day = _parse_work_date(_value(row, "work_date"))
+            if year and month and (work_day.year != int(year) or work_day.month != int(month)):
+                frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u65e5\u671f\u5fc5\u987b\u5728\u5f53\u524d\u4f1a\u8ba1\u671f\u95f4\u5185\u3002"))
+            activity_type = _clean(_value(row, "activity_type"))
+            if not activity_type:
+                frappe.throw(frappe._("\u8bf7\u9009\u62e9\u5883\u5916\u5de5\u65f6\u7684\u6d3b\u52a8\u7c7b\u578b\u3002"))
+            if not description:
+                frappe.throw(frappe._("\u8bf7\u586b\u5199\u5883\u5916\u5de5\u65f6\u7684\u5de5\u4f5c\u5185\u5bb9\u3002"))
         if hours <= 0:
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5fc5\u987b\u5927\u4e8e 0\u3002"))
-        if hours > MAX_DAILY_HOURS:
+        if not is_monthly and hours > MAX_DAILY_HOURS:
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5355\u65e5\u4e0d\u80fd\u8d85\u8fc7 8 \u5c0f\u65f6\u3002"))
         info = project_info.get(project)
         if not info:
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u9879\u76ee {0} \u4e0d\u5b58\u5728\u6216\u672a\u542f\u7528\u3002").format(project))
         project_code, project_name = _validate_project_identity(row, info)
         stage = _normalize_stage(_value(info, "rd_stage"))
-        prepared.append({
-            "project": project,
-            "project_code": project_code,
-            "project_name": project_name,
-            "project_stage": stage,
-            "stage_label": STAGE_LABELS.get(stage, STAGE_LABELS["unknown"]),
-            "work_date": work_day.isoformat(),
-            "activity_type": activity_type,
-            "hours": float(hours),
-            "description": description,
-        })
+        prepared_row = {"project": project, "project_code": project_code, "project_name": project_name, "project_stage": stage, "stage_label": STAGE_LABELS.get(stage, STAGE_LABELS["unknown"]), "work_date": work_day.isoformat(), "activity_type": activity_type, "hours": float(hours), "description": description}
+        if is_monthly:
+            prepared_row["foreign_entity"] = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
+            prepared_row["occurrence_days"] = round(occurrence_days, 2)
+        prepared.append(prepared_row)
 
     total_hours = sum(row["hours"] for row in prepared)
     common_amount = _money(common_amount)
@@ -261,7 +292,6 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
         frappe.throw(frappe._("\u5883\u5916\u59d4\u6258\u7814\u53d1\u516c\u5171\u8d39\u7528\u4e0d\u80fd\u4e3a\u8d1f\u6570\u3002"))
     if common_amount > 0 and total_hours <= 0:
         frappe.throw(frappe._("\u6709\u5883\u5916\u516c\u5171\u8d39\u7528\u65f6\uff0c\u5fc5\u987b\u5f55\u5165\u81f3\u5c11\u4e00\u6761\u5de5\u65f6\u3002"))
-
     direct_remaining = {project: _money(amount) for project, amount in (direct_amounts_by_project or {}).items()}
     running = 0.0
     for index, row in enumerate(prepared):
@@ -276,7 +306,6 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
         row["direct_allocated_amount"] = direct_allocated
         row["allocated_amount"] = _money(common_allocated + direct_allocated)
     return prepared
-
 
 def _serialize_line(line):
     stage = _normalize_stage(_value(line, "project_stage"))
@@ -296,8 +325,10 @@ def _serialize_line(line):
         "project_name": _clean(_value(line, "project_name")) or project,
         "project_stage": stage,
         "stage_label": STAGE_LABELS.get(stage, STAGE_LABELS["unknown"]),
+        "foreign_entity": _clean(_value(line, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY,
         "work_date": _clean(_value(line, "work_date")),
         "activity_type": _clean(_value(line, "activity_type")),
+        "occurrence_days": _number(_value(line, "occurrence_days")) if _value(line, "occurrence_days", None) not in (None, "") else None,
         "hours": _number(_value(line, "hours")),
         "ratio": _number(_value(line, "ratio")),
         "common_allocated_amount": common_amount,
@@ -511,7 +542,7 @@ def _get_foreign_rd_month(year, month):
     if not name:
         return _response(period_text, year, month, domestic_projects, expense_context)
     doc = frappe.get_doc("Foreign RD Expense", name)
-    lines = [_serialize_line(line) for line in (doc.lines or [])]
+    lines = _monthly_foreign_rows([_serialize_line(line) for line in (doc.lines or [])], year, month)
     return _response(period_text, year, month, domestic_projects, expense_context, name=doc.name, status=doc.status, lines=lines)
 
 
@@ -606,6 +637,8 @@ def save_foreign_rd(period, total_amount=0, rows=None):
         })
     for row in allocated:
         doc.append("lines", {
+            "foreign_entity": row.get("foreign_entity", DEFAULT_FOREIGN_ENTITY),
+            "occurrence_days": row.get("occurrence_days", round(row["hours"] / MAX_DAILY_HOURS, 2)),
             "work_date": row["work_date"],
             "activity_type": row["activity_type"],
             "project": row["project"],

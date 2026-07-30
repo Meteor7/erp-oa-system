@@ -32,3 +32,9 @@ test('router registers allocation dashboard page after the allocation table', ()
   assert.match(source, /\.\/pages\/AllocationDashboard\.vue/);
   assert.ok(source.indexOf("path: '/allocation'") < source.indexOf("path: '/allocation-dashboard'"));
 });
+
+
+test('router registers the independent foreign R&D timesheet report', () => {
+  assert.match(source, /path:\s*['"]\/foreign-rd-timesheet['"]/);
+  assert.match(source, /\.\/pages\/ForeignRDTimesheet\.vue/);
+});

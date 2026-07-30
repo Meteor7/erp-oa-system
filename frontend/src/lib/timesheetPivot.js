@@ -93,3 +93,13 @@ export function buildMonthlyProjectRatePivot(rows = [], selectedYear) {
   });
   return { projects, data };
 }
+
+export function buildForeignEntityProjectPivot(rows = []) {
+  return buildEmployeeProjectPivot((rows || []).map((row) => ({
+    ...row,
+    employee: clean(row.foreign_entity) || 'QIHENG DEMO OVERSEAS',
+    employee_name: clean(row.foreign_entity) || 'QIHENG DEMO OVERSEAS',
+    rd_project_code: clean(row.rd_project_code || row.project_code),
+    rd_project_key: clean(row.rd_project_key) || [clean(row.project_code), clean(row.project_name)].filter(Boolean).join(' | '),
+  })));
+}

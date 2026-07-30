@@ -9,13 +9,14 @@ const PROJECT_ACCESS = [...MANAGE, 'Project Owner'];
 const TIME_ENTRY = ['System Manager', 'HR User', 'HR Manager', 'Department Manager'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const ROUTE_ORDER = ['/dashboard', '/personnel', '/accommodation', '/projects', '/entry', '/approval/leave', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/allocation', '/allocation-dashboard'];
+const ROUTE_ORDER = ['/dashboard', '/personnel', '/accommodation', '/projects', '/entry', '/approval/leave', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 const PAGE_ROLES = {
   '/expense': FINANCE,
   '/allocation': FINANCE,
   '/allocation-dashboard': FINANCE,
   '/foreign-rd': FOREIGN_RD_ACCESS,
+  '/foreign-rd-timesheet': FOREIGN_RD_ACCESS,
   '/personnel': HR,
   '/accommodation': HR,
   '/projects': PROJECT_ACCESS,

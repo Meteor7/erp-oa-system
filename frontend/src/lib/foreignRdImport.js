@@ -2,185 +2,137 @@ function clean(value) {
   return String(value ?? '').trim();
 }
 
-function aliasKey(value) {
+function splitLine(line) {
+  const text = String(line ?? '');
+  if (text.includes('\t')) return text.split('\t').map(clean);
+  if (text.includes(',')) return text.split(',').map(clean);
+  const wide = text.split(/\s{2,}/).map(clean).filter(Boolean);
+  return wide.length >= 4 ? wide : text.split(/\s+/).map(clean).filter(Boolean);
+}
+
+const HEADERS = {
+  foreign_entity: ['主体', '研发主体', '境外主体', 'foreign_entity', 'entity'],
+  project_code: ['项目代码', '项目编号', 'project_code', 'rd_project_code'],
+  project_name: ['项目名称', 'project_name'],
+  occurrence_days: ['发生天数', '天数', 'occurrence_days', 'days'],
+  remark: ['备注', '工作内容', 'remark', 'description'],
+};
+
+function headerKey(value) {
   return clean(value).replace(/[\s_\-:：()（）/\\.]+/g, '').toLowerCase();
 }
 
-function splitLooseWhitespace(text) {
-  return clean(text).split(/\s+/).map(clean).filter(Boolean);
-}
-
-function splitWideSpaces(cells) {
-  return cells.flatMap((cell) => clean(cell).split(/\s{2,}/).map(clean).filter(Boolean));
-}
-
-function splitLine(line) {
-  const text = String(line ?? '');
-  let cells;
-  if (text.includes('\t')) cells = text.split('\t').map(clean);
-  else if (text.includes(',')) cells = text.split(',').map(clean);
-  else if (text.includes('，')) cells = text.split('，').map(clean);
-  else cells = [clean(text)];
-  if (cells.length >= 6) return cells;
-  const wideSpaceCells = splitWideSpaces(cells);
-  if (wideSpaceCells.length >= 6) return wideSpaceCells;
-  const looseCells = splitLooseWhitespace(text);
-  return looseCells.length >= 6 ? looseCells : cells;
-}
-
-const HEADER_ALIASES = {
-  work_date: ['日期', '填报日期', '工作日期', 'date', 'work_date'],
-  project_code: ['项目代码', '项目编号', 'project_code', 'rd_project_code'],
-  project_name: ['项目名称', 'project_name', 'rd_project_name'],
-  activity_type: ['活动类型', 'activity_type'],
-  hours: ['工时', '工时h', '小时', 'hours'],
-  description: ['工作内容', '内容', '描述', 'description'],
-};
-const REQUIRED_HEADERS = ['work_date', 'project_code', 'project_name', 'activity_type', 'hours'];
 function headerField(value) {
-  const key = aliasKey(value);
-  return Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.some((alias) => aliasKey(alias) === key))?.[0] || '';
+  const key = headerKey(value);
+  return Object.entries(HEADERS).find(([, aliases]) => aliases.some((alias) => headerKey(alias) === key))?.[0] || '';
 }
+
 function headerMap(cells) {
   const map = {};
   cells.forEach((cell, index) => {
     const field = headerField(cell);
     if (field && map[field] === undefined) map[field] = index;
   });
-  return REQUIRED_HEADERS.every((field) => map[field] !== undefined) ? map : null;
+  return ['foreign_entity', 'project_code', 'project_name', 'occurrence_days'].every((field) => map[field] !== undefined) ? map : null;
 }
-function rowFromHeader(cells, map) {
-  const pick = (field) => (map[field] === undefined ? '' : clean(cells[map[field]]));
-  return { work_date: pick('work_date'), project_code: pick('project_code'), project_name: pick('project_name'), activity_type: pick('activity_type'), hours: pick('hours'), description: pick('description') };
+
+function rawRow(cells, map) {
+  const pick = (field, fallback) => clean(cells[map ? map[field] : fallback]);
+  return {
+    foreign_entity: pick('foreign_entity', 0),
+    project_code: pick('project_code', 1),
+    project_name: pick('project_name', 2),
+    occurrence_days: pick('occurrence_days', 3),
+    remark: map && map.remark === undefined ? '' : pick('remark', 4),
+  };
 }
-function rowFromPosition(cells) {
-  const values = cells.map(clean);
-  return { work_date: values[0] || '', project_code: values[1] || '', project_name: values[2] || '', activity_type: values[3] || '', hours: values[4] || '', description: values.slice(5).join(' ').trim() };
+
+function projectCode(project) {
+  return clean(project?.rd_project_code || project?.project_code || project?.name);
 }
-function excelSerialToISO(value) {
-  const serial = Number(value);
-  if (!Number.isFinite(serial) || serial <= 0) return '';
-  const utc = Date.UTC(1899, 11, 30) + Math.round(serial) * 24 * 60 * 60 * 1000;
-  return new Date(utc).toISOString().slice(0, 10);
+
+function projectName(project) {
+  return clean(project?.project_name || project?.name);
 }
-function parseDate(value) {
-  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
-  if (typeof value === 'number') return excelSerialToISO(value);
-  const text = clean(value);
-  if (!text) return '';
-  if (/^\d+(\.\d+)?$/.test(text) && Number(text) > 20000) return excelSerialToISO(Number(text));
-  const normalized = text.replace(/[年月/.]/g, '-').replace(/日/g, '').replace(/\s+.*/, '').trim();
-  const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (!match) return '';
-  const [, year, month, day] = match;
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+
+function findProject(code, name, projects) {
+  return (projects || []).find((project) => projectCode(project) === clean(code) && projectName(project) === clean(name)) || null;
 }
-function parseHours(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const text = clean(value).replace(/小时|h/gi, '').replace(/,/g, '');
-  if (!text) return null;
-  const number = Number(text);
-  return Number.isFinite(number) ? number : null;
-}
-function projectCode(project) { return clean(project?.rd_project_code || project?.project_code || project?.name); }
-function projectName(project) { return clean(project?.project_name || project?.name); }
-function findProject(codeValue, nameValue, projects = []) {
-  const code = clean(codeValue);
-  const name = clean(nameValue);
-  if (!code || !name) return null;
-  return projects.find((project) => projectCode(project) === code && projectName(project) === name) || null;
-}
-function activityName(activity) { return clean(activity?.name || activity); }
-function findActivity(value, activityTypes = []) {
-  const text = clean(value);
-  if (!text) return '';
-  return activityTypes.map(activityName).find((name) => name === text) || '';
-}
-function rowKey({ work_date, project_code, project_name, activity_type }) {
-  return [work_date, project_code, project_name, activity_type].map(aliasKey).join('|');
-}
-function addDailyTotal(totals, workDate, hours) {
-  const key = clean(workDate);
-  totals.set(key, (totals.get(key) || 0) + Number(hours || 0));
-  return totals.get(key);
-}
-function existingProjectCode(row) { return clean(row?.rd_project_code || row?.project_code || row?.project); }
-function existingProjectName(row) { return clean(row?.project_name || row?.rd_project_name || row?.project); }
-function buildExistingState(existingRows = []) {
-  const keys = new Set();
-  const dailyTotals = new Map();
-  existingRows.forEach((row) => {
-    const workDate = parseDate(row?.work_date || row?.date);
-    if (workDate) addDailyTotal(dailyTotals, workDate, Number(row.hours || 0));
-    const key = rowKey({ work_date: workDate, project_code: existingProjectCode(row), project_name: existingProjectName(row), activity_type: row?.activity_type });
-    if (workDate && existingProjectCode(row) && existingProjectName(row) && clean(row?.activity_type)) keys.add(key);
-  });
-  return { keys, dailyTotals };
-}
-function normalizeRawRow(rawRow, options, lineNo, state) {
-  const projects = options.projects || [];
-  const activityTypes = options.activityTypes || [];
-  const period = clean(options.period);
-  const rowErrors = [];
-  const workDate = parseDate(rawRow.work_date);
-  if (!workDate) rowErrors.push(`第 ${lineNo} 行：日期格式不正确`);
-  else if (period && !workDate.startsWith(`${period}-`)) rowErrors.push(`第 ${lineNo} 行：日期必须在当前会计期间 ${period} 内`);
-  const project = findProject(rawRow.project_code, rawRow.project_name, projects);
-  if (!project) rowErrors.push(`第 ${lineNo} 行：项目代码和项目名称未匹配`);
-  const activity = findActivity(rawRow.activity_type, activityTypes);
-  if (!activity) rowErrors.push(`第 ${lineNo} 行：活动类型“${clean(rawRow.activity_type)}”不存在`);
-  const hours = parseHours(rawRow.hours);
-  if (hours === null || hours <= 0 || hours > 8) rowErrors.push(`第 ${lineNo} 行：工时必须大于 0，且单日不超过 8 小时`);
-  const description = clean(rawRow.description);
-  if (!description) rowErrors.push(`第 ${lineNo} 行：工作内容不能为空`);
-  if (project && activity && workDate) {
-    const normalized = { work_date: workDate, project: project.name, project_code: projectCode(project), project_name: projectName(project), activity_type: activity, hours, description };
-    const key = rowKey(normalized);
-    if (state.seenKeys.has(key)) rowErrors.push(`第 ${lineNo} 行：导入内容中存在重复的日期/项目/活动类型`);
-    if (state.existingKeys.has(key)) rowErrors.push(`第 ${lineNo} 行：当前表格中已存在相同日期/项目/活动类型工时`);
-    if (hours !== null && hours > 0 && hours <= 8) {
-      const total = (state.dailyTotals.get(normalized.work_date) || 0) + hours;
-      if (total > 8) rowErrors.push(`第 ${lineNo} 行：${normalized.work_date} 工时合计超过 8 小时`);
-    }
-    if (!rowErrors.length) {
-      state.seenKeys.add(key);
-      addDailyTotal(state.dailyTotals, normalized.work_date, hours);
-      return { row: normalized, errors: [] };
-    }
+
+function parseDays(value) {
+  const text = clean(value).replace(/天$/u, '');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) {
+    return { value: null, precision: /^\d+\.\d{3,}$/.test(text) };
   }
-  return { row: null, errors: rowErrors };
+  return { value: Number(text), precision: false };
 }
+
+function rowKey(entity, project) {
+  return `${headerKey(entity)}|${clean(project)}`;
+}
+
 export function parseForeignRdTableRows(tableRows, options = {}) {
   const rows = [];
   const errors = [];
+  const allowedEntities = options.foreignEntities || ['QIHENG DEMO OVERSEAS'];
+  const existingKeys = new Set((options.existingRows || []).map((row) => rowKey(row.foreign_entity || 'QIHENG DEMO OVERSEAS', row.project)));
+  const seenKeys = new Set();
   let map = null;
-  let seenContentRow = false;
-  const existing = buildExistingState(options.existingRows || []);
-  const state = { existingKeys: existing.keys, dailyTotals: existing.dailyTotals, seenKeys: new Set() };
-  tableRows.forEach((inputRow, index) => {
-    const cells = Array.from(inputRow || []).map(clean);
+  let seenContent = false;
+
+  tableRows.forEach((input, index) => {
+    const cells = Array.from(input || []).map(clean);
     if (!cells.some(Boolean)) return;
     const possibleHeader = headerMap(cells);
-    if (!seenContentRow && possibleHeader) { map = possibleHeader; return; }
-    seenContentRow = true;
-    const result = normalizeRawRow(map ? rowFromHeader(cells, map) : rowFromPosition(cells), options, index + 1, state);
-    if (result.errors.length) errors.push(...result.errors);
-    else rows.push(result.row);
+    if (!seenContent && possibleHeader) {
+      map = possibleHeader;
+      return;
+    }
+    seenContent = true;
+    const raw = rawRow(cells, map);
+    const line = index + 1;
+    const rowErrors = [];
+    if (!allowedEntities.includes(raw.foreign_entity)) rowErrors.push(`第 ${line} 行：主体“${raw.foreign_entity}”未匹配`);
+    const project = findProject(raw.project_code, raw.project_name, options.projects || []);
+    if (!project) rowErrors.push(`第 ${line} 行：项目代码和项目名称未匹配`);
+    const days = parseDays(raw.occurrence_days);
+    if (days.precision) rowErrors.push(`第 ${line} 行：发生天数最多保留两位小数`);
+    else if (days.value === null || days.value <= 0) rowErrors.push(`第 ${line} 行：发生天数必须大于 0`);
+    if (project) {
+      const key = rowKey(raw.foreign_entity, project.name);
+      if (seenKeys.has(key)) rowErrors.push(`第 ${line} 行：导入内容中存在重复的主体和项目`);
+      if (existingKeys.has(key)) rowErrors.push(`第 ${line} 行：系统中已存在相同主体和项目`);
+      if (!rowErrors.length) {
+        seenKeys.add(key);
+        rows.push({
+          foreign_entity: raw.foreign_entity,
+          project: project.name,
+          project_code: projectCode(project),
+          project_name: projectName(project),
+          occurrence_days: days.value,
+          hours: Math.round(days.value * 8 * 100) / 100,
+          remark: raw.remark,
+        });
+      }
+    }
+    errors.push(...rowErrors);
   });
-  if (!rows.length && !errors.length) errors.push('请粘贴或导入至少一行境外工时。');
+
+  if (!rows.length && !errors.length) errors.push('请粘贴或导入至少一行境外月度工时。');
   return { rows: errors.length ? [] : rows, errors };
 }
+
 export function parseForeignRdPaste(text, options = {}) {
   const lines = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   return parseForeignRdTableRows(lines.map(splitLine), options);
 }
+
 export async function importForeignRdWorkbookFile(file, options = {}) {
   const XLSX = await import('xlsx');
   const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) return { rows: [], errors: ['Excel 文件没有工作表'] };
-  const worksheet = workbook.Sheets[firstSheetName];
-  const tableRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
-  return parseForeignRdTableRows(tableRows, options);
+  const workbook = XLSX.read(data, { type: 'array' });
+  const firstSheet = workbook.SheetNames[0];
+  if (!firstSheet) return { rows: [], errors: ['Excel 文件没有工作表'] };
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1, defval: '', raw: false });
+  return parseForeignRdTableRows(rows, options);
 }

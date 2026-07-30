@@ -19,6 +19,7 @@ const routes = [
   { path: '/allocation', component: () => import('./pages/Allocation.vue') },
   { path: '/allocation-dashboard', component: () => import('./pages/AllocationDashboard.vue') },
   { path: '/foreign-rd', component: () => import('./pages/ForeignRD.vue') },
+  { path: '/foreign-rd-timesheet', component: () => import('./pages/ForeignRDTimesheet.vue') },
 ];
 
 const router = createRouter({ history: createWebHistory('/rayher'), routes });

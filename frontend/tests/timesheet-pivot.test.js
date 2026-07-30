@@ -25,3 +25,17 @@ test("yearly timesheet groups by month and exposes project-code allocation rates
   assert.deepEqual(monthly.projects.map((project) => project.label), ["RD01", "RD02"]);
   assert.deepEqual(monthly.data.map((row) => row.emp), ["Alice", "Bob"]);
 });
+
+
+test('foreign entity pivot calculates project allocation rates independently', async () => {
+  const pivotModule = await import('../src/lib/timesheetPivot.js');
+  assert.equal(typeof pivotModule.buildForeignEntityProjectPivot, 'function');
+  const result = pivotModule.buildForeignEntityProjectPivot([
+    { foreign_entity: 'QIHENG DEMO OVERSEAS', project_code: 'RD14', project_name: 'ACONCA 7961', hours: 120 },
+    { foreign_entity: 'QIHENG DEMO OVERSEAS', project_code: 'RD16', project_name: 'EFEM', hours: 40 },
+  ]);
+  assert.deepEqual(result.data.map((row) => row.emp), ['QIHENG DEMO OVERSEAS']);
+  assert.deepEqual(result.projTotals, [120, 40]);
+  assert.deepEqual(result.rates, [75, 25]);
+  assert.equal(result.grand, 160);
+});
