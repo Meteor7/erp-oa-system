@@ -5,6 +5,10 @@ from rayher_hr_payroll.period_controls import normalize_period_fields
 
 
 class ForeignRDExpense(Document):
+    def autoname(self):
+        self._normalize_period()
+        self.name = f"FRD-{int(self.year):04d}-{int(self.month):02d}"
+
     def before_insert(self):
         self._normalize_period()
 

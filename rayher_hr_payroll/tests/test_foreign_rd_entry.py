@@ -10,8 +10,13 @@ class RuleError(Exception):
     pass
 
 
+class DuplicateEntryError(Exception):
+    pass
+
+
 def _install_fake_frappe(monkeypatch):
     frappe = types.ModuleType("frappe")
+    frappe.DuplicateEntryError = DuplicateEntryError
     frappe._ = lambda text: text
     frappe.only_for = lambda roles: None
     frappe.get_roles = lambda user=None: ["Accounts User"]
@@ -245,6 +250,51 @@ def test_get_foreign_rd_recalculates_from_imported_foreign_expenses(monkeypatch)
     assert result["combined_stage_summaries"][0]["total"] == 700.0
     assert result["combined_project_summaries"][0]["project"] == "RD06"
     assert result["combined_project_summaries"][0]["total_amount"] == 700.0
+
+
+def test_save_foreign_rd_reports_concurrent_first_save_without_overwrite(monkeypatch):
+    mod, frappe = _load_foreign_rd_entry(monkeypatch)
+    captured = {"commit": 0, "save": 0}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
+    monkeypatch.setattr(mod, "_foreign_expense_context", lambda year, month: {
+        "expense_import": None,
+        "total_amount": 0.0,
+        "common_amount": 0.0,
+        "direct_amount": 0.0,
+        "direct_amounts_by_project": {},
+        "expense_sources": [],
+    })
+    monkeypatch.setattr(mod, "_resolve_projects_from_identity", lambda rows: set())
+    monkeypatch.setattr(mod, "_foreign_project_info", lambda names: {})
+    monkeypatch.setattr(mod, "_allocate_foreign_rows", lambda *args, **kwargs: [])
+    monkeypatch.setattr(mod, "_foreign_doc_name", lambda year, month: None)
+
+    class NewDocument:
+        def set(self, fieldname, value):
+            setattr(self, fieldname, value)
+
+        def append(self, fieldname, value):
+            raise AssertionError("no rows should be appended")
+
+        def is_new(self):
+            return True
+
+        def insert(self, ignore_permissions=False):
+            assert ignore_permissions is True
+            raise frappe.DuplicateEntryError("FRD-2026-07")
+
+        def save(self, ignore_permissions=False):
+            captured["save"] += 1
+
+    frappe.get_doc = lambda payload: NewDocument()
+    frappe.db.commit = lambda: captured.__setitem__("commit", captured["commit"] + 1)
+
+    with pytest.raises(RuleError, match="刷新"):
+        mod.save_foreign_rd("2026-07", rows=[])
+
+    assert captured == {"commit": 0, "save": 0}
 
 
 def test_foreign_rd_allows_the_all_project_account_exception(monkeypatch):

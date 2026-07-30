@@ -620,7 +620,10 @@ def save_foreign_rd(period, total_amount=0, rows=None):
             "description": row["description"],
         })
     if getattr(doc, "is_new", lambda: True)():
-        doc.insert(ignore_permissions=True)
+        try:
+            doc.insert(ignore_permissions=True)
+        except frappe.DuplicateEntryError:
+            frappe.throw(frappe._("\u8be5\u6708\u4efd\u5883\u5916\u7814\u53d1\u5de5\u65f6\u5df2\u88ab\u5176\u4ed6\u7528\u6237\u4fdd\u5b58\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540e\u91cd\u8bd5\u3002"))
     else:
         doc.save(ignore_permissions=True)
     frappe.db.commit()
