@@ -541,14 +541,22 @@ def get_allocation(period, scope="month"):
         "RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
         "name", order_by="creation desc",
     )
+    foreign_totals = _foreign_stage_totals(year, month)
     if not name:
-        return {"name": None, "scope": "month"}
+        capitalized, expensed, unknown = _add_foreign_totals(0, 0, 0, foreign_totals)
+        return {
+            "name": None, "status": None, "period": period, "scope": "month",
+            "capitalized": capitalized, "expensed": expensed,
+            "unknown": unknown, "lines": 0,
+            "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
+            "project_summaries": [],
+        }
     d = frappe.get_doc("RD Cost Allocation", name)
     capitalized, expensed, unknown = _add_foreign_totals(
         d.capitalized_total,
         d.expensed_total,
         d.unknown_total,
-        _foreign_stage_totals(year, month),
+        foreign_totals,
     )
     return {
         "name": d.name, "status": d.status, "period": period, "scope": "month",

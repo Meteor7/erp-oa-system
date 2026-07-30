@@ -205,6 +205,35 @@ def test_get_allocation_year_aggregates_submitted_months(monkeypatch):
 
 
 
+def test_get_allocation_returns_foreign_totals_without_domestic_allocation(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: {
+        "capitalized": 12,
+        "expensed": 8,
+        "unknown": 0,
+    })
+    frappe.db.get_value = lambda *args, **kwargs: None
+
+    result = mod.get_allocation("2026-06")
+
+    assert result["name"] is None
+    assert result["status"] is None
+    assert result["period"] == "2026-06"
+    assert result["scope"] == "month"
+    assert result["capitalized"] == 12
+    assert result["expensed"] == 8
+    assert result["unknown"] == 0
+    assert result["lines"] == 0
+    assert result["stage_summaries"] == [
+        {"stage": "capitalized", "label": mod.STAGE_LABELS["capitalized"], "total": 12},
+        {"stage": "expensed", "label": mod.STAGE_LABELS["expensed"], "total": 8},
+        {"stage": "unknown", "label": mod.STAGE_LABELS["unknown"], "total": 0},
+    ]
+    assert result["project_summaries"] == []
+
+
 def test_get_allocation_adds_foreign_stage_totals_to_summary_cards(monkeypatch):
     mod, frappe = _load_allocation_entry(monkeypatch)
 
