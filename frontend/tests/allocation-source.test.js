@@ -21,6 +21,11 @@ test("allocation page supports month and year views with four top totals", () =>
   assert.match(source, /capitalized/);
   assert.match(source, /expensed/);
   assert.match(source, /unknown/);
+  assert.match(source, /hasAllocationData\(a\)/);
+  assert.match(source, /buildAllocationMatrixFilters/);
+  assert.match(source, /allocationEmptyState/);
+  assert.match(source, /if \(!summary\.value\) return/);
+  assert.match(source, /allocName \|\| displayPeriod/);
 });
 
 test("allocation ledger uses the shared summary capitalized and expensed views", () => {

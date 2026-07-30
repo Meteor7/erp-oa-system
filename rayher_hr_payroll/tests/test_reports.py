@@ -226,6 +226,7 @@ def test_matrix_report_checks_parent_read_permission(monkeypatch):
             return text
 
     monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None)
     mod.execute({"allocation": "ALLOC-1"})
     assert "read" in checked
 
@@ -252,6 +253,7 @@ def test_matrix_report_propagates_denied_parent_read(monkeypatch):
             return text
 
     monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None)
     with pytest.raises(Denied):
         mod.execute({"allocation": "ALLOC-1"})
 
@@ -298,12 +300,115 @@ def test_matrix_report_adds_allocation_period_to_domestic_rows(monkeypatch):
             raise AssertionError(doctype)
 
     monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None)
     monkeypatch.setattr(mod, "_foreign_matrix_lines_for_month", lambda year, month: [])
 
     columns, rows = mod.execute({"allocation": "ALLOC-1"})
 
     assert columns[0]["fieldname"] == "period"
     assert rows[0]["period"] == "2026-06"
+
+
+def test_matrix_report_year_month_loads_only_requested_foreign_month(monkeypatch):
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    called = []
+
+    class FakeFrappe:
+        _ = staticmethod(lambda text: text)
+
+        def get_list(self, doctype, **kwargs):
+            assert doctype == "RD Cost Allocation"
+            return []
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None, raising=False)
+    monkeypatch.setattr(
+        mod,
+        "_foreign_matrix_lines_for_month",
+        lambda year, month: called.append((year, month)) or [],
+    )
+
+    mod.execute({"year": 2026, "month": 6, "stage": "all"})
+
+    assert called == [(2026, 6)]
+
+
+def test_matrix_report_year_month_queries_only_same_month_domestic_allocation(monkeypatch):
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    captured = {}
+
+    class FakeFrappe:
+        _ = staticmethod(lambda text: text)
+
+        def get_list(self, doctype, filters=None, limit_page_length=None, **kwargs):
+            assert doctype == "RD Cost Allocation"
+            captured["filters"] = filters
+            captured["limit_page_length"] = limit_page_length
+            return []
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None, raising=False)
+    monkeypatch.setattr(mod, "_foreign_matrix_lines_for_month", lambda year, month: [])
+    monkeypatch.setattr(
+        mod,
+        "_allocation_names_for_year",
+        lambda frappe, year: (_ for _ in ()).throw(AssertionError("annual query must not run")),
+    )
+
+    mod.execute({"year": 2026, "month": 6, "stage": "all"})
+
+    assert captured["filters"] == {
+        "year": 2026,
+        "month": 6,
+        "docstatus": 1,
+    }
+    assert captured["limit_page_length"] == 1
+
+
+def test_matrix_report_stops_before_business_reads_when_finance_access_is_denied(monkeypatch):
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    class AccessDenied(Exception):
+        pass
+
+    business_reads = []
+
+    class FakeFrappe:
+        def get_list(self, *args, **kwargs):
+            business_reads.append((args, kwargs))
+            raise AssertionError("business read must not run")
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(
+        mod,
+        "_require_finance_access",
+        lambda: (_ for _ in ()).throw(AccessDenied()),
+        raising=False,
+    )
+
+    with pytest.raises(AccessDenied):
+        mod.execute({"year": 2026, "month": 6})
+
+    assert business_reads == []
+
+
+def test_matrix_report_finance_wrapper_uses_finance_roles(monkeypatch):
+    import sys
+
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    checked = []
+    fake_guards = SimpleNamespace(
+        RD_FINANCE_ROLES=("System Manager", "Accounts User"),
+        require_rd_access=lambda roles: checked.append(roles),
+    )
+    monkeypatch.setitem(sys.modules, "rayher_hr_payroll.api._guards", fake_guards)
+
+    mod._require_finance_access()
+
+    assert checked == [fake_guards.RD_FINANCE_ROLES]
 
 
 

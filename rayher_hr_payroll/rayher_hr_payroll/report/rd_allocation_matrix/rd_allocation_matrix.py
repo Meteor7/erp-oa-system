@@ -10,6 +10,12 @@ def _get_frappe():
     return frappe
 
 
+def _require_finance_access():
+    from rayher_hr_payroll.api._guards import RD_FINANCE_ROLES, require_rd_access
+
+    require_rd_access(RD_FINANCE_ROLES)
+
+
 def _identity(text: str) -> str:
     return text
 
@@ -319,6 +325,17 @@ def _allocation_names_for_year(frappe, year):
     return [row["name"] for row in rows]
 
 
+def _allocation_names_for_month(frappe, year, month):
+    rows = frappe.get_list(
+        "RD Cost Allocation",
+        filters={"year": int(year), "month": int(month), "docstatus": 1},
+        fields=["name"],
+        order_by="creation desc",
+        limit_page_length=1,
+    )
+    return [row["name"] for row in rows if row.get("name")]
+
+
 def _has_field(frappe, doctype: str, fieldname: str) -> bool:
     try:
         meta = frappe.get_meta(doctype)
@@ -361,6 +378,8 @@ def _foreign_matrix_lines_for_month(year: Any, month: Any) -> list[dict[str, Any
 
 
 def _foreign_periods_for_report(filters: Mapping[str, Any], allocation_docs: list[Any]) -> list[tuple[int, int]]:
+    if filters.get("year") and filters.get("month"):
+        return [(int(filters.get("year")), int(filters.get("month")))]
     if filters.get("year"):
         return [(int(filters.get("year")), month) for month in range(1, 13)]
     periods = []
@@ -379,6 +398,7 @@ def _foreign_periods_for_report(filters: Mapping[str, Any], allocation_docs: lis
 
 def execute(filters=None):
     filters = filters or {}
+    _require_finance_access()
     frappe = _get_frappe()
     allocation = filters.get("allocation")
     allocation_names = []
@@ -388,6 +408,16 @@ def execute(filters=None):
         doc.check_permission("read")
         allocation_docs = [doc]
         allocation_names = [allocation]
+    elif filters.get("year") and filters.get("month"):
+        allocation_names = _allocation_names_for_month(
+            frappe,
+            filters.get("year"),
+            filters.get("month"),
+        )
+        for name in allocation_names:
+            doc = frappe.get_doc("RD Cost Allocation", name)
+            doc.check_permission("read")
+            allocation_docs.append(doc)
     elif filters.get("year"):
         allocation_names = _allocation_names_for_year(frappe, filters.get("year"))
         for name in allocation_names:

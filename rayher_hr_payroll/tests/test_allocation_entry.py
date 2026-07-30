@@ -107,7 +107,11 @@ def test_get_allocation_includes_project_and_stage_summaries(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
-    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: mod._zero_stage_totals())
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: (mod._zero_stage_totals(), False),
+    )
     frappe.db.get_value = lambda *args, **kwargs: "ALLOC-1"
 
     frappe.get_doc = lambda doctype, name: SimpleNamespace(
@@ -170,7 +174,11 @@ def test_get_allocation_year_aggregates_submitted_months(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
-    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: mod._zero_stage_totals())
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: (mod._zero_stage_totals(), False),
+    )
 
     def get_all(doctype, filters=None, fields=None, **kwargs):
         if doctype == "RD Cost Allocation":
@@ -247,11 +255,15 @@ def test_get_allocation_returns_foreign_totals_without_domestic_allocation(monke
     mod, frappe = _load_allocation_entry(monkeypatch)
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: {
-        "capitalized": 12,
-        "expensed": 8,
-        "unknown": 0,
-    })
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: ({
+            "capitalized": 12,
+            "expensed": 8,
+            "unknown": 0,
+        }, True),
+    )
     frappe.db.get_value = lambda *args, **kwargs: None
 
     result = mod.get_allocation("2026-06")
@@ -272,15 +284,147 @@ def test_get_allocation_returns_foreign_totals_without_domestic_allocation(monke
     assert result["project_summaries"] == []
 
 
+def test_get_allocation_marks_foreign_expense_sources_as_business_data(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: (mod._zero_stage_totals(), True),
+        raising=False,
+    )
+    frappe.db.get_value = lambda *args, **kwargs: None
+
+    result = mod.get_allocation("2026-06")
+
+    assert result["name"] is None
+    assert result["has_domestic_data"] is False
+    assert result["has_foreign_data"] is True
+    assert result["has_data"] is True
+
+
+def test_get_allocation_marks_empty_month_as_no_data(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: (mod._zero_stage_totals(), False),
+        raising=False,
+    )
+    frappe.db.get_value = lambda *args, **kwargs: None
+
+    result = mod.get_allocation("2026-06")
+
+    assert result["has_domestic_data"] is False
+    assert result["has_foreign_data"] is False
+    assert result["has_data"] is False
+
+
+def test_get_allocation_marks_domestic_month_as_data(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: (mod._zero_stage_totals(), False),
+        raising=False,
+    )
+    monkeypatch.setattr(mod, "_project_summaries", lambda name: [])
+    frappe.db.get_value = lambda *args, **kwargs: "ALLOC-1"
+    frappe.get_doc = lambda doctype, name: SimpleNamespace(
+        name=name,
+        status="Submitted",
+        capitalized_total=0,
+        expensed_total=0,
+        unknown_total=0,
+        lines=[],
+    )
+
+    result = mod.get_allocation("2026-06")
+
+    assert result["has_domestic_data"] is True
+    assert result["has_foreign_data"] is False
+    assert result["has_data"] is True
+
+
+def test_year_allocation_keeps_foreign_only_year_visible(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+
+    frappe.get_all = lambda doctype, **kwargs: []
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: (
+            {"capitalized": 12, "expensed": 8, "unknown": 0}
+            if month == 6 else mod._zero_stage_totals(),
+            month == 6,
+        ),
+        raising=False,
+    )
+
+    result = mod._year_allocation("2026-06")
+
+    assert result["scope"] == "year"
+    assert result["capitalized"] == 12
+    assert result["expensed"] == 8
+    assert result["has_domestic_data"] is False
+    assert result["has_foreign_data"] is True
+    assert result["has_data"] is True
+
+
+def test_foreign_period_state_uses_real_sources_and_lines_not_empty_draft_name(monkeypatch):
+    mod, _frappe = _load_allocation_entry(monkeypatch)
+    api_package = importlib.import_module("rayher_hr_payroll.api")
+    payloads = iter([
+        {
+            "name": "FOREIGN-DRAFT",
+            "expense_sources": [],
+            "lines": [],
+            "foreign_stage_summaries": [],
+        },
+        {
+            "name": None,
+            "expense_sources": [{"expense_item": "EXP-1", "amount": 0}],
+            "lines": [],
+            "foreign_stage_summaries": [
+                {"stage": "capitalized", "total": 12},
+                {"stage": "expensed", "total": 8},
+            ],
+        },
+    ])
+    monkeypatch.setattr(
+        api_package,
+        "foreign_rd_entry",
+        SimpleNamespace(_get_foreign_rd_month=lambda year, month: next(payloads)),
+        raising=False,
+    )
+
+    empty_totals, empty_has_data = mod._foreign_period_state(2026, 6)
+    source_totals, source_has_data = mod._foreign_period_state(2026, 7)
+
+    assert empty_totals == mod._zero_stage_totals()
+    assert empty_has_data is False
+    assert source_totals == {"capitalized": 12.0, "expensed": 8.0, "unknown": 0.0}
+    assert source_has_data is True
+
+
 def test_get_allocation_adds_foreign_stage_totals_to_summary_cards(monkeypatch):
     mod, frappe = _load_allocation_entry(monkeypatch)
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    monkeypatch.setattr(mod, "_foreign_stage_totals", lambda year, month: {
-        "capitalized": 5,
-        "expensed": 7,
-        "unknown": 1,
-    }, raising=False)
+    monkeypatch.setattr(
+        mod,
+        "_foreign_period_state",
+        lambda year, month: ({
+            "capitalized": 5,
+            "expensed": 7,
+            "unknown": 1,
+        }, True),
+    )
     frappe.db.get_value = lambda *args, **kwargs: "ALLOC-1"
     frappe.get_doc = lambda doctype, name: SimpleNamespace(
         name=name, status="Submitted", capitalized_total=70, expensed_total=30, unknown_total=0, lines=[]

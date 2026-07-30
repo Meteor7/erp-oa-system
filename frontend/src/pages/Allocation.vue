@@ -1,8 +1,13 @@
 <script setup>
 import { ref, computed, watch } from "vue";
 import { Card, Button, Spinner, createResource } from "frappe-ui";
-import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel, periodYear } from "../lib/period";
+import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
 import { exportAllocationWorkbook } from "../lib/allocationExport";
+import {
+  allocationEmptyState,
+  buildAllocationMatrixFilters,
+  hasAllocationData,
+} from "../lib/allocationView";
 
 const TEXT = {
   title: "\u7814\u53d1\u8d39\u7528\u53f0\u8d26",
@@ -17,8 +22,9 @@ const TEXT = {
   capitalExpense: "\u8d44\u672c\u548c\u8d39\u7528\u5408\u8ba1",
   unknown: "\u672a\u5224\u5b9a\u5408\u8ba1",
   projectTotal: "\u9879\u76ee\u6c47\u603b",
-  noData: "\u5f53\u524d\u8303\u56f4\u6682\u65e0\u5206\u644a\u6570\u636e\u3002",
-  monthNoData: "\u672c\u671f\u6682\u65e0\u5206\u644a\u6570\u636e\uff0c\u70b9\u4e0a\u65b9\u300c\u91cd\u7b97\u5206\u644a\u300d\u751f\u6210\u3002",
+  noBusinessData: "\u672c\u671f\u6682\u65e0\u6570\u636e\u3002",
+  noAllocationDetail: "\u5df2\u6709\u8d39\u7528\u6216\u4e1a\u52a1\u6570\u636e\uff0c\u4f46\u6682\u65e0\u53ef\u5c55\u793a\u7684\u9879\u76ee\u5206\u644a\u660e\u7ec6\u3002",
+  noDetailForMode: "\u5f53\u524d\u53e3\u5f84\u6682\u65e0\u53ef\u5c55\u793a\u7684\u5206\u644a\u660e\u7ec6\u3002",
   confirmCancel: "\u786e\u5b9a\u64a4\u9500",
 };
 
@@ -47,10 +53,21 @@ const cancelRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.
 const isYearScope = computed(() => periodScope.value === "year");
 const displayPeriod = computed(() => periodScopeLabel(period.value, periodScope.value));
 const allocationModeLabel = computed(() => modeOptions.find((option) => option.value === allocationMode.value)?.label || modeOptions[0].label);
-const matrixFilters = computed(() => ({
-  ...(isYearScope.value ? { year: Number(periodYear(period.value)) } : { allocation: allocName.value }),
+const matrixFilters = computed(() => buildAllocationMatrixFilters({
+  scope: periodScope.value,
+  period: period.value,
+  allocation: allocName.value,
   stage: allocationMode.value,
 }));
+const emptyText = computed(() => {
+  const state = allocationEmptyState({
+    hasData: Boolean(summary.value?.has_data),
+    mode: allocationMode.value,
+  });
+  if (state === "no-detail") return TEXT.noAllocationDetail;
+  if (state === "no-detail-for-mode") return TEXT.noDetailForMode;
+  return TEXT.noBusinessData;
+});
 const canExport = computed(() => Boolean(summary.value && columns.value.length && result.value.length));
 const totalRows = computed(() => result.value.filter((row) => !isTotalRow(row)).length);
 const viewSummary = computed(() => {
@@ -78,7 +95,7 @@ const summaryCards = computed(() => {
 async function loadMatrix() {
   columns.value = [];
   result.value = [];
-  if (!isYearScope.value && !allocName.value) return;
+  if (!summary.value) return;
   const d = await matrixRes.submit({ report_name: "RD Allocation Matrix", filters: JSON.stringify(matrixFilters.value) });
   columns.value = d.columns || [];
   result.value = d.result || [];
@@ -89,7 +106,7 @@ async function load() {
   msg.value = "";
   try {
     const a = await allocRes.submit({ period: period.value, scope: periodScope.value });
-    summary.value = a && (a.name || a.scope === "year") ? a : null;
+    summary.value = hasAllocationData(a) ? a : null;
     allocName.value = a && a.name ? a.name : null;
     await loadMatrix();
   } finally {
@@ -108,8 +125,8 @@ async function recalc() {
       msg.value = (er.messages && er.messages.join("\uff1b")) || er.message || "\u91cd\u7b97\u5931\u8d25";
       return;
     }
-    summary.value = a;
-    allocName.value = a.name;
+    summary.value = hasAllocationData(a) ? a : null;
+    allocName.value = a && a.name ? a.name : null;
     await loadMatrix();
     msg.value = "\u5df2\u91cd\u7b97\uff1a" + period.value;
   } catch (e) {
@@ -204,7 +221,7 @@ load();
     </div>
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
-    <div v-else-if="!result.length" class="py-6 text-sm text-gray-500">{{ isYearScope ? TEXT.noData : TEXT.monthNoData }}</div>
+    <div v-else-if="!result.length" class="py-6 text-sm text-gray-500">{{ emptyText }}</div>
     <template v-else>
       <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
         <table class="w-full min-w-[1280px] text-sm">
@@ -220,7 +237,7 @@ load();
           </tbody>
         </table>
       </div>
-      <p class="mt-3 text-xs text-gray-400">{{ displayPeriod }} ? {{ allocName || 'Year' }} ? {{ totalRows }} rows</p>
+      <p class="mt-3 text-xs text-gray-400">{{ displayPeriod }} ? {{ allocName || displayPeriod }} ? {{ totalRows }} rows</p>
     </template>
   </Card>
 </template>

@@ -70,7 +70,7 @@ def _zero_stage_totals():
     return {"capitalized": 0.0, "expensed": 0.0, "unknown": 0.0}
 
 
-def _foreign_stage_totals(year, month):
+def _foreign_period_state(year, month):
     from rayher_hr_payroll.api import foreign_rd_entry
 
     payload = foreign_rd_entry._get_foreign_rd_month(int(year), int(month))
@@ -80,6 +80,12 @@ def _foreign_stage_totals(year, month):
         if stage not in totals:
             stage = "unknown"
         totals[stage] += _number(_value(row, "total"))
+    has_foreign_data = bool(payload.get("expense_sources") or payload.get("lines"))
+    return totals, has_foreign_data
+
+
+def _foreign_stage_totals(year, month):
+    totals, _has_foreign_data = _foreign_period_state(year, month)
     return totals
 
 
@@ -171,8 +177,11 @@ def _year_allocation(period):
     expensed = sum(_value(row, "expensed_total") or 0 for row in rows)
     unknown = sum(_value(row, "unknown_total") or 0 for row in rows)
     foreign_totals = _zero_stage_totals()
+    has_domestic_data = bool(allocation_names)
+    has_foreign_data = False
     for month in range(1, 13):
-        month_totals = _foreign_stage_totals(year, month)
+        month_totals, month_has_foreign_data = _foreign_period_state(year, month)
+        has_foreign_data = has_foreign_data or month_has_foreign_data
         for stage in foreign_totals:
             foreign_totals[stage] += _number(month_totals.get(stage))
     capitalized, expensed, unknown = _add_foreign_totals(capitalized, expensed, unknown, foreign_totals)
@@ -181,6 +190,9 @@ def _year_allocation(period):
         "period": str(year),
         "scope": "year",
         "status": "Yearly" if rows else None,
+        "has_data": has_domestic_data or has_foreign_data,
+        "has_domestic_data": has_domestic_data,
+        "has_foreign_data": has_foreign_data,
         "allocation_names": allocation_names,
         "capitalized": capitalized,
         "expensed": expensed,
@@ -532,11 +544,16 @@ def get_allocation(period, scope="month"):
         "RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
         "name", order_by="creation desc",
     )
-    foreign_totals = _foreign_stage_totals(year, month)
+    foreign_totals, has_foreign_data = _foreign_period_state(year, month)
+    has_domestic_data = bool(name)
+    has_data = has_domestic_data or has_foreign_data
     if not name:
         capitalized, expensed, unknown = _add_foreign_totals(0, 0, 0, foreign_totals)
         return {
             "name": None, "status": None, "period": period, "scope": "month",
+            "has_data": has_data,
+            "has_domestic_data": has_domestic_data,
+            "has_foreign_data": has_foreign_data,
             "capitalized": capitalized, "expensed": expensed,
             "unknown": unknown, "lines": 0,
             "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
@@ -551,6 +568,9 @@ def get_allocation(period, scope="month"):
     )
     return {
         "name": d.name, "status": d.status, "period": period, "scope": "month",
+        "has_data": has_data,
+        "has_domestic_data": has_domestic_data,
+        "has_foreign_data": has_foreign_data,
         "capitalized": capitalized, "expensed": expensed,
         "unknown": unknown, "lines": len(d.lines),
         "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
