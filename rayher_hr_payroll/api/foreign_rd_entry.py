@@ -73,8 +73,10 @@ def _monthly_foreign_rows(rows, year, month):
         entity = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
         hours = _number(_value(row, "hours"))
         raw_days = _value(row, "occurrence_days", None)
-        occurrence_days = _number(raw_days) if raw_days not in (None, "") else hours / MAX_DAILY_HOURS
-        if raw_days not in (None, ""):
+        submitted_days = _number(raw_days) if raw_days not in (None, "") else 0.0
+        has_monthly_days = submitted_days > 0
+        occurrence_days = submitted_days if has_monthly_days else hours / MAX_DAILY_HOURS
+        if has_monthly_days:
             hours = occurrence_days * MAX_DAILY_HOURS
         key = (entity, project)
         description = _clean(_value(row, "remark")) or _clean(_value(row, "description"))

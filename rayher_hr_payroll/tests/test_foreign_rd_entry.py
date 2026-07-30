@@ -344,3 +344,22 @@ def test_legacy_daily_rows_are_grouped_for_monthly_entry(monkeypatch):
         "hours": 12.0,
         "description": "a\uFF1Bb",
     }]
+
+def test_legacy_daily_row_with_zero_occurrence_days_preserves_hours(monkeypatch):
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    rows = [{
+        "foreign_entity": "QIHENG DEMO OVERSEAS",
+        "project": "RD02",
+        "project_code": "RD02",
+        "project_name": "ADC",
+        "work_date": "2026-06-01",
+        "activity_type": "analysis",
+        "occurrence_days": 0,
+        "hours": 8,
+        "description": "legacy daily input",
+    }]
+
+    monthly = mod._monthly_foreign_rows(rows, 2026, 6)
+
+    assert monthly[0]["occurrence_days"] == 1.0
+    assert monthly[0]["hours"] == 8.0
