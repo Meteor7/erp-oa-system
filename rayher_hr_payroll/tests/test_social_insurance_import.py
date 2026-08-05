@@ -115,7 +115,7 @@ def test_summary_uses_weighted_counts_not_average_percentages():
     summary = summarize_rows(rows)
     assert summary["matched_rows"] == 1
     assert summary["comparable_rows"] == 2
-    assert summary["match_rate"] == 50.0
+    assert summary["match_rate"] == 33.33
     assert summary["linked_rows"] == 2
     assert summary["automatic_link_rate"] == 66.67
 
@@ -149,3 +149,43 @@ def test_reconcile_missing_household_and_company_policy_are_pending():
         "social_base_source": "员工默认基数",
     })
     assert "社保政策未配置" in missing_policy["difference_reasons"]
+
+
+def test_period_social_base_overrides_employee_default():
+    from rayher_hr_payroll.social_insurance_import import resolve_employee_bases
+    employees = [{"name": "EMP-1", "default_social_insurance_base": 5000}]
+    period_rows = [{"employee": "EMP-1", "contribution_base": 6000}]
+    resolved = resolve_employee_bases(employees, period_rows, "2026-07")
+    assert resolved[0]["social_insurance_base"] == Decimal("6000.00")
+    assert resolved[0]["social_base_source"] == "2026-07月度社保记录"
+
+
+def test_default_social_base_is_used_without_period_record():
+    from rayher_hr_payroll.social_insurance_import import resolve_employee_bases
+    resolved = resolve_employee_bases(
+        [{"name": "EMP-1", "default_social_insurance_base": 5000}], [], "2026-07"
+    )
+    assert resolved[0]["social_insurance_base"] == Decimal("5000.00")
+    assert resolved[0]["social_base_source"] == "员工默认基数"
+
+
+def test_ignored_rows_stay_in_strict_match_rate_denominator():
+    from rayher_hr_payroll.social_insurance_import import summarize_rows
+    rows = [
+        {"status": "Matched", "original_match_status": "Matched", "employee": "A"},
+        {"status": "Ignored", "original_match_status": "Pending", "employee": "B"},
+        {"status": "Pending", "original_match_status": "Pending", "employee": None},
+    ]
+    summary = summarize_rows(rows)
+    assert summary["matched_rows"] == 1
+    assert summary["match_rate"] == 33.33
+
+
+def test_batch_activation_allows_ignored_but_requires_accepted_row():
+    from rayher_hr_payroll.social_insurance_import import can_activate_rows
+    matched = {"status": "Matched", "employee": "A"}
+    ignored = {"status": "Ignored", "employee": None}
+    pending = {"status": "Pending", "employee": "B"}
+    assert can_activate_rows([matched, ignored]) is True
+    assert can_activate_rows([ignored]) is False
+    assert can_activate_rows([matched, pending]) is False

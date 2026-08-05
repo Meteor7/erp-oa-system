@@ -108,6 +108,22 @@ def normalize_name(value):
     return "".join(str(value or "").split())
 
 
+def resolve_employee_bases(employees, period_records, period):
+    period_map = {row.get("employee"): row for row in (period_records or []) if row.get("employee")}
+    resolved = []
+    for source in employees or []:
+        employee = dict(source)
+        period_row = period_map.get(employee.get("name"))
+        if period_row:
+            employee["social_insurance_base"] = _money(period_row.get("contribution_base"))
+            employee["social_base_source"] = f"{period}月度社保记录"
+        else:
+            employee["social_insurance_base"] = _money(employee.get("default_social_insurance_base"))
+            employee["social_base_source"] = "员工默认基数"
+        resolved.append(employee)
+    return resolved
+
+
 def match_employee(row, employees):
     employees = list(employees or [])
     identity = normalize_identity(row.get("identity_number"))
@@ -209,8 +225,10 @@ def select_workbench_batches(batches, requested_batch=None):
 
 def can_activate_rows(rows):
     rows = list(rows or [])
-    return bool(rows) and all(
-        row.get("employee") and row.get("status") in ("Matched", "Confirmed Difference")
+    accepted = [row for row in rows if row.get("status") in ("Matched", "Confirmed Difference")]
+    return bool(accepted) and all(
+        row.get("status") == "Ignored"
+        or (row.get("employee") and row.get("status") in ("Matched", "Confirmed Difference"))
         for row in rows
     )
 
@@ -237,7 +255,7 @@ def summarize_rows(rows):
         "pending_rows": pending,
         "confirmed_difference_rows": confirmed,
         "unlinked_rows": total - linked,
-        "match_rate": rate(matched, comparable),
+        "match_rate": rate(matched, total),
         "comparable_rate": rate(comparable, total),
         "automatic_link_rate": rate(linked, total),
         "employee_total": total_money("employee_total"),

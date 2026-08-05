@@ -1,0 +1,348 @@
+{
+ "doctype": "DocType",
+ "name": "Social Insurance Import Row",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "SIR-.YYYY.-.#####",
+ "title_field": "excel_name",
+ "fields": [
+  {
+   "fieldname": "batch",
+   "label": "导入批次",
+   "fieldtype": "Link",
+   "options": "Social Insurance Import Batch",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "company",
+   "label": "公司",
+   "fieldtype": "Link",
+   "options": "Company",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "period",
+   "label": "期间",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "source_row",
+   "label": "Excel行号",
+   "fieldtype": "Int",
+   "reqd": 1
+  },
+  {
+   "fieldname": "row_key",
+   "label": "明细键",
+   "fieldtype": "Data",
+   "unique": 1,
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "excel_name",
+   "label": "Excel姓名",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "identity_number",
+   "label": "证件号码",
+   "fieldtype": "Data",
+   "permlevel": 1
+  },
+  {
+   "fieldname": "masked_identity",
+   "label": "脱敏证件号码",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee",
+   "label": "关联员工",
+   "fieldtype": "Link",
+   "options": "Employee",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "label": "员工姓名",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "contribution_base",
+   "label": "缴费工资",
+   "fieldtype": "Currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee_pension",
+   "label": "employee_pension",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_pension",
+   "label": "company_pension",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee_medical",
+   "label": "employee_medical",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_medical",
+   "label": "company_medical",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_maternity",
+   "label": "company_maternity",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_injury",
+   "label": "company_injury",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee_unemployment",
+   "label": "employee_unemployment",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_unemployment",
+   "label": "company_unemployment",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "local_pension",
+   "label": "local_pension",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee_total",
+   "label": "employee_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_total",
+   "label": "company_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receivable_total",
+   "label": "receivable_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_employee_pension",
+   "label": "calculated_employee_pension",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_company_pension",
+   "label": "calculated_company_pension",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_employee_medical",
+   "label": "calculated_employee_medical",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_company_medical",
+   "label": "calculated_company_medical",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_company_maternity",
+   "label": "calculated_company_maternity",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_company_injury",
+   "label": "calculated_company_injury",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_employee_unemployment",
+   "label": "calculated_employee_unemployment",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_company_unemployment",
+   "label": "calculated_company_unemployment",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_local_pension",
+   "label": "calculated_local_pension",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_employee_total",
+   "label": "calculated_employee_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_company_total",
+   "label": "calculated_company_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculated_receivable_total",
+   "label": "calculated_receivable_total",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "difference_total",
+   "label": "总差额",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "original_match_status",
+   "label": "原始匹配结果",
+   "fieldtype": "Select",
+   "options": "Matched\nPending",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "处理状态",
+   "fieldtype": "Select",
+   "options": "Matched\nPending\nConfirmed Difference\nIgnored",
+   "default": "Pending",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "difference_reasons",
+   "label": "自动差异原因",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remark",
+   "label": "人工备注",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "confirmed_by",
+   "label": "确认人",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "confirmed_at",
+   "label": "确认时间",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_base",
+   "label": "档案社保基数",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_source",
+   "label": "基数来源",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "household_source",
+   "label": "户口信息快照",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "household_classification",
+   "label": "系统户籍判断",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "policy_version",
+   "label": "社保政策版本",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ignored_by",
+   "label": "忽略操作人",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ignored_at",
+   "label": "忽略时间",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  }
+ ]
+}
