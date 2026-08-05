@@ -57,3 +57,10 @@ test("company changes clear a department filter that is no longer available", ()
   assert.match(source, /watch\(companyFilter/);
   assert.match(source, /!departmentOptions\.value\.includes\(departmentFilter\.value\)/);
 });
+
+
+test("personnel errors hide internal API method names", () => {
+  assert.match(source, /import \{ extractFrappeError \}/);
+  assert.match(source, /extractFrappeError\(e,"保存失败"\)/);
+  assert.match(source, /extractFrappeError\(e,"删除失败"\)/);
+});

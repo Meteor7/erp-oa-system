@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch } from "vue";
 import { Card, Button, Badge, createResource } from "frappe-ui";
 import { displayCompany, displayDepartment } from "../lib/displayBrand.js";
+import { extractFrappeError } from "../lib/frappeError.js";
 
 const RD_TYPES=["全时研发","非全时研发","研发辅助","非研发"];
 const ARCH=["待完善","待确认","已归档"];
@@ -92,10 +93,10 @@ async function save(){
   if(!form.employee_name||!form.company){errMsg.value="请填写姓名并选择所属单位";return}
   saving.value=true;
   try{await saver.submit({...form});editing.value=false;rows.reload()}
-  catch(e){errMsg.value=e?.message||"保存失败"}
+  catch(e){errMsg.value=extractFrappeError(e,"保存失败")}
   finally{saving.value=false}
 }
-async function del(name){try{await remover.submit({name});await rows.reload();if(currentPage.value>pageCount.value)currentPage.value=pageCount.value}catch(e){errMsg.value=e?.message||"删除失败"}}
+async function del(name){try{await remover.submit({name});await rows.reload();if(currentPage.value>pageCount.value)currentPage.value=pageCount.value}catch(e){errMsg.value=extractFrappeError(e,"删除失败")}}
 </script>
 
 <template>

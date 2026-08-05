@@ -7,7 +7,12 @@ const routes = [
   { path: '/', redirect: () => firstVisiblePath() },
   { path: '/dashboard', component: () => import('./pages/Dashboard.vue') },
   { path: '/personnel', component: () => import('./pages/Personnel.vue') },
-  { path: '/accommodation', component: () => import('./pages/Accommodation.vue') },
+  { path: '/social-insurance', component: () => import('./pages/SocialInsurance.vue') },
+  { path: '/housing-fund', component: () => import('./pages/HousingFund.vue') },
+  { path: '/accommodation', redirect: '/accommodation/monthly' },
+  { path: '/accommodation/master', component: () => import('./pages/AccommodationMaster.vue') },
+  { path: '/accommodation/monthly', component: () => import('./pages/Accommodation.vue') },
+  { path: '/payroll', component: () => import('./pages/Payroll.vue') },
   { path: '/projects', component: () => import('./pages/Projects.vue') },
   { path: '/ledger', redirect: '/entry' },
   { path: '/entry', component: () => import('./pages/TimesheetEntry.vue') },
@@ -22,7 +27,20 @@ const routes = [
   { path: '/foreign-rd-timesheet', component: () => import('./pages/ForeignRDTimesheet.vue') },
 ];
 
-const router = createRouter({ history: createWebHistory('/rayher'), routes });
+const LEGACY_BASE = '/rayher';
+const CANONICAL_BASE = '/planck-semicon';
+if (typeof window !== 'undefined') {
+  const path = window.location.pathname;
+  if (path === LEGACY_BASE || path.startsWith(`${LEGACY_BASE}/`)) {
+    const canonicalPath = `${CANONICAL_BASE}${path.slice(LEGACY_BASE.length)}`;
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${canonicalPath}${window.location.search}${window.location.hash}`,
+    );
+  }
+}
+const router = createRouter({ history: createWebHistory(CANONICAL_BASE), routes });
 
 router.beforeEach((to) => {
   if (to.path === '/' || canSee(to.path)) return true;
