@@ -89,8 +89,27 @@ def test_confirm_social_row_accepts_resolved_employee_dict(monkeypatch):
     monkeypatch.setattr(mod, "_refresh_batch_summary", lambda batch: None)
     monkeypatch.setattr(mod, "get_social_workbench", lambda period, company, batch: {"ok": True})
     monkeypatch.setattr(mod, "reconcile_row", lambda *args, **kwargs: {
-        "calculated": {}, "difference_total": 0, "difference_reasons": "人工确认"
+        "calculated": {}, "difference_total": 0, "difference_reasons": "人工确认",
+        "reference_base": Decimal("10000"), "base_source": "员工默认基数",
+        "household_source": "深圳", "household_classification": "深户",
+        "policy_version": "示例总部-2026"
     })
     assert mod.confirm_social_row("ROW-1", "EMP-1", "确认差异") == {"ok": True}
     assert row.employee == "EMP-1"
     assert row.status == "Confirmed Difference"
+    assert row.reference_base == Decimal("10000")
+    assert row.household_classification == "深户"
+
+
+def test_pending_batch_reconciliation_is_exposed(monkeypatch):
+    mod, _frappe = _load(monkeypatch)
+    assert callable(mod.reconcile_pending_batch)
+
+
+def test_workbench_batch_query_includes_cancel_audit(monkeypatch):
+    mod, _frappe = _load(monkeypatch)
+    import inspect
+    source = inspect.getsource(mod.get_social_workbench)
+    assert "cancel_remark" in source
+    assert "canceled_by" in source
+    assert "canceled_at" in source

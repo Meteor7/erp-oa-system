@@ -179,7 +179,7 @@ def get_social_workbench(period, company=None, batch=None):
             "name", "company", "period", "source_file", "source_filename", "status",
             "is_current", "uploaded_by", "uploaded_at", "total_rows", "parsed_rows",
             "matched_rows", "pending_rows", "unlinked_rows", "employee_total",
-            "company_total", "receivable_total",
+            "company_total", "receivable_total", "cancel_remark", "canceled_by", "canceled_at",
         ],
         order_by="uploaded_at desc",
     )
@@ -344,6 +344,11 @@ def confirm_social_row(row, employee=None, remark=""):
         doc.set(target, (result.get("calculated") or {}).get(source_field, 0))
     doc.difference_total = result.get("difference_total", 0)
     doc.difference_reasons = result.get("difference_reasons")
+    doc.reference_base = result.get("reference_base", 0)
+    doc.base_source = result.get("base_source")
+    doc.household_source = result.get("household_source")
+    doc.household_classification = result.get("household_classification")
+    doc.policy_version = result.get("policy_version")
     doc.remark = remark
     doc.status = "Confirmed Difference"
     doc.confirmed_by = frappe.session.user
@@ -392,3 +397,51 @@ def cancel_social_batch(batch, remark=""):
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return get_social_workbench(doc.period, None)
+
+
+@frappe.whitelist(methods=["POST"])
+def reconcile_pending_batch(batch):
+    require_rd_access(ROLES)
+    batch_doc = frappe.get_doc("Social Insurance Import Batch", batch)
+    if batch_doc.status != "Pending Activation":
+        frappe.throw(frappe._("只有待确认导入批次可以重新核对。"))
+    employees = _employees(batch_doc.period)
+    rows = frappe.get_all(
+        "Social Insurance Import Row",
+        filters={"batch": batch_doc.name},
+        fields=["name", "source_row", "excel_name", "identity_number", "status", *EXCEL_FIELDS],
+        order_by="source_row",
+    )
+    for stored in rows:
+        if stored.get("status") in ("Confirmed Difference", "Ignored"):
+            continue
+        source = {
+            "row_number": max(int(stored.get("source_row") or 3) - 3, 0),
+            "excel_name": stored.get("excel_name"),
+            "identity_number": stored.get("identity_number"),
+            "period_start": batch_doc.period,
+            "period_end": batch_doc.period,
+        }
+        for field in EXCEL_FIELDS:
+            source[field] = stored.get(field) or 0
+        employee, association_reason = match_employee(source, employees)
+        result = reconcile_row(source, employee, association_reason=association_reason)
+        row_doc = frappe.get_doc("Social Insurance Import Row", stored.get("name"))
+        row_doc.employee = result.get("employee")
+        row_doc.employee_name = result.get("employee_name")
+        row_doc.company = result.get("company")
+        row_doc.reference_base = result.get("reference_base", 0)
+        row_doc.base_source = result.get("base_source")
+        row_doc.household_source = result.get("household_source")
+        row_doc.household_classification = result.get("household_classification")
+        row_doc.policy_version = result.get("policy_version")
+        row_doc.status = result.get("status")
+        row_doc.original_match_status = result.get("original_match_status")
+        row_doc.difference_total = result.get("difference_total", 0)
+        row_doc.difference_reasons = result.get("difference_reasons")
+        for source_field, target in CALCULATED_MAP.items():
+            row_doc.set(target, (result.get("calculated") or {}).get(source_field, 0))
+        row_doc.save(ignore_permissions=True)
+    _refresh_batch_summary(batch_doc.name)
+    frappe.db.commit()
+    return get_social_workbench(batch_doc.period, None, batch_doc.name)
