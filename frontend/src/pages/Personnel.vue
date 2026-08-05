@@ -41,7 +41,25 @@ const departmentFilter=ref("");
 const keyword=ref("");
 const currentPage=ref(1);
 const PAGE_SIZE=20;
-const departmentOptions=computed(()=>[...new Set((depts.data||[]).map(x=>displayDepartment(x.department_name||x.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"zh-CN")));
+const DEPARTMENT_GROUP_ORDER=["客户运营","研发","运营","职能"];
+const departmentGroups=computed(()=>{
+  const aggregated=new Map();
+  for(const department of depts.data||[]){
+    if(companyFilter.value&&department.company!==companyFilter.value)continue;
+    const name=displayDepartment(department.department_name||department.name);
+    if(!name||!department.group_name)continue;
+    const key=`${department.group_name}:${name}`;
+    const current=aggregated.get(key)||{name,group_name:department.group_name,employee_count:0};
+    current.employee_count+=Number(department.employee_count||0);
+    aggregated.set(key,current);
+  }
+  return DEPARTMENT_GROUP_ORDER.map(groupName=>{
+    const departments=[...aggregated.values()].filter(item=>item.group_name===groupName&&item.employee_count>0);
+    return {name:groupName,departments,total:departments.reduce((sum,item)=>sum+item.employee_count,0)};
+  }).filter(group=>group.departments.length);
+});
+const departmentOptions=computed(()=>departmentGroups.value.flatMap(group=>group.departments.map(item=>item.name)));
+const formDepartmentOptions=computed(()=>(depts.data||[]).filter(x=>x.company===form.company));
 const filteredRows=computed(()=>{
   const needle=keyword.value.trim().toLowerCase();
   return (rows.data||[]).filter(e=>{
@@ -54,6 +72,12 @@ const filteredRows=computed(()=>{
 const pageCount=computed(()=>Math.max(1,Math.ceil(filteredRows.value.length/PAGE_SIZE)));
 const pagedRows=computed(()=>filteredRows.value.slice((currentPage.value-1)*PAGE_SIZE,currentPage.value*PAGE_SIZE));
 watch([companyFilter, departmentFilter, keyword],()=>{currentPage.value=1});
+watch(companyFilter,()=>{
+  if(departmentFilter.value&&!departmentOptions.value.includes(departmentFilter.value))departmentFilter.value="";
+});
+watch(()=>form.company,()=>{
+  if(form.department&&!formDepartmentOptions.value.some(x=>x.name===form.department))form.department="";
+});
 watch(pageCount,count=>{if(currentPage.value>count)currentPage.value=count});
 const canDelete=typeof window!=="undefined"&&Array.isArray(window.roles)&&window.roles.some(r=>["System Manager","HR Manager"].includes(r));
 const archTheme=s=>s==="已归档"?"green":s==="待确认"?"orange":"gray";
@@ -93,7 +117,7 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 <section><h3 class="section-title">任职与薪资</h3><div class="form-grid">
 <label class="label">入职时间<input v-model="form.date_of_joining" type="date" class="field"/></label>
 <label class="label">离职时间<input v-model="form.relieving_date" type="date" class="field"/></label>
-<label class="label">部门<select v-model="form.department" class="field"><option value="">未设置</option><option v-for="x in depts.data||[]" :key="x.name" :value="x.name">{{displayDepartment(x.department_name||x.name)}}</option></select></label>
+<label class="label">部门<select v-model="form.department" class="field"><option value="">{{form.company?'未设置':'请先选择所属单位'}}</option><option v-for="x in formDepartmentOptions" :key="x.name" :value="x.name">{{displayDepartment(x.department_name||x.name)}}</option></select></label>
 <label class="label">职位<select v-model="form.designation" class="field"><option value="">未设置</option><option v-for="x in designations.data||[]" :key="x" :value="x">{{x}}</option></select></label>
 <label class="label">汇报对象<select v-model="form.reports_to" class="field"><option value="">未设置</option><option v-for="x in (rows.data||[]).filter(x=>x.name!==form.name)" :key="x.name" :value="x.name">{{x.employee_name}}</option></select></label>
 <label class="label">合同类型<select v-model="form.employment_type" class="field"><option value="">未设置</option><option v-for="x in employmentTypes.data||[]" :key="x" :value="x">{{x}}</option></select></label>
@@ -146,6 +170,16 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 <div class="flex gap-2"><Button variant="solid" :loading="saving" @click="save">保存</Button><Button variant="subtle" @click="cancel">取消</Button></div>
 </div>
 
+<section class="department-overview" aria-label="部门分类">
+<div class="department-overview-head"><div><h3>部门分布</h3><p>按组织架构展示实际在职团队，点击部门可筛选员工</p></div><button v-if="departmentFilter" class="clear-department" type="button" @click="departmentFilter=''">查看全部</button></div>
+<div class="department-board">
+<article v-for="group in departmentGroups" :key="group.name" class="department-group">
+<div class="department-group-title"><span>{{group.name}}</span><strong>{{group.total}} 人</strong></div>
+<div class="department-list"><button v-for="department in group.departments" :key="department.name" type="button" class="department-card" :class="{'department-card-active':departmentFilter===department.name}" @click="departmentFilter=department.name"><span>{{department.name}}</span><b>{{department.employee_count}}</b></button></div>
+</article>
+</div>
+</section>
+
 <div class="mb-3 grid gap-3 md:grid-cols-3">
 <label class="label">所属公司<select v-model="companyFilter" class="field"><option value="">全部公司</option><option v-for="x in companies.data||[]" :key="x.name" :value="x.name">{{x.display_name||displayCompany(x.name)}}</option></select></label>
 <label class="label">部门筛选<select v-model="departmentFilter" class="field"><option value="">全部部门</option><option v-for="name in departmentOptions" :key="name" :value="name">{{name}}</option></select></label>
@@ -168,5 +202,5 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 </template>
 
 <style scoped>
-.section-title{margin-bottom:.5rem;font-size:.875rem;font-weight:600}.form-grid{display:grid;gap:.75rem}@media(min-width:768px){.form-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(min-width:1280px){.form-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}.label{font-size:.75rem;color:rgb(107 114 128)}.field{margin-top:.25rem;display:block;width:100%;border-radius:.375rem;border:1px solid rgb(209 213 219);padding:.5rem .75rem;font-size:.875rem;color:rgb(17 24 39);background:white}.cell{padding:.55rem .75rem;text-align:left;white-space:nowrap}.table-scroll{max-height:68vh;overflow:auto;border:1px solid #e5e7eb;border-radius:.5rem}.employee-table thead th{position:sticky;top:0;z-index:20;background:#f8fafc;border-bottom:1px solid #d1d5db}.employee-table th:first-child{position:sticky;left:0;z-index:30;background:#f8fafc}.employee-table td:first-child{position:sticky;left:0;z-index:10;background:white;border-right:1px solid #e5e7eb}.employee-table tr:hover td:first-child{background:#f9fafb}
+.section-title{margin-bottom:.5rem;font-size:.875rem;font-weight:600}.department-overview{margin-bottom:1rem;border:1px solid #e5e7eb;border-radius:.65rem;background:#fafafa;padding:.9rem}.department-overview-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.75rem}.department-overview-head h3{font-size:.875rem;font-weight:650;color:#111827}.department-overview-head p{margin-top:.15rem;font-size:.75rem;color:#6b7280}.clear-department{border:0;background:transparent;padding:.2rem .35rem;font-size:.75rem;color:#2563eb}.department-board{display:grid;gap:.65rem}@media(min-width:1024px){.department-board{grid-template-columns:repeat(2,minmax(0,1fr))}}.department-group{min-width:0;border-left:3px solid #d1d5db;padding:.15rem 0 .15rem .7rem}.department-group-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:.45rem;font-size:.75rem;color:#4b5563}.department-group-title strong{font-weight:600;color:#111827}.department-list{display:flex;flex-wrap:wrap;gap:.4rem}.department-card{display:inline-flex;align-items:center;gap:.45rem;border:1px solid #d1d5db;border-radius:.45rem;background:white;padding:.35rem .55rem;font-size:.75rem;color:#374151;transition:border-color .15s,background .15s,color .15s}.department-card:hover{border-color:#9ca3af}.department-card b{min-width:1.35rem;border-radius:.35rem;background:#f3f4f6;padding:.05rem .3rem;text-align:center;font-weight:650;color:#111827}.department-card-active{border-color:#111827;background:#111827;color:white}.department-card-active b{background:#374151;color:white}.form-grid{display:grid;gap:.75rem}@media(min-width:768px){.form-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(min-width:1280px){.form-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}.label{font-size:.75rem;color:rgb(107 114 128)}.field{margin-top:.25rem;display:block;width:100%;border-radius:.375rem;border:1px solid rgb(209 213 219);padding:.5rem .75rem;font-size:.875rem;color:rgb(17 24 39);background:white}.cell{padding:.55rem .75rem;text-align:left;white-space:nowrap}.table-scroll{max-height:68vh;overflow:auto;border:1px solid #e5e7eb;border-radius:.5rem}.employee-table thead th{position:sticky;top:0;z-index:20;background:#f8fafc;border-bottom:1px solid #d1d5db}.employee-table th:first-child{position:sticky;left:0;z-index:30;background:#f8fafc}.employee-table td:first-child{position:sticky;left:0;z-index:10;background:white;border-right:1px solid #e5e7eb}.employee-table tr:hover td:first-child{background:#f9fafb}
 </style>

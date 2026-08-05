@@ -34,3 +34,26 @@ test("household and contribution data are explicit", () => {
   assert.match(source, /公积金基数/);
   assert.match(source, /未维护/);
 });
+
+
+test("department classification shows grouped nonempty cards with counts and click filtering", () => {
+  assert.match(source, /const DEPARTMENT_GROUP_ORDER/);
+  assert.match(source, /const departmentGroups\s*=\s*computed/);
+  assert.match(source, /employee_count/);
+  assert.match(source, /v-for="group in departmentGroups"/);
+  assert.match(source, /v-for="department in group\.departments"/);
+  assert.match(source, /@click="departmentFilter=department\.name"/);
+  assert.match(source, /department-card-active/);
+});
+
+test("employee form limits department ids to the selected company", () => {
+  assert.match(source, /const formDepartmentOptions\s*=\s*computed/);
+  assert.match(source, /x\.company===form\.company/);
+  assert.match(source, /v-for="x in formDepartmentOptions"/);
+});
+
+
+test("company changes clear a department filter that is no longer available", () => {
+  assert.match(source, /watch\(companyFilter/);
+  assert.match(source, /!departmentOptions\.value\.includes\(departmentFilter\.value\)/);
+});
