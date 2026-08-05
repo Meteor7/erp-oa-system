@@ -1,6 +1,10 @@
 import frappe
 
 from rayher_hr_payroll.api._guards import require_rd_access
+from rayher_hr_payroll.department_structure import (
+    CANONICAL_DEPARTMENTS,
+    DEPARTMENT_GROUP_BY_NAME,
+)
 from rayher_hr_payroll.hr_contributions import HOUSEHOLD_OPTIONS, household_classification
 
 RD_HR_WRITE = ("System Manager", "HR User", "HR Manager")
@@ -60,7 +64,32 @@ def get_company_options():
 @frappe.whitelist()
 def get_dept_options():
     require_rd_access(RD_HR_WRITE)
-    return frappe.get_all("Department", filters={"is_group": 0}, fields=["name", "department_name"], order_by="department_name")
+    rows = frappe.db.sql(
+        """
+        SELECT d.name, d.department_name, d.company, COUNT(e.name) AS employee_count
+        FROM `tabDepartment` d
+        INNER JOIN `tabEmployee` e
+            ON e.department = d.name AND e.status = 'Active'
+        WHERE d.is_group = 0
+        GROUP BY d.name, d.department_name, d.company
+        """,
+        as_dict=True,
+    )
+    order = {name: index for index, name in enumerate(CANONICAL_DEPARTMENTS)}
+    result = []
+    for row in rows:
+        department_name = row.get("department_name")
+        if department_name not in order:
+            continue
+        result.append({
+            **row,
+            "group_name": DEPARTMENT_GROUP_BY_NAME[department_name],
+            "employee_count": int(row.get("employee_count") or 0),
+        })
+    return sorted(
+        result,
+        key=lambda row: (order[row["department_name"]], row.get("company") or ""),
+    )
 
 
 @frappe.whitelist()
