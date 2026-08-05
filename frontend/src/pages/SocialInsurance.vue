@@ -44,6 +44,30 @@ const statusLabel = value => ({
 }[value] || value);
 const statusTheme = value => value === "Matched" || value === "Current" ? "green" : value === "Pending" || value === "Pending Activation" ? "orange" : "gray";
 const employeeOptionsFor = row => (employees.data || []).filter(employee => !row.company || employee.company === row.company);
+const pendingReasonCategory = row => {
+  const reason = String(row.difference_reasons || "");
+  if (reason.includes("户口信息")) return "员工档案户口信息未维护";
+  if (reason.includes("local_pension")) return "地方补充养老金额不一致";
+  return reason || "其他待确认原因";
+};
+const pendingReason = row => {
+  const reason = String(row.difference_reasons || "");
+  if (reason.includes("户口信息")) {
+    return "员工档案未维护户口信息，后台无法判断深户/非深户，因此暂不能独立复算社保金额";
+  }
+  if (reason.includes("local_pension")) {
+    return `地方补充养老：Excel ${money(row.local_pension)}，后台 ${money(row.calculated_local_pension)}，差额 ${money(Number(row.local_pension || 0) - Number(row.calculated_local_pension || 0))}`;
+  }
+  return reason || "请核对员工关联、档案基数和Excel申报金额";
+};
+const pendingReasonSummary = computed(() => {
+  const counts = new Map();
+  for (const row of data.value.pending || []) {
+    const label = pendingReasonCategory(row);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()].map(([label, count]) => ({ label, count }));
+});
 
 watch([period, company], () => { preview.value = null; workbench.reload(); employees.reload(); });
 
@@ -140,15 +164,20 @@ async function ignoreRow(row) {
       </table></div>
     </Card>
 
-    <Card title="待确认社保信息明细" subtitle="不匹配或基础资料不完整的Excel记录，填写备注后确认纳入或忽略">
-      <div class="overflow-x-auto"><table class="w-full min-w-[3000px] text-sm">
-        <thead><tr><th>所属公司</th><th>姓名</th><th>证件号码</th><th>关联员工</th><th>档案社保基数</th><th>Excel缴费工资</th><th>基数来源</th><th>户口信息</th><th>系统判断</th><th>政策版本</th><th>Excel个人</th><th>后台个人</th><th>Excel单位</th><th>后台单位</th><th>Excel应收</th><th>后台应收</th><th>总差额</th><th>自动差异原因</th><th>备注与操作</th></tr></thead>
+    <Card title="待确认社保信息明细" subtitle="原因和具体差异优先展示；填写备注后确认纳入或忽略">
+      <div v-if="pendingReasonSummary.length" class="reason-summary">
+        <strong>待确认原因汇总</strong>
+        <span v-for="item in pendingReasonSummary" :key="item.label">{{ item.label }}：{{ item.count }}人</span>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full min-w-[2850px] text-sm">
+        <thead><tr><th>所属公司</th><th>姓名</th><th>待确认原因</th><th>关联员工</th><th>证件号码</th><th>户口信息</th><th>系统判断</th><th>档案社保基数</th><th>Excel缴费工资</th><th>基数来源</th><th>政策版本</th><th>Excel个人</th><th>后台个人</th><th>Excel单位</th><th>后台单位</th><th>Excel应收</th><th>后台应收</th><th>总差额</th><th>备注与操作</th></tr></thead>
         <tbody><tr v-for="row in data.pending||[]" :key="row.name">
-          <td>{{ displayCompany(row.company) }}</td><td>{{ row.excel_name }}</td><td>{{ row.masked_identity }}</td>
-          <td><select v-model="selectedEmployees[row.name]" class="field min-w-40"><option :value="row.employee||''">{{ row.employee_name || '请选择员工' }}</option><option v-for="employee in employeeOptionsFor(row)" :key="employee.name" :value="employee.name">{{ employee.employee_name }}</option></select></td>
-          <td class="num">{{ money(row.reference_base) }}</td><td class="num">{{ money(row.contribution_base) }}</td><td>{{row.base_source||'-'}}</td><td>{{row.household_source||'未维护'}}</td><td><Badge :theme="row.household_classification==='待完善'?'orange':'gray'">{{row.household_classification||'待完善'}}</Badge></td><td>{{row.policy_version||'未配置'}}</td>
+          <td>{{ displayCompany(row.company) }}</td><td>{{ row.excel_name }}</td>
+          <td class="reason-cell"><strong>{{ pendingReasonCategory(row) }}</strong><span>{{ pendingReason(row) }}</span></td>
+          <td><select :value="selectedEmployees[row.name] || row.employee || ''" class="field min-w-40" @change="selectedEmployees[row.name] = $event.target.value"><option value="">请选择员工</option><option v-for="employee in employeeOptionsFor(row)" :key="employee.name" :value="employee.name">{{ employee.employee_name }}</option></select></td>
+          <td>{{ row.masked_identity }}</td><td>{{row.household_source||'未维护'}}</td><td><Badge :theme="row.household_classification==='待完善'?'orange':'gray'">{{row.household_classification||'待完善'}}</Badge></td>
+          <td class="num">{{ money(row.reference_base) }}</td><td class="num">{{ money(row.contribution_base) }}</td><td>{{row.base_source||'-'}}</td><td>{{row.policy_version||'未配置'}}</td>
           <td class="num">{{money(row.employee_total)}}</td><td class="num">{{money(row.calculated_employee_total)}}</td><td class="num">{{money(row.company_total)}}</td><td class="num">{{money(row.calculated_company_total)}}</td><td class="num">{{money(row.receivable_total)}}</td><td class="num">{{money(row.calculated_receivable_total)}}</td><td class="num">{{money(row.difference_total)}}</td>
-          <td class="max-w-80 whitespace-normal text-red-600">{{ row.difference_reasons }}</td>
           <td><div class="flex min-w-[480px] gap-2"><input v-model="notes[row.name]" class="field flex-1" placeholder="填写确认或忽略原因"/><Button size="sm" variant="solid" @click="confirmRow(row)">确认并纳入本批次</Button><Button size="sm" @click="ignoreRow(row)">忽略此行</Button></div></td>
         </tr><tr v-if="!(data.pending||[]).length"><td colspan="19" class="empty">没有待确认社保信息</td></tr></tbody>
       </table></div>
@@ -166,5 +195,5 @@ async function ignoreRow(row) {
 </template>
 
 <style scoped>
-.kpi{display:flex;min-height:88px;flex-direction:column;justify-content:space-between;border-radius:.75rem;background:#f8fafc;padding:1rem;color:#64748b}.kpi b{font-size:1.25rem;color:#111827;font-variant-numeric:tabular-nums}th{white-space:nowrap;border-bottom:1px solid #e5e7eb;padding:.625rem .75rem;text-align:left;color:#6b7280;background:white}td{white-space:nowrap;border-bottom:1px solid #f1f5f9;padding:.625rem .75rem}.num{text-align:right;font-variant-numeric:tabular-nums}.field{display:block;border:1px solid #d1d5db;border-radius:.375rem;padding:.45rem .6rem;font-size:.875rem;background:white}.empty{padding:2rem;text-align:center;color:#9ca3af}
+.kpi{display:flex;min-height:88px;flex-direction:column;justify-content:space-between;border-radius:.75rem;background:#f8fafc;padding:1rem;color:#64748b}.kpi b{font-size:1.25rem;color:#111827;font-variant-numeric:tabular-nums}th{white-space:nowrap;border-bottom:1px solid #e5e7eb;padding:.625rem .75rem;text-align:left;color:#6b7280;background:white}td{white-space:nowrap;border-bottom:1px solid #f1f5f9;padding:.625rem .75rem}.num{text-align:right;font-variant-numeric:tabular-nums}.field{display:block;border:1px solid #d1d5db;border-radius:.375rem;padding:.45rem .6rem;font-size:.875rem;background:white}.reason-summary{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;padding:.75rem;border-radius:.5rem;background:#fff7ed;color:#9a3412}.reason-summary strong{margin-right:.25rem}.reason-summary span{padding:.15rem .5rem;border-radius:999px;background:white;border:1px solid #fed7aa}.reason-cell{min-width:340px;white-space:normal}.reason-cell strong,.reason-cell span{display:block}.reason-cell strong{color:#b91c1c}.reason-cell span{margin-top:.2rem;color:#7f1d1d;line-height:1.45}.empty{padding:2rem;text-align:center;color:#9ca3af}
 </style>

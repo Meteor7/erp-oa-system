@@ -26,3 +26,16 @@ test("pending audit table shows record inputs and policy", () => {
   assert.match(source, /系统判断/);
   assert.match(source, /政策版本/);
 });
+
+
+test("pending reasons are visible before financial columns and explain exact mismatches", () => {
+  assert.match(source, /pendingReasonSummary/);
+  assert.match(source, /pendingReason\(row\)/);
+  assert.match(source, /地方补充养老：Excel/);
+  assert.ok(source.indexOf("待确认原因") < source.indexOf("关联员工"));
+});
+
+test("linked employee select displays the stored association by default", () => {
+  assert.match(source, /:value="selectedEmployees\[row\.name\] \|\| row\.employee \|\| ''"/);
+  assert.match(source, /selectedEmployees\[row\.name\] = \$event\.target\.value/);
+});
