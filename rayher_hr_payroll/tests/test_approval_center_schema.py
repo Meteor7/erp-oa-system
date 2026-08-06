@@ -46,6 +46,12 @@ def test_ledger_is_immutable_and_idempotent_by_schema():
     assert result["paid_delta"]["fieldtype"] == "Currency"
     assert result["idempotency_key"]["unique"] == 1
     assert result["actor"]["options"] == "User"
+    assert ledger_meta["permissions"]
+    assert all(
+        not permission.get(action)
+        for permission in ledger_meta["permissions"]
+        for action in ("create", "write", "delete")
+    )
 
 
 def test_business_documents_are_private_versioned_references():
