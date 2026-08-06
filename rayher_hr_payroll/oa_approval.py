@@ -1,4 +1,4 @@
-REQUEST_LEAVE = "请假申请"
+from rayher_hr_payroll.oa_document_types import REQUEST_LEAVE
 REQUEST_EXPENSE_PAYMENT = "费用付款申请"
 
 FINANCE_AUDITOR_NAME = "演示员工13"
