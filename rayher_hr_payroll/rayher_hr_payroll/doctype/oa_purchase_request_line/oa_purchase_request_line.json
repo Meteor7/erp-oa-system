@@ -1,0 +1,82 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "creation": "2026-08-06 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "item_name",
+    "specification",
+    "quantity",
+    "unit",
+    "unit_price",
+    "amount",
+    "remarks"
+  ],
+  "fields": [
+    {
+      "fieldname": "item_name",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "Item Name",
+      "reqd": 1
+    },
+    {
+      "fieldname": "specification",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "Specification"
+    },
+    {
+      "fieldname": "quantity",
+      "fieldtype": "Float",
+      "in_list_view": 1,
+      "label": "Quantity",
+      "precision": "4",
+      "reqd": 1
+    },
+    {
+      "fieldname": "unit",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "Unit",
+      "reqd": 1
+    },
+    {
+      "fieldname": "unit_price",
+      "fieldtype": "Currency",
+      "in_list_view": 1,
+      "label": "Unit Price",
+      "precision": "2",
+      "reqd": 1
+    },
+    {
+      "fieldname": "amount",
+      "fieldtype": "Currency",
+      "in_list_view": 1,
+      "label": "Amount",
+      "precision": "2",
+      "read_only": 1
+    },
+    {
+      "fieldname": "remarks",
+      "fieldtype": "Small Text",
+      "label": "Remarks"
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "is_submittable": 0,
+  "links": [],
+  "modified": "2026-08-06 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Purchase Request Line",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1,
+  "istable": 1
+}

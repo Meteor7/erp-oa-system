@@ -1,6 +1,6 @@
 {
   "actions": [],
-  "allow_rename": 1,
+  "allow_rename": 0,
   "autoname": "format:OA-{YYYY}-{#####}",
   "creation": "2026-07-07 00:00:00.000000",
   "doctype": "DocType",
@@ -20,6 +20,15 @@
     "from_date",
     "to_date",
     "amount",
+    "currency",
+    "approved_amount",
+    "asset_nature",
+    "fixed_asset_category",
+    "payment_source_kind",
+    "source_request",
+    "approved_amount_snapshot",
+    "source_modified",
+    "business_lines",
     "asset_category",
     "source_type",
     "source_summary",
@@ -48,7 +57,7 @@
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Request Type",
-      "options": "请假申请\n费用付款申请",
+      "options": "请假申请\n费用付款申请\n采购申请\n购买申请\n采购付款",
       "reqd": 1
     },
     {
@@ -247,6 +256,67 @@
       "label": "Approval Steps",
       "options": "OA Approval Step",
       "read_only": 1
+    },
+    {
+      "default": "CNY",
+      "fieldname": "currency",
+      "fieldtype": "Select",
+      "label": "Currency",
+      "options": "CNY",
+      "reqd": 1
+    },
+    {
+      "fieldname": "approved_amount",
+      "fieldtype": "Currency",
+      "label": "Approved Amount",
+      "options": "currency",
+      "precision": "2",
+      "read_only": 1
+    },
+    {
+      "fieldname": "asset_nature",
+      "fieldtype": "Select",
+      "label": "Asset Nature",
+      "options": "\n固定资产\n非固定资产"
+    },
+    {
+      "depends_on": "eval:doc.asset_nature==\"固定资产\"",
+      "fieldname": "fixed_asset_category",
+      "fieldtype": "Select",
+      "label": "Fixed Asset Category",
+      "options": "\n办公家具、工具及器具\n电子设备、研发专用设备、仪器仪表\n生产设备、生产工具及器具"
+    },
+    {
+      "fieldname": "payment_source_kind",
+      "fieldtype": "Select",
+      "label": "Payment Source Kind",
+      "options": "\n关联采购申请\n关联购买申请\n无事前申请"
+    },
+    {
+      "fieldname": "source_request",
+      "fieldtype": "Link",
+      "label": "Source Request",
+      "options": "OA Approval Request"
+    },
+    {
+      "fieldname": "approved_amount_snapshot",
+      "fieldtype": "Currency",
+      "label": "Approved Amount Snapshot",
+      "options": "currency",
+      "precision": "2",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_modified",
+      "fieldtype": "Datetime",
+      "label": "Source Modified",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_lines",
+      "fieldtype": "Table",
+      "label": "Purchase Lines",
+      "options": "OA Purchase Request Line"
     }
   ],
   "index_web_pages_for_search": 1,

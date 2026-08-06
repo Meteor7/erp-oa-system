@@ -1,0 +1,117 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "creation": "2026-08-06 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "request",
+    "document_type",
+    "version_no",
+    "file",
+    "file_sha256",
+    "original_filename",
+    "uploaded_by",
+    "uploaded_on",
+    "supersedes"
+  ],
+  "fields": [
+    {
+      "fieldname": "request",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Approval Request",
+      "options": "OA Approval Request",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "document_type",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Document Type",
+      "options": "需求申请\n报价单\n价格审批表\nPR\nPO\n合同\n付款计划\n发票\n验收资料\n送货单\n收料单\n入库单\n付款回单\n采购完成报告",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "version_no",
+      "fieldtype": "Int",
+      "in_list_view": 1,
+      "label": "Version",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "file",
+      "fieldtype": "Attach",
+      "label": "Private File",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "file_sha256",
+      "fieldtype": "Data",
+      "label": "SHA-256",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "original_filename",
+      "fieldtype": "Data",
+      "label": "Original Filename",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "uploaded_by",
+      "fieldtype": "Link",
+      "label": "Uploaded By",
+      "options": "User",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "uploaded_on",
+      "fieldtype": "Datetime",
+      "in_list_view": 1,
+      "label": "Uploaded On",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "supersedes",
+      "fieldtype": "Link",
+      "label": "Supersedes",
+      "options": "OA Business Document",
+      "read_only": 1
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "is_submittable": 0,
+  "links": [],
+  "modified": "2026-08-06 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Business Document",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "uploaded_on",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1,
+  "autoname": "format:OABD-{YYYY}-{########}",
+  "naming_rule": "Expression",
+  "title_field": "original_filename"
+}
