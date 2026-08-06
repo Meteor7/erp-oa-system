@@ -12,11 +12,16 @@ test('app shell shows current account level and logout', () => {
 });
 
 test('app shell exposes approval children and project management in the nav', () => {
-  assert.ok(source.includes('\\u5ba1\\u6279'));
+  assert.ok(source.includes("label: '审批中心'"));
   assert.ok(source.includes("to: '/approval/leave'"));
-  assert.ok(source.includes("to: '/approval/purchase'"));
-  assert.ok(source.includes('\\u8bf7\\u5047\\u5ba1\\u6279'));
-  assert.ok(source.includes('\\u8d39\\u7528\\u4ed8\\u6b3e/\\u62a5\\u9500'));
+  assert.ok(source.includes("to: '/approval/procurement'"));
+  assert.ok(source.includes("to: '/approval/direct-purchase'"));
+  assert.ok(source.includes("to: '/approval/procurement-payment'"));
+  assert.ok(source.includes("to: '/approval/reimbursement'"));
+  assert.ok(source.includes("to: '/approval/corporate-payment'"));
+  assert.ok(source.includes("label: '请假审批'"));
+  assert.ok(source.includes("label: '申请看板'"));
+  assert.ok(source.includes("label: '付款看板'"));
   assert.ok(source.includes('\\u9879\\u76ee\\u7ba1\\u7406'));
   assert.ok(source.includes('/projects'));
 });

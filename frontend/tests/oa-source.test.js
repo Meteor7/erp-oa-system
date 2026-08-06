@@ -38,9 +38,12 @@ test('rayher SPA registers split approval pages', () => {
   assert.match(routerSource, /path:\s*['"]\/oa['"],\s*redirect:\s*['"]\/approval\/leave['"]/);
   assert.match(accessSource, /['"]\/approval\/leave['"]/);
   assert.match(accessSource, /['"]\/approval\/purchase['"]/);
-  assert.match(appSource, /\\u5ba1\\u6279/);
-  assert.match(appSource, /\\u8bf7\\u5047\\u5ba1\\u6279/);
-  assert.match(appSource, /\\u8d39\\u7528\\u4ed8\\u6b3e\/\\u62a5\\u9500/);
+  assert.match(appSource, /审批中心/);
+  assert.match(appSource, /请假审批/);
+  assert.match(appSource, /采购申请/);
+  assert.match(appSource, /购买申请/);
+  assert.match(appSource, /采购付款/);
+  assert.match(appSource, /对公付款/);
 });
 
 test('approval page keeps leave behavior and delegates expense reimbursement to its workbench', () => {
