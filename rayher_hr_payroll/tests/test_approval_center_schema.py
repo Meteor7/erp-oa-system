@@ -63,6 +63,15 @@ def test_business_documents_are_private_versioned_references():
     assert result["file_sha256"]["read_only"] == 1
     assert result["version_no"]["read_only"] == 1
     assert result["supersedes"]["options"] == "OA Business Document"
+    assert {row["role"] for row in document_meta["permissions"]} >= {
+        "System Manager", "Employee", "Department Manager", "Accounts User", "HR User", "HR Manager",
+        "Rayher Business Executive",
+    }
+    assert all(
+        not permission.get(action)
+        for permission in document_meta["permissions"]
+        for action in ("create", "write", "delete")
+    )
 
 
 
