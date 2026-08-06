@@ -22,6 +22,7 @@ from rayher_hr_payroll.oa_approval import (
     normalize_asset_category,
 )
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access, visible_request_types
+from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
     OrganizationResolutionError,
@@ -60,6 +61,21 @@ INVOICE_UPLOADED = "\u5df2\u4e0a\u4f20"
 INVOICE_VERIFIED = "\u5df2\u9a8c\u8bc1"
 INVOICE_CONFIRMED = "\u5df2\u786e\u8ba4"
 INVOICE_DUPLICATE = "\u91cd\u590d\u53d1\u7968"
+
+
+def _save_document(doc):
+    if getattr(doc, "doctype", None) == "OA Approval Request":
+        with authorized_oa_action():
+            return doc.save(ignore_permissions=True)
+    return doc.save(ignore_permissions=True)
+
+
+def _insert_document(doc):
+    if getattr(doc, "doctype", None) == "OA Approval Request":
+        with authorized_oa_action():
+            return doc.insert(ignore_permissions=True)
+    return doc.insert(ignore_permissions=True)
+
 
 EXPENSE_CATEGORIES = [
     "\u673a\u7968",
@@ -1073,7 +1089,7 @@ def _build_request_doc(
     )
     _append_steps(doc, steps)
     _set_expense_lines(doc, lines)
-    doc.insert(ignore_permissions=True)
+    _insert_document(doc)
     return doc
 
 
@@ -1253,7 +1269,7 @@ def create_request(
         doc.invoice_status = draft_summary.get("invoice_status", "")
     if requested_submit:
         _submit_draft(doc)
-    doc.save(ignore_permissions=True)
+    _save_document(doc)
     return _summarize_doc(doc)
 
 
@@ -1417,7 +1433,7 @@ def save_draft_expense_sources(name, source_lines):
                 },
             )
             invoice_service._apply_request_invoice_summary(doc, save=False, current=True)
-            doc.save(ignore_permissions=True)
+            _save_document(doc)
             return _summarize_doc(doc)
 
 
@@ -1498,7 +1514,7 @@ def save_finance_expense_items(name, lines):
                 line.expense_account_level_2 = level_2
                 line.expense_item = display
         _append_request_event(doc, "Finance expense classification", doc.workflow_status, doc.workflow_status, details={"project_count": len(assignments), "line_count": len(seen)})
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 @frappe.whitelist(methods=["POST"])
 def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reasons=None):
@@ -1564,7 +1580,7 @@ def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reas
             doc.no_invoice_reason = supplied_reason
         for key, value in normalized_reasons.items():
             lines[key].invoice_difference_reason = value
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 
@@ -1583,7 +1599,7 @@ def submit_request(name, no_invoice_reason=None):
         if supplied_reason is not None:
             doc.no_invoice_reason = supplied_reason
         _submit_draft(doc)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 
@@ -2025,9 +2041,9 @@ def save_consumption_detail(name=None, title=None, category=None, expense_date=N
     doc.description = _clean(description)
     _update_consumption_invoice_state(doc)
     if name:
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
     else:
-        doc.insert(ignore_permissions=True)
+        _insert_document(doc)
     frappe.db.commit()
     return _serialize_consumption(doc)
 
@@ -2062,7 +2078,7 @@ def add_invoice(
         },
     )
     _update_consumption_invoice_state(doc)
-    doc.save(ignore_permissions=True)
+    _save_document(doc)
     frappe.db.commit()
     return _serialize_consumption(doc)
 
@@ -2121,7 +2137,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
     )
     if _to_bool(submit):
         _submit_draft(doc)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
     for cd in docs:
         cd.status = CD_PUSHED
         cd.linked_request = doc.name
@@ -2149,7 +2165,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
                 doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
             )
             _reject_to_target(doc, step, reject_target, actor, note)
-            doc.save(ignore_permissions=True)
+            _save_document(doc)
             return _summarize_doc(doc, authorized_expense_lines)
         if action != "approve":
             frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
@@ -2169,7 +2185,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
             step.acted_on = now_datetime()
             if note:
                 step.note = note
-            doc.save(ignore_permissions=True)
+            _save_document(doc)
             return _summarize_doc(doc, authorized_expense_lines)
         done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
         from_status = doc.workflow_status
@@ -2180,7 +2196,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
             doc.paid_by = actor
             doc.paid_on = step.acted_on or now_datetime()
             _append_request_event(doc, "确认付款", from_status, STATUS_PAID, note)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc, authorized_expense_lines)
 
 
@@ -2202,7 +2218,7 @@ def mark_paid(name, note=None):
         if note:
             doc.reason = ((doc.reason or "") + "\n" + "\u4ed8\u6b3e\u5907\u6ce8\uff1a" + note).strip()
         _append_request_event(doc, "标记已付款", old_status, STATUS_PAID, note)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 def _reset_request_to_draft(doc, note=""):
@@ -2296,7 +2312,7 @@ def push_invoices_to_request(invoice_names, payment_info=None):
             invoice_service._save(record)
         _append_request_event(doc, "发票下推", STATUS_DRAFT, STATUS_DRAFT, "、".join(names))
         invoice_service._apply_request_invoice_summary(doc, save=False)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 
@@ -2312,7 +2328,7 @@ def withdraw_request(name, note=None):
         if doc.workflow_status == STATUS_DRAFT:
             return _summarize_doc(doc)
         _reset_request_to_draft(doc, note)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 
@@ -2330,7 +2346,7 @@ def withdraw_payment(name, note=None):
         doc.paid_by = ""
         doc.paid_on = None
         _append_request_event(doc, "撤回付款", old_status, STATUS_COMPLETED, note)
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 
@@ -2406,7 +2422,7 @@ def withdraw_invoice_push(invoice_names, note=None):
                 {"invoices": [record.name for record in selected]},
             )
             invoice_service._apply_request_invoice_summary(doc, save=False)
-            doc.save(ignore_permissions=True)
+            _save_document(doc)
             results.append(_summarize_doc(doc))
         return results[0] if len(results) == 1 else {"requests": results, "invoice_names": names}
 
@@ -2644,7 +2660,7 @@ def add_sign_request(name, approver, position, opinion):
             _clean(opinion),
             {"actor": actor, "approver": resolved, "position": _clean(position), "step_key": inserted.step_key, "parent_step_key": inserted.parent_step_key},
         )
-        doc.save(ignore_permissions=True)
+        _save_document(doc)
         return _summarize_doc(doc)
 
 

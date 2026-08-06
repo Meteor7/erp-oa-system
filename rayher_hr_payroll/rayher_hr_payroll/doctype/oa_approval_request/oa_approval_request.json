@@ -61,7 +61,7 @@
       "reqd": 1
     },
     {
-      "default": "待审批",
+      "default": "草稿",
       "fieldname": "workflow_status",
       "fieldtype": "Select",
       "in_list_view": 1,

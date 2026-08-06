@@ -19,6 +19,7 @@ def test_request_amount_source_and_line_contracts():
     request = meta("oa_approval_request")
     result = fields("oa_approval_request")
     assert request["allow_rename"] == 0
+    assert result["workflow_status"]["default"] == "草稿"
     assert result["amount"]["fieldtype"] == "Currency"
     assert result["currency"]["default"] == "CNY"
     assert result["currency"]["options"] == "CNY"

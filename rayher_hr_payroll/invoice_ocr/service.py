@@ -15,6 +15,7 @@ import frappe
 from rayher_hr_payroll.invoice_ocr.domain import business_key, submission_blockers
 from rayher_hr_payroll.invoice_ocr import permissions as invoice_permissions
 from rayher_hr_payroll.invoice_ocr.permissions import can_read_invoice
+from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 
 BATCH_DOCTYPE = "OA Invoice Import Batch"
 RECORD_DOCTYPE = "OA Invoice Record"
@@ -71,6 +72,9 @@ def _set(doc, field, value):
 
 
 def _save(doc):
+    if _get(doc, "doctype") == REQUEST_DOCTYPE:
+        with authorized_oa_action():
+            return doc.save(ignore_permissions=True)
     return doc.save(ignore_permissions=True)
 
 
