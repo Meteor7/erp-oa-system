@@ -21,6 +21,16 @@ const PAGE_CONFIG = {
     title: '\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500',
     formTitle: '\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500\u5de5\u4f5c\u53f0',
   },
+  '/approval/reimbursement': {
+    requestType: REQUEST_EXPENSE_PAYMENT,
+    title: '报销',
+    formTitle: '报销工作台',
+  },
+  '/approval/corporate-payment': {
+    requestType: REQUEST_EXPENSE_PAYMENT,
+    title: '对公付款',
+    formTitle: '对公付款工作台',
+  },
 };
 
 const T = {

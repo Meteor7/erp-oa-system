@@ -1,4 +1,5 @@
 import { displayUser } from './displayBrand.js';
+import { isApprovalRouteEnabled } from './approvalCenter.js';
 // Role-aware page access for the SPA nav + route gating.
 // Expense/allocation stay finance-only; HR pages stay HR-only.
 // Employees and department supervisors can use the R&D timesheet entry and approval pages.
@@ -11,7 +12,7 @@ const TIME_MANAGE = ['System Manager', 'HR User', 'HR Manager', 'Department Mana
 const TIME_ENTRY = [...TIME_MANAGE, 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
+const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 const PAGE_ROLES = {
   '/expense': FINANCE,
@@ -31,20 +32,20 @@ const PAGE_ROLES = {
   '/entry': TIME_VIEW,
   '/oa': APPROVAL,
   '/approval/leave': APPROVAL,
+  '/approval/procurement': APPROVAL,
+  '/approval/direct-purchase': APPROVAL,
+  '/approval/request-dashboard': APPROVAL,
+  '/approval/procurement-payment': APPROVAL,
+  '/approval/reimbursement': APPROVAL,
+  '/approval/corporate-payment': APPROVAL,
+  '/approval/payment-dashboard': APPROVAL,
   '/approval/purchase': APPROVAL,
   '/timesheet': TIME_VIEW,
 };
 
-const OA_FLAG_BY_PATH = {
-  '/approval/leave': 'leave_approval',
-  '/approval/purchase': 'expense_reimbursement',
-};
-
 function hasEnabledFeature(path) {
-  const flag = OA_FLAG_BY_PATH[path];
-  if (!flag) return true;
   const access = (typeof window !== 'undefined' && window.oa_access) || {};
-  return access[flag] !== false;
+  return isApprovalRouteEnabled(path, access);
 }
 
 function myRoles() {

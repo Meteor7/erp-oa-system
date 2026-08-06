@@ -7,9 +7,19 @@ const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo.p
 
 const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
-  { label: '\u5ba1\u6279', items: [
-    { to: '/approval/leave', step: '01', label: '\u8bf7\u5047\u5ba1\u6279' },
-    { to: '/approval/purchase', step: '02', label: '\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500' },
+  { label: '审批中心', items: [
+    { to: '/approval/leave', step: '01', label: '请假审批' },
+    { step: '02', label: '采购/购买申请', children: [
+      { to: '/approval/procurement', label: '采购申请' },
+      { to: '/approval/direct-purchase', label: '购买申请' },
+    ] },
+    { to: '/approval/request-dashboard', step: '03', label: '申请看板' },
+    { step: '04', label: '付款申请', children: [
+      { to: '/approval/procurement-payment', label: '采购付款' },
+      { to: '/approval/reimbursement', label: '报销' },
+      { to: '/approval/corporate-payment', label: '对公付款' },
+    ] },
+    { to: '/approval/payment-dashboard', step: '05', label: '付款看板' },
   ] },
   { label: '人事中心', items: [
     { to: '/personnel', step: '01', label: '员工信息管理' },
@@ -42,6 +52,13 @@ const WIDE_PAGE_PATHS = new Set([
   '/accommodation/monthly',
   '/payroll',
   '/approval/purchase',
+  '/approval/procurement',
+  '/approval/direct-purchase',
+  '/approval/request-dashboard',
+  '/approval/procurement-payment',
+  '/approval/reimbursement',
+  '/approval/corporate-payment',
+  '/approval/payment-dashboard',
   '/projects',
   '/timesheet',
   '/expense',

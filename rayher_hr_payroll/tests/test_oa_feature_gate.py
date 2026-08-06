@@ -43,6 +43,9 @@ def test_switches_are_independent_and_reversible(gate):
     assert module.boot_access_flags("employee@example.com") == {
         "leave_approval": False,
         "expense_reimbursement": True,
+        "procurement_application": False,
+        "direct_purchase_application": False,
+        "procurement_payment": False,
     }
 
 

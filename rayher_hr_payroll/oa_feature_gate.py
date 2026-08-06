@@ -22,6 +22,9 @@ FEATURE_CONFIG_BY_REQUEST_TYPE = {
 BOOT_FLAG_BY_REQUEST_TYPE = {
     REQUEST_LEAVE: "leave_approval",
     REQUEST_EXPENSE_PAYMENT: "expense_reimbursement",
+    REQUEST_PROCUREMENT: "procurement_application",
+    REQUEST_DIRECT_PURCHASE: "direct_purchase_application",
+    REQUEST_PROCUREMENT_PAYMENT: "procurement_payment",
 }
 
 
@@ -66,7 +69,7 @@ def visible_request_types(request_types, user=None):
 def boot_access_flags(user=None):
     return {
         BOOT_FLAG_BY_REQUEST_TYPE[item]: can_access_request_type(item, user)
-        for item in FEATURE_CONFIG_BY_REQUEST_TYPE
+        for item in (*FEATURE_CONFIG_BY_REQUEST_TYPE, *DRAFT_ONLY_REQUEST_TYPES)
     }
 
 

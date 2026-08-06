@@ -130,3 +130,14 @@ test("temporary OA flags restore modules independently", () => {
   assert.equal(canSee("/approval/leave"), false);
   assert.equal(canSee("/approval/purchase"), true);
 });
+
+test("closed approval center drafts stay hidden until explicit server flags", () => {
+  globalThis.window = { roles: ["System Manager"], oa_access: { procurement_application: false, direct_purchase_application: false, procurement_payment: false } };
+  assert.equal(canSee("/approval/procurement"), false);
+  assert.equal(canSee("/approval/direct-purchase"), false);
+  assert.equal(canSee("/approval/procurement-payment"), false);
+  globalThis.window.oa_access = { procurement_application: true, direct_purchase_application: true, procurement_payment: true };
+  assert.equal(canSee("/approval/procurement"), true);
+  assert.equal(canSee("/approval/direct-purchase"), true);
+  assert.equal(canSee("/approval/procurement-payment"), true);
+});

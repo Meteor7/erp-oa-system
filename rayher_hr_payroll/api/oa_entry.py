@@ -2671,3 +2671,49 @@ def _workflow_metadata(doc):
         "add_sign_count": count,
         "add_sign_remaining": max(0, MAX_ADD_SIGN_OPERATIONS - count),
     }
+
+
+def _approval_center_result(value):
+    if hasattr(value, "as_dict"):
+        return value.as_dict()
+    return value
+
+
+@frappe.whitelist()
+def save_approval_center_draft(request_type, payload, name=None):
+    from rayher_hr_payroll.approval_center import ApprovalCenterError, save_draft
+
+    try:
+        return _approval_center_result(save_draft(request_type, payload, name=name))
+    except ApprovalCenterError as exc:
+        frappe.throw(str(exc))
+
+
+@frappe.whitelist()
+def get_approval_center_dashboard(kind, limit=200):
+    from rayher_hr_payroll.approval_center import ApprovalCenterError, dashboard
+
+    try:
+        return dashboard(kind, limit=limit)
+    except ApprovalCenterError as exc:
+        frappe.throw(str(exc))
+
+
+@frappe.whitelist()
+def attach_approval_business_document(request, document_type, file_ref):
+    from rayher_hr_payroll.business_documents import BusinessDocumentError, attach
+
+    try:
+        return _approval_center_result(attach(request, document_type, file_ref))
+    except BusinessDocumentError as exc:
+        frappe.throw(str(exc))
+
+
+@frappe.whitelist()
+def list_approval_business_documents(request):
+    from rayher_hr_payroll.business_documents import BusinessDocumentError, list_documents
+
+    try:
+        return list_documents(request)
+    except BusinessDocumentError as exc:
+        frappe.throw(str(exc))
