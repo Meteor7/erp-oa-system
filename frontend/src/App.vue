@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { createResource } from 'frappe-ui';
 import { canSee, currentUser, roleLabel } from './lib/access';
@@ -11,9 +11,15 @@ const groups = [
     { to: '/approval/leave', step: '01', label: '\u8bf7\u5047\u5ba1\u6279' },
     { to: '/approval/purchase', step: '02', label: '\u8d39\u7528\u4ed8\u6b3e/\u62a5\u9500' },
   ] },
-  { label: '\u7814\u53d1\u4e2d\u5fc3', items: [
-    { to: '/personnel', step: '01', label: '\u4eba\u4e8b\u4fe1\u606f\u7ba1\u7406' },
-    { to: '/accommodation', step: '02', label: '\u5bbf\u820d\u4f4f\u5bbf\u8d39\u7528' },
+  { label: '人事中心', items: [
+    { to: '/personnel', step: '01', label: '员工信息管理' },
+    { to: '/social-insurance', step: '02', label: '社保信息管理' },
+    { to: '/housing-fund', step: '03', label: '公积金信息管理' },
+    { step: '04', label: '宿舍信息管理', children: [
+      { to: '/accommodation/master', label: '宿舍基本信息管理' },
+      { to: '/accommodation/monthly', label: '当月费用管理' },
+    ] },
+    { to: '/payroll', step: '05', label: '薪酬计算' },
   ] },
   { label: '\u7814\u53d1\u53f0\u8d26', items: [
     { to: '/projects', step: '03', label: '\u9879\u76ee\u7ba1\u7406' },
@@ -29,7 +35,12 @@ const groups = [
 
 const WIDE_PAGE_PATHS = new Set([
   '/personnel',
+  '/social-insurance',
+  '/housing-fund',
   '/accommodation',
+  '/accommodation/master',
+  '/accommodation/monthly',
+  '/payroll',
   '/approval/purchase',
   '/projects',
   '/timesheet',
@@ -39,9 +50,21 @@ const WIDE_PAGE_PATHS = new Set([
   '/foreign-rd',
 ]);
 const route = useRoute();
+const ACCOMMODATION_PATHS = new Set(['/accommodation/master', '/accommodation/monthly']);
+const openNavGroups = reactive(new Set());
+function isNavGroupOpen(item) { return openNavGroups.has(item.label); }
+function toggleNavGroup(item) {
+  if (openNavGroups.has(item.label)) openNavGroups.delete(item.label);
+  else openNavGroups.add(item.label);
+}
+watch(() => route.path, (path) => {
+  if (ACCOMMODATION_PATHS.has(path)) openNavGroups.add('宿舍信息管理');
+}, { immediate: true });
 const visibleGroups = computed(() =>
   groups
-    .map((g) => ({ ...g, items: g.items.filter((n) => canSee(n.to)) }))
+    .map((g) => ({ ...g, items: g.items
+      .map((n) => n.children ? ({ ...n, children: n.children.filter((child) => canSee(child.to)) }) : n)
+      .filter((n) => n.children ? n.children.length : canSee(n.to)) }))
     .filter((g) => g.items.length)
 );
 const allowed = computed(() => canSee(route.path));
@@ -116,11 +139,27 @@ function logout() {
       <nav class='p-3 flex-1 overflow-y-auto'>
         <div v-for='g in visibleGroups' :key='g.label' class='mb-3'>
           <div class='px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 font-semibold'>{{ g.label }}</div>
-          <router-link v-for='n in g.items' :key='n.to' :to='n.to'
-            class='flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-white/5'
-            active-class='bg-white/10 text-white'>
-            <span class='w-5 text-[10px] text-gray-500 text-center'>{{ n.step }}</span>{{ n.label }}
-          </router-link>
+          <template v-for='n in g.items' :key='n.to || n.label'>
+            <div v-if='n.children'>
+              <button type='button'
+                class='flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-300 hover:bg-white/5'
+                :aria-expanded='isNavGroupOpen(n)' @click='toggleNavGroup(n)'>
+                <span class='w-5 text-[10px] text-gray-500 text-center'>{{ n.step }}</span>
+                <span class='flex-1'>{{ n.label }}</span>
+                <span class='text-xs text-gray-500'>{{ isNavGroupOpen(n) ? '▾' : '▸' }}</span>
+              </button>
+              <div v-if='isNavGroupOpen(n)'>
+                <router-link v-for='child in n.children' :key='child.to' :to='child.to'
+                  class='ml-7 flex items-center rounded-md px-3 py-2 text-[13px] text-gray-400 hover:bg-white/5 hover:text-gray-200'
+                  active-class='bg-white/10 text-white'>{{ child.label }}</router-link>
+              </div>
+            </div>
+            <router-link v-else :to='n.to'
+              class='flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-white/5'
+              active-class='bg-white/10 text-white'>
+              <span class='w-5 text-[10px] text-gray-500 text-center'>{{ n.step }}</span>{{ n.label }}
+            </router-link>
+          </template>
         </div>
       </nav>
     </aside>

@@ -8,6 +8,12 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ExpenseApprovalRecords: typeof import('./src/components/expense/ExpenseApprovalRecords.vue')['default']
+    ExpenseStatistics: typeof import('./src/components/expense/ExpenseStatistics.vue')['default']
+    ExpenseWorkbench: typeof import('./src/components/ExpenseWorkbench.vue')['default']
+    InvoicePreviewDrawer: typeof import('./src/components/invoice/InvoicePreviewDrawer.vue')['default']
+    InvoiceRecognitionPanel: typeof import('./src/components/invoice/InvoiceRecognitionPanel.vue')['default']
+    InvoiceUploadWorkbench: typeof import('./src/components/invoice/InvoiceUploadWorkbench.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

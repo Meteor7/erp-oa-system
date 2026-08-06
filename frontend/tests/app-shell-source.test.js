@@ -21,9 +21,9 @@ test('app shell exposes approval children and project management in the nav', ()
   assert.ok(source.includes('/projects'));
 });
 
-test('left navigation labels the personnel group as R and D center', () => {
-  assert.ok(source.includes("label: '\\u7814\\u53d1\\u4e2d\\u5fc3'"));
-  assert.ok(!source.includes("label: '\\u4eba\\u4e8b\\u4e2d\\u5fc3'"));
+test('left navigation labels the personnel group as HR center', () => {
+  assert.ok(source.includes("label: '人事中心'"));
+  assert.ok(!source.includes("label: '\\u7814\\u53d1\\u4e2d\\u5fc3'"));
 });
 
 test('R&D ledger navigation uses the timesheet report and R&D expense import names', () => {

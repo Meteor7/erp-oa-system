@@ -12,7 +12,7 @@ function asRoles(roles) {
   globalThis.window = { roles };
 }
 
-test("employees land on timesheet entry in read-only mode and can see approval pages without HR pages", () => {
+test("employees can edit their own timesheet without management-page access", () => {
   asRoles(["Employee"]);
   assert.equal(canSee("/entry"), true);
   assert.equal(firstVisiblePath(), "/entry");
@@ -21,7 +21,7 @@ test("employees land on timesheet entry in read-only mode and can see approval p
   assert.equal(canSee("/dashboard"), false);
   assert.equal(canSee("/accommodation"), false);
   assert.equal(canSee("/expense"), false);
-  assert.equal(canEditTimesheetEntry(), false);
+  assert.equal(canEditTimesheetEntry(), true);
 });
 
 test("department supervisors can use timesheet entry and approval pages without HR access", () => {
@@ -56,6 +56,7 @@ test("project owners can open project management without admin controls", () => 
   assert.equal(canAdministerProjects(), false);
   assert.equal(canSee("/personnel"), false);
   assert.equal(canSee("/expense"), false);
+  assert.equal(canEditTimesheetEntry(), true);
 });
 
 test("all-project access widens project data without granting administration", () => {

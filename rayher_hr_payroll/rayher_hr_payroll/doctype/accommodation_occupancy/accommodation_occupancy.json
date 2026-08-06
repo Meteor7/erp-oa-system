@@ -1,0 +1,25 @@
+{
+ "doctype": "DocType",
+ "name": "Accommodation Occupancy",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "format:OCC-{#####}",
+ "title_field": "employee_name",
+ "fields": [
+  {"fieldname": "employee", "label": "员工", "fieldtype": "Link", "options": "Employee", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "employee_name", "label": "员工姓名", "fieldtype": "Data", "read_only": 1, "in_list_view": 1},
+  {"fieldname": "room", "label": "房间", "fieldtype": "Link", "options": "Accommodation Room", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "start_date", "label": "入住日期", "fieldtype": "Date", "in_list_view": 1},
+  {"fieldname": "end_date", "label": "退宿日期", "fieldtype": "Date", "in_list_view": 1},
+  {"fieldname": "is_active", "label": "当前入住", "fieldtype": "Check", "default": 1, "in_list_view": 1},
+  {"fieldname": "remark", "label": "备注", "fieldtype": "Small Text"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "HR Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "HR User", "read": 1, "write": 1, "create": 1, "report": 1}
+ ]
+}

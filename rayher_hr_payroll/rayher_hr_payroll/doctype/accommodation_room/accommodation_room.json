@@ -1,0 +1,31 @@
+{
+ "doctype": "DocType",
+ "name": "Accommodation Room",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "field:room_no",
+ "title_field": "room_no",
+ "fields": [
+  {"fieldname": "room_no", "label": "房间号", "fieldtype": "Data", "reqd": 1, "unique": 1, "in_list_view": 1},
+  {"fieldname": "room_type", "label": "房型", "fieldtype": "Data", "in_list_view": 1},
+  {"fieldname": "lease_start_date", "label": "承租日", "fieldtype": "Date"},
+  {"fieldname": "lease_end_date", "label": "到期日", "fieldtype": "Date"},
+  {"fieldname": "monthly_rent", "label": "每月租金", "fieldtype": "Currency", "in_list_view": 1},
+  {"fieldname": "default_rent", "label": "标准房租（兼容）", "fieldtype": "Currency", "hidden": 1},
+  {"fieldname": "paid_deposit", "label": "已付押金", "fieldtype": "Currency"},
+  {"fieldname": "rent_contract_attachment", "label": "房租合同", "fieldtype": "Attach"},
+  {"fieldname": "deposit_attachment", "label": "押金附件", "fieldtype": "Attach"},
+  {"fieldname": "occupant_label", "label": "基础资料入住人", "fieldtype": "Data"},
+  {"fieldname": "room_purpose", "label": "房间用途", "fieldtype": "Select", "options": "\n空\n客房\n午休室"},
+  {"fieldname": "is_active", "label": "启用", "fieldtype": "Check", "default": 1, "in_list_view": 1},
+  {"fieldname": "remark", "label": "备注", "fieldtype": "Small Text"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "HR Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "HR User", "read": 1, "write": 1, "create": 1, "report": 1}
+ ]
+}

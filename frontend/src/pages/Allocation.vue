@@ -7,6 +7,7 @@ import {
   allocationEmptyState,
   buildAllocationMatrixFilters,
   hasAllocationData,
+  loadAllocationStageMatrices,
 } from "../lib/allocationView";
 
 const TEXT = {
@@ -47,6 +48,7 @@ const allocationMode = ref("all");
 
 const allocRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.get_allocation", method: "GET" });
 const matrixRes = createResource({ url: "frappe.desk.query_report.run", method: "GET" });
+const exportMatrixRes = createResource({ url: "frappe.desk.query_report.run", method: "GET" });
 const recalcRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.recalc_allocation" });
 const cancelRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.cancel_allocation" });
 
@@ -163,11 +165,21 @@ async function exportCurrentAllocation() {
   exporting.value = true;
   msg.value = "";
   try {
+    const stageMatrices = await loadAllocationStageMatrices({
+      scope: periodScope.value,
+      period: period.value,
+      allocation: allocName.value,
+      load: (filters) => exportMatrixRes.submit({
+        report_name: "RD Allocation Matrix",
+        filters: JSON.stringify(filters),
+      }),
+    });
     const filename = await exportAllocationWorkbook({
       period: `${displayPeriod.value}-${allocationModeLabel.value}`,
       summary: viewSummary.value,
       columns: columns.value,
       result: result.value,
+      stageMatrices,
     });
     msg.value = "\u5df2\u5bfc\u51fa\uff1a" + filename;
   } catch (e) {

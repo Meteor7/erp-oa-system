@@ -17,3 +17,25 @@ export function allocationEmptyState({ hasData, mode }) {
   if (!hasData) return "no-data";
   return mode === "all" ? "no-detail" : "no-detail-for-mode";
 }
+
+export async function loadAllocationStageMatrices({
+  scope,
+  period,
+  allocation,
+  load,
+}) {
+  const stageMatrices = {};
+  for (const stage of ["all", "capitalized", "expensed"]) {
+    const data = await load(buildAllocationMatrixFilters({
+      scope,
+      period,
+      allocation,
+      stage,
+    }));
+    stageMatrices[stage] = {
+      columns: data?.columns || [],
+      result: data?.result || [],
+    };
+  }
+  return stageMatrices;
+}

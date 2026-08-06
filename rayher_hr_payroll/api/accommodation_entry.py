@@ -1,15 +1,26 @@
+from calendar import monthrange
+from datetime import date
+
 import frappe
 
 from rayher_hr_payroll.api._guards import require_rd_access, ensure_not_locked, parse_period
+from rayher_hr_payroll.importers.accommodation_master import occupancy_is_effective
 
 EXPENSE_ACCOUNT_CATEGORIES = ("研发费用", "管理费用", "销售费用", "生产成本")
 EMPLOYEE_OCCUPANT = "员工"
 SPECIAL_OCCUPANTS = ("空", "客房", "午休室")
+PERIOD_ROOM_CATEGORY_OVERRIDES = {("2026-07", "A609"): "销售费用"}
 
 
 def _canon_period(period):
     y, m = parse_period(period)
     return "%04d-%02d" % (y, m)
+
+
+def _period_bounds(period):
+    period = _canon_period(period)
+    year, month = (int(part) for part in period.split("-"))
+    return period, date(year, month, 1), date(year, month, monthrange(year, month)[1])
 
 
 def _amount(value):
@@ -34,9 +45,13 @@ def _normalize_occupant(employee, occupant_type):
     return employee, EMPLOYEE_OCCUPANT
 
 
-def _category_for_occupant(employee, occupant_type):
+def _category_for_occupant(employee, occupant_type, room_no=None, period=None):
+    override = PERIOD_ROOM_CATEGORY_OVERRIDES.get((period, room_no))
+    if override:
+        return override
+    if occupant_type == "客房" and room_no == "A703":
+        return "销售费用"
     return "管理费用" if occupant_type in SPECIAL_OCCUPANTS else _category_for_employee(employee)
-
 
 def _validate_component(label, total, personal, company):
     if min(total, personal, company) < 0:
@@ -48,9 +63,6 @@ def _validate_component(label, total, personal, company):
 def _payload(period, employee, occupant_type, room_no, rent_amount, water_amount, electricity_amount,
              personal_rent_amount, personal_water_amount, personal_electricity_amount,
              company_rent_amount, company_water_amount, company_electricity_amount):
-    rent = _amount(rent_amount)
-    water = _amount(water_amount)
-    electricity = _amount(electricity_amount)
     personal_rent = _amount(personal_rent_amount)
     personal_water = _amount(personal_water_amount)
     personal_electricity = _amount(personal_electricity_amount)
@@ -58,14 +70,14 @@ def _payload(period, employee, occupant_type, room_no, rent_amount, water_amount
     company_water = _amount(company_water_amount)
     company_electricity = _amount(company_electricity_amount)
 
-    _validate_component("房租", rent, personal_rent, company_rent)
-    _validate_component("水费", water, personal_water, company_water)
-    _validate_component("电费", electricity, personal_electricity, company_electricity)
+    if min(personal_rent, personal_water, personal_electricity, company_rent, company_water, company_electricity) < 0:
+        frappe.throw(frappe._("金额不能为负数。"))
+    rent, water, electricity = personal_rent + company_rent, personal_water + company_water, personal_electricity + company_electricity
 
     employee, occupant_type = _normalize_occupant(employee, occupant_type)
     room_no = (room_no or "").strip()
     if not room_no:
-        frappe.throw(frappe._("请选择或填写房间号。"))
+        frappe.throw(frappe._("请选择房间。"))
 
     personal_total = personal_rent + personal_water + personal_electricity
     company_total = company_rent + company_water + company_electricity
@@ -74,7 +86,7 @@ def _payload(period, employee, occupant_type, room_no, rent_amount, water_amount
         "employee": employee,
         "occupant_type": occupant_type,
         "room_no": room_no,
-        "expense_account_category": _category_for_occupant(employee, occupant_type),
+        "expense_account_category": _category_for_occupant(employee, occupant_type, room_no, period),
         "rent_amount": rent,
         "water_amount": water,
         "electricity_amount": electricity,
@@ -102,17 +114,131 @@ def get_emp_options():
     )
 
 
+def _row_value(row, key, default=None):
+    if isinstance(row, dict):
+        return row.get(key, default)
+    return getattr(row, key, default)
+
+
 @frappe.whitelist()
 def get_room_options():
     require_rd_access(("System Manager", "HR User", "HR Manager"))
-    rooms = frappe.get_all(
-        "Accommodation Deduction",
-        filters={"room_no": ["is", "set"]},
-        pluck="room_no",
+    return frappe.get_all("Accommodation Room", filters={"is_active": 1}, fields=["name", "room_no", "room_type", "monthly_rent", "default_rent"], order_by="room_no")
+
+
+@frappe.whitelist()
+def get_room_occupants(period, room_no):
+    """Return the occupants effective for a room in the selected accounting month."""
+    require_rd_access(("System Manager", "HR User", "HR Manager"))
+    _period, period_start, period_end = _period_bounds(period)
+    room_no = (room_no or "").strip()
+    room = frappe.db.get_value(
+        "Accommodation Room", {"name": room_no, "is_active": 1},
+        ["name", "room_purpose"], as_dict=True,
+    )
+    if not room:
+        frappe.throw(frappe._("请选择有效且已启用的房间。"))
+
+    purpose = (_row_value(room, "room_purpose") or "").strip()
+    if purpose in SPECIAL_OCCUPANTS:
+        label = "空（空置房间费用）" if purpose == "空" else purpose
+        return [{
+            "value": f"special:{purpose}", "employee": None,
+            "occupant_type": purpose, "label": label,
+            "start_date": None, "end_date": None,
+        }]
+
+    occupancies = frappe.get_all(
+        "Accommodation Occupancy", filters={"room": room_no},
+        fields=["employee", "employee_name", "start_date", "end_date", "is_active"],
+        order_by="start_date, creation",
+    )
+    choices = []
+    for occupancy in occupancies:
+        employee = _row_value(occupancy, "employee")
+        if not employee:
+            continue
+        if not (_row_value(occupancy, "is_active") or _row_value(occupancy, "end_date")):
+            continue
+        if not occupancy_is_effective(
+            _row_value(occupancy, "start_date"), _row_value(occupancy, "end_date"),
+            period_start, period_end,
+        ):
+            continue
+        choices.append({
+            "value": f"employee:{employee}", "employee": employee,
+            "occupant_type": EMPLOYEE_OCCUPANT,
+            "label": _row_value(occupancy, "employee_name") or employee,
+            "start_date": _row_value(occupancy, "start_date"),
+            "end_date": _row_value(occupancy, "end_date"),
+        })
+    if choices:
+        return choices
+    return [{
+        "value": "special:空", "employee": None, "occupant_type": "空",
+        "label": "空（空置房间费用）", "start_date": None, "end_date": None,
+    }]
+
+
+@frappe.whitelist()
+def get_allowed_rooms(period, employee=None, occupant_type=EMPLOYEE_OCCUPANT):
+    """Return only rooms whose basic-data relationship is effective in the period."""
+    require_rd_access(("System Manager", "HR User", "HR Manager"))
+    period = _canon_period(period)
+    year, month = (int(part) for part in period.split("-"))
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+    employee, occupant_type = _normalize_occupant(employee, occupant_type)
+
+    if occupant_type in SPECIAL_OCCUPANTS:
+        return frappe.get_all(
+            "Accommodation Room",
+            filters={"room_purpose": occupant_type, "is_active": 1},
+            fields=["name", "room_no", "room_type", "monthly_rent"],
+            order_by="room_no",
+        )
+
+    occupancies = frappe.get_all(
+        "Accommodation Occupancy",
+        filters={"employee": employee},
+        fields=["room", "start_date", "end_date", "is_active"],
+    )
+    room_names = sorted({
+        _row_value(row, "room")
+        for row in occupancies
+        if _row_value(row, "room")
+        and (_row_value(row, "is_active") or _row_value(row, "end_date"))
+        and occupancy_is_effective(
+            _row_value(row, "start_date"), _row_value(row, "end_date"), period_start, period_end
+        )
+    })
+    if not room_names:
+        return []
+    return frappe.get_all(
+        "Accommodation Room",
+        filters={"name": ["in", room_names], "is_active": 1},
+        fields=["name", "room_no", "room_type", "monthly_rent"],
         order_by="room_no",
     )
-    return sorted({str(room).strip() for room in rooms if str(room or "").strip()})
 
+
+@frappe.whitelist()
+def list_occupancies():
+    require_rd_access(("System Manager", "HR User", "HR Manager"))
+    return frappe.get_all("Accommodation Occupancy", filters={"is_active": 1}, fields=["name", "employee", "employee_name", "room", "start_date", "end_date"], order_by="room")
+
+
+@frappe.whitelist(methods=["POST"])
+def save_occupancy(employee, room, start_date, end_date=None):
+    require_rd_access(("System Manager", "HR User", "HR Manager"))
+    if not frappe.db.exists("Employee", employee) or not frappe.db.exists("Accommodation Room", room):
+        frappe.throw(frappe._("请选择有效的员工和房间。"))
+    current = frappe.db.get_value("Accommodation Occupancy", {"employee": employee, "is_active": 1}, "name")
+    doc = frappe.get_doc("Accommodation Occupancy", current) if current else frappe.new_doc("Accommodation Occupancy")
+    doc.update({"employee": employee, "room": room, "start_date": start_date, "end_date": end_date or None})
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"name": doc.name}
 
 @frappe.whitelist()
 def list_accommodation(period):
@@ -127,7 +253,7 @@ def list_accommodation(period):
             "company_rent_amount", "company_water_amount", "company_electricity_amount", "company_total_amount",
             "total_amount",
         ],
-        order_by="employee",
+        order_by="room_no, employee",
     )
 
 
@@ -171,6 +297,14 @@ def save_accommodation(period, employee=None, occupant_type=EMPLOYEE_OCCUPANT, r
         frappe.throw(frappe._("您无权为该员工登记宿舍代扣。"))
     period = _canon_period(period)
     ensure_not_locked(period, "lock_timesheets", "工时")
+    if not frappe.db.exists("Accommodation Room", {"name": room_no, "is_active": 1}):
+        frappe.throw(frappe._("请选择有效且已启用的房间。"))
+    selected_occupant = f"employee:{employee}" if employee else f"special:{occupant_type}"
+    allowed_occupants = {
+        _row_value(choice, "value") for choice in get_room_occupants(period, room_no)
+    }
+    if selected_occupant not in allowed_occupants:
+        frappe.throw(frappe._("该入住人在本期没有此房间的有效入住关系，请重新选择房间和入住人。"))
     values = _payload(
         period, employee, occupant_type, room_no, rent_amount, water_amount, electricity_amount,
         personal_rent_amount, personal_water_amount, personal_electricity_amount,

@@ -3,10 +3,12 @@ name = "rayher_hr_payroll"
 version = "0.1.0"
 description = "Rayher HR, R&D timesheet, and R&D cost allocation custom Frappe app"
 requires-python = ">=3.10"
-dependencies = ["pypinyin>=0.50,<1"]
+dependencies = ["pypinyin>=0.50,<1", "openpyxl>=3.1,<4"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["rayher_hr_payroll/tests"]
 [tool.setuptools.packages.find]
 include = ["rayher_hr_payroll*"]
+
+

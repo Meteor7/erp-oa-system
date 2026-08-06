@@ -44,10 +44,19 @@ export function allocationExportFilename(period) {
   return `\u7814\u53d1\u8d39\u7528\u53f0\u8d26-${period}.xlsx`;
 }
 
-export function buildAllocationExportSheets({ period, summary = {}, columns = [], result = [] } = {}) {
+export function buildAllocationExportSheets({
+  period,
+  summary = {},
+  columns = [],
+  result = [],
+  stageMatrices = {},
+} = {}) {
   const capitalized = amount(summary.capitalized);
   const expensed = amount(summary.expensed);
   const unknown = amount(summary.unknown);
+  const allMatrix = stageMatrices.all || { columns, result };
+  const capitalizedMatrix = stageMatrices.capitalized;
+  const expensedMatrix = stageMatrices.expensed;
   const stageTotals = [
     STAGE_TOTAL_HEADERS,
     [period, "\u8d44\u672c\u5316\u5408\u8ba1", capitalized],
@@ -58,9 +67,13 @@ export function buildAllocationExportSheets({ period, summary = {}, columns = []
 
   return {
     stageTotals,
-    matrix: matrixRows(columns, result),
-    capitalizedMatrix: matrixRows(columnsForStage(columns, "capitalized"), result),
-    expensedMatrix: matrixRows(columnsForStage(columns, "expensed"), result),
+    matrix: matrixRows(allMatrix.columns || [], allMatrix.result || []),
+    capitalizedMatrix: capitalizedMatrix
+      ? matrixRows(capitalizedMatrix.columns || [], capitalizedMatrix.result || [])
+      : matrixRows(columnsForStage(columns, "capitalized"), result),
+    expensedMatrix: expensedMatrix
+      ? matrixRows(expensedMatrix.columns || [], expensedMatrix.result || [])
+      : matrixRows(columnsForStage(columns, "expensed"), result),
   };
 }
 

@@ -117,3 +117,51 @@ def test_employee_expense_account_category_exists():
     assert field["label"] == "费用科目"
     assert field["fieldtype"] == "Select"
     assert field["options"].splitlines() == ["", "研发费用", "管理费用", "销售费用", "生产成本"]
+
+
+def test_employee_reference_master_fields_exist():
+    fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Employee"]}
+
+    expected = {
+        "english_name": "Data",
+        "default_monthly_salary": "Currency",
+        "salary_months": "Int",
+        "first_education_level": "Data",
+        "first_education_school": "Data",
+        "first_education_major": "Data",
+        "default_social_insurance_base": "Currency",
+        "default_housing_fund_base": "Currency",
+    }
+    assert {name: fields[name]["fieldtype"] for name in expected} == expected
+    assert fields["education_level_cn"]["label"] == "最高学历"
+    assert fields["graduation_school"]["label"] == "最高学历学校"
+    assert fields["major_cn"]["label"] == "最高学历专业"
+
+
+def test_employee_full_personnel_source_fields_exist():
+    fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Employee"]}
+    expected = {
+        "labour_contract_start_date": "Date", "probation_months": "Int",
+        "probation_end_date": "Date", "first_contract_period_years": "Float",
+        "first_contract_end_date": "Date", "contract_renewal_status": "Data",
+        "second_contract_period_years": "Float", "second_contract_end_date": "Date",
+        "degree_cn": "Data", "education_completion_type": "Data",
+        "household_registration": "Data", "id_type_cn": "Data",
+        "social_insurance_number": "Data", "housing_fund_number": "Data",
+    }
+    assert {name: fields[name]["fieldtype"] for name in expected} == expected
+    assert fields["social_insurance_number"]["permlevel"] == 1
+    assert fields["housing_fund_number"]["permlevel"] == 1
+
+def test_salary_slip_payroll_input_and_snapshot_fields_exist():
+    fields = {field["fieldname"]: field for field in CUSTOM_FIELDS["Salary Slip"]}
+
+    for name in (
+        "hr_spa_managed", "hr_base_salary", "hr_salary_adjustment", "hr_adjusted_base",
+        "hr_company_subsidy", "hr_bonus", "hr_other_adjustment", "hr_income_tax",
+        "hr_advanced_paid", "hr_id_card_number_cn", "hr_gender",
+        "hr_expense_account_category", "hr_date_of_joining", "hr_relieving_date", "hr_phone",
+    ):
+        assert name in fields
+    assert fields["hr_spa_managed"]["fieldtype"] == "Check"
+    assert fields["hr_id_card_number_cn"]["permlevel"] == 1

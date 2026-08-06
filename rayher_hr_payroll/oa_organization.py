@@ -73,8 +73,12 @@ DIRECT_SUPERVISOR_BY_EMPLOYEE = {
     # Active R&D staff not shown under a named leaf team on the supplied chart.
     "演示人员H7e2c07": "Philippe",
     "演示人员Haf2449": "Philippe",
-    "演示人员H7188e9": "Philippe",
 
+    # AI branch under Operation.
+    "演示人员H7188e9": "演示人员Hf4b020",
+    "演示人员H85c4c3": "演示人员H7188e9",
+    "演示人员H5d15fc": "演示人员H7188e9",
+    "演示人员H5b7816": "演示人员H7188e9",
     # Operation/manufacturing/supply-chain branches.
     "演示人员Hb2957c": "演示人员Hf4b020",
     "演示人员H40c44a": "演示人员Hb2957c",
@@ -100,7 +104,6 @@ DIRECT_SUPERVISOR_BY_EMPLOYEE = {
 
     # General-office and project-application staff.
     "演示人员H70623a": "演示人员H57af9a",
-    "演示人员H5b7816": "演示人员H57af9a",
     "演示人员H307f00": "演示人员H57af9a",
 }
 

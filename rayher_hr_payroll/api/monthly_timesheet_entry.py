@@ -22,9 +22,94 @@ from rayher_hr_payroll.working_calendar import resolve_monthly_work_limit
 DAY_QUANTUM = Decimal("0.01")
 HOUR_QUANTUM = Decimal("0.01")
 HOURS_PER_DAY = Decimal("8.00")
-RD_MONTHLY_ENTRY_ROLES = ("System Manager", "HR User", "HR Manager", "Department Manager")
+RD_MONTHLY_ENTRY_ROLES = ("System Manager", "HR User", "HR Manager", "Department Manager", "Employee")
 RD_MONTHLY_VIEW_ROLES = (*RD_MONTHLY_ENTRY_ROLES, "Accounts User", "Employee")
+RD_MONTHLY_ADMIN_ROLES = {"System Manager", "HR User", "HR Manager"}
 MONTHLY_SAVEPOINT = "rd_monthly_timesheet"
+
+
+def _session_user() -> str:
+    return str(getattr(getattr(frappe, "session", None), "user", "") or "")
+
+
+def _roles() -> set[str]:
+    return set(frappe.get_roles(_session_user()) or [])
+
+
+def _eligible_employee_filters(**extra) -> dict:
+    filters = {
+        "status": "Active",
+        "rd_personnel_type": ["in", _daily_module().RD_TYPES],
+    }
+    filters.update(extra)
+    return filters
+
+
+def _eligible_employee_rows(**extra) -> list:
+    return frappe.get_all(
+        "Employee",
+        filters=_eligible_employee_filters(**extra),
+        fields=["name", "employee_name", "user_id", "reports_to"],
+        order_by="name",
+    )
+
+
+def _row_name(row) -> str:
+    return str(_value(row, "name") or "")
+
+
+def _single_active_linked_rd_employee() -> str:
+    rows = _eligible_employee_rows(user_id=_session_user())
+    if not rows:
+        frappe.throw(frappe._("当前账号未关联唯一的在职研发员工，请联系 HR 处理。"))
+    if len(rows) > 1:
+        frappe.throw(frappe._("当前账号关联了多个在职研发员工，请联系 HR 清理重复关联。"))
+    return _row_name(rows[0])
+
+
+def _monthly_employee_scope(mode: str) -> list[str] | None:
+    if mode not in {"view", "edit"}:
+        raise ValueError("mode must be view or edit")
+    roles = _roles()
+    if roles & RD_MONTHLY_ADMIN_ROLES:
+        return None
+    if "Department Manager" in roles:
+        current = _single_active_linked_rd_employee()
+        reports = [_row_name(row) for row in _eligible_employee_rows(reports_to=current)]
+        return sorted({current, *reports})
+    if "Accounts User" in roles:
+        return None if mode == "view" else []
+    if "Employee" in roles:
+        return [_single_active_linked_rd_employee()]
+    return []
+
+
+def _require_monthly_employee(employee: str, mode: str) -> None:
+    employee = str(employee or "").strip()
+    scope = _monthly_employee_scope(mode)
+    if scope is not None and employee not in scope:
+        frappe.throw(frappe._("您无权查看或登记该员工的工时。"))
+    if mode == "edit" and not _eligible_employee_rows(name=employee):
+        frappe.throw(frappe._("只能为在职研发员工登记工时。"))
+
+
+def _employees_for_scope(scope: list[str] | None) -> list:
+    if scope is None:
+        return _eligible_employee_rows()
+    if not scope:
+        return []
+    return _eligible_employee_rows(name=["in", scope])
+
+
+def _monthly_summary_employee_filter(employee=None):
+    selected = str(employee or "").strip() or None
+    if selected:
+        _require_monthly_employee(selected, "view")
+        return "and ts.employee = %(employee)s", selected, None
+    scope = _monthly_employee_scope("view")
+    if scope is None:
+        return "", None, None
+    return "and ts.employee in %(employees)s", None, tuple(scope or ["__none__"])
 
 
 def parse_occurrence_days(value, year: int, month: int) -> Decimal:
@@ -231,8 +316,7 @@ def _legacy_daily_exists(employee: str, year: int, month: int) -> bool:
 
 
 def _query_monthly_entries(period: str, employee=None) -> list:
-    daily = _daily_module()
-    employee_filter, selected_employee, visible_employees = daily._summary_employee_filter(employee)
+    employee_filter, selected_employee, visible_employees = _monthly_summary_employee_filter(employee)
     return frappe.db.sql(
         f"""
         select ts.rd_monthly_entry_id as monthly_entry_id,
@@ -273,7 +357,7 @@ def _query_monthly_entries(period: str, employee=None) -> list:
 
 def _query_legacy_monthly_entries(period: str, employee=None) -> list:
     daily = _daily_module()
-    employee_filter, selected_employee, visible_employees = daily._summary_employee_filter(employee)
+    employee_filter, selected_employee, visible_employees = _monthly_summary_employee_filter(employee)
     return frappe.db.sql(
         f"""
         select ts.employee,
@@ -371,7 +455,15 @@ def _merge_monthly_entry_rows(monthly_rows: list, legacy_rows: list, period: str
 @frappe.whitelist()
 def get_monthly_options():
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
-    return _daily_module().get_rd_options()
+    options = dict(_daily_module().get_rd_options())
+    visible = _employees_for_scope(_monthly_employee_scope("view"))
+    editable = _employees_for_scope(_monthly_employee_scope("edit"))
+    options["employees"] = [
+        {"name": _row_name(row), "employee_name": str(_value(row, "employee_name") or "")}
+        for row in visible
+    ]
+    options["editable_employees"] = [_row_name(row) for row in editable]
+    return options
 
 
 @frappe.whitelist()
@@ -379,6 +471,8 @@ def list_monthly_entries(period, employee=None):
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
     year, month = parse_period(period)
     period_text = _canonical_period(year, month)
+    if employee:
+        _require_monthly_employee(employee, "view")
     monthly_rows = _query_monthly_entries(period_text, employee)
     rows = _merge_monthly_entry_rows(
         monthly_rows,
@@ -499,7 +593,7 @@ def save_monthly_entries(period, employee, rows, expected_revision=None):
     if not expected_revision:
         frappe.throw(frappe._("\u6708\u5ea6\u5de5\u65f6\u6570\u636e\u7248\u672c\u5df2\u5931\u6548\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002"))
     daily = _daily_module()
-    daily._require_visible_employee(employee)
+    _require_monthly_employee(employee, "edit")
     ensure_not_locked(period_text, "lock_timesheets", "工时")
     limit = resolve_monthly_work_limit(year, month, employee=employee)
     if daily._period_has_submitted_allocation(year, month):
@@ -562,7 +656,7 @@ def delete_monthly_entry(monthly_entry_id):
     year, month = parse_period(period)
     employee = doc.employee
     daily = _daily_module()
-    daily._require_visible_employee(employee)
+    _require_monthly_employee(employee, "edit")
     ensure_not_locked(period, "lock_timesheets", "工时")
     lock_period_import(year, month)
     if daily._period_has_submitted_allocation(year, month):
