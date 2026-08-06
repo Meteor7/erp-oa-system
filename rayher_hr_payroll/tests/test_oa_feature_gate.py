@@ -65,3 +65,12 @@ def test_open_switch_defers_to_existing_permissions(gate):
     ) is None
     with pytest.raises(ValueError):
         module.can_access_request_type("unknown", "employee@example.com")
+
+
+def test_unconfigured_new_routes_are_always_administrator_only(gate):
+    module, _frappe = gate
+    for request_type in module.DRAFT_ONLY_REQUEST_TYPES:
+        assert module.can_access_request_type(request_type, "employee@example.com") is False
+        assert module.can_access_request_type(request_type, "manager@example.com") is False
+        assert module.can_access_request_type(request_type, "Administrator") is True
+        assert module.can_access_request_type(request_type, "admin@staff.example.invalid") is True

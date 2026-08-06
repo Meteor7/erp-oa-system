@@ -77,7 +77,7 @@ website_route_rules = [
 ]
 
 permission_query_conditions = {
-    "OA Approval Request": "rayher_hr_payroll.oa_feature_gate.oa_request_query",
+    "OA Approval Request": "rayher_hr_payroll.oa_access.oa_request_query",
     "Expense Claim": "rayher_hr_payroll.request_visibility.expense_claim_query",
     "Leave Application": "rayher_hr_payroll.request_visibility.leave_application_query",
     "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_query",
@@ -89,7 +89,7 @@ permission_query_conditions = {
 }
 
 has_permission = {
-    "OA Approval Request": "rayher_hr_payroll.oa_feature_gate.oa_request_has_permission",
+    "OA Approval Request": "rayher_hr_payroll.oa_access.oa_request_has_permission",
     "Expense Claim": "rayher_hr_payroll.request_visibility.expense_claim_has_permission",
     "Leave Application": "rayher_hr_payroll.request_visibility.leave_application_has_permission",
     "Travel Request": "rayher_hr_payroll.request_visibility.travel_request_has_permission",
