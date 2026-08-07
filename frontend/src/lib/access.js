@@ -1,3 +1,4 @@
+import { displayUser } from './displayBrand.js';
 // Role-aware page access for the SPA nav + route gating.
 // Expense/allocation stay finance-only; HR pages stay HR-only.
 // Employees and department supervisors can use the R&D timesheet entry and approval pages.
@@ -6,10 +7,11 @@ const FOREIGN_RD_ACCESS = [...FINANCE, 'All Project Access'];
 const HR = ['System Manager', 'HR User', 'HR Manager'];
 const MANAGE = ['System Manager', 'Accounts User', 'HR User', 'HR Manager'];
 const PROJECT_ACCESS = [...MANAGE, 'Project Owner'];
-const TIME_ENTRY = ['System Manager', 'HR User', 'HR Manager', 'Department Manager'];
+const TIME_MANAGE = ['System Manager', 'HR User', 'HR Manager', 'Department Manager'];
+const TIME_ENTRY = [...TIME_MANAGE, 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const ROUTE_ORDER = ['/dashboard', '/personnel', '/accommodation', '/projects', '/entry', '/approval/leave', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
+const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 const PAGE_ROLES = {
   '/expense': FINANCE,
@@ -18,7 +20,12 @@ const PAGE_ROLES = {
   '/foreign-rd': FOREIGN_RD_ACCESS,
   '/foreign-rd-timesheet': FOREIGN_RD_ACCESS,
   '/personnel': HR,
+  '/social-insurance': HR,
+  '/housing-fund': HR,
   '/accommodation': HR,
+  '/accommodation/master': HR,
+  '/accommodation/monthly': HR,
+  '/payroll': HR,
   '/projects': PROJECT_ACCESS,
   '/ledger': [],
   '/entry': TIME_VIEW,
@@ -55,7 +62,10 @@ export function canAdministerProjects() {
 }
 
 export function canEditTimesheetEntry() {
-  return myRoles().some((role) => TIME_ENTRY.includes(role));
+  const roles = myRoles();
+  if (roles.some((role) => TIME_MANAGE.includes(role))) return true;
+  if (roles.includes('Accounts User')) return false;
+  return roles.includes('Employee');
 }
 
 export function firstVisiblePath() {
@@ -75,5 +85,5 @@ export function roleLabel() {
 
 export function currentUser() {
   if (typeof window === 'undefined') return '';
-  return window.full_name || window.user || '';
+  return displayUser(window.full_name || window.user || '');
 }

@@ -11,6 +11,7 @@ from rayher_hr_payroll.oa_organization import (
 USERS = {
     "演示员工132": "person024@business.example.invalid",
     "演示员工108": "person062@business.example.invalid",
+    "演示员工218": "person075@staff.example.invalid",
     "演示员工16": "person072@staff.example.invalid",
     "演示员工10": "person047@staff.example.invalid",
     "演示员工21": "person046@business.example.invalid",
@@ -75,6 +76,23 @@ def test_algorithm_member_resolves_to_xi_he():
     assert result.supervisor_name == "演示员工108"
     assert result.user_id == "person062@business.example.invalid"
 
+
+def test_ai_members_resolve_to_zhiyu_zhang():
+    for employee_name in ("演示员工247", "演示员工209", "演示员工243"):
+        result = resolve_stage_two_supervisor(employee_name, resolve_user)
+
+        assert result.decision == "approve"
+        assert result.supervisor_name == "演示员工218"
+        assert result.user_id == "person075@staff.example.invalid"
+        assert result.traversed == ("演示员工218",)
+
+
+def test_zhiyu_zhang_reports_to_li_demo_executive():
+    result = resolve_stage_two_supervisor("演示员工218", resolve_user)
+
+    assert result.decision == "skip"
+    assert result.supervisor_name == "演示员工21"
+    assert result.traversed == ("演示员工21",)
 
 def test_accountless_nonexecutive_supervisor_moves_to_parent():
     result = resolve_stage_two_supervisor("演示员工206", lambda name: USERS.get(name) if name != "演示员工108" else None)

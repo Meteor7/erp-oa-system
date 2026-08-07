@@ -33,6 +33,7 @@ const batchErrors = ref([]);
 const batchWorkbookInput = ref(null);
 
 const employees = computed(() => options.data?.employees || []);
+const editableEmployees = computed(() => options.data?.editable_employees || []);
 const projects = computed(() => options.data?.projects || []);
 const dayLimit = computed(() => Number(monthly.data?.day_limit || new Date(selectedYear.value, selectedMonth.value, 0).getDate() || 31));
 const hourLimit = computed(() => Number(monthly.data?.hour_limit ?? dayLimit.value * 8));
@@ -40,7 +41,11 @@ const calendarSource = computed(() => String(monthly.data?.calendar_source || "w
 const usesWeekdayFallback = computed(() => calendarSource.value === "weekday_fallback");
 const isAllEmployees = computed(() => !selectedEmployee.value);
 const hasLegacySources = computed(() => Boolean(monthly.data?.has_legacy_sources));
-const canEditSelection = computed(() => Boolean(canEdit.value && selectedEmployee.value && !hasLegacySources.value));
+const canEditSelection = computed(() => Boolean(
+  canEdit.value
+  && editableEmployees.value.includes(selectedEmployee.value)
+  && !hasLegacySources.value
+));
 const employeeCount = computed(() => Number(monthly.data?.employee_count || 0));
 const totalDays = computed(() => Math.round(entries.value.reduce((sum, row) => sum + validDays(row.occurrence_days), 0) * 100) / 100);
 const totalHours = computed(() => Math.round(entries.value.reduce((sum, row) => sum + Number(row.hours ?? calculatedRowHours(row)), 0) * 100) / 100);

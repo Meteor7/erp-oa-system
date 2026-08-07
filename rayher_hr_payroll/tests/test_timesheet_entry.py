@@ -313,15 +313,16 @@ def test_timesheet_entry_write_roles_are_manager_only_while_employee_and_finance
     assert "Accounts User" in mod.RD_TIMESHEET_VIEW_ROLES
 
 
-def test_all_project_access_can_view_and_fill_every_rd_employee(monkeypatch):
+def test_all_project_access_does_not_expand_employee_timesheet_scope(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
 
     frappe.session = SimpleNamespace(user="person070@staff.example.invalid")
     frappe.get_roles = lambda user=None: ["Employee", "Project Owner", "All Project Access"]
     frappe.db.get_value = lambda *args, **kwargs: "EMP-ZHANG"
 
-    assert mod._visible_employee_names() is None
-    mod._require_visible_employee("EMP-OTHER")
+    assert mod._visible_employee_names() == ["EMP-ZHANG"]
+    with pytest.raises(RuleError):
+        mod._require_visible_employee("EMP-OTHER")
 
 
 def test_project_owner_without_all_project_access_remains_self_scoped(monkeypatch):

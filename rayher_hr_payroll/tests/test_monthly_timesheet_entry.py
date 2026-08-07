@@ -44,6 +44,198 @@ def monthly_module(monkeypatch):
     return mod, frappe
 
 
+def _install_monthly_scope_frappe(frappe, roles, employees, user="worker@example.com"):
+    frappe.session = types.SimpleNamespace(user=user)
+    frappe.get_roles = lambda selected_user=None: list(roles)
+
+    def get_all(doctype, filters=None, fields=None, order_by=None, pluck=None, **kwargs):
+        assert doctype == "Employee"
+        rows = list(employees)
+        for key, expected in (filters or {}).items():
+            if isinstance(expected, (list, tuple)) and expected and expected[0] == "in":
+                allowed = set(expected[1])
+                rows = [row for row in rows if row.get(key) in allowed]
+            else:
+                rows = [row for row in rows if row.get(key) == expected]
+        rows.sort(key=lambda row: row["name"])
+        if pluck:
+            return [row.get(pluck) for row in rows]
+        return [dict(row) for row in rows]
+
+    frappe.get_all = get_all
+
+
+def _rd_employee(name, user_id=None, reports_to=None, status="Active", personnel_type="全时研发"):
+    return {
+        "name": name,
+        "employee_name": name,
+        "user_id": user_id,
+        "reports_to": reports_to,
+        "status": status,
+        "rd_personnel_type": personnel_type,
+    }
+
+
+def test_employee_scope_is_self_only_even_with_project_roles(monthly_module):
+    mod, frappe = monthly_module
+    _install_monthly_scope_frappe(
+        frappe,
+        ["Employee", "Project Owner", "All Project Access"],
+        [
+            _rd_employee("EMP-SELF", user_id="worker@example.com"),
+            _rd_employee("EMP-OTHER", user_id="other@example.com"),
+        ],
+    )
+
+    assert mod._monthly_employee_scope("view") == ["EMP-SELF"]
+    assert mod._monthly_employee_scope("edit") == ["EMP-SELF"]
+
+
+def test_accounts_user_is_read_only_but_management_roles_take_precedence(monthly_module):
+    mod, frappe = monthly_module
+    employees = [_rd_employee("EMP-SELF", user_id="worker@example.com")]
+
+    _install_monthly_scope_frappe(frappe, ["Employee", "Accounts User"], employees)
+    assert mod._monthly_employee_scope("view") is None
+    assert mod._monthly_employee_scope("edit") == []
+
+    _install_monthly_scope_frappe(frappe, ["Employee", "Accounts User", "HR User"], employees)
+    assert mod._monthly_employee_scope("edit") is None
+
+    _install_monthly_scope_frappe(frappe, ["Employee", "Accounts User", "System Manager"], employees)
+    assert mod._monthly_employee_scope("edit") is None
+
+
+def test_department_manager_scope_is_self_and_active_rd_direct_reports(monthly_module):
+    mod, frappe = monthly_module
+    _install_monthly_scope_frappe(
+        frappe,
+        ["Employee", "Department Manager", "All Project Access"],
+        [
+            _rd_employee("EMP-MANAGER", user_id="worker@example.com"),
+            _rd_employee("EMP-ACTIVE", user_id="active@example.com", reports_to="EMP-MANAGER"),
+            _rd_employee("EMP-LEFT", user_id="left@example.com", reports_to="EMP-MANAGER", status="Left"),
+            _rd_employee("EMP-NON-RD", user_id="office@example.com", reports_to="EMP-MANAGER", personnel_type=""),
+        ],
+    )
+
+    assert mod._monthly_employee_scope("edit") == ["EMP-ACTIVE", "EMP-MANAGER"]
+
+
+@pytest.mark.parametrize(
+    "employees, message",
+    [
+        ([], "未关联"),
+        (
+            [
+                _rd_employee("EMP-ONE", user_id="worker@example.com"),
+                _rd_employee("EMP-TWO", user_id="worker@example.com"),
+            ],
+            "多个",
+        ),
+        ([_rd_employee("EMP-LEFT", user_id="worker@example.com", status="Left")], "未关联"),
+        ([_rd_employee("EMP-NON-RD", user_id="worker@example.com", personnel_type="")], "未关联"),
+    ],
+)
+def test_employee_scope_rejects_invalid_current_employee_links(monthly_module, employees, message):
+    mod, frappe = monthly_module
+    _install_monthly_scope_frappe(frappe, ["Employee"], employees)
+
+    with pytest.raises(RuleError, match=message):
+        mod._monthly_employee_scope("edit")
+
+
+def test_monthly_options_separates_visible_and_editable_employees(monthly_module, monkeypatch):
+    mod, frappe = monthly_module
+    employees = [
+        _rd_employee("EMP-SELF", user_id="worker@example.com"),
+        _rd_employee("EMP-OTHER", user_id="other@example.com"),
+    ]
+    _install_monthly_scope_frappe(frappe, ["Employee", "All Project Access"], employees)
+    monkeypatch.setattr(
+        mod,
+        "_daily_module",
+        lambda: types.SimpleNamespace(
+            RD_TYPES=("全时研发", "非全时研发", "研发辅助"),
+            get_rd_options=lambda: {
+                "employees": employees,
+                "projects": [{"name": "PROJ-1"}],
+                "activity_types": [{"name": "编码开发"}],
+            },
+        ),
+    )
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+
+    result = mod.get_monthly_options()
+
+    assert [row["name"] for row in result["employees"]] == ["EMP-SELF"]
+    assert set(result["employees"][0]) == {"name", "employee_name"}
+    assert result["editable_employees"] == ["EMP-SELF"]
+    assert result["projects"] == [{"name": "PROJ-1"}]
+
+
+def test_cross_employee_list_is_rejected_before_business_queries(monthly_module, monkeypatch):
+    mod, _frappe = monthly_module
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode: ["EMP-SELF"], raising=False)
+    business_queries = []
+    monkeypatch.setattr(mod, "_query_monthly_entries", lambda *args: business_queries.append(args))
+    monkeypatch.setattr(mod, "_query_legacy_monthly_entries", lambda *args: business_queries.append(args))
+
+    with pytest.raises(RuleError, match="无权"):
+        mod.list_monthly_entries("2026-07", employee="EMP-OTHER")
+
+    assert business_queries == []
+
+
+def test_cross_employee_save_is_rejected_before_business_reads(monthly_module, monkeypatch):
+    mod, frappe = monthly_module
+    frappe.db = TransactionDb()
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode: ["EMP-SELF"], raising=False)
+
+    with pytest.raises(RuleError, match="无权"):
+        mod.save_monthly_entries(
+            "2026-07",
+            "EMP-OTHER",
+            [],
+            expected_revision="loaded-revision",
+        )
+
+    assert frappe.db.events == []
+
+
+def test_delete_authorizes_actual_timesheet_employee_before_mutation(monthly_module, monkeypatch):
+    mod, frappe = monthly_module
+    doc = types.SimpleNamespace(
+        name="TS-OTHER",
+        employee="EMP-OTHER",
+        rd_system_generated=1,
+        rd_monthly_entry_id="entry-other",
+        get=lambda key: {
+            "rd_entry_period": "2026-07",
+            "rd_system_generated": 1,
+            "rd_monthly_entry_id": "entry-other",
+        }.get(key),
+    )
+    frappe.db = types.SimpleNamespace(
+        get_value=lambda *args, **kwargs: "TS-OTHER",
+    )
+    frappe.get_doc = lambda doctype, name: doc
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode: ["EMP-SELF"], raising=False)
+    mutations = []
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: mutations.append(("lock", args)))
+    monkeypatch.setattr(mod, "_delete_monthly_document", lambda *args: mutations.append(("delete", args)))
+
+    with pytest.raises(RuleError, match="无权"):
+        mod.delete_monthly_entry("entry-other")
+
+    assert mutations == []
+
+
 def test_two_decimal_days_split_into_full_and_partial_hours(monthly_module):
     mod, _frappe = monthly_module
 
@@ -257,6 +449,7 @@ class TransactionDb:
 def _install_save_dependencies(monkeypatch, mod, frappe):
     frappe.db = TransactionDb()
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
+    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode: None, raising=False)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None, raising=False)
     monkeypatch.setattr(mod, "lock_period_import", lambda *args: None, raising=False)
@@ -349,6 +542,7 @@ def test_list_monthly_entries_returns_parent_rows_without_technical_dates(monthl
     mod, _frappe = monthly_module
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
+    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode: None, raising=False)
     monkeypatch.setattr(
         mod,
         "_query_monthly_entries",
@@ -384,6 +578,7 @@ def test_list_monthly_entries_returns_resolved_day_and_hour_limits(monthly_modul
     mod, _frappe = monthly_module
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
+    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode: None, raising=False)
     monkeypatch.setattr(mod, "_query_monthly_entries", lambda *args: [], raising=False)
     monkeypatch.setattr(mod, "_query_legacy_monthly_entries", lambda *args: [], raising=False)
     monkeypatch.setattr(
