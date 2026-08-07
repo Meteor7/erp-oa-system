@@ -85,6 +85,16 @@ DIRECT_SUPERVISOR_BY_EMPLOYEE = {
     "演示人员H0686c8": "演示人员Hb2957c",
     "演示人员H109018": "演示人员Hf4b020",
     "演示人员H122511": "演示人员Hf4b020",
+    "演示人员Hfc0966": "演示人员Hb2957c",
+    "演示人员Hbdc69a": "演示人员Hf4b020",
+    "演示人员H337caa": "演示人员Hbdc69a",
+    "演示人员H118c59": "演示人员Hbdc69a",
+    "演示人员H01feec": "演示人员Hbdc69a",
+    "演示人员He58aff": "演示人员Hbdc69a",
+    "演示人员He60276": "演示人员Hbdc69a",
+    "演示人员Hb76b07": "演示人员Hbdc69a",
+    "演示人员H48d9f9": "演示人员Hf4b020",
+    "演示人员H79b96c": "演示人员Hdd56ba",
 
     # Customer operation. These branches connect directly to Qingbo for approval.
     "演示人员H72d494": "演示人员Hf4b020",

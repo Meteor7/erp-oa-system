@@ -128,3 +128,20 @@ def test_every_active_employee_name_is_present_in_the_approved_mapping():
 def test_unknown_employee_fails_closed():
     with pytest.raises(OrganizationResolutionError, match="未配置"):
         resolve_stage_two_supervisor("不存在的人", resolve_user)
+
+def test_new_active_employee_routes_are_server_mapped():
+    expected = {
+        "演示员工223": "演示员工241",
+        "演示员工155": "演示员工21",
+        "演示员工201": "演示员工155",
+        "演示员工109": "演示员工155",
+        "演示员工219": "演示员工155",
+        "演示员工226": "演示员工155",
+        "演示员工230": "演示员工155",
+        "演示员工213": "演示员工155",
+        "演示员工237": "演示员工21",
+        "演示员工32": "演示员工16",
+    }
+
+    for employee_name, supervisor_name in expected.items():
+        assert DIRECT_SUPERVISOR_BY_EMPLOYEE[employee_name] == supervisor_name
