@@ -5,7 +5,7 @@ from rayher_hr_payroll.oa_feature_gate import boot_access_flags
 
 def get_context(context):
     if frappe.session.user == "Guest":
-        frappe.local.flags.redirect_location = "/login?redirect-to=/rayher"
+        frappe.local.flags.redirect_location = "/login?redirect-to=/planck-semicon"
         raise frappe.Redirect
     context.no_cache = 1
     context.boot = {

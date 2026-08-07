@@ -14,7 +14,7 @@ add_to_apps_screen = [
         "name": "rayher_hr_payroll",
         "logo": "/assets/rayher_hr_payroll/images/planck-semicon-logo.png",
         "title": "QIHENG DEMO",
-        "route": "/rayher",
+        "route": "/planck-semicon",
     }
 ]
 
@@ -71,6 +71,8 @@ doc_events = {
 }
 
 website_route_rules = [
+    {"from_route": "/planck-semicon", "to_route": "rayher"},
+    {"from_route": "/planck-semicon/<path:app_path>", "to_route": "rayher"},
     {"from_route": "/rayher/<path:app_path>", "to_route": "rayher"},
 ]
 
