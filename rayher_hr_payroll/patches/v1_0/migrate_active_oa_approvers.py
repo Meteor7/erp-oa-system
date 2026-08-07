@@ -18,7 +18,7 @@ GENERAL = "\u6f14\u793a\u5458\u5de529"
 
 YE_USER = "person067@staff.example.invalid"
 REN_USER = "person047@staff.example.invalid"
-VICE_USER = "person046@business.example.invalid"
+VICE_USER = "person046@staff.example.invalid"
 LEGACY_GENERAL_USER = "person058@staff.example.invalid"
 GENERAL_USER = "person060@staff.example.invalid"
 
@@ -28,6 +28,7 @@ LEGACY_USER_MAP = {
     QING: VICE_USER,
     WANG: GENERAL_USER,
     GENERAL: GENERAL_USER,
+    "person046@business.example.invalid": VICE_USER,
     LEGACY_GENERAL_USER: GENERAL_USER,
 }
 

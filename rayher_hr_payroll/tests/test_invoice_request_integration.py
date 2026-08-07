@@ -2837,6 +2837,114 @@ def test_preview_route_passes_resolved_supervisor_user_into_route_builder(monkey
 
 
 
+def test_leave_route_ignores_client_department_and_supervisor(monkeypatch):
+    monkeypatch.setattr(oa_entry, "_require_leave_accounts", lambda *_args: None)
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {
+            "employee": "HR-EMP-SOFTWARE",
+            "employee_name": "演示员工150",
+            "applicant_user": "person051@staff.example.invalid",
+            "department": "研发部 - RAY",
+            "supervisor": "演示员工132",
+            "supervisor_user": "person024@staff.example.invalid",
+            "supervisor_decision": "approve",
+            "supervisor_path": ["演示员工132"],
+        },
+    )
+
+    context = oa_entry._route_context(
+        department="财务部 - FORGED",
+        supervisor="伪造审批人",
+        asset_category=oa_entry.ADMIN_ASSET,
+        request_type=oa_entry.REQUEST_LEAVE,
+    )
+    route = oa_entry.preview_route(
+        oa_entry.REQUEST_LEAVE,
+        department="财务部 - FORGED",
+        supervisor="伪造审批人",
+    )
+
+    assert context["department"] == "研发部 - RAY"
+    assert context["supervisor"] == "演示员工132"
+    assert [step["label"] for step in route["steps"]] == [
+        "直属主管：演示员工132", "演示员工10", "演示员工37"
+    ]
+    assert route["copied_to"] == [
+        {"label": "演示员工10", "user": "person047@staff.example.invalid"},
+        {"label": "演示员工37", "user": "person046@staff.example.invalid"},
+    ]
+
+
+def test_leave_route_fails_closed_for_unlinked_account(monkeypatch):
+    monkeypatch.setattr(
+        oa_entry,
+        "_employee_context",
+        lambda user=None: {
+            "employee": None,
+            "employee_name": "",
+            "applicant_user": "person039@staff.example.invalid",
+            "department": "",
+            "supervisor": "",
+            "supervisor_user": "",
+            "supervisor_decision": "",
+            "supervisor_path": [],
+        },
+    )
+
+    with pytest.raises(ValidationError, match="未关联在职员工"):
+        oa_entry.preview_route(
+            oa_entry.REQUEST_LEAVE,
+            department="财务部 - FORGED",
+            supervisor="伪造审批人",
+        )
+
+
+
+def test_leave_route_rejects_a_disabled_fixed_account(monkeypatch):
+    class UserDB:
+        def get_value(self, doctype, filters, fieldname, **_kwargs):
+            if doctype == "User" and filters.get("name") != "person035@staff.example.invalid":
+                return filters.get("name")
+            return None
+
+    monkeypatch.setattr(frappe_stub, "db", UserDB())
+
+    with pytest.raises(oa_entry.ApprovalRouteError, match="未启用或不存在"):
+        oa_entry._require_leave_accounts(
+            [{"approvers": ["person035@staff.example.invalid"]}], []
+        )
+
+
+def test_leave_submission_creates_non_blocking_copy_notifications(monkeypatch):
+    inserted = []
+
+    class Notification(dict):
+        def insert(self, ignore_permissions=False):
+            inserted.append((dict(self), ignore_permissions))
+            return self
+
+    monkeypatch.setattr(frappe_stub, "get_doc", lambda values: Notification(values))
+    doc = Row(
+        request_type=oa_entry.REQUEST_LEAVE,
+        name="OA-LEAVE-1",
+        copied_to=json.dumps([
+            {"label": "演示员工10", "user": "person047@staff.example.invalid"},
+            {"label": "演示员工37", "user": "person046@staff.example.invalid"},
+        ], ensure_ascii=False),
+    )
+
+    oa_entry._notify_copied_users(doc)
+
+    assert [row[0]["for_user"] for row in inserted] == [
+        "person047@staff.example.invalid",
+        "person046@staff.example.invalid",
+    ]
+    assert all(row[1] is True for row in inserted)
+
+
+
 def test_submitting_expense_requires_explicit_asset_category(monkeypatch):
     environment = _install_request_environment(monkeypatch)
     doc = RequestDocument(

@@ -7,11 +7,15 @@ from rayher_hr_payroll.oa_approval import (
     GENERAL_MANAGER_USER,
     IT_APPROVER_USER,
     IT_ASSET,
+    LEAVE_ADMIN_APPROVER_USER,
+    LEAVE_FINANCE_APPROVER_USER,
+    LEAVE_OTHER_APPROVER_USER,
     OTHER_ASSET,
     VICE_MANAGER_USER,
     ApprovalRouteError,
     build_expense_payment_route,
     build_leave_route,
+    leave_copy_recipients,
     normalize_asset_category,
 )
 
@@ -24,13 +28,104 @@ def modes(steps):
     return [step["mode"] for step in steps]
 
 
-def test_leave_route_uses_current_vice_and_general_manager_accounts():
-    steps = build_leave_route(supervisor="直属上级")
+def test_leave_route_for_other_department_uses_supervisor_ren_and_qingbo():
+    steps = build_leave_route(
+        department="研发部 - RAY",
+        supervisor="演示员工132",
+        supervisor_user="person024@staff.example.invalid",
+        applicant_user="employee@staff.example.invalid",
+    )
 
-    assert labels(steps) == ["直属上级", "演示员工21", "演示员工29"]
+    assert labels(steps) == ["直属主管：演示员工132", "演示员工10", "演示员工37"]
     assert modes(steps) == ["approve", "approve", "approve"]
-    assert steps[1]["approvers"] == [VICE_MANAGER_USER]
-    assert steps[2]["approvers"] == [GENERAL_MANAGER_USER]
+    assert [step["approvers"] for step in steps] == [
+        ["person024@staff.example.invalid"],
+        [LEAVE_ADMIN_APPROVER_USER],
+        [LEAVE_OTHER_APPROVER_USER],
+    ]
+
+
+def test_leave_route_for_finance_uses_wangbo_at_level_three():
+    steps = build_leave_route(
+        department="财务部 - RAY",
+        supervisor="演示员工16",
+        supervisor_user="person072@staff.example.invalid",
+        applicant_user="finance@staff.example.invalid",
+    )
+
+    assert labels(steps) == ["直属主管：演示员工16", "演示员工10", "演示员工28"]
+    assert steps[2]["approvers"] == [LEAVE_FINANCE_APPROVER_USER]
+
+
+def test_leave_route_skips_self_and_duplicate_fixed_approvers():
+    ren_steps = build_leave_route(
+        department="研发部 - RAY",
+        supervisor="演示员工132",
+        supervisor_user="person024@staff.example.invalid",
+        applicant_user=LEAVE_ADMIN_APPROVER_USER,
+    )
+    qing_steps = build_leave_route(
+        department="研发部 - RAY",
+        supervisor="演示员工10",
+        supervisor_user=LEAVE_ADMIN_APPROVER_USER,
+        applicant_user="employee@staff.example.invalid",
+    )
+
+    assert labels(ren_steps) == ["直属主管：演示员工132", "演示员工37"]
+    assert labels(qing_steps) == ["直属主管：演示员工10", "演示员工37"]
+
+
+def test_leave_route_skips_level_one_for_top_executives_without_self_approval():
+    qingbo_steps = build_leave_route(
+        department="总经办 - RAY",
+        supervisor="演示员工21",
+        supervisor_user=LEAVE_OTHER_APPROVER_USER,
+        supervisor_decision="skip",
+        applicant_user=LEAVE_OTHER_APPROVER_USER,
+    )
+    wangbo_steps = build_leave_route(
+        department="总经办 - RAY",
+        supervisor="演示员工29",
+        supervisor_user=LEAVE_FINANCE_APPROVER_USER,
+        supervisor_decision="skip",
+        applicant_user=LEAVE_FINANCE_APPROVER_USER,
+    )
+
+    assert labels(qingbo_steps) == ["演示员工10"]
+    assert labels(wangbo_steps) == ["演示员工10", "演示员工37"]
+    assert all(
+        LEAVE_OTHER_APPROVER_USER not in step["approvers"]
+        for step in qingbo_steps
+    )
+    assert all(
+        LEAVE_FINANCE_APPROVER_USER not in step["approvers"]
+        for step in wangbo_steps
+    )
+
+
+
+def test_leave_route_rejects_missing_or_self_supervisor_accounts():
+    with pytest.raises(ApprovalRouteError, match="没有关联可用账号"):
+        build_leave_route(
+            department="研发部 - RAY", supervisor="演示员工132", supervisor_user=""
+        )
+    with pytest.raises(ApprovalRouteError, match="不能成为自己的直属上级"):
+        build_leave_route(
+            department="研发部 - RAY",
+            supervisor="申请人",
+            supervisor_user="employee@staff.example.invalid",
+            applicant_user="employee@staff.example.invalid",
+        )
+
+
+def test_leave_copy_recipients_exclude_the_applicant_without_changing_approval():
+    assert leave_copy_recipients() == [
+        {"label": "演示员工10", "user": LEAVE_ADMIN_APPROVER_USER},
+        {"label": "演示员工37", "user": LEAVE_OTHER_APPROVER_USER},
+    ]
+    assert leave_copy_recipients(LEAVE_ADMIN_APPROVER_USER) == [
+        {"label": "演示员工37", "user": LEAVE_OTHER_APPROVER_USER}
+    ]
 
 
 def test_other_department_ordinary_employee_has_full_sequential_route():

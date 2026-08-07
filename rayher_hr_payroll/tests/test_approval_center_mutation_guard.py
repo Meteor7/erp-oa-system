@@ -51,7 +51,7 @@ def test_client_cannot_change_request_identity_or_amount(guard):
         "amount": 10,
         "workflow_status": "草稿",
     })
-    for field, value in (("request_type", module.REQUEST_PROCUREMENT), ("employee", "EMP-B"), ("amount", 999)):
+    for field, value in (("request_type", module.REQUEST_PROCUREMENT), ("employee", "EMP-B"), ("amount", 999), ("copied_to", "forged@example.com")):
         changed = Doc(dict(before, **{field: value}), before=before)
         with pytest.raises(frappe.PermissionError, match="服务端字段"):
             module.validate_request_mutation(changed)

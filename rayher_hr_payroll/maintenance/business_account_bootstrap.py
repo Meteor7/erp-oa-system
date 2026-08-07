@@ -61,7 +61,8 @@ ACCOUNT_SPECS = (
         "roles": ("Employee", "Department Manager"),
     },
     {
-        "user_id": "person046@business.example.invalid",
+        "user_id": "person046@staff.example.invalid",
+        "legacy_user_id": "person046@business.example.invalid",
         "full_name": "\u6f14\u793a\u4eba\u5458Hf4b020",
         "employee": "HR-EMP-90004",
         "employee_name": "\u6f14\u793a\u4eba\u5458Hf4b020",

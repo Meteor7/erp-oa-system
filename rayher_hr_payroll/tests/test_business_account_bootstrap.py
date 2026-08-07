@@ -19,12 +19,13 @@ def test_account_specs_preserve_admin_system_manager_and_limit_business_executiv
     assert specs["person068@staff.example.invalid"]["employee"] == "HR-EMP-90012"
     assert "Department Manager" in specs["person047@staff.example.invalid"]["roles"]
     assert "Department Manager" in specs["person068@staff.example.invalid"]["roles"]
-    assert specs["person046@business.example.invalid"]["employee"] == "HR-EMP-90004"
+    assert specs["person046@staff.example.invalid"]["employee"] == "HR-EMP-90004"
+    assert specs["person046@staff.example.invalid"]["legacy_user_id"] == "person046@business.example.invalid"
     assert specs["person060@staff.example.invalid"]["employee"] == "HR-EMP-90003"
     assert specs["person060@staff.example.invalid"]["legacy_user_id"] == "person058@staff.example.invalid"
     assert "person058@staff.example.invalid" not in specs
     assert specs["admin@staff.example.invalid"]["roles"] == ("System Manager",)
-    for user in ("person046@business.example.invalid", "person060@staff.example.invalid"):
+    for user in ("person046@staff.example.invalid", "person060@staff.example.invalid"):
         assert "System Manager" not in specs[user]["roles"]
         assert bootstrap.BUSINESS_EXECUTIVE_ROLE in specs[user]["roles"]
 

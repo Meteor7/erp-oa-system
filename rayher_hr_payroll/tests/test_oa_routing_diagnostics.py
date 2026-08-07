@@ -6,7 +6,7 @@ from rayher_hr_payroll.maintenance.oa_routing_diagnostics import (
 
 USERS = {
     "演示员工132": "person024@business.example.invalid",
-    "演示员工21": "person046@business.example.invalid",
+    "演示员工21": "person046@staff.example.invalid",
     "演示员工29": "person060@staff.example.invalid",
 }
 
@@ -75,6 +75,6 @@ def test_canonical_required_approvers_include_all_six_route_accounts():
         "演示员工10": "person047@staff.example.invalid",
         "演示员工18": "person068@staff.example.invalid",
         "演示员工16": "person072@staff.example.invalid",
-        "演示员工21": "person046@business.example.invalid",
+        "演示员工21": "person046@staff.example.invalid",
         "演示员工29": "person060@staff.example.invalid",
     }

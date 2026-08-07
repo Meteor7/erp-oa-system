@@ -87,7 +87,7 @@ def test_non_admin_and_server_owned_payload_fields_fail_closed():
         approval_center.save_draft(
             approval_center.REQUEST_PROCUREMENT, valid_payload(), store=MemoryStore("employee@example.com")
         )
-    for field in ("workflow_status", "approved_amount", "amount", "steps", "owner", "employee", "department"):
+    for field in ("workflow_status", "approved_amount", "amount", "steps", "owner", "employee", "department", "copied_to"):
         payload = valid_payload()
         payload[field] = "forged"
         with pytest.raises(approval_center.ApprovalCenterError, match="服务端字段"):

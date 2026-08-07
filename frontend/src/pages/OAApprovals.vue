@@ -214,6 +214,7 @@ const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
 const companies = computed(() => options.data?.companies || []);
 const routeSteps = computed(() => preview.data?.steps || []);
+const copiedTo = computed(() => preview.data?.copied_to || []);
 const requestRows = computed(() => purchaseRequests.data || []);
 const selectedRequest = computed(() => requestRows.value.find((row) => row.name === selectedRequestName.value) || requestRows.value[0]);
 const consumptionList = computed(() => consumptionRows.data || []);
@@ -318,9 +319,6 @@ function previewPayload() {
     return {
       request_type: REQUEST_LEAVE,
       subject: leaveForm.subject.trim(),
-      department: leaveForm.department.trim(),
-      supervisor: leaveForm.supervisor.trim() || T.supervisor,
-      asset_category: ASSET_OTHER,
     };
   }
   return {
@@ -430,8 +428,6 @@ async function submitLeaveRequest() {
     await creator.submit({
       request_type: REQUEST_LEAVE,
       subject: leaveForm.subject.trim(),
-      department: leaveForm.department.trim(),
-      supervisor: leaveForm.supervisor.trim(),
       from_date: leaveForm.from_date,
       to_date: leaveForm.to_date,
       reason: leaveForm.reason.trim(),
@@ -632,11 +628,11 @@ watch(requestRows, (rows) => {
             </label>
             <label class='flex flex-col gap-1 text-sm'>
               <span class='text-xs text-gray-500'>{{ T.department }}</span>
-              <input v-model='leaveForm.department' class='border border-gray-300 rounded px-3 py-2' />
+              <input v-model='leaveForm.department' readonly class='border border-gray-200 bg-gray-50 rounded px-3 py-2 text-gray-600' />
             </label>
             <label class='flex flex-col gap-1 text-sm'>
               <span class='text-xs text-gray-500'>{{ T.supervisor }}</span>
-              <input v-model='leaveForm.supervisor' class='border border-gray-300 rounded px-3 py-2' />
+              <input v-model='leaveForm.supervisor' readonly class='border border-gray-200 bg-gray-50 rounded px-3 py-2 text-gray-600' />
             </label>
             <label class='flex flex-col gap-1 text-sm'>
               <span class='text-xs text-gray-500'>{{ T.dateFrom }}</span>
@@ -670,6 +666,9 @@ watch(requestRows, (rows) => {
               <div class='text-xs text-gray-500 mt-1'>{{ step.approvers.join(' / ') }}</div>
             </li>
           </ol>
+          <div v-if='copiedTo.length' class='mt-3 rounded border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800'>
+            抄送：{{ copiedTo.map((row) => row.label).join('、') }}
+          </div>
         </Card>
       </div>
     </template>

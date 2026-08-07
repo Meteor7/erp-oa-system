@@ -10,7 +10,7 @@ IT_APPROVER_USER = "person068@staff.example.invalid"
 FINANCE_MANAGER_NAME = "演示员工16"
 FINANCE_MANAGER_USER = "person072@staff.example.invalid"
 VICE_MANAGER_NAME = "演示员工21"
-VICE_MANAGER_USER = "person046@business.example.invalid"
+VICE_MANAGER_USER = "person046@staff.example.invalid"
 GENERAL_MANAGER_NAME = "演示员工29"
 GENERAL_MANAGER_USER = "person060@staff.example.invalid"
 
@@ -74,15 +74,98 @@ def normalize_asset_category(asset_category):
     raise ApprovalRouteError(f"不支持的资产类型：{text}")
 
 
-def build_leave_route(supervisor):
+LEAVE_ADMIN_APPROVER_NAME = "演示员工10"
+LEAVE_ADMIN_APPROVER_USER = ADMIN_APPROVER_USER
+LEAVE_FINANCE_APPROVER_NAME = "演示员工28"
+LEAVE_FINANCE_APPROVER_USER = GENERAL_MANAGER_USER
+LEAVE_OTHER_APPROVER_NAME = "演示员工37"
+LEAVE_OTHER_APPROVER_USER = VICE_MANAGER_USER
+LEAVE_COPY_RECIPIENTS = (
+    (LEAVE_ADMIN_APPROVER_NAME, LEAVE_ADMIN_APPROVER_USER),
+    (LEAVE_OTHER_APPROVER_NAME, LEAVE_OTHER_APPROVER_USER),
+)
+
+
+def leave_copy_recipients(applicant_user=None):
+    applicant = _clean(applicant_user).lower()
+    recipients = []
+    seen = set()
+    for label, user in LEAVE_COPY_RECIPIENTS:
+        user_id = _clean(user).lower()
+        if not user_id or user_id == applicant or user_id in seen:
+            continue
+        seen.add(user_id)
+        recipients.append({"label": label, "user": user_id})
+    return recipients
+
+
+def _append_leave_step(steps, label, approver, applicant_user=None):
+    user_id = _clean(approver).lower()
+    if not user_id:
+        raise ApprovalRouteError(f"请假审批人 {label} 没有关联可用账号")
+    if user_id == _clean(applicant_user).lower():
+        return
+    if any(user_id in {_clean(value).lower() for value in step["approvers"]} for step in steps):
+        return
+    steps.append(_step(label, approvers=[user_id]))
+
+
+def build_leave_route(
+    department,
+    supervisor,
+    *,
+    supervisor_user,
+    supervisor_decision=None,
+    applicant_user=None,
+):
+    department = _clean(department)
     supervisor = _clean(supervisor)
-    if not supervisor:
-        raise ApprovalRouteError("leave route requires a supervisor")
-    return [
-        _step(supervisor),
-        _step(VICE_MANAGER_NAME, approvers=[VICE_MANAGER_USER]),
-        _step(GENERAL_MANAGER_NAME, approvers=[GENERAL_MANAGER_USER]),
-    ]
+    supervisor_user = _clean(supervisor_user).lower()
+    supervisor_decision = _clean(supervisor_decision)
+    applicant_user = _clean(applicant_user).lower()
+    if not department:
+        raise ApprovalRouteError("请假申请缺少申请人所属部门")
+    if supervisor_decision not in {"", "approve", "skip"}:
+        raise ApprovalRouteError(f"不支持的直属主管决策：{supervisor_decision}")
+    if supervisor_decision != "skip":
+        if not supervisor:
+            raise ApprovalRouteError("请假申请缺少直属上级")
+        if not supervisor_user:
+            raise ApprovalRouteError(f"直属上级 {supervisor} 没有关联可用账号")
+        if applicant_user and supervisor_user == applicant_user:
+            raise ApprovalRouteError("申请人不能成为自己的直属上级审批人")
+
+    steps = []
+    if supervisor_decision != "skip":
+        _append_leave_step(
+            steps,
+            SUPERVISOR_LABEL_PREFIX + supervisor,
+            supervisor_user,
+            applicant_user,
+        )
+    _append_leave_step(
+        steps,
+        LEAVE_ADMIN_APPROVER_NAME,
+        LEAVE_ADMIN_APPROVER_USER,
+        applicant_user,
+    )
+    if classify_department(department) == "finance":
+        _append_leave_step(
+            steps,
+            LEAVE_FINANCE_APPROVER_NAME,
+            LEAVE_FINANCE_APPROVER_USER,
+            applicant_user,
+        )
+    else:
+        _append_leave_step(
+            steps,
+            LEAVE_OTHER_APPROVER_NAME,
+            LEAVE_OTHER_APPROVER_USER,
+            applicant_user,
+        )
+    if not steps:
+        raise ApprovalRouteError("请假审批路线不能为空")
+    return steps
 
 
 def _stage_two_steps(supervisor, supervisor_user, supervisor_decision):
@@ -163,9 +246,16 @@ def build_route(
     asset_category=None,
     supervisor_user=None,
     supervisor_decision=None,
+    applicant_user=None,
 ):
     if request_type == REQUEST_LEAVE:
-        return build_leave_route(supervisor=supervisor)
+        return build_leave_route(
+            department=department,
+            supervisor=supervisor,
+            supervisor_user=supervisor_user,
+            supervisor_decision=supervisor_decision,
+            applicant_user=applicant_user,
+        )
     if request_type == REQUEST_EXPENSE_PAYMENT:
         return build_expense_payment_route(
             department=department,

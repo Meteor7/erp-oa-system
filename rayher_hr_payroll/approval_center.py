@@ -27,7 +27,7 @@ FIXED_ASSET_CATEGORIES = {
 }
 SERVER_FIELDS = {
     "workflow_status", "approved_amount", "amount", "steps", "owner", "employee",
-    "employee_name", "department", "company", "current_step_index",
+    "employee_name", "department", "company", "copied_to", "current_step_index",
     "current_step_label", "currency", "paid_by", "paid_on", "operation_log",
     "approved_amount_snapshot", "source_modified", "payment_source_kind",
 }

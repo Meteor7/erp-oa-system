@@ -29,6 +29,8 @@ def test_request_amount_source_and_line_contracts():
     assert result["approved_amount_snapshot"]["read_only"] == 1
     assert result["source_modified"]["read_only"] == 1
     assert result["business_lines"]["options"] == "OA Purchase Request Line"
+    assert result["copied_to"]["fieldtype"] == "Small Text"
+    assert result["copied_to"]["read_only"] == 1
 
     line = fields("oa_purchase_request_line")
     assert line["quantity"]["fieldtype"] == "Float"

@@ -26,6 +26,7 @@ SERVER_OWNED_FIELDS = {
     "employee_name",
     "department",
     "supervisor",
+    "copied_to",
     "workflow_status",
     "current_step_index",
     "current_step_label",

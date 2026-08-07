@@ -19,6 +19,7 @@ from rayher_hr_payroll.oa_approval import (
     REQUEST_LEAVE,
     ApprovalRouteError,
     build_route,
+    leave_copy_recipients,
     normalize_asset_category,
 )
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access, visible_request_types
@@ -384,6 +385,7 @@ def _employee_context(user=None):
         return {
             "employee": None,
             "employee_name": "",
+            "applicant_user": str(user).lower(),
             "department": "",
             "supervisor": "",
             "supervisor_user": "",
@@ -395,6 +397,7 @@ def _employee_context(user=None):
     context = {
         "employee": row.name,
         "employee_name": employee_name,
+        "applicant_user": str(user).lower(),
         "department": _display_department(row.department),
         "supervisor": "",
         "supervisor_user": "",
@@ -417,17 +420,47 @@ def _employee_context(user=None):
         )
         return context
 
-    # Compatibility for isolated fixtures and legacy Employees not yet in the chart.
+    # Compatibility for active Employees not yet represented in the organization map.
     if row.get("reports_to"):
-        context["supervisor"] = (
-            frappe.db.get_value("Employee", row.reports_to, "employee_name")
-            or row.reports_to
+        supervisor_row = frappe.db.get_value(
+            "Employee",
+            row.reports_to,
+            ["employee_name", "user_id", "status"],
+            as_dict=True,
         )
+        if supervisor_row and _clean(supervisor_row.get("status")) == "Active":
+            context["supervisor"] = _clean(
+                supervisor_row.get("employee_name") or row.reports_to
+            )
+            context["supervisor_user"] = _enabled_employee_user(
+                context["supervisor"]
+            )
     return context
 
 
-def _route_context(department=None, supervisor=None, asset_category=None):
+def _route_context(
+    department=None,
+    supervisor=None,
+    asset_category=None,
+    *,
+    request_type=None,
+):
     ctx = _employee_context()
+    if request_type == REQUEST_LEAVE:
+        if not ctx.get("employee"):
+            raise ApprovalRouteError("当前账号未关联在职员工，不能提交请假申请")
+        ctx["department"] = _canonical_department(ctx.get("department"))
+        if not ctx.get("department"):
+            raise ApprovalRouteError("当前员工未配置所属部门，不能提交请假申请")
+        if not ctx.get("supervisor"):
+            raise ApprovalRouteError("当前员工未配置直属上级，不能提交请假申请")
+        if not ctx.get("supervisor_user"):
+            raise ApprovalRouteError(
+                f"直属上级 {ctx.get('supervisor')} 没有关联可用账号"
+            )
+        ctx["asset_category"] = OTHER_ASSET
+        return ctx
+
     organization_managed = bool(ctx.get("supervisor_decision"))
     selected_department = ctx.get("department") if organization_managed else (department or ctx.get("department"))
     ctx["department"] = _canonical_department(selected_department)
@@ -464,6 +497,39 @@ def _resolve_route_approver(value):
         if enabled_user:
             return str(enabled_user)
     return candidate
+def _require_leave_accounts(steps, copied_to):
+    users = []
+    for step in steps:
+        users.extend(step.get("approvers") or [])
+    users.extend(row.get("user") for row in copied_to or [])
+    for user in dict.fromkeys(_clean(value).lower() for value in users if value):
+        enabled = frappe.db.get_value(
+            "User", {"name": user, "enabled": 1}, "name"
+        )
+        if not enabled:
+            raise ApprovalRouteError(f"请假审批账号未启用或不存在：{user}")
+
+
+def _notify_copied_users(doc):
+    if getattr(doc, "request_type", None) != REQUEST_LEAVE:
+        return
+    for row in _parse_json(getattr(doc, "copied_to", None), default=[]) or []:
+        user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
+        if not user:
+            continue
+        frappe.get_doc(
+            {
+                "doctype": "Notification Log",
+                "for_user": user,
+                "type": "Alert",
+                "document_type": "OA Approval Request",
+                "document_name": doc.name,
+                "subject": "请假申请抄送：" + str(doc.name),
+                "email_content": "请假申请 " + str(doc.name) + " 已提交，现抄送给你查阅。",
+            }
+        ).insert(ignore_permissions=True)
+
+
 def _serialize_route_steps(steps, active=True):
     return [
         {
@@ -770,6 +836,7 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "employee_name": doc.employee_name,
         "department": _display_department(doc.department),
         "supervisor": doc.supervisor,
+        "copied_to": _parse_json(getattr(doc, "copied_to", None), default=[]),
         "company": getattr(doc, "company", None),
         "subject": doc.subject,
         "doc_type": getattr(doc, "doc_type", None),
@@ -1043,7 +1110,7 @@ def _build_request_doc(
 ):
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
-    ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category)
+    ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
     route = preview_route(request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=submit)
     steps = route["steps"]
     if request_type == REQUEST_LEAVE and submit and (not from_date or not to_date):
@@ -1062,6 +1129,7 @@ def _build_request_doc(
             "employee_name": ctx.get("employee_name"),
             "department": ctx.get("department"),
             "supervisor": ctx.get("supervisor"),
+            "copied_to": _json_list(route.get("copied_to") or []),
             "company": company or COMPANIES[0],
             "subject": subject or request_type,
             "doc_type": doc_type or DOC_TYPES[0],
@@ -1090,6 +1158,8 @@ def _build_request_doc(
     _append_steps(doc, steps)
     _set_expense_lines(doc, lines)
     _insert_document(doc)
+    if submit:
+        _notify_copied_users(doc)
     return doc
 
 
@@ -1131,8 +1201,9 @@ def _submit_draft(doc):
     if isinstance(summary, dict):
         doc.invoice_count = summary.get("invoice_count", 0)
         doc.invoice_status = summary.get("invoice_status", "")
-    ctx = _route_context(department=doc.department, supervisor=doc.supervisor, asset_category=doc.asset_category)
+    ctx = _route_context(department=doc.department, supervisor=doc.supervisor, asset_category=doc.asset_category, request_type=doc.request_type)
     route = preview_route(doc.request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=True)
+    doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])
     doc.workflow_status = route["steps"][0]["status"]
     doc.current_step_index = 1
@@ -1196,16 +1267,28 @@ def get_options():
 def preview_route(request_type, department=None, supervisor=None, asset_category=None, active=True):
     require_request_type_access(request_type)
     try:
-        ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category)
+        ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
         steps = build_route(
             request_type,
             department=ctx["department"],
             supervisor=ctx["supervisor"],
             supervisor_user=ctx.get("supervisor_user"),
             supervisor_decision=ctx.get("supervisor_decision"),
+            applicant_user=ctx.get("applicant_user"),
             asset_category=ctx["asset_category"],
         )
-        return {"context": ctx, "steps": _serialize_route_steps(steps, active=_to_bool(active))}
+        copied_to = (
+            leave_copy_recipients(ctx.get("applicant_user"))
+            if request_type == REQUEST_LEAVE
+            else []
+        )
+        if request_type == REQUEST_LEAVE:
+            _require_leave_accounts(steps, copied_to)
+        return {
+            "context": ctx,
+            "steps": _serialize_route_steps(steps, active=_to_bool(active)),
+            "copied_to": copied_to,
+        }
     except ApprovalRouteError as exc:
         frappe.throw(str(exc))
 
@@ -1600,6 +1683,7 @@ def submit_request(name, no_invoice_reason=None):
             doc.no_invoice_reason = supplied_reason
         _submit_draft(doc)
         _save_document(doc)
+        _notify_copied_users(doc)
         return _summarize_doc(doc)
 
 
@@ -2228,6 +2312,7 @@ def _reset_request_to_draft(doc, note=""):
         department=doc.department,
         supervisor=doc.supervisor,
         asset_category=doc.asset_category,
+        request_type=doc.request_type,
     )
     route = preview_route(
         doc.request_type,
@@ -2236,6 +2321,7 @@ def _reset_request_to_draft(doc, note=""):
         ctx["asset_category"],
         active=False,
     )
+    doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])
     doc.workflow_status = STATUS_DRAFT
     doc.current_step_index = 0

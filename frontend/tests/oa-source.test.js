@@ -55,6 +55,10 @@ test('approval page keeps leave behavior and delegates expense reimbursement to 
   assert.match(pageSource, /<ExpenseWorkbench\s+v-else\s*\/>/);
   assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.preview_route/);
   assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.create_request/);
+  assert.match(pageSource, /copiedTo/);
+  assert.match(pageSource, /抄送/);
+  assert.match(pageSource, /v-model='leaveForm\.department' readonly/);
+  assert.match(pageSource, /v-model='leaveForm\.supervisor' readonly/);
   assert.doesNotMatch(pageSource, /<select\s+v-model='form\.request_type'/);
 });
 
