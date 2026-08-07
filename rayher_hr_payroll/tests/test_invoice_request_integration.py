@@ -2837,11 +2837,115 @@ def test_preview_route_passes_resolved_supervisor_user_into_route_builder(monkey
 
 
 
+
+def test_leave_employee_context_uses_direct_reports_to_without_climbing(monkeypatch):
+    employee_rows = [
+        {
+            "name": "HR-EMP-STAFF",
+            "employee_name": "演示员工109",
+            "department": "应用部 - SHGL",
+            "reports_to": "HR-EMP-MANAGER",
+        }
+    ]
+
+    class LeaveDB:
+        def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
+            if doctype == "Employee" and filters == "HR-EMP-MANAGER":
+                return Row(
+                    employee_name="演示员工155",
+                    status="Active",
+                    user_id="xiong@example.com",
+                )
+            if doctype == "User" and filters == {
+                "name": "xiong@example.com",
+                "enabled": 1,
+            }:
+                return "xiong@example.com"
+            return None
+
+    monkeypatch.setattr(
+        frappe_stub,
+        "get_all",
+        lambda doctype, **_kwargs: employee_rows if doctype == "Employee" else [],
+        raising=False,
+    )
+    monkeypatch.setattr(frappe_stub, "db", LeaveDB(), raising=False)
+
+    context = oa_entry._leave_employee_context("staff@example.com")
+
+    assert context["supervisor"] == "演示员工155"
+    assert context["supervisor_user"] == "xiong@example.com"
+    assert context["supervisor_decision"] == "approve"
+
+
+def test_leave_employee_context_rejects_direct_supervisor_without_account(monkeypatch):
+    employee_rows = [
+        {
+            "name": "HR-EMP-STAFF",
+            "employee_name": "演示员工109",
+            "department": "应用部 - SHGL",
+            "reports_to": "HR-EMP-MANAGER",
+        }
+    ]
+
+    class LeaveDB:
+        def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
+            if doctype == "Employee":
+                return Row(employee_name="演示员工155", status="Active", user_id="")
+            return None
+
+    monkeypatch.setattr(
+        frappe_stub,
+        "get_all",
+        lambda doctype, **_kwargs: employee_rows if doctype == "Employee" else [],
+        raising=False,
+    )
+    monkeypatch.setattr(frappe_stub, "db", LeaveDB(), raising=False)
+
+    with pytest.raises(oa_entry.ApprovalRouteError, match="演示员工155.*可用账号"):
+        oa_entry._leave_employee_context("staff@example.com")
+
+
+def test_leave_employee_context_rejects_duplicate_active_employee_links(monkeypatch):
+    monkeypatch.setattr(
+        frappe_stub,
+        "get_all",
+        lambda *_args, **_kwargs: [
+            {"name": "HR-EMP-1"},
+            {"name": "HR-EMP-2"},
+        ],
+        raising=False,
+    )
+
+    with pytest.raises(oa_entry.ApprovalRouteError, match="多个在职员工"):
+        oa_entry._leave_employee_context("duplicate@example.com")
+
+
+def test_leave_employee_context_skips_only_top_executive_self_approval(monkeypatch):
+    monkeypatch.setattr(
+        frappe_stub,
+        "get_all",
+        lambda *_args, **_kwargs: [
+            {
+                "name": "HR-EMP-QINGBO",
+                "employee_name": "演示员工21",
+                "department": "总经办 - RAY",
+                "reports_to": "",
+            }
+        ],
+        raising=False,
+    )
+
+    context = oa_entry._leave_employee_context("person046@staff.example.invalid")
+
+    assert context["supervisor_decision"] == "skip"
+    assert context["supervisor_user"] == "person046@staff.example.invalid"
+
 def test_leave_route_ignores_client_department_and_supervisor(monkeypatch):
     monkeypatch.setattr(oa_entry, "_require_leave_accounts", lambda *_args: None)
     monkeypatch.setattr(
         oa_entry,
-        "_employee_context",
+        "_leave_employee_context",
         lambda user=None: {
             "employee": "HR-EMP-SOFTWARE",
             "employee_name": "演示员工150",
@@ -2880,7 +2984,7 @@ def test_leave_route_ignores_client_department_and_supervisor(monkeypatch):
 def test_leave_route_fails_closed_for_unlinked_account(monkeypatch):
     monkeypatch.setattr(
         oa_entry,
-        "_employee_context",
+        "_leave_employee_context",
         lambda user=None: {
             "employee": None,
             "employee_name": "",
@@ -2909,7 +3013,7 @@ def test_leave_route_rejects_a_disabled_fixed_account(monkeypatch):
                 return filters.get("name")
             return None
 
-    monkeypatch.setattr(frappe_stub, "db", UserDB())
+    monkeypatch.setattr(frappe_stub, "db", UserDB(), raising=False)
 
     with pytest.raises(oa_entry.ApprovalRouteError, match="未启用或不存在"):
         oa_entry._require_leave_accounts(
@@ -2925,7 +3029,7 @@ def test_leave_submission_creates_non_blocking_copy_notifications(monkeypatch):
             inserted.append((dict(self), ignore_permissions))
             return self
 
-    monkeypatch.setattr(frappe_stub, "get_doc", lambda values: Notification(values))
+    monkeypatch.setattr(frappe_stub, "get_doc", lambda values: Notification(values), raising=False)
     doc = Row(
         request_type=oa_entry.REQUEST_LEAVE,
         name="OA-LEAVE-1",

@@ -26,6 +26,8 @@ from rayher_hr_payroll.oa_feature_gate import require_request_type_access, visib
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
+    EXCLUDED_MANAGERS,
+    TOP_EXECUTIVES,
     OrganizationResolutionError,
     resolve_stage_two_supervisor,
 )
@@ -438,6 +440,108 @@ def _employee_context(user=None):
     return context
 
 
+def _leave_employee_context(user=None):
+    """Resolve leave identity and the immediate approver from server-owned data."""
+
+    user = str(user or frappe.session.user or "").strip().lower()
+    if not user or user == "guest":
+        frappe.throw(frappe._("请先登录。"))
+
+    rows = frappe.get_all(
+        "Employee",
+        filters={"user_id": user, "status": "Active"},
+        fields=["name", "employee_name", "department", "reports_to"],
+        order_by="name asc",
+        limit_page_length=2,
+    )
+    if not rows:
+        raise ApprovalRouteError("当前账号未关联在职员工，不能提交请假申请")
+    if len(rows) != 1:
+        raise ApprovalRouteError("当前账号关联了多个在职员工，请联系 HR 清理后再提交请假申请")
+
+    row = rows[0]
+    employee_id = _clean(row.get("name"))
+    employee_name = _clean(row.get("employee_name") or employee_id)
+    department = _canonical_department(_display_department(row.get("department")))
+    if not department:
+        raise ApprovalRouteError("当前员工未配置所属部门，不能提交请假申请")
+
+    context = {
+        "employee": employee_id,
+        "employee_name": employee_name,
+        "applicant_user": user,
+        "department": department,
+        "supervisor": "",
+        "supervisor_user": "",
+        "supervisor_decision": "",
+        "supervisor_path": [],
+    }
+    if employee_name in TOP_EXECUTIVES:
+        context.update(
+            {
+                "supervisor": employee_name,
+                "supervisor_user": user,
+                "supervisor_decision": "skip",
+                "supervisor_path": [],
+                "supervisor_reason": "applicant_is_top_executive",
+            }
+        )
+        return context
+
+    supervisor_name = ""
+    reports_to = _clean(row.get("reports_to"))
+    if reports_to:
+        supervisor = frappe.db.get_value(
+            "Employee",
+            reports_to,
+            ["employee_name", "status", "user_id"],
+            as_dict=True,
+        )
+        if not supervisor or _clean(supervisor.get("status")) != "Active":
+            raise ApprovalRouteError("当前员工配置的直属上级不存在或已离职")
+        supervisor_name = _clean(supervisor.get("employee_name") or reports_to)
+        supervisor_user = _clean(supervisor.get("user_id")).lower()
+    else:
+        supervisor_name = _clean(DIRECT_SUPERVISOR_BY_EMPLOYEE.get(employee_name))
+        if not supervisor_name:
+            raise ApprovalRouteError("当前员工未配置直属上级，不能提交请假申请")
+        if supervisor_name in EXCLUDED_MANAGERS or supervisor_name == "BOARD":
+            try:
+                resolution = resolve_stage_two_supervisor(
+                    employee_name, _enabled_employee_user
+                )
+            except OrganizationResolutionError as exc:
+                raise ApprovalRouteError(str(exc)) from exc
+            supervisor_name = _clean(resolution.supervisor_name)
+        supervisor_user = _clean(_enabled_employee_user(supervisor_name)).lower()
+
+    if not supervisor_name:
+        raise ApprovalRouteError("当前员工未配置直属上级，不能提交请假申请")
+    enabled_user = (
+        frappe.db.get_value(
+            "User", {"name": supervisor_user, "enabled": 1}, "name"
+        )
+        if supervisor_user
+        else None
+    )
+    if not enabled_user:
+        raise ApprovalRouteError(f"直属上级 {supervisor_name} 没有关联可用账号")
+    supervisor_user = str(enabled_user).strip().lower()
+    if supervisor_user == user:
+        raise ApprovalRouteError("申请人不能成为自己的直属上级审批人")
+
+    context.update(
+        {
+            "supervisor": supervisor_name,
+            "supervisor_user": supervisor_user,
+            "supervisor_decision": "approve",
+            "supervisor_path": [supervisor_name],
+            "supervisor_reason": "direct_employee_reports_to",
+        }
+    )
+    return context
+
+
 def _route_context(
     department=None,
     supervisor=None,
@@ -445,7 +549,7 @@ def _route_context(
     *,
     request_type=None,
 ):
-    ctx = _employee_context()
+    ctx = _leave_employee_context() if request_type == REQUEST_LEAVE else _employee_context()
     if request_type == REQUEST_LEAVE:
         if not ctx.get("employee"):
             raise ApprovalRouteError("当前账号未关联在职员工，不能提交请假申请")
