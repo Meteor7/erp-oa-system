@@ -64,8 +64,12 @@ def test_household_categories_map_without_excel_inference():
     assert household_classification("深圳") is True
     for value in ("广东省内城镇", "广东省内农村", "广东省外城镇", "广东省外农村"):
         assert household_classification(value) is False
+    assert household_classification("深户") is True
+    assert household_classification("广东省深圳市南山区") is True
+    for value in ("非深城镇", "非深农村", "湖北省襄阳市", "安徽省界首市"):
+        assert household_classification(value) is False
     assert household_classification("") is None
-    assert household_classification("深户") is None
+    assert household_classification("待确认") is None
 
 
 def test_social_policy_is_scoped_by_company_and_period():

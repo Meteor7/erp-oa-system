@@ -28,7 +28,9 @@ test("employee table freezes header and first column", () => {
 
 test("household and contribution data are explicit", () => {
   assert.match(source, /get_household_options/);
-  assert.match(source, /<select v-model="form\.household_registration"/);
+  assert.match(source, /<input v-model="form\.household_registration"/);
+  assert.match(source, /list="household-options"/);
+  assert.match(source, /非深农村/);
   assert.match(source, /系统判断/);
   assert.match(source, /社保基数/);
   assert.match(source, /公积金基数/);

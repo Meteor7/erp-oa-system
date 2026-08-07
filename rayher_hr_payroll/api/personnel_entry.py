@@ -48,8 +48,8 @@ def get_household_options():
 
 def _clean_household(value):
     household = str(value or "").strip()
-    if household and household not in HOUSEHOLD_OPTIONS:
-        frappe.throw(frappe._("户口信息必须从规定选项中选择。"))
+    if household and household_classification(household) is None:
+        frappe.throw(frappe._("户口信息无法判断为深户或非深户，请填写明确户籍地。"))
     return household
 
 

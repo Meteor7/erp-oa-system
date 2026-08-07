@@ -223,12 +223,32 @@ def test_household_options_are_explicit(monkeypatch):
     ]
 
 
+def test_save_employee_accepts_explicit_legacy_household(monkeypatch):
+    mod, frappe = _load_personnel_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.exists = lambda *args, **kwargs: True
+    saved = {}
+
+    class Doc:
+        name = "EMP-1"
+
+        def update(self, values):
+            saved.update(values)
+
+        def save(self, ignore_permissions=False):
+            return self
+
+    frappe.get_doc = lambda *_args, **_kwargs: Doc()
+    mod.save_employee(name="EMP-1", household_registration="湖北省襄阳市")
+    assert saved["household_registration"] == "湖北省襄阳市"
+
+
 def test_save_employee_rejects_unknown_household(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     frappe.db.exists = lambda *args, **kwargs: True
     try:
-        mod.save_employee(name="EMP-1", household_registration="深户")
+        mod.save_employee(name="EMP-1", household_registration="待确认")
     except RuleError as exc:
         assert "户口信息" in str(exc)
     else:
@@ -241,7 +261,11 @@ def test_list_employees_adds_household_classification(monkeypatch):
     frappe.get_all = lambda *args, **kwargs: [
         {"name": "A", "household_registration": "深圳"},
         {"name": "B", "household_registration": "广东省外农村"},
-        {"name": "C", "household_registration": None},
+        {"name": "C", "household_registration": "非深城镇"},
+        {"name": "D", "household_registration": "湖北省襄阳市"},
+        {"name": "E", "household_registration": None},
     ]
     rows = mod.list_employees()
-    assert [row["household_classification"] for row in rows] == ["深户", "非深户", "待完善"]
+    assert [row["household_classification"] for row in rows] == [
+        "深户", "非深户", "非深户", "非深户", "待完善"
+    ]

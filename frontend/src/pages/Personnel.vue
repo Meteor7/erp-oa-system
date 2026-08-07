@@ -150,7 +150,7 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 
 <section><h3 class="section-title">联系与银行</h3><div class="form-grid">
 <label class="label">联系电话<input v-model="form.cell_number" class="field"/></label>
-<label class="label">户口信息<select v-model="form.household_registration" class="field"><option value="">未维护</option><option v-for="x in householdOptions.data||[]" :key="x" :value="x">{{x}}</option></select></label>
+<label class="label">户口信息<input v-model="form.household_registration" class="field" list="household-options" placeholder="例如：深圳、非深农村、湖北省襄阳市"><datalist id="household-options"><option v-for="x in householdOptions.data||[]" :key="x" :value="x"/></datalist></label>
 <label class="label">工资卡银行开户行及支行<input v-model="form.bank_name" class="field"/></label>
 <label class="label">工资卡银行账号<input v-model="form.bank_ac_no" class="field"/></label>
 </div></section>

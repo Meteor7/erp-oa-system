@@ -8,10 +8,19 @@ HOUSEHOLD_OPTIONS = (
 
 
 def household_classification(value):
+    """Classify canonical choices, legacy labels, and explicit locations."""
+
     text = str(value or "").strip()
-    if text == "深圳":
+    if not text:
+        return None
+    compact = "".join(text.split())
+    if compact.startswith("非深") or "非深圳" in compact:
+        return False
+    if compact == "深户" or "深圳" in compact:
         return True
-    if text in HOUSEHOLD_OPTIONS[1:]:
+    if compact in HOUSEHOLD_OPTIONS[1:]:
+        return False
+    if any(marker in compact for marker in ("省", "市", "县", "自治州", "自治区")):
         return False
     return None
 
