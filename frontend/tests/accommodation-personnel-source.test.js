@@ -14,8 +14,8 @@ test("personnel page manages employee expense account category", () => {
   assert.ok(personnel.includes("销售费用"));
   assert.ok(personnel.includes("生产成本"));
   assert.match(personnel, /relieving_date/);
-  assert.ok(personnel.includes("离职日期"));
-  assert.match(personnel, /{{\s*e\.relieving_date\s*\|\|\s*""\s*}}/);
+  assert.ok(personnel.includes("离职时间"));
+  assert.match(personnel, /{{\s*e\.relieving_date\s*\|\|\s*["\']-["\']\s*}}/);
   assert.match(personnel, /designation/);
   assert.ok(personnel.includes("部门"));
   assert.ok(personnel.includes("职位"));
@@ -50,6 +50,6 @@ test("accommodation page captures room, total fees, personal fees, company fees,
   assert.ok(accommodation.includes("客房"));
   assert.ok(accommodation.includes("午休室"));
   assert.match(accommodation, /get_room_options/);
-  assert.match(accommodation, /<datalist[^>]+id="accommodation-room-options"/);
+  assert.match(accommodation, /<select v-model="form.room_no"/);
   assert.match(accommodation, /occupant_type/);
 });

@@ -13,7 +13,12 @@ class AccommodationDeduction(Document):
     def validate(self):
         self._canonical_period()
         self._check_amounts()
-        self.total_amount = (self.rent_amount or 0) + (self.water_amount or 0) + (self.electricity_amount or 0)
+        self.personal_total_amount = (self.personal_rent_amount or 0) + (self.personal_water_amount or 0) + (self.personal_electricity_amount or 0)
+        self.company_total_amount = (self.company_rent_amount or 0) + (self.company_water_amount or 0) + (self.company_electricity_amount or 0)
+        self.rent_amount = (self.personal_rent_amount or 0) + (self.company_rent_amount or 0)
+        self.water_amount = (self.personal_water_amount or 0) + (self.company_water_amount or 0)
+        self.electricity_amount = (self.personal_electricity_amount or 0) + (self.company_electricity_amount or 0)
+        self.total_amount = self.personal_total_amount + self.company_total_amount
         self._check_not_exported()
         self._check_period_lock()
         self._check_duplicate()
@@ -46,7 +51,7 @@ class AccommodationDeduction(Document):
         self.period = "%04d-%02d" % (int(m.group(1)), int(m.group(2)))
 
     def _check_amounts(self):
-        if min((self.rent_amount or 0), (self.water_amount or 0), (self.electricity_amount or 0)) < 0:
+        if min((self.personal_rent_amount or 0), (self.personal_water_amount or 0), (self.personal_electricity_amount or 0), (self.company_rent_amount or 0), (self.company_water_amount or 0), (self.company_electricity_amount or 0)) < 0:
             frappe.throw(frappe._("金额不能为负数。"))
 
     def _check_period_lock(self):

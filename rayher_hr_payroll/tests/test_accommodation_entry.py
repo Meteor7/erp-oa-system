@@ -26,7 +26,7 @@ def _install_fake_frappe(monkeypatch):
 
     frappe.throw = throw
     frappe.whitelist = whitelist
-    frappe.db = SimpleNamespace()
+    frappe.db = SimpleNamespace(exists=lambda *args, **kwargs: True)
     monkeypatch.setitem(sys.modules, "frappe", frappe)
     return frappe
 
@@ -74,6 +74,7 @@ def test_save_accommodation_persists_room_split_and_expense_category_snapshot(mo
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "list_accommodation", lambda period: [{"period": period, "ok": True}])
+    monkeypatch.setattr(mod, "get_room_occupants", lambda *args, **kwargs: [{"value": "employee:EMP-1"}])
 
     def get_value(doctype, name_or_filters, fieldname=None, **kwargs):
         if doctype == "Employee" and fieldname == "name":
@@ -91,6 +92,7 @@ def test_save_accommodation_persists_room_split_and_expense_category_snapshot(mo
         raise AssertionError((arg, name))
 
     frappe.db.get_value = get_value
+    frappe.get_all = lambda *args, **kwargs: [SimpleNamespace(end_date=None)]
     frappe.get_doc = get_doc
     frappe.db.commit = lambda: captured.setdefault("committed", True)
 
@@ -129,34 +131,42 @@ def test_save_accommodation_persists_room_split_and_expense_category_snapshot(mo
     assert captured["committed"] is True
 
 
-def test_save_accommodation_rejects_split_amounts_above_totals(monkeypatch):
-    mod, frappe = _load_accommodation_entry(monkeypatch)
+def test_guest_room_uses_sales_expense_category(monkeypatch):
+    mod, _frappe = _load_accommodation_entry(monkeypatch)
 
-    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
-    frappe.db.get_value = lambda doctype, name_or_filters, fieldname=None, **kwargs: "研发费用" if fieldname == "expense_account_category" else name_or_filters
-    frappe.get_doc = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not insert"))
+    values = mod._payload(
+        "2026-08", None, "客房", "A703",
+        0, 0, 0,
+        0, 0, 0,
+        0, 0, 0,
+    )
 
-    with pytest.raises(RuleError, match="不能超过总费用"):
-        mod.save_accommodation(
-            period="2026-07",
-            employee="EMP-1",
-            room_no="A315",
-            rent_amount=100,
-            water_amount=0,
-            electricity_amount=0,
-            personal_rent_amount=60,
-            company_rent_amount=50,
-        )
+    assert values["expense_account_category"] == "销售费用"
 
+def test_payload_derives_totals_from_personal_and_company_amounts(monkeypatch):
+    mod, _frappe = _load_accommodation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "_category_for_occupant", lambda *args: "研发费用")
 
-def test_save_special_occupant_uses_management_expense_without_employee(monkeypatch):
+    values = mod._payload(
+        "2026-07", "EMP-1", "员工", "A315",
+        1, 2, 3,
+        60, 0, 0,
+        50, 0, 0,
+    )
+
+    assert values["rent_amount"] == 110
+    assert values["total_amount"] == 110
+    assert values["personal_total_amount"] == 60
+    assert values["company_total_amount"] == 50
+
+def test_save_non_a703_guest_room_uses_management_expense_without_employee(monkeypatch):
     mod, frappe = _load_accommodation_entry(monkeypatch)
     captured = {}
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "list_accommodation", lambda period: [{"period": period}])
+    monkeypatch.setattr(mod, "get_room_occupants", lambda *args, **kwargs: [{"value": "special:客房"}])
 
     def get_value(doctype, filters, fieldname=None, **kwargs):
         if doctype == "Accommodation Deduction":
@@ -170,6 +180,7 @@ def test_save_special_occupant_uses_management_expense_without_employee(monkeypa
         return SimpleNamespace(insert=lambda ignore_permissions=False: None)
 
     frappe.db.get_value = get_value
+    frappe.get_all = lambda *args, **kwargs: [SimpleNamespace(end_date=None)]
     frappe.get_doc = get_doc
     frappe.db.commit = lambda: None
 
@@ -222,3 +233,97 @@ def test_get_accommodation_summary_groups_company_amount_by_employee_expense_cat
     assert summary[1]["company_total_amount"] == 110.0
     assert summary[2]["company_total_amount"] == 0.0
     assert summary[3]["company_total_amount"] == 0.0
+
+
+def test_delete_accommodation_deletes_existing_record_without_unrelated_room_validation(monkeypatch):
+    mod, frappe = _load_accommodation_entry(monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: captured.setdefault("lock", args))
+    frappe.db.get_value = lambda doctype, name, field: "2026-07"
+    frappe.delete_doc = lambda doctype, name, ignore_permissions=False: captured.setdefault(
+        "deleted", (doctype, name, ignore_permissions)
+    )
+    frappe.db.commit = lambda: captured.setdefault("committed", True)
+
+    result = mod.delete_accommodation("ACC-1")
+
+    assert result == {"ok": True}
+    assert captured["roles"] == ("System Manager",)
+    assert captured["lock"] == ("2026-07", "lock_timesheets", "工时")
+    assert captured["deleted"] == ("Accommodation Deduction", "ACC-1", True)
+    assert captured["committed"] is True
+
+def test_get_allowed_rooms_returns_only_effective_employee_room(monkeypatch):
+    mod, frappe = _load_accommodation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+
+    def get_all(doctype, filters=None, fields=None, order_by=None, **kwargs):
+        if doctype == "Accommodation Occupancy":
+            assert filters == {"employee": "HR-EMP-90015"}
+            return [
+                SimpleNamespace(room="B702", start_date=None, end_date=None, is_active=1),
+                SimpleNamespace(room="B407", start_date="2025-06-16", end_date="2026-06-18", is_active=0),
+            ]
+        if doctype == "Accommodation Room":
+            assert filters == {"name": ["in", ["B702"]], "is_active": 1}
+            return [{"name": "B702", "room_no": "B702", "room_type": "一房一厅", "monthly_rent": 1880}]
+        raise AssertionError(doctype)
+
+    frappe.get_all = get_all
+
+    rows = mod.get_allowed_rooms("2026-08", employee="HR-EMP-90015")
+
+    assert rows == [{"name": "B702", "room_no": "B702", "room_type": "一房一厅", "monthly_rent": 1880}]
+
+
+def test_save_rejects_room_outside_period_relation(monkeypatch):
+    mod, frappe = _load_accommodation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mod, "get_room_occupants", lambda *args, **kwargs: [{"value": "employee:OTHER"}])
+    frappe.db.exists = lambda *args, **kwargs: True
+
+    with pytest.raises(RuleError, match="没有此房间的有效入住关系"):
+        mod.save_accommodation(period="2026-08", employee="HR-EMP-90015", room_no="B407")
+
+def test_get_room_occupants_returns_hexie_for_b702(monkeypatch):
+    mod, frappe = _load_accommodation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.get_value = lambda *args, **kwargs: {"name": "B702", "room_purpose": ""}
+    frappe.get_all = lambda *args, **kwargs: [
+        {"employee": "HR-EMP-90015", "employee_name": "演示员工108", "start_date": "2024-08-24", "end_date": None, "is_active": 1}
+    ]
+
+    assert mod.get_room_occupants("2026-08", "B702") == [{
+        "value": "employee:HR-EMP-90015", "employee": "HR-EMP-90015",
+        "occupant_type": "员工", "label": "演示员工108", "start_date": "2024-08-24", "end_date": None,
+    }]
+
+
+def test_get_room_occupants_returns_vacant_choice_after_checkout(monkeypatch):
+    mod, frappe = _load_accommodation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.get_value = lambda *args, **kwargs: {"name": "B704", "room_purpose": ""}
+    frappe.get_all = lambda *args, **kwargs: [
+        {"employee": "HR-EMP-90019", "employee_name": "演示员工131", "start_date": "2025-06-09", "end_date": "2026-06-18", "is_active": 0}
+    ]
+
+    assert mod.get_room_occupants("2026-08", "B704") == [{
+        "value": "special:空", "employee": None, "occupant_type": "空",
+        "label": "空（空置房间费用）", "start_date": None, "end_date": None,
+    }]
+
+
+def test_get_room_occupants_keeps_both_people_during_turnover_month(monkeypatch):
+    mod, frappe = _load_accommodation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.get_value = lambda *args, **kwargs: {"name": "A203", "room_purpose": ""}
+    frappe.get_all = lambda *args, **kwargs: [
+        {"employee": "EMP-OLD", "employee_name": "旧入住人", "start_date": "2026-01-01", "end_date": "2026-08-15", "is_active": 0},
+        {"employee": "EMP-NEW", "employee_name": "新入住人", "start_date": "2026-08-16", "end_date": None, "is_active": 1},
+    ]
+
+    choices = mod.get_room_occupants("2026-08", "A203")
+    assert [choice["value"] for choice in choices] == ["employee:EMP-OLD", "employee:EMP-NEW"]
