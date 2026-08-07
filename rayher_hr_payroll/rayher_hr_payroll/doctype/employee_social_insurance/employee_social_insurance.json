@@ -1,0 +1,191 @@
+{
+ "doctype": "DocType",
+ "name": "Employee Social Insurance",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "SI-.{period}.-.####",
+ "title_field": "employee_name",
+ "fields": [
+  {
+   "fieldname": "period",
+   "label": "期间",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee",
+   "label": "员工",
+   "fieldtype": "Link",
+   "options": "Employee",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "label": "员工姓名",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "contribution_base",
+   "label": "缴费基数",
+   "fieldtype": "Currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee_pension_rate",
+   "label": "个人养老比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "company_pension_rate",
+   "label": "公司养老比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "employee_medical_rate",
+   "label": "个人医疗比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "company_medical_rate",
+   "label": "公司医疗比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "employee_unemployment_rate",
+   "label": "个人失业比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "company_unemployment_rate",
+   "label": "公司失业比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "company_injury_rate",
+   "label": "公司工伤比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "company_maternity_rate",
+   "label": "公司生育比例（%）",
+   "fieldtype": "Percent"
+  },
+  {
+   "fieldname": "employee_pension",
+   "label": "个人养老",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_pension",
+   "label": "公司养老",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee_medical",
+   "label": "个人医疗",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_medical",
+   "label": "公司医疗",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee_unemployment",
+   "label": "个人失业",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_unemployment",
+   "label": "公司失业",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_injury",
+   "label": "公司工伤",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_maternity",
+   "label": "公司生育",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee_total",
+   "label": "个人合计",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_total",
+   "label": "公司合计",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "状态",
+   "fieldtype": "Select",
+   "options": "Draft\nConfirmed",
+   "default": "Draft",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "remark",
+   "label": "备注",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "employee_period_key",
+   "label": "员工期间键",
+   "fieldtype": "Data",
+   "unique": 1,
+   "hidden": 1,
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  }
+ ]
+}
