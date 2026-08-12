@@ -1,0 +1,25 @@
+{
+ "doctype": "DocType",
+ "name": "RD Expense Account Path",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "hash",
+ "fields": [
+  {"fieldname":"path_hash","label":"路径哈希","fieldtype":"Data","reqd":1,"unique":1,"read_only":1,"hidden":1},
+  {"fieldname":"account_level_1","label":"1级费用科目","fieldtype":"Data","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"account_level_2","label":"2级费用科目","fieldtype":"Select","options":"人员人工费用\n直接投入费用\n折旧费用\n无形资产摊销\n其他相关费用\n委托研发","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"account_level_3","label":"3级费用科目","fieldtype":"Data","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"account_level_4","label":"4级费用科目","fieldtype":"Data","in_list_view":1},
+  {"fieldname":"business_category","label":"业务归类","fieldtype":"Select","options":"personnel\ndirect_input\ndepreciation\namortization\nother\ndesign","reqd":1,"read_only":1},
+  {"fieldname":"enabled","label":"启用","fieldtype":"Check","default":"1","in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"created_from","label":"创建来源","fieldtype":"Select","options":"系统初始化\nExcel确认\n手工维护","default":"手工维护","read_only":1},
+  {"fieldname":"sort_order","label":"排序","fieldtype":"Int","default":"0"}
+ ],
+ "permissions": [
+  {"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1},
+  {"role":"Accounts User","read":1,"write":1,"create":1,"delete":0,"report":1,"export":1}
+ ]
+}

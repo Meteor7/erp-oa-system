@@ -46,6 +46,8 @@ def test_save_expense_persists_direct_project_and_allows_same_amount_for_differe
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
+    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
 
     def get_value(doctype, filters, fieldname=None, **kwargs):
         if doctype == "RD Expense Import":
@@ -109,6 +111,8 @@ def test_save_expense_persists_four_level_accounts_and_derives_category(monkeypa
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
+    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
     frappe.db.get_value = lambda doctype, filters, fieldname=None, **kwargs: None
     frappe.db.exists = lambda doctype, name_or_filters=None: True if doctype == "Project" else False
     frappe.db.commit = lambda: None
@@ -149,6 +153,8 @@ def test_save_expense_persists_sabri_overseas_commissioned_research_account(monk
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
+    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
     frappe.db.get_value = lambda doctype, filters, fieldname=None, **kwargs: None
     frappe.db.exists = lambda doctype, name_or_filters=None: False
     frappe.db.commit = lambda: None
@@ -188,6 +194,8 @@ def test_save_expense_reopens_allocated_import_by_canceling_allocation_and_creat
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
+    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
 
     def get_value(doctype, filters, fieldname=None, **kwargs):
         if doctype == "RD Expense Import":
@@ -270,6 +278,8 @@ def test_save_expense_refetches_import_after_allocation_cancel_updates_timestamp
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
+    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
+    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
 
     frappe.db.get_value = lambda doctype, filters, fieldname=None, **kwargs: "EXP-OLD" if doctype == "RD Expense Import" else None
     frappe.db.exists = lambda doctype, name_or_filters=None: True if doctype == "Project" else False

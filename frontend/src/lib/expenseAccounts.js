@@ -84,68 +84,82 @@ function matchesPrefix(path, row, beforeLevel) {
   return true;
 }
 
-export function accountOptions(row = {}, level = 1) {
+export function accountOptions(row = {}, level = 1, paths = EXPENSE_ACCOUNT_PATHS) {
   const targetLevel = Number(level);
   if (targetLevel < 1 || targetLevel > 4) return [];
   return uniqueInOrder(
-    EXPENSE_ACCOUNT_PATHS
+    paths
       .filter((path) => matchesPrefix(path, row, targetLevel))
       .map((path) => valueAt(path, targetLevel))
   );
 }
 
-function exactThirdLevelPaths(row) {
-  return EXPENSE_ACCOUNT_PATHS.filter((path) => [1, 2, 3].every((level) => rowValue(row, level) === valueAt(path, level)));
+function exactThirdLevelPaths(row, paths) {
+  return paths.filter((path) => [1, 2, 3].every((level) => rowValue(row, level) === valueAt(path, level)));
 }
 
 function levelError(lineNo, level, message) {
   return '第 ' + lineNo + ' 行：' + level + '级费用科目' + message;
 }
 
-export function validateExpenseAccount(row = {}, lineNo = 1) {
+export function validateExpenseAccount(row = {}, lineNo = 1, paths = EXPENSE_ACCOUNT_PATHS, allowUnknown = false) {
   const errors = [];
   for (let level = 1; level <= 3; level += 1) {
     if (!rowValue(row, level)) errors.push(levelError(lineNo, level, '不能为空'));
   }
   if (errors.length) return errors;
 
-  for (let level = 1; level <= 3; level += 1) {
-    const options = accountOptions(row, level);
+  for (let level = 1; level <= 2; level += 1) {
+    const options = accountOptions(row, level, EXPENSE_ACCOUNT_PATHS);
     const value = rowValue(row, level);
     if (!options.includes(value)) {
-      if (level === 1) errors.push(levelError(lineNo, level, '不在分类表中'));
-      else errors.push(levelError(lineNo, level, '不属于上级费用科目'));
+      errors.push(levelError(lineNo, level, level === 1 ? '不在固定分类中' : '不属于固定的上级费用科目'));
       return errors;
     }
   }
 
-  const paths = exactThirdLevelPaths(row);
-  if (!paths.length) {
-    errors.push(levelError(lineNo, 3, '不在分类表中'));
-    return errors;
+  const matchingThird = exactThirdLevelPaths(row, paths);
+  if (!matchingThird.length) {
+    return allowUnknown ? [] : [levelError(lineNo, 3, '不在分类表中')];
   }
 
-  const fourthOptions = uniqueInOrder(paths.map((path) => path.account_level_4));
   const fourthValue = rowValue(row, 4);
-  if (fourthOptions.length) {
-    if (!fourthValue) {
-      errors.push(levelError(lineNo, 4, '必须选择：' + fourthOptions.join('、')));
-    } else if (!fourthOptions.includes(fourthValue)) {
-      errors.push(levelError(lineNo, 4, '不属于所选3级费用科目，可选：' + fourthOptions.join('、')));
-    }
-  } else if (fourthValue) {
-    errors.push(levelError(lineNo, 4, '应为空'));
-  }
+  const exact = matchingThird.some((path) => valueAt(path, 4) === fourthValue);
+  if (exact) return [];
 
-  return errors;
+  if (allowUnknown) return [];
+  const fourthOptions = uniqueInOrder(matchingThird.map((path) => path.account_level_4));
+  if (!fourthValue && fourthOptions.length) {
+    return [levelError(lineNo, 4, '必须选择：' + fourthOptions.join('、'))];
+  }
+  if (fourthValue) {
+    return [levelError(lineNo, 4, '不属于所选3级费用科目' + (fourthOptions.length ? '，可选：' + fourthOptions.join('、') : ''))];
+  }
+  return [levelError(lineNo, 4, '应为空')];
 }
 
-export function clearInvalidLowerLevels(row = {}, changedLevel = 1) {
+export function unknownExpenseAccountPaths(rows = [], paths = EXPENSE_ACCOUNT_PATHS) {
+  const known = new Set(paths.map((path) => LEVEL_FIELDS.map((_, index) => valueAt(path, index + 1)).join('\u001f')));
+  const seen = new Set();
+  const result = [];
+  rows.forEach((row) => {
+    if (validateExpenseAccount(row, 1, paths, true).length) return;
+    const normalized = Object.fromEntries(LEVEL_FIELDS.map((field, index) => [field, rowValue(row, index + 1)]));
+    const key = LEVEL_FIELDS.map((field) => normalized[field]).join('\u001f');
+    if (!known.has(key) && !seen.has(key)) {
+      seen.add(key);
+      result.push(normalized);
+    }
+  });
+  return result;
+}
+
+export function clearInvalidLowerLevels(row = {}, changedLevel = 1, paths = EXPENSE_ACCOUNT_PATHS) {
   for (let level = Number(changedLevel) + 1; level <= 4; level += 1) {
     const field = LEVEL_FIELDS[level - 1];
     const value = rowValue(row, level);
     if (!value) continue;
-    const options = accountOptions(row, level);
+    const options = accountOptions(row, level, paths);
     if (!options.includes(value)) row[field] = '';
   }
 }

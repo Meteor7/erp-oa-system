@@ -8,3 +8,4 @@ rayher_hr_payroll.patches.v1_0.sync_timesheet_supervisor_permissions
 rayher_hr_payroll.patches.v1_0.add_approval_center_safe_foundation
 rayher_hr_payroll.patches.v1_0.migrate_demo_executive_account
 rayher_hr_payroll.patches.v1_0.backfill_supplied_household_registration
+rayher_hr_payroll.patches.v1_0.bootstrap_rd_expense_account_paths

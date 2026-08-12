@@ -2,6 +2,9 @@ import json
 import frappe
 
 from rayher_hr_payroll.api._guards import require_rd_access, parse_period, ensure_not_locked, RD_FINANCE_ROLES
+from rayher_hr_payroll.rd_expense_accounts import (
+    catalog_paths, confirmed_new_paths, ensure_paths, path_dict
+)
 
 
 _EDITABLE_REPLACEMENT_STATUSES = {"Imported", "Allocated"}
@@ -198,12 +201,25 @@ def get_expense(period, scope="month"):
     }
 
 
+@frappe.whitelist()
+def get_expense_account_catalog():
+    require_rd_access(RD_FINANCE_ROLES)
+    return {"paths": [path_dict(path) for path in catalog_paths()]}
+
+
 @frappe.whitelist(methods=["POST"])
-def save_expense(period, items):
+def save_expense(period, items, new_account_paths=None):
     require_rd_access(RD_FINANCE_ROLES)
     ensure_not_locked(period, "lock_gl_import", "费用导入")
     if isinstance(items, str):
         items = json.loads(items)
+    if isinstance(new_account_paths, str):
+        new_account_paths = json.loads(new_account_paths)
+    try:
+        paths_to_create = confirmed_new_paths(items, catalog_paths(), new_account_paths or [])
+    except ValueError as error:
+        frappe.throw(str(error))
+    ensure_paths(paths_to_create, created_from="Excel确认")
     year, month = parse_period(period)
     rows = _expense_rows(items)
 

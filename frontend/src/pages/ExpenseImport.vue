@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { Card, Button, createResource } from 'frappe-ui';
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from '../lib/period';
-import { clearInvalidLowerLevels, accountOptions, validateExpenseAccount } from '../lib/expenseAccounts';
+import { EXPENSE_ACCOUNT_PATHS, clearInvalidLowerLevels, accountOptions, unknownExpenseAccountPaths, validateExpenseAccount } from '../lib/expenseAccounts';
 import { deriveExpenseCategory, filterNewExpenseRows, importWorkbookFile, parseExpensePaste, resolveProjectValue } from '../lib/expensePaste';
 import { exportTableWorkbook } from '../lib/tableExport';
 
@@ -27,6 +27,7 @@ const pasteErrors = ref([]);
 const pasteMessage = ref('');
 const workbookInput = ref(null);
 const workbookReplace = ref(false);
+const confirmNewAccounts = ref(false);
 
 const projects = createResource({
   url: 'rayher_hr_payroll.api.project_entry.list_projects',
@@ -43,10 +44,18 @@ const loader = createResource({
   },
   auto: true,
 });
+const accountCatalog = createResource({
+  url: 'rayher_hr_payroll.api.expense_entry.get_expense_account_catalog',
+  method: 'GET',
+  auto: true,
+});
 const saver = createResource({ url: 'rayher_hr_payroll.api.expense_entry.save_expense' });
 
 const isYearScope = computed(() => periodScope.value === 'year');
 const projectOptions = computed(() => (projects.data || []).filter((project) => project.status !== 'Cancelled'));
+const catalogReady = computed(() => Array.isArray(accountCatalog.data?.paths));
+const expenseAccountPaths = computed(() => catalogReady.value ? accountCatalog.data.paths : EXPENSE_ACCOUNT_PATHS);
+const pendingAccountPaths = computed(() => unknownExpenseAccountPaths(items.value, expenseAccountPaths.value));
 const fmt = (n) => (n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const total = computed(() => items.value.reduce((s, r) => s + Number(r.amount || 0), 0));
 const visiblePasteErrors = computed(() => pasteErrors.value.slice(0, 5));
@@ -163,7 +172,7 @@ function applyImportedRows(result, replace = false, source = '导入') {
 
 function importPastedRows(replace = false) {
   errMsg.value = '';
-  const result = parseExpensePaste(pasteText.value, projectOptions.value);
+  const result = parseExpensePaste(pasteText.value, projectOptions.value, expenseAccountPaths.value);
   applyImportedRows(result, replace, '已导入');
   if (!pasteErrors.value.length) pasteText.value = '';
 }
@@ -179,7 +188,7 @@ async function importWorkbookRows(event) {
   event.target.value = '';
   if (!file) return;
   try {
-    const result = await importWorkbookFile(file, projectOptions.value);
+    const result = await importWorkbookFile(file, projectOptions.value, expenseAccountPaths.value);
     applyImportedRows(result, workbookReplace.value, 'Excel 已导入');
   } catch (error) {
     pasteErrors.value = [(error && error.message) || 'Excel 导入失败'];
@@ -191,11 +200,11 @@ function accountDatalistId(index, level) {
 }
 
 function accountLevelOptions(row, level) {
-  return accountOptions(row, level);
+  return accountOptions(row, level, expenseAccountPaths.value);
 }
 
 function syncAccountLevels(row, level) {
-  clearInvalidLowerLevels(row, level);
+  clearInvalidLowerLevels(row, level, expenseAccountPaths.value);
 }
 
 function syncAllocationType(row) {
@@ -205,7 +214,7 @@ function syncAllocationType(row) {
 function rowValidationErrors(row, index) {
   const lineNo = index + 1;
   const errors = [];
-  errors.push(...validateExpenseAccount(row, lineNo));
+  errors.push(...validateExpenseAccount(row, lineNo, expenseAccountPaths.value, true));
   const rawAmount = String(row.amount ?? '').trim();
   const amount = Number(rawAmount);
   if (!rawAmount || !Number.isFinite(amount)) errors.push('第 ' + lineNo + ' 行：费用金额必须是有效数字');
@@ -234,18 +243,28 @@ function payloadRows() {
 }
 
 async function save() {
-  if (isYearScope.value) return;
+  if (isYearScope.value || !catalogReady.value) return;
   errMsg.value = '';
   const errors = items.value.flatMap((row, index) => rowValidationErrors(row, index));
   if (errors.length) {
     errMsg.value = errors.slice(0, 5).join('；') + (errors.length > 5 ? '；还有 ' + (errors.length - 5) + ' 条错误' : '');
     return;
   }
+  if (pendingAccountPaths.value.length && !confirmNewAccounts.value) {
+    errMsg.value = '请先确认新增下方列出的三级/四级费用科目';
+    return;
+  }
   saving.value = true;
   try {
-    const d = await saver.submit({ period: period.value, items: JSON.stringify(payloadRows()) });
+    const d = await saver.submit({
+      period: period.value,
+      items: JSON.stringify(payloadRows()),
+      new_account_paths: JSON.stringify(pendingAccountPaths.value),
+    });
     status.value = d.status;
     items.value = normalizeRows(d.items || []);
+    confirmNewAccounts.value = false;
+    await accountCatalog.reload();
   } catch (e) {
     errMsg.value = serverMessage(saver.error || e, '保存失败');
   } finally {
@@ -281,6 +300,7 @@ async function exportCurrentExpense() {
 }
 watch(period, () => loader.reload());
 watch(periodScope, () => loader.reload());
+watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|')).join('||'), () => { confirmNewAccounts.value = false; });
 </script>
 
 <template>
@@ -295,7 +315,7 @@ watch(periodScope, () => loader.reload());
       <Button variant='subtle' :loading='exporting' :disabled='!items.length' @click='exportCurrentExpense'>导出Excel</Button>
     </div>
 
-    <div v-if='loader.loading' class='text-gray-500 text-sm py-4'>加载中…</div>
+    <div v-if='loader.loading || accountCatalog.loading' class='text-gray-500 text-sm py-4'>加载中…</div>
     <template v-else>
       <div v-if='!isYearScope' class='rounded border border-gray-200 bg-gray-50 p-3 mb-4'>
         <div class='flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-2'>
@@ -319,7 +339,19 @@ watch(periodScope, () => loader.reload());
         </div>
       </div>
 
-      <div class='overflow-x-auto rounded border border-gray-200 bg-white'>
+
+      <div v-if="pendingAccountPaths.length" class="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <div class="font-medium">检测到 {{ pendingAccountPaths.length }} 个新三级/四级费用科目</div>
+        <ul class="mt-2 list-disc pl-5 space-y-1">
+          <li v-for="path in pendingAccountPaths" :key="[path.account_level_1, path.account_level_2, path.account_level_3, path.account_level_4].join('|')">{{ [path.account_level_1, path.account_level_2, path.account_level_3, path.account_level_4].filter(Boolean).join(' → ') }}</li>
+        </ul>
+        <label class="mt-3 flex items-start gap-2">
+          <input v-model="confirmNewAccounts" type="checkbox" class="mt-0.5 rounded border-amber-400" />
+          <span>我已核对，保存时将创建这些科目并导入本月费用。</span>
+        </label>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-gray-200 bg-white">
         <table class='w-full min-w-[1500px] text-sm whitespace-nowrap'>
           <thead class='text-gray-500 border-b bg-gray-50'>
             <tr>

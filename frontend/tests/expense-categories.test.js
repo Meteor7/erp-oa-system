@@ -76,3 +76,15 @@ test('expense account validation accepts workbook paths and rejects mismatched l
     account_level_4: '',
   }, 4).join('\n'), /第 4 行：4级费用科目必须选择/);
 });
+
+test('dynamic lower-level paths can be discovered without relaxing fixed levels', async () => {
+  const module = await import('../src/lib/expenseAccounts.js');
+  const paths = [...EXPENSE_ACCOUNT_PATHS, {
+    account_level_1: '研发支出', account_level_2: '人员人工费用',
+    account_level_3: '年终一次性奖金', account_level_4: '',
+  }];
+  const row = { account_level_1: '研发支出', account_level_2: '人员人工费用', account_level_3: '年终一次性奖金', account_level_4: '' };
+  assert.deepEqual(module.validateExpenseAccount(row, 1, paths), []);
+  assert.deepEqual(module.unknownExpenseAccountPaths([row], EXPENSE_ACCOUNT_PATHS), [row]);
+  assert.match(module.validateExpenseAccount({ ...row, account_level_2: '新增二级' }, 2, EXPENSE_ACCOUNT_PATHS, true).join('\n'), /2级费用科目/);
+});

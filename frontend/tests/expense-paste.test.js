@@ -102,9 +102,8 @@ test('reports expense account hierarchy mismatches before import', () => {
 
   const result = parseExpensePaste(pasted, projects);
 
-  assert.deepEqual(result.rows, []);
-  assert.match(result.errors.join('\n'), /第 1 行：4级费用科目应为空/);
-  assert.match(result.errors.join('\n'), /第 2 行：4级费用科目必须选择/);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.rows.length, 2);
 });
 
 test('skips rows already present while preserving repeated rows inside one new import', () => {
@@ -122,4 +121,11 @@ test('skips rows already present while preserving repeated rows inside one new i
   const originalDuplicates = expensePaste.filterNewExpenseRows([], [saved, { ...saved }]);
   assert.equal(originalDuplicates.rows.length, 2);
   assert.equal(originalDuplicates.skipped, 0);
+});
+
+
+test('accepts an unknown third-level account for confirmation when fixed levels are valid', () => {
+  const result = parseExpensePaste('研发支出\t人员人工费用\t年终一次性奖金\t\t100\t公共费用', projects, []);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.rows[0].account_level_3, '年终一次性奖金');
 });

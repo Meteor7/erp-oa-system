@@ -1,4 +1,4 @@
-import { validateExpenseAccount } from './expenseAccounts.js';
+import { EXPENSE_ACCOUNT_PATHS, validateExpenseAccount } from './expenseAccounts.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -194,7 +194,7 @@ function parseAmount(value) {
   return Number.isFinite(amount) ? amount : null;
 }
 
-function normalizeRawRow(rawRow, projects, lineNo) {
+function normalizeRawRow(rawRow, projects, lineNo, accountPaths) {
   const amount = parseAmount(rawRow.amount);
   const row = {
     voucher_no: clean(rawRow.voucher_no),
@@ -208,7 +208,7 @@ function normalizeRawRow(rawRow, projects, lineNo) {
   row.category = deriveExpenseCategory(row);
 
   const rowErrors = [];
-  rowErrors.push(...validateExpenseAccount(row, lineNo));
+  rowErrors.push(...validateExpenseAccount(row, lineNo, accountPaths, true));
   if (amount === null) rowErrors.push('第 ' + lineNo + ' 行：费用金额必须是有效数字');
 
   const project = resolveProjectValue(row.project_text, projects);
@@ -226,7 +226,7 @@ function normalizeRawRow(rawRow, projects, lineNo) {
   };
 }
 
-export function parseExpenseTableRows(tableRows, projects = []) {
+export function parseExpenseTableRows(tableRows, projects = [], accountPaths = EXPENSE_ACCOUNT_PATHS) {
   const rows = [];
   const errors = [];
   let map = null;
@@ -245,7 +245,7 @@ export function parseExpenseTableRows(tableRows, projects = []) {
     seenContentRow = true;
     const lineNo = index + 1;
     const rawRow = map ? rowFromHeader(cells, map) : rowFromPosition(cells);
-    const result = normalizeRawRow(rawRow, projects, lineNo);
+    const result = normalizeRawRow(rawRow, projects, lineNo, accountPaths);
     if (result.errors.length) {
       errors.push(...result.errors);
       return;
@@ -256,13 +256,13 @@ export function parseExpenseTableRows(tableRows, projects = []) {
   return { rows: errors.length ? [] : rows, errors };
 }
 
-export function parseExpensePaste(text, projects = []) {
+export function parseExpensePaste(text, projects = [], accountPaths = EXPENSE_ACCOUNT_PATHS) {
   const lines = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const tableRows = lines.map(splitLine);
-  return parseExpenseTableRows(tableRows, projects);
+  return parseExpenseTableRows(tableRows, projects, accountPaths);
 }
 
-export async function importWorkbookFile(file, projects = []) {
+export async function importWorkbookFile(file, projects = [], accountPaths = EXPENSE_ACCOUNT_PATHS) {
   const XLSX = await import('xlsx');
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: 'array' });
@@ -270,5 +270,5 @@ export async function importWorkbookFile(file, projects = []) {
   if (!firstSheetName) return { rows: [], errors: ['Excel 文件没有工作表'] };
   const worksheet = workbook.Sheets[firstSheetName];
   const tableRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-  return parseExpenseTableRows(tableRows, projects);
+  return parseExpenseTableRows(tableRows, projects, accountPaths);
 }
