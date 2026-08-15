@@ -33,6 +33,8 @@ from rayher_hr_payroll.oa_role_resolver import (
 )
 from rayher_hr_payroll.procurement_workflow import (
     ProcurementWorkflowError,
+    contract_copy_recipients,
+    plan_contract_delivery,
     validate_payment_submission,
     validate_procurement_submission,
 )
@@ -674,8 +676,15 @@ def _require_leave_accounts(steps, copied_to):
 
 
 def _notify_copied_users(doc):
-    if getattr(doc, "request_type", None) != REQUEST_LEAVE:
+    request_type = getattr(doc, "request_type", None)
+    if request_type not in {REQUEST_LEAVE, REQUEST_PROCUREMENT}:
         return
+    subject_prefix = "请假申请抄送" if request_type == REQUEST_LEAVE else "采购合同交期抄送"
+    content = (
+        "请假申请 {0} 已提交，现抄送给你查阅。".format(doc.name)
+        if request_type == REQUEST_LEAVE
+        else "采购申请 {0} 的合同交期已确认，现抄送给你查阅。".format(doc.name)
+    )
     for row in _parse_json(getattr(doc, "copied_to", None), default=[]) or []:
         user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
         if not user:
@@ -687,8 +696,8 @@ def _notify_copied_users(doc):
                 "type": "Alert",
                 "document_type": "OA Approval Request",
                 "document_name": doc.name,
-                "subject": "请假申请抄送：" + str(doc.name),
-                "email_content": "请假申请 " + str(doc.name) + " 已提交，现抄送给你查阅。",
+                "subject": subject_prefix + "：" + str(doc.name),
+                "email_content": content,
             }
         ).insert(ignore_permissions=True)
 
@@ -1022,6 +1031,9 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "paid_on": getattr(doc, "paid_on", None),
         "reason": doc.reason,
         "business_status": getattr(doc, "business_status", None) or "",
+        "contract_delivery_date": getattr(doc, "contract_delivery_date", None) or "",
+        "pending_contract_delivery_date": getattr(doc, "pending_contract_delivery_date", None) or "",
+        "delivery_change_reason": getattr(doc, "delivery_change_reason", None) or "",
         "procurement_scope": getattr(doc, "procurement_scope", None),
         "expected_delivery_date": getattr(doc, "expected_delivery_date", None),
         "project": getattr(doc, "project", None),
@@ -1105,6 +1117,8 @@ def _advance_after_step(doc, step):
         doc.workflow_status = STATUS_COMPLETED
         doc.current_step_index = 0
         doc.current_step_label = ""
+        if doc.request_type == REQUEST_PROCUREMENT and _clean(getattr(doc, "business_status", None)) == "待审批":
+            doc.business_status = "合同待登记"
         return
     doc.workflow_status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
     doc.current_step_index = next_step.step_index
@@ -1901,6 +1915,140 @@ def submit_request(name, no_invoice_reason=None):
         return _summarize_doc(doc)
 
 
+def _step_snapshot(doc, prefix, role_label):
+    for step in list(getattr(doc, "steps", []) or []):
+        if _clean(getattr(step, "label", None)).startswith(prefix):
+            users = _parse_json_list(getattr(step, "approvers", None))
+            if users:
+                return {"label": role_label, "user": _clean(users[0])}
+    return {"label": role_label, "user": ""}
+
+
+def _contract_copy_snapshot(doc):
+    return {
+        "applicant": {"label": "申请人", "user": _clean(getattr(doc, "owner", None))},
+        "purchaser": {"label": "采购经办人", "user": _clean(getattr(doc, "purchaser_user", None))},
+        "pmc": _step_snapshot(doc, "PMC", "PMC"),
+        "supervisor": _step_snapshot(doc, "直属主管", "直属上级"),
+        "project_owner": {"label": "项目主管", "user": _clean(getattr(doc, "project_owner", None))},
+    }
+
+
+def _require_contract_registration_access(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
+        frappe.throw(frappe._("只有采购申请可以登记合同交期。"))
+    if getattr(doc, "workflow_status", None) != STATUS_COMPLETED:
+        frappe.throw(frappe._("采购审批完成后才能登记合同交期。"))
+    if _clean(getattr(doc, "business_status", None)) == "合同交期待确认":
+        frappe.throw(frappe._("当前合同交期仍在确认中，不能重复登记。"))
+    user = _clean(getattr(frappe.session, "user", None))
+    allowed = {_clean(getattr(doc, "owner", None)), _clean(getattr(doc, "purchaser_user", None))}
+    roles = set(frappe.get_roles(user))
+    if user not in allowed and not (roles & {"System Manager", "Purchase User", "Purchase Manager"}):
+        frappe.throw(frappe._("只有申请人、采购经办人或采购管理人员可以登记合同交期。"))
+
+
+def _append_contract_delivery_steps(doc, role_keys, contract_date):
+    pmc = _step_snapshot(doc, "PMC", "PMC")
+    role_rows = {
+        "pmc": (pmc, "合同交期确认-PMC"),
+        "project_owner": ({"label": "项目主管", "user": _clean(getattr(doc, "project_owner", None))}, "合同交期确认-项目主管"),
+    }
+    next_index = max([int(getattr(row, "step_index", 0) or 0) for row in list(getattr(doc, "steps", []) or [])] or [0]) + 1
+    appended = []
+    seen_users = set()
+    for role_key in role_keys:
+        role, label_prefix = role_rows[role_key]
+        user = _clean(role.get("user"))
+        if not user:
+            frappe.throw(frappe._("合同交期确认缺少{0}有效账号。".format(role.get("label") or role_key)))
+        if user in seen_users:
+            continue
+        seen_users.add(user)
+        offset = len(appended)
+        if role_key == "project_owner":
+            display_name = _clean(getattr(doc, "project_owner_name", None)) or "项目主管"
+        else:
+            source = next((row for row in doc.steps if _clean(getattr(row, "label", None)).startswith("PMC")), None)
+            display_name = _clean(source.label).split("：", 1)[1] if source and "：" in _clean(source.label) else "PMC"
+        index = next_index + offset
+        row = doc.append("steps", {
+            "step_index": index,
+            "step_key": str(uuid5(NAMESPACE_URL, "{0}:contract:{1}:{2}:{3}".format(doc.name, contract_date, index, role_key))),
+            "origin": "contract_delivery",
+            "parent_step_key": "",
+            "add_sign_position": "",
+            "add_sign_opinion": "",
+            "added_by": _clean(getattr(frappe.session, "user", None)),
+            "added_on": now_datetime(),
+            "label": label_prefix + "：" + display_name,
+            "mode": "approve",
+            "approvers": _json_list([user]),
+            "status": STATUS_PENDING if offset == 0 else STATUS_WAIT_FLOW,
+            "approved_by": _json_list([]),
+            "action_by": "",
+            "acted_on": None,
+            "note": "",
+        })
+        appended.append(row)
+    doc.workflow_status = STATUS_PENDING
+    doc.current_step_index = appended[0].step_index
+    doc.current_step_label = appended[0].label
+    return appended
+
+
+def _finalize_contract_delivery_if_complete(doc, completed_step):
+    if _clean(getattr(completed_step, "origin", None)) != "contract_delivery":
+        return False
+    if getattr(doc, "workflow_status", None) != STATUS_COMPLETED:
+        return False
+    pending_date = _clean(getattr(doc, "pending_contract_delivery_date", None))
+    if not pending_date:
+        return False
+    previous = _clean(getattr(doc, "contract_delivery_date", None))
+    doc.contract_delivery_date = pending_date
+    doc.pending_contract_delivery_date = ""
+    doc.business_status = "采购执行中"
+    doc.copied_to = _json_list(contract_copy_recipients(_contract_copy_snapshot(doc)))
+    _append_request_event(doc, "确认合同交期", "合同交期待确认", "采购执行中", getattr(doc, "delivery_change_reason", None), {"previous_contract_delivery_date": previous, "contract_delivery_date": pending_date})
+    return True
+
+
+@frappe.whitelist(methods=["POST"])
+def register_contract_delivery(name, contract_delivery_date, reason=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_contract_registration_access(doc)
+        try:
+            plan = plan_contract_delivery(getattr(doc, "expected_delivery_date", None), contract_delivery_date, getattr(doc, "procurement_scope", None), reason)
+        except ProcurementWorkflowError as error:
+            frappe.throw(frappe._(str(error)))
+        previous = _clean(getattr(doc, "contract_delivery_date", None))
+        old_business_status = _clean(getattr(doc, "business_status", None))
+        doc.delivery_change_reason = _bounded_optional_text(reason, "交期变更原因", 500)
+        details = {"previous_contract_delivery_date": previous, "requested_contract_delivery_date": plan["contract_delivery_date"], "requires_reapproval": plan["requires_reapproval"]}
+        if plan["requires_reapproval"]:
+            doc.pending_contract_delivery_date = plan["contract_delivery_date"]
+            doc.business_status = "合同交期待确认"
+            _append_contract_delivery_steps(doc, plan["approval_roles"], plan["contract_delivery_date"])
+            _append_request_event(doc, "登记延期合同交期", old_business_status, doc.business_status, doc.delivery_change_reason, details)
+            notify = False
+        else:
+            doc.contract_delivery_date = plan["contract_delivery_date"]
+            doc.pending_contract_delivery_date = ""
+            doc.business_status = "采购执行中"
+            doc.copied_to = _json_list(contract_copy_recipients(_contract_copy_snapshot(doc)))
+            _append_request_event(doc, "确认合同交期", old_business_status, doc.business_status, doc.delivery_change_reason, details)
+            notify = True
+        _save_document(doc)
+        _sync_assignments_after_save(doc)
+        if notify:
+            _notify_copied_users(doc)
+        return _summarize_doc(doc)
+
+
 @frappe.whitelist()
 def list_requests(view="mine", limit=50, request_type=None, name=None):
     allowed_types = visible_request_types(REQUEST_TYPES)
@@ -2492,6 +2640,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
         from_status = doc.workflow_status
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
+        contract_delivery_confirmed = _finalize_contract_delivery_if_complete(doc, step)
         if step.mode == "handle" and doc.request_type == REQUEST_EXPENSE_PAYMENT:
             doc.workflow_status = STATUS_PAID
             doc.paid_by = actor
@@ -2499,6 +2648,8 @@ def action_request(name, action="approve", note=None, reject_target=None):
             _append_request_event(doc, "确认付款", from_status, STATUS_PAID, note)
         _save_document(doc)
         _sync_assignments_after_save(doc)
+        if contract_delivery_confirmed:
+            _notify_copied_users(doc)
         return _summarize_doc(doc, authorized_expense_lines)
 
 

@@ -35,7 +35,8 @@ SERVER_FIELDS = {
     "employee_name", "department", "company", "copied_to", "current_step_index",
     "current_step_label", "currency", "paid_by", "paid_on", "operation_log",
     "approved_amount_snapshot", "source_modified", "payment_source_kind",
-    "business_status", "project_owner", "project_owner_name", "arrival_status",
+    "business_status", "project_owner", "project_owner_name", "contract_delivery_date",
+    "pending_contract_delivery_date", "delivery_change_reason", "arrival_status",
     "inspection_status", "prepayment_writeoff_status", "received_quantity",
 }
 ALLOWED_PAYLOAD_FIELDS = {

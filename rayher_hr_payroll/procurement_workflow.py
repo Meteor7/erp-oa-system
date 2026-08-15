@@ -161,3 +161,42 @@ def derive_prepayment_overdue(doc, *, today=None):
         return False
     expected_date = _date(expected, "预计到货日期")
     return expected_date < (today or date.today())
+
+def plan_contract_delivery(expected_delivery_date, contract_delivery_date, procurement_scope, reason=None):
+    expected = _date(expected_delivery_date, "意向交期")
+    contract = _date(contract_delivery_date, "合同约定交期")
+    scope = _text(procurement_scope)
+    if scope not in PROCUREMENT_SCOPES:
+        raise ProcurementWorkflowError("采购范围必须选择项目采购或非项目采购")
+    requires_reapproval = contract > expected
+    if requires_reapproval and not _text(reason):
+        raise ProcurementWorkflowError("合同交期晚于意向交期时必须填写变更原因")
+    approval_roles = []
+    if requires_reapproval:
+        approval_roles.append("pmc")
+        if scope == PROJECT_PROCUREMENT:
+            approval_roles.append("project_owner")
+    return {
+        "contract_delivery_date": contract.isoformat(),
+        "requires_reapproval": requires_reapproval,
+        "approval_roles": approval_roles,
+    }
+
+
+def contract_copy_recipients(snapshot):
+    recipients = []
+    by_user = {}
+    for role_key in ("applicant", "purchaser", "pmc", "supervisor", "project_owner"):
+        role = (snapshot or {}).get(role_key) or {}
+        user = _text(_get(role, "user"))
+        label = _text(_get(role, "label")) or role_key
+        if not user:
+            continue
+        if user not in by_user:
+            row = {"label": label, "user": user, "roles": [label]}
+            by_user[user] = row
+            recipients.append(row)
+        elif label not in by_user[user]["roles"]:
+            by_user[user]["roles"].append(label)
+            by_user[user]["label"] = "、".join(by_user[user]["roles"])
+    return recipients

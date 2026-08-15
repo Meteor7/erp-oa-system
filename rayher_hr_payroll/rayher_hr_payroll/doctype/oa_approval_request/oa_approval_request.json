@@ -36,6 +36,7 @@
     "non_project_department",
     "purchaser_user",
     "contract_delivery_date",
+    "pending_contract_delivery_date",
     "delivery_change_reason",
     "purchase_method",
     "supplier",
@@ -257,12 +258,20 @@
     {
       "fieldname": "contract_delivery_date",
       "fieldtype": "Date",
-      "label": "Contract Delivery Date"
+      "label": "Contract Delivery Date",
+      "read_only": 1
+    },
+    {
+      "fieldname": "pending_contract_delivery_date",
+      "fieldtype": "Date",
+      "label": "Pending Contract Delivery Date",
+      "read_only": 1
     },
     {
       "fieldname": "delivery_change_reason",
       "fieldtype": "Small Text",
-      "label": "Delivery Change Reason"
+      "label": "Delivery Change Reason",
+      "read_only": 1
     },
     {
       "fieldname": "purchase_method",
