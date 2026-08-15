@@ -63,6 +63,7 @@ def restore_service_frappe(monkeypatch):
     monkeypatch.setattr(oa_entry, "frappe", frappe_stub)
     monkeypatch.setattr(oa_entry, "now_datetime", frappe_stub.utils.now_datetime)
     monkeypatch.setattr(oa_entry, "_resolve_approval_roles", lambda *_args, **_kwargs: _procurement_role_snapshots())
+    monkeypatch.setattr(oa_entry, "sync_current_assignments", lambda current: None)
     frappe_stub.session.user = "alice@example.com"
     frappe_stub.get_roles = lambda user=None: ["Employee"]
     frappe_stub.local = types.SimpleNamespace(site="test.localhost")
@@ -2514,17 +2515,21 @@ def test_action_request_requires_target_and_reopens_earlier_step(monkeypatch):
         _workflow_step(2, "step-2", "manager", oa_entry.STATUS_PENDING, "manager@example.com"),
     ]
     doc = _dynamic_workflow_doc(steps, 2)
+    doc.doctype = service.REQUEST_DOCTYPE
     object.__setattr__(doc, "environment", environment)
     environment.committed[doc.name] = doc
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["manager@example.com"])
     monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"manager@example.com"})
+    assignment_syncs = []
+    monkeypatch.setattr(oa_entry, "sync_current_assignments", lambda current: assignment_syncs.append(current.current_step_index), raising=False)
     with pytest.raises(ValidationError):
         oa_entry.action_request(doc.name, "reject", "fix it")
     result = oa_entry.action_request(doc.name, "reject", "fix it", "step-1")
     assert doc.current_step_index == 1
     assert doc.workflow_status == oa_entry.STATUS_PENDING
     assert result["status"] == oa_entry.STATUS_PENDING
+    assert assignment_syncs == [1]
 
 
 def test_add_sign_request_inserts_resolved_enabled_user_under_request_lock(monkeypatch):
@@ -3108,6 +3113,8 @@ def test_final_handle_step_confirms_payment_atomically(monkeypatch):
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["person067@staff.example.invalid"])
     monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: False)
+    assignment_syncs = []
+    monkeypatch.setattr(oa_entry, "sync_current_assignments", lambda current: assignment_syncs.append(current.workflow_status), raising=False)
 
     oa_entry.action_request(doc.name, "approve", note="已核对付款")
 
@@ -3117,6 +3124,7 @@ def test_final_handle_step_confirms_payment_atomically(monkeypatch):
     assert doc.paid_by == "person067@staff.example.invalid"
     assert doc.paid_on is not None
     assert json.loads(doc.operation_log)[-1]["action"] == "确认付款"
+    assert assignment_syncs == [oa_entry.STATUS_PAID]
 
 
 def _procurement_role_snapshots():
@@ -3169,6 +3177,8 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
         "supervisor_decision": "approve", "supervisor_path": ["直属领导"],
     })
     monkeypatch.setattr(oa_entry, "_resolve_approval_roles", lambda *_args, **_kwargs: _procurement_role_snapshots())
+    assignment_syncs = []
+    monkeypatch.setattr(oa_entry, "sync_current_assignments", lambda current: assignment_syncs.append((current.name, current.current_step_label)), raising=False)
     monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current, authorized_expense_lines=None: {
         "workflow_status": current.workflow_status,
         "business_status": current.business_status,
@@ -3180,6 +3190,7 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
     assert result["current_step_label"] == "PMC：演示员工178"
     assert [row.label for row in doc.steps] == ["PMC：演示员工178", "直属主管：直属领导", "项目主管：项目主管"]
     assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
+    assert assignment_syncs == [("PROC-1", "PMC：演示员工178")]
 
 
 def test_procurement_submit_rejects_other_users_and_duplicate_submission(monkeypatch):

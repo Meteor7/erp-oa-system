@@ -37,6 +37,7 @@ from rayher_hr_payroll.procurement_workflow import (
     validate_procurement_submission,
 )
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
+from rayher_hr_payroll.oa_assignments import sync_current_assignments
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
     EXCLUDED_MANAGERS,
@@ -123,6 +124,12 @@ def _save_document(doc):
         with authorized_oa_action():
             return doc.save(ignore_permissions=True)
     return doc.save(ignore_permissions=True)
+
+
+def _sync_assignments_after_save(doc):
+    if getattr(doc, "doctype", None) == "OA Approval Request":
+        sync_current_assignments(doc)
+    return doc
 
 
 def _insert_document(doc):
@@ -1557,6 +1564,8 @@ def create_request(
     if requested_submit:
         _submit_draft(doc)
     _save_document(doc)
+    if requested_submit:
+        _sync_assignments_after_save(doc)
     return _summarize_doc(doc)
 
 
@@ -1887,6 +1896,7 @@ def submit_request(name, no_invoice_reason=None):
             doc.no_invoice_reason = supplied_reason
         _submit_draft(doc)
         _save_document(doc)
+        _sync_assignments_after_save(doc)
         _notify_copied_users(doc)
         return _summarize_doc(doc)
 
@@ -2426,6 +2436,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
     if _to_bool(submit):
         _submit_draft(doc)
         _save_document(doc)
+        _sync_assignments_after_save(doc)
     for cd in docs:
         cd.status = CD_PUSHED
         cd.linked_request = doc.name
@@ -2454,6 +2465,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
             )
             _reject_to_target(doc, step, reject_target, actor, note)
             _save_document(doc)
+            _sync_assignments_after_save(doc)
             return _summarize_doc(doc, authorized_expense_lines)
         if action != "approve":
             frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
@@ -2474,6 +2486,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
             if note:
                 step.note = note
             _save_document(doc)
+            _sync_assignments_after_save(doc)
             return _summarize_doc(doc, authorized_expense_lines)
         done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
         from_status = doc.workflow_status
@@ -2485,6 +2498,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
             doc.paid_on = step.acted_on or now_datetime()
             _append_request_event(doc, "确认付款", from_status, STATUS_PAID, note)
         _save_document(doc)
+        _sync_assignments_after_save(doc)
         return _summarize_doc(doc, authorized_expense_lines)
 
 
@@ -2507,6 +2521,7 @@ def mark_paid(name, note=None):
             doc.reason = ((doc.reason or "") + "\n" + "\u4ed8\u6b3e\u5907\u6ce8\uff1a" + note).strip()
         _append_request_event(doc, "标记已付款", old_status, STATUS_PAID, note)
         _save_document(doc)
+        _sync_assignments_after_save(doc)
         return _summarize_doc(doc)
 
 def _reset_request_to_draft(doc, note=""):
@@ -2619,6 +2634,7 @@ def withdraw_request(name, note=None):
             return _summarize_doc(doc)
         _reset_request_to_draft(doc, note)
         _save_document(doc)
+        _sync_assignments_after_save(doc)
         return _summarize_doc(doc)
 
 
@@ -2637,6 +2653,7 @@ def withdraw_payment(name, note=None):
         doc.paid_on = None
         _append_request_event(doc, "撤回付款", old_status, STATUS_COMPLETED, note)
         _save_document(doc)
+        _sync_assignments_after_save(doc)
         return _summarize_doc(doc)
 
 
@@ -2713,6 +2730,7 @@ def withdraw_invoice_push(invoice_names, note=None):
             )
             invoice_service._apply_request_invoice_summary(doc, save=False)
             _save_document(doc)
+            _sync_assignments_after_save(doc)
             results.append(_summarize_doc(doc))
         return results[0] if len(results) == 1 else {"requests": results, "invoice_names": names}
 
@@ -2951,6 +2969,7 @@ def add_sign_request(name, approver, position, opinion):
             {"actor": actor, "approver": resolved, "position": _clean(position), "step_key": inserted.step_key, "parent_step_key": inserted.parent_step_key},
         )
         _save_document(doc)
+        _sync_assignments_after_save(doc)
         return _summarize_doc(doc)
 
 
