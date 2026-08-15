@@ -107,17 +107,19 @@ def test_arrival_transition_enforces_quantity_and_proof():
     with pytest.raises(ProcurementWorkflowError, match="到货证明"):
         transition_business_state(request, "record_arrival", {"quantity": 4}, evidence=set())
     partial = transition_business_state(
-        request, "record_arrival", {"quantity": 4}, evidence={"送货单"}
+        request, "record_arrival", {"quantity": 4, "arrival_date": "2026-08-12"}, evidence={"送货单"}
     )
     assert partial == {
         "business_status": "部分到货",
         "arrival_status": "部分到货",
         "received_quantity": 4,
+        "arrival_date": "2026-08-12",
+        "inspection_status": "未验收",
     }
     with pytest.raises(ProcurementWorkflowError, match="超过"):
         transition_business_state(
             {**request, "received_quantity": 8},
-            "record_arrival", {"quantity": 3}, evidence={"入库单"},
+            "record_arrival", {"quantity": 3, "arrival_date": "2026-08-12"}, evidence={"入库单"},
         )
 
 
@@ -135,7 +137,10 @@ def test_inspection_cannot_pass_before_arrival_or_without_acceptance_document():
     assert transition_business_state(
         {"business_status": "待验收", "arrival_status": "全部到货"},
         "pass_inspection", {}, evidence={"验收资料"},
-    ) == {"business_status": "验收通过", "inspection_status": "验收通过"}
+    ) == {
+        "business_status": "验收通过", "inspection_status": "验收通过",
+        "inspection_failure_reason": "", "exception_direction": "",
+    }
 
 
 def test_prepayment_overdue_is_derived_without_mutating_workflow_status():

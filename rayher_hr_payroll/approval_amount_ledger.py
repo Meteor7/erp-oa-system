@@ -85,7 +85,8 @@ class FrappeLedgerStore:
         name = _name(payment)
         rows = frappe.db.sql(
             """SELECT name, request_type, workflow_status, amount,
-                      currency, owner, employee, modified
+                      currency, owner, employee, modified, source_request,
+                      approved_amount_snapshot
                  FROM `tabOA Approval Request`
                 WHERE name = %s
                 FOR UPDATE""",
@@ -167,6 +168,12 @@ def _validate_payment(source, payment):
         raise ApprovalAmountError("付款类型与来源申请不匹配")
     if not _name(payment):
         raise ApprovalAmountError("付款申请不存在")
+    if _name(_get(payment, "source_request")) != _name(source):
+        raise ApprovalAmountError("付款申请关联的来源申请不匹配")
+    snapshot = _money(_get(payment, "approved_amount_snapshot"), "批准金额快照")
+    approved = _money(_get(source, "approved_amount"), "批准金额")
+    if snapshot != approved:
+        raise ApprovalAmountError("付款申请批准金额快照与来源申请不一致")
 
 
 def _event_totals(events, linked_request=None):
@@ -296,3 +303,29 @@ def refund(source, payment, amount, idempotency_key, *, store=None, note=""):
 
 def reverse(source, payment, amount, idempotency_key, *, store=None, note=""):
     return _apply(source, payment, "reverse", idempotency_key, amount=amount, store=store, note=note)
+
+def release_all_reserved(source, payment, idempotency_key, *, store=None, note=""):
+    store = _store(store)
+    current_source = store.lock_source(source)
+    _validate_source(current_source, store)
+    current_payment = store.lock_payment(payment)
+    _validate_payment(current_source, current_payment)
+    key = _key(idempotency_key)
+    existing = store.event_by_key(key)
+    if existing:
+        if not _same_event(existing, _name(current_source), _name(current_payment), "release"):
+            raise ApprovalAmountError("幂等键已被其他金额事件使用")
+        return _balance(current_source, store.events(_name(current_source)))
+    events = list(store.events(_name(current_source)))
+    linked_reserved, _linked_paid = _event_totals(events, _name(current_payment))
+    if linked_reserved <= 0:
+        return _balance(current_source, events)
+    return _apply(
+        current_source,
+        current_payment,
+        "release",
+        key,
+        amount=linked_reserved,
+        store=store,
+        note=note,
+    )

@@ -48,6 +48,11 @@
     "arrival_status",
     "inspection_status",
     "prepayment_writeoff_status",
+    "ordered_quantity",
+    "arrival_date",
+    "inspection_failure_reason",
+    "exception_direction",
+    "followup_status",
     "received_quantity",
     "payment_source_kind",
     "source_request",
@@ -334,6 +339,38 @@
       "fieldtype": "Select",
       "label": "Prepayment Write-off Status",
       "options": "无需核销\n待核销\n已核销",
+      "read_only": 1
+    },
+    {
+      "fieldname": "ordered_quantity",
+      "fieldtype": "Float",
+      "label": "Ordered Quantity",
+      "read_only": 1
+    },
+    {
+      "fieldname": "arrival_date",
+      "fieldtype": "Date",
+      "label": "Arrival Date",
+      "read_only": 1
+    },
+    {
+      "fieldname": "inspection_failure_reason",
+      "fieldtype": "Small Text",
+      "label": "Inspection Failure Reason",
+      "read_only": 1
+    },
+    {
+      "fieldname": "exception_direction",
+      "fieldtype": "Select",
+      "label": "Exception Direction",
+      "options": "\n退货\n换货",
+      "read_only": 1
+    },
+    {
+      "fieldname": "followup_status",
+      "fieldtype": "Select",
+      "label": "Follow-up Status",
+      "options": "\n催办中\n供应商退款中\n退货中\n换货中",
       "read_only": 1
     },
     {

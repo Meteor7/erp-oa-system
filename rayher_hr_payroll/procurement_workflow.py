@@ -14,6 +14,7 @@ INSPECTION_STATUSES = {"未验收", "待验收", "验收通过", "验收不合�
 WRITE_OFF_STATUSES = {"无需核销", "待核销", "已核销"}
 ARRIVAL_EVIDENCE = {"送货单", "收料单", "入库单"}
 ACCEPTANCE_EVIDENCE = "验收资料"
+FOLLOWUP_STATUSES = {"催办中", "供应商退款中", "退货中", "换货中"}
 
 
 class ProcurementWorkflowError(ValueError):
@@ -118,10 +119,11 @@ def transition_business_state(doc, action, payload=None, evidence=None):
     business_status = _text(_get(doc, "business_status"))
     arrival_status = _text(_get(doc, "arrival_status")) or "未到货"
     if action == "record_arrival":
-        if business_status not in {"待到货", "部分到货"}:
+        if business_status not in {"待到货", "部分到货", "预付款逾期", "催办中"}:
             raise ProcurementWorkflowError("当前状态不能登记到货")
         if not (ARRIVAL_EVIDENCE & evidence_types):
             raise ProcurementWorkflowError("登记到货必须提供送货单、收料单或入库单作为到货证明")
+        arrival_date = _date(payload.get("arrival_date"), "到货日期").isoformat()
         quantity = _decimal(payload.get("quantity"), "到货数量")
         ordered = _decimal(_get(doc, "ordered_quantity"), "订单数量")
         received = _decimal(_get(doc, "received_quantity"), "累计到货数量")
@@ -132,20 +134,72 @@ def transition_business_state(doc, action, payload=None, evidence=None):
         total = received + quantity
         if total > ordered:
             raise ProcurementWorkflowError("累计到货数量不能超过订单数量")
-        next_status = "全部到货" if total == ordered else "部分到货"
+        complete = total == ordered
         return {
-            "business_status": next_status,
-            "arrival_status": next_status,
+            "business_status": "待验收" if complete else "部分到货",
+            "arrival_status": "全部到货" if complete else "部分到货",
             "received_quantity": int(total) if total == total.to_integral() else float(total),
+            "arrival_date": arrival_date,
+            "inspection_status": "未验收",
         }
-    if action == "pass_inspection":
+    if action in {"pass_inspection", "fail_inspection"}:
         if arrival_status not in {"全部到货", "关闭未交数量"}:
-            raise ProcurementWorkflowError("货物未全部到货或关闭未交数量，不能验收通过")
-        if business_status not in {"待验收", "全部到货", "关闭未交数量"}:
-            raise ProcurementWorkflowError("当前状态不能验收通过")
+            raise ProcurementWorkflowError("货物未全部到货或关闭未交数量，不能登记验收结果")
+        if business_status not in {"待验收", "全部到货", "关闭未交数量", "验收不合格"}:
+            raise ProcurementWorkflowError("当前状态不能登记验收结果")
         if ACCEPTANCE_EVIDENCE not in evidence_types:
-            raise ProcurementWorkflowError("验收通过必须提供验收资料")
-        return {"business_status": "验收通过", "inspection_status": "验收通过"}
+            raise ProcurementWorkflowError("登记验收结果必须提供验收资料")
+        if action == "pass_inspection":
+            return {
+                "business_status": "验收通过",
+                "inspection_status": "验收通过",
+                "inspection_failure_reason": "",
+                "exception_direction": "",
+            }
+        reason = _text(payload.get("reason"))
+        direction = _text(payload.get("direction"))
+        if not reason:
+            raise ProcurementWorkflowError("验收不合格必须填写原因")
+        if direction not in {"退货", "换货"}:
+            raise ProcurementWorkflowError("验收不合格必须选择退货或换货方向")
+        return {
+            "business_status": "退货中" if direction == "退货" else "换货中",
+            "inspection_status": "验收不合格",
+            "inspection_failure_reason": reason,
+            "exception_direction": direction,
+        }
+    if action == "record_followup":
+        status = _text(payload.get("status"))
+        if status not in FOLLOWUP_STATUSES:
+            raise ProcurementWorkflowError("预付款异常状态无效")
+        if not _text(payload.get("reason")):
+            raise ProcurementWorkflowError("预付款异常跟进必须填写说明")
+        if _text(_get(doc, "payment_stage")) != "预付款":
+            raise ProcurementWorkflowError("只有预付款可以登记异常跟进")
+        return {"business_status": status, "followup_status": status}
+    if action == "writeoff_prepayment":
+        if _text(_get(doc, "payment_stage")) != "预付款" or _decimal(_get(doc, "prepayment_percentage"), "预付款比例") != 100:
+            raise ProcurementWorkflowError("只有100%预付款可以执行预付款核销")
+        if arrival_status not in {"全部到货", "关闭未交数量"} or _text(_get(doc, "inspection_status")) != "验收通过":
+            raise ProcurementWorkflowError("预付款核销前必须完成到货和验收")
+        if "发票" not in evidence_types:
+            raise ProcurementWorkflowError("预付款核销必须提供发票")
+        if ACCEPTANCE_EVIDENCE not in evidence_types:
+            raise ProcurementWorkflowError("预付款核销必须提供验收资料")
+        return {"business_status": "已核销", "prepayment_writeoff_status": "已核销"}
+    if action == "close_procurement":
+        if bool(int(_get(doc, "has_balance_payment") or 0)):
+            raise ProcurementWorkflowError("存在后续尾款的采购不能按无尾款流程关闭")
+        if arrival_status not in {"全部到货", "关闭未交数量"} or _text(_get(doc, "inspection_status")) != "验收通过":
+            raise ProcurementWorkflowError("关闭采购前必须完成到货和验收")
+        if _text(_get(doc, "payment_stage")) == "预付款" and _decimal(_get(doc, "prepayment_percentage"), "预付款比例") == 100:
+            if _text(_get(doc, "prepayment_writeoff_status")) != "已核销":
+                raise ProcurementWorkflowError("100%预付款关闭前必须完成预付款核销")
+        required = {"发票", "验收资料", "采购完成报告"}
+        missing = required - evidence_types
+        if missing:
+            raise ProcurementWorkflowError("关闭采购缺少" + "、".join(sorted(missing)))
+        return {"business_status": "已关闭"}
     raise ProcurementWorkflowError(f"不支持的采购状态操作：{_text(action)}")
 
 

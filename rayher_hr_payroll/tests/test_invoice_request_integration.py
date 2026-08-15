@@ -3211,3 +3211,58 @@ def test_procurement_submit_rejects_other_users_and_duplicate_submission(monkeyp
     doc.workflow_status = oa_entry.STATUS_PENDING
     with pytest.raises(ValidationError, match="草稿"):
         oa_entry.submit_request("PROC-2")
+
+def test_procurement_payment_submit_reserves_source_amount_in_same_request_transaction(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(environment, {
+        "doctype": service.REQUEST_DOCTYPE, "name": "PAY-PROC-SUBMIT", "owner": "alice@example.com",
+        "employee": "EMP-1", "request_type": oa_entry.REQUEST_PROCUREMENT_PAYMENT,
+        "workflow_status": oa_entry.STATUS_DRAFT, "business_status": "", "department": "研发部",
+        "supervisor": "直属领导", "asset_category": oa_entry.OTHER_ASSET,
+        "source_request": "PROC-SOURCE-1", "supplier": "SUP-1", "payment_stage": "预付款",
+        "prepayment_percentage": 30, "has_balance_payment": 1, "approved_amount_snapshot": 100,
+        "amount": 30, "currency": "CNY", "business_lines": [Row(item_name="芯片", quantity=1, amount=30)],
+        "steps": [], "operation_log": "[]",
+    })
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(oa_entry, "validate_payment_submission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(oa_entry, "_request_business_document_types", lambda *_args, **_kwargs: {"合同", "付款计划"})
+    reserved = []
+    monkeypatch.setattr(oa_entry, "_reserve_procurement_payment", lambda current: reserved.append((current.source_request, current.name)))
+
+    oa_entry.submit_request(doc.name)
+
+    assert reserved == [("PROC-SOURCE-1", "PAY-PROC-SUBMIT")]
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+
+
+def test_procurement_payment_final_handle_posts_ledger_and_enters_arrival_lifecycle(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    step = Row(
+        step_index=1, step_key="proc-payment-handle", origin="base", label="财务确认付款：演示员工13",
+        mode="handle", approvers=json.dumps(["finance@example.com"]), approved_by="[]",
+        status=oa_entry.STATUS_WAIT_HANDLE, action_by="", acted_on=None, note="",
+    )
+    doc = RequestDocument(environment, {
+        "doctype": service.REQUEST_DOCTYPE, "name": "PAY-PROC-HANDLE", "owner": "alice@example.com",
+        "request_type": oa_entry.REQUEST_PROCUREMENT_PAYMENT, "workflow_status": oa_entry.STATUS_WAIT_HANDLE,
+        "business_status": "待审批", "current_step_index": 1, "current_step_label": step.label,
+        "source_request": "PROC-SOURCE-1", "payment_stage": "预付款", "prepayment_percentage": 100,
+        "arrival_status": "", "inspection_status": "", "prepayment_writeoff_status": "无需核销",
+        "expense_lines": [], "steps": [step], "operation_log": "[]",
+    })
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda *_args, **_kwargs: ["finance@example.com"])
+    monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda *_args, **_kwargs: False)
+    paid = []
+    monkeypatch.setattr(oa_entry, "_mark_procurement_payment_paid", lambda current: paid.append(current.name))
+
+    oa_entry.action_request(doc.name, "approve", "已付款")
+
+    assert paid == ["PAY-PROC-HANDLE"]
+    assert doc.workflow_status == oa_entry.STATUS_PAID
+    assert doc.business_status == "待到货"
+    assert doc.prepayment_writeoff_status == "待核销"

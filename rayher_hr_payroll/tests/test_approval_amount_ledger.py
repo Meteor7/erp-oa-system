@@ -31,11 +31,17 @@ class MemoryStore:
         self.sources[doc.name] = doc
         return doc
 
-    def payment(self, amount=60, request_type=ledger.REQUEST_PROCUREMENT_PAYMENT):
+    def payment(self, amount=60, request_type=ledger.REQUEST_PROCUREMENT_PAYMENT, source_request=None, approved_amount_snapshot=None):
+        latest_source = list(self.sources.values())[-1] if self.sources else None
         doc = SimpleNamespace(
             name=f"PAY-{len(self.payments) + 1}",
             request_type=request_type,
             amount=amount,
+            source_request=source_request or (latest_source.name if latest_source else ""),
+            approved_amount_snapshot=(
+                approved_amount_snapshot if approved_amount_snapshot is not None
+                else (latest_source.approved_amount if latest_source else 0)
+            ),
         )
         self.payments[doc.name] = doc
         return doc
@@ -177,6 +183,8 @@ def test_currency_note_and_key_reuse_fail_closed():
     with pytest.raises(ledger.ApprovalAmountError, match="人民币"):
         ledger.reserve(store.source(currency=""), payment, "bad:currency", store=store)
     source = store.source()
+    payment.source_request = source.name
+    payment.approved_amount_snapshot = source.approved_amount
     with pytest.raises(ledger.ApprovalAmountError, match="备注"):
         ledger.reserve(source, payment, "bad:note", store=store, note="x" * 501)
     ledger.reserve(source, payment, "same-key", store=store)
@@ -200,3 +208,22 @@ def test_ledger_controller_rejects_update_and_delete(monkeypatch):
         ledger_controller.OAApprovalAmountLedger.validate(existing)
     with pytest.raises(PermissionError, match="不允许删除"):
         ledger_controller.OAApprovalAmountLedger.on_trash(existing)
+
+def test_payment_allocation_is_bound_to_immutable_source_snapshot():
+    store = MemoryStore()
+    source = store.source(approved_amount=100)
+    with pytest.raises(ledger.ApprovalAmountError, match="来源申请"):
+        ledger.reserve(source, store.payment(source_request="SRC-OTHER"), "bad:source", store=store)
+    with pytest.raises(ledger.ApprovalAmountError, match="快照"):
+        ledger.reserve(source, store.payment(approved_amount_snapshot=90), "bad:snapshot", store=store)
+
+
+def test_release_all_reserved_is_idempotent_and_uses_current_linked_total():
+    store = MemoryStore()
+    source = store.source(approved_amount=100)
+    payment = store.payment(amount=30)
+    ledger.reserve(source, payment, "submit:PAY-1:1", store=store)
+    first = ledger.release_all_reserved(source, payment, "release:PAY-1:1", store=store)
+    second = ledger.release_all_reserved(source, payment, "release:PAY-1:1", store=store)
+    assert first == second
+    assert first["reserved_amount"] == Decimal("0.00")

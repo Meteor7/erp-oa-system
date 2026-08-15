@@ -8,7 +8,7 @@ import frappe
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
-from rayher_hr_payroll import expense_attachments, invoice_supplemental_attachments
+from rayher_hr_payroll import approval_amount_ledger, expense_attachments, invoice_supplemental_attachments
 from rayher_hr_payroll.access_control import BUSINESS_EXECUTIVE_ROLE
 from rayher_hr_payroll.expense_accounts import account_options, normalize_account_pair
 from rayher_hr_payroll.oa_approval import (
@@ -35,6 +35,7 @@ from rayher_hr_payroll.procurement_workflow import (
     ProcurementWorkflowError,
     contract_copy_recipients,
     plan_contract_delivery,
+    transition_business_state,
     validate_payment_submission,
     validate_procurement_submission,
 )
@@ -109,16 +110,26 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
         raise ApprovalRouteError(str(exc)) from exc
 
 
-def _request_business_document_types(request_name):
+def _active_request_business_documents(request_name):
     if not request_name:
-        return set()
+        return []
     rows = frappe.get_all(
         "OA Business Document",
         filters={"request": request_name},
-        fields=["document_type"],
+        fields=["name", "document_type", "supersedes", "version_no"],
+        order_by="version_no asc, creation asc",
         limit_page_length=0,
     )
-    return {_clean(row.get("document_type")) for row in rows if _clean(row.get("document_type"))}
+    superseded = {_clean(row.get("supersedes")) for row in rows if _clean(row.get("supersedes"))}
+    return [row for row in rows if _clean(row.get("name")) not in superseded]
+
+
+def _request_business_document_types(request_name):
+    return {
+        _clean(row.get("document_type"))
+        for row in _active_request_business_documents(request_name)
+        if _clean(row.get("document_type"))
+    }
 
 
 def _save_document(doc):
@@ -1034,6 +1045,15 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "contract_delivery_date": getattr(doc, "contract_delivery_date", None) or "",
         "pending_contract_delivery_date": getattr(doc, "pending_contract_delivery_date", None) or "",
         "delivery_change_reason": getattr(doc, "delivery_change_reason", None) or "",
+        "ordered_quantity": getattr(doc, "ordered_quantity", None) or 0,
+        "received_quantity": getattr(doc, "received_quantity", None) or 0,
+        "arrival_date": getattr(doc, "arrival_date", None) or "",
+        "arrival_status": getattr(doc, "arrival_status", None) or "",
+        "inspection_status": getattr(doc, "inspection_status", None) or "",
+        "inspection_failure_reason": getattr(doc, "inspection_failure_reason", None) or "",
+        "exception_direction": getattr(doc, "exception_direction", None) or "",
+        "followup_status": getattr(doc, "followup_status", None) or "",
+        "prepayment_writeoff_status": getattr(doc, "prepayment_writeoff_status", None) or "",
         "procurement_scope": getattr(doc, "procurement_scope", None),
         "expected_delivery_date": getattr(doc, "expected_delivery_date", None),
         "project": getattr(doc, "project", None),
@@ -1894,6 +1914,70 @@ def update_draft_invoice_details(name, no_invoice_reason=None, expense_line_reas
         return _summarize_doc(doc)
 
 
+def _procurement_payment_revision(doc):
+    return max(1, sum(1 for event in _operation_events(doc) if event.get("action") == "提交申请"))
+
+
+def _run_approval_amount_operation(operation, *args, **kwargs):
+    try:
+        return operation(*args, **kwargs)
+    except approval_amount_ledger.ApprovalAmountError as error:
+        frappe.throw(frappe._(str(error)))
+
+
+def _reserve_procurement_payment(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        return None
+    revision = _procurement_payment_revision(doc)
+    return _run_approval_amount_operation(
+        approval_amount_ledger.reserve,
+        _clean(getattr(doc, "source_request", None)),
+        doc.name,
+        "submit:{0}:{1}".format(doc.name, revision),
+        note="采购付款提交占用",
+    )
+
+
+def _release_procurement_payment_reservation(doc, note=""):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        return None
+    revision = _procurement_payment_revision(doc)
+    return _run_approval_amount_operation(
+        approval_amount_ledger.release_all_reserved,
+        _clean(getattr(doc, "source_request", None)),
+        doc.name,
+        "release:{0}:{1}".format(doc.name, revision),
+        note=note or "采购付款退回释放占用",
+    )
+
+
+def _mark_procurement_payment_paid(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        return None
+    return _run_approval_amount_operation(
+        approval_amount_ledger.mark_paid,
+        _clean(getattr(doc, "source_request", None)),
+        doc.name,
+        "pay:{0}".format(doc.name),
+        note="采购付款确认付款",
+    )
+
+
+def _set_procurement_payment_paid_state(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        return doc
+    stage = _clean(getattr(doc, "payment_stage", None))
+    percentage = Decimal(str(getattr(doc, "prepayment_percentage", 0) or 0))
+    if stage in {"预付款", "全额付款"}:
+        doc.business_status = "待到货"
+        doc.arrival_status = _clean(getattr(doc, "arrival_status", None)) or "未到货"
+        doc.inspection_status = _clean(getattr(doc, "inspection_status", None)) or "未验收"
+    else:
+        doc.business_status = "验收通过" if _clean(getattr(doc, "inspection_status", None)) == "验收通过" else "待验收"
+    doc.prepayment_writeoff_status = "待核销" if stage == "预付款" and percentage == 100 else (_clean(getattr(doc, "prepayment_writeoff_status", None)) or "无需核销")
+    return doc
+
+
 @frappe.whitelist(methods=["POST"])
 def submit_request(name, no_invoice_reason=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
@@ -1909,6 +1993,7 @@ def submit_request(name, no_invoice_reason=None):
         if supplied_reason is not None:
             doc.no_invoice_reason = supplied_reason
         _submit_draft(doc)
+        _reserve_procurement_payment(doc)
         _save_document(doc)
         _sync_assignments_after_save(doc)
         _notify_copied_users(doc)
@@ -2047,6 +2132,125 @@ def register_contract_delivery(name, contract_delivery_date, reason=None):
         if notify:
             _notify_copied_users(doc)
         return _summarize_doc(doc)
+
+
+def _require_procurement_lifecycle_access(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        frappe.throw(frappe._("只有采购付款单可以登记到货、验收和核销。"))
+    if getattr(doc, "workflow_status", None) != STATUS_PAID:
+        frappe.throw(frappe._("采购付款完成后才能登记到货、验收和核销。"))
+    user = _clean(getattr(frappe.session, "user", None))
+    roles = set(frappe.get_roles(user))
+    allowed = {_clean(getattr(doc, "owner", None)), _clean(getattr(doc, "purchaser_user", None))}
+    if user not in allowed and not (roles & {"System Manager", "Purchase User", "Purchase Manager", "Accounts User"}):
+        frappe.throw(frappe._("只有申请人、采购经办人、采购或财务人员可以登记采购履约状态。"))
+
+
+def _evidence_audit(rows):
+    return {
+        "evidence_names": [_clean(row.get("name")) for row in rows if _clean(row.get("name"))],
+        "evidence_types": [_clean(row.get("document_type")) for row in rows if _clean(row.get("document_type"))],
+    }
+
+
+def _audit_detail_value(value):
+    if isinstance(value, (Decimal, date)):
+        return str(value)
+    return value
+
+
+def _apply_procurement_lifecycle_transition(doc, action, payload, event_action, note=""):
+    evidence = _active_request_business_documents(doc.name)
+    old_status = _clean(getattr(doc, "business_status", None))
+    try:
+        updates = transition_business_state(doc, action, payload=payload, evidence=evidence)
+    except ProcurementWorkflowError as error:
+        frappe.throw(frappe._(str(error)))
+    for fieldname, value in updates.items():
+        setattr(doc, fieldname, value)
+    details = _evidence_audit(evidence)
+    details.update({key: _audit_detail_value(value) for key, value in (payload or {}).items() if value not in (None, "")})
+    _append_request_event(doc, event_action, old_status, getattr(doc, "business_status", None), note, details)
+    _save_document(doc)
+    _sync_assignments_after_save(doc)
+    return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def record_arrival(name, quantity, arrival_date, reason=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_lifecycle_access(doc)
+        note = _bounded_optional_text(reason, "到货说明", 500)
+        return _apply_procurement_lifecycle_transition(
+            doc,
+            "record_arrival",
+            {"quantity": quantity, "arrival_date": arrival_date},
+            "登记到货",
+            note,
+        )
+
+
+@frappe.whitelist(methods=["POST"])
+def record_inspection(name, outcome, reason=None, direction=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_lifecycle_access(doc)
+        normalized_outcome = _bounded_optional_text(outcome, "验收结果", 20)
+        note = _bounded_optional_text(reason, "验收说明", 500)
+        action = "pass_inspection" if normalized_outcome == "通过" else "fail_inspection" if normalized_outcome == "不合格" else ""
+        if not action:
+            frappe.throw(frappe._("验收结果必须选择通过或不合格。"))
+        return _apply_procurement_lifecycle_transition(
+            doc,
+            action,
+            {"reason": note, "direction": _bounded_optional_text(direction, "异常方向", 20)},
+            "验收通过" if action == "pass_inspection" else "验收不合格",
+            note,
+        )
+
+
+@frappe.whitelist(methods=["POST"])
+def record_prepayment_followup(name, status, reason):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_lifecycle_access(doc)
+        note = _bounded_optional_text(reason, "跟进说明", 500)
+        return _apply_procurement_lifecycle_transition(
+            doc,
+            "record_followup",
+            {"status": _bounded_optional_text(status, "跟进状态", 30), "reason": note},
+            "预付款异常跟进",
+            note,
+        )
+
+
+@frappe.whitelist(methods=["POST"])
+def writeoff_prepayment(name, reason=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_lifecycle_access(doc)
+        note = _bounded_optional_text(reason, "核销说明", 500)
+        return _apply_procurement_lifecycle_transition(doc, "writeoff_prepayment", {}, "预付款核销", note)
+
+
+@frappe.whitelist(methods=["POST"])
+def close_procurement(name, reason=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_lifecycle_access(doc)
+        note = _bounded_optional_text(reason, "关闭说明", 500)
+        return _apply_procurement_lifecycle_transition(doc, "close_procurement", {}, "关闭采购", note)
 
 
 @frappe.whitelist()
@@ -2612,6 +2816,8 @@ def action_request(name, action="approve", note=None, reject_target=None):
                 doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
             )
             _reject_to_target(doc, step, reject_target, actor, note)
+            if doc.request_type == REQUEST_PROCUREMENT_PAYMENT and doc.workflow_status == STATUS_DRAFT:
+                _release_procurement_payment_reservation(doc, note)
             _save_document(doc)
             _sync_assignments_after_save(doc)
             return _summarize_doc(doc, authorized_expense_lines)
@@ -2641,7 +2847,10 @@ def action_request(name, action="approve", note=None, reject_target=None):
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
         contract_delivery_confirmed = _finalize_contract_delivery_if_complete(doc, step)
-        if step.mode == "handle" and doc.request_type == REQUEST_EXPENSE_PAYMENT:
+        if step.mode == "handle" and doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}:
+            if doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
+                _mark_procurement_payment_paid(doc)
+                _set_procurement_payment_paid_state(doc)
             doc.workflow_status = STATUS_PAID
             doc.paid_by = actor
             doc.paid_on = step.acted_on or now_datetime()
@@ -2690,6 +2899,9 @@ def _reset_request_to_draft(doc, note=""):
         ctx["supervisor"],
         ctx["asset_category"],
         active=False,
+        project_owner=getattr(doc, "project_owner", None),
+        project_owner_name=getattr(doc, "project_owner_name", None),
+        purchase_method=getattr(doc, "purchase_method", None),
     )
     doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])
@@ -2784,6 +2996,7 @@ def withdraw_request(name, note=None):
         if doc.workflow_status == STATUS_DRAFT:
             return _summarize_doc(doc)
         _reset_request_to_draft(doc, note)
+        _release_procurement_payment_reservation(doc, note)
         _save_document(doc)
         _sync_assignments_after_save(doc)
         return _summarize_doc(doc)

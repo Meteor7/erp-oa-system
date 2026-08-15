@@ -37,7 +37,9 @@ SERVER_FIELDS = {
     "approved_amount_snapshot", "source_modified", "payment_source_kind",
     "business_status", "project_owner", "project_owner_name", "contract_delivery_date",
     "pending_contract_delivery_date", "delivery_change_reason", "arrival_status",
-    "inspection_status", "prepayment_writeoff_status", "received_quantity",
+    "inspection_status", "prepayment_writeoff_status", "ordered_quantity",
+    "received_quantity", "arrival_date", "inspection_failure_reason",
+    "exception_direction", "followup_status",
 }
 ALLOWED_PAYLOAD_FIELDS = {
     "subject", "reason", "urgency", "asset_nature", "fixed_asset_category",
@@ -241,6 +243,13 @@ def _store(store):
     return store or FrappeApprovalCenterStore()
 
 
+def _source_ordered_quantity(source):
+    total = Decimal("0")
+    for row in list(_get(source, "business_lines", []) or []):
+        total += _decimal(_get(row, "quantity"), "来源采购数量", positive=True, places=QUANTITY_UNIT)
+    return total.quantize(QUANTITY_UNIT)
+
+
 def save_draft(request_type, payload, name=None, *, store=None):
     if request_type not in DRAFT_TYPES:
         raise ApprovalCenterError("草稿类型无效")
@@ -353,6 +362,11 @@ def save_draft(request_type, payload, name=None, *, store=None):
         "has_balance_payment": has_balance_payment,
         "expected_arrival_date": expected_arrival_date or None,
         "prepayment_risk_note": prepayment_risk_note,
+        "ordered_quantity": _source_ordered_quantity(source_snapshot) if source_snapshot else None,
+        "received_quantity": 0,
+        "arrival_status": "未到货" if source_snapshot else None,
+        "inspection_status": "未验收" if source_snapshot else None,
+        "prepayment_writeoff_status": "无需核销",
         "amount": total,
         "currency": "CNY",
         "approved_amount": None,

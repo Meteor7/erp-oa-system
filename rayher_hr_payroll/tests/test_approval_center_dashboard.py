@@ -147,6 +147,7 @@ def test_procurement_payment_source_must_be_completed_procurement_and_is_snapsho
         "name": "SRC-1", "request_type": approval_center.REQUEST_PROCUREMENT,
         "workflow_status": "待审批", "currency": "CNY", "approved_amount": 100,
         "modified": "2026-08-06 11:00:00",
+        "business_lines": [{"quantity": 2}, {"quantity": 3}],
     }
     payload = payment_payload()
     with pytest.raises(approval_center.ApprovalCenterError, match="已完成"):
@@ -159,6 +160,7 @@ def test_procurement_payment_source_must_be_completed_procurement_and_is_snapsho
     assert result.approved_amount_snapshot == Decimal("100.00")
     assert result.source_modified == "2026-08-06 11:00:00"
     assert result.payment_source_kind == "关联采购申请"
+    assert result.ordered_quantity == Decimal("5.0000")
 
 
 def test_dashboard_does_not_hide_corrupt_ledger_balance():

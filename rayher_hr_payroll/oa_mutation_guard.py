@@ -52,7 +52,12 @@ SERVER_OWNED_FIELDS = {
     "arrival_status",
     "inspection_status",
     "prepayment_writeoff_status",
+    "ordered_quantity",
     "received_quantity",
+    "arrival_date",
+    "inspection_failure_reason",
+    "exception_direction",
+    "followup_status",
 }
 NEW_DOCUMENT_ALLOWED_VALUES = {
     "workflow_status": {None, "", DRAFT_STATUS},
