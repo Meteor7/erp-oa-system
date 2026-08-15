@@ -14,6 +14,7 @@ class MemoryStore:
         self.allowed = user in {"Administrator", "admin@staff.example.invalid"}
         self.sources = {}
         self.projects = {}
+        self.project_rows = []
 
     def require_draft_access(self, request_type):
         if not self.allowed:
@@ -52,6 +53,9 @@ class MemoryStore:
         if name not in self.projects:
             raise approval_center.ApprovalCenterError("所属项目不存在")
         return self.projects[name]
+
+    def list_projects(self, limit):
+        return self.project_rows[:limit]
 
     def source_balance(self, source):
         return source.get("balance") or {
@@ -98,6 +102,19 @@ def payment_payload(**overrides):
     })
     value.update(overrides)
     return value
+
+
+def test_procurement_project_options_expose_only_minimal_owner_snapshot():
+    store = MemoryStore()
+    store.project_rows = [
+        {"name": "RD04", "project_name": "VEYMONT 2341", "status": "Open",
+         "project_owner": "owner@example.com", "project_owner_name": "项目主管",
+         "project_initiation_report": "/private/files/secret.pdf"},
+    ]
+    assert approval_center.project_options(store=store) == [{
+        "name": "RD04", "project_name": "VEYMONT 2341", "status": "Open",
+        "project_owner": "owner@example.com", "project_owner_name": "项目主管",
+    }]
 
 
 def test_draft_recalculates_lines_and_keeps_all_workflow_fields_closed():

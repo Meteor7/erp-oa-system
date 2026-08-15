@@ -227,10 +227,26 @@ class FrappeApprovalCenterStore:
         return source
 
     def resolve_project(self, name):
-        project = frappe.get_doc("Project", name)
-        if not frappe.has_permission("Project", "read", doc=project):
-            raise ApprovalCenterError("无权使用所属项目")
+        project = frappe.db.get_value(
+            "Project", name,
+            ["name", "project_name", "status", "project_owner", "project_owner_name"],
+            as_dict=True,
+        )
+        if not project or project.get("status") == "Cancelled":
+            raise ApprovalCenterError("所属项目不存在或已取消")
+        owner = str(project.get("project_owner") or "").strip()
+        if not owner or not frappe.db.get_value("User", owner, "enabled"):
+            raise ApprovalCenterError("所属项目未配置有效项目主管")
         return project
+
+    def list_projects(self, limit):
+        return frappe.get_all(
+            "Project",
+            filters={"status": ["!=", "Cancelled"], "project_owner": ["!=", ""]},
+            fields=["name", "project_name", "status", "project_owner", "project_owner_name"],
+            order_by="modified desc",
+            limit_page_length=limit,
+        )
 
     def source_balance(self, source):
         from rayher_hr_payroll.approval_amount_ledger import source_balance
@@ -253,6 +269,20 @@ def _source_ordered_quantity(source):
     for row in list(_get(source, "business_lines", []) or []):
         total += _decimal(_get(row, "quantity"), "来源采购数量", positive=True, places=QUANTITY_UNIT)
     return total.quantize(QUANTITY_UNIT)
+
+
+def project_options(limit=500, *, store=None):
+    try:
+        limit = max(1, min(int(limit or 500), 500))
+    except (TypeError, ValueError):
+        raise ApprovalCenterError("项目数量格式无效")
+    store = _store(store)
+    store.require_draft_access(REQUEST_PROCUREMENT)
+    allowed = {"name", "project_name", "status", "project_owner", "project_owner_name"}
+    return [
+        {key: _get(row, key) or "" for key in allowed}
+        for row in store.list_projects(limit)
+    ]
 
 
 def save_draft(request_type, payload, name=None, *, store=None):

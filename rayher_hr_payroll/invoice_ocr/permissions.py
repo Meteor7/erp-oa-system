@@ -329,9 +329,12 @@ def can_read_request(request, user=None, *, current=False):
 
 
 def can_edit_request(request, user=None, *, current=False):
-    """Only the request applicant/owner or a System Manager may edit invoice data."""
+    """Only the request applicant/owner or a System Manager may edit request data."""
     user = user or frappe.session.user
-    if not can_access_request_type(REQUEST_EXPENSE_PAYMENT, user):
+    request_type = REQUEST_EXPENSE_PAYMENT if isinstance(request, str) else (
+        _get(request, "request_type") or REQUEST_EXPENSE_PAYMENT
+    )
+    if not can_access_request_type(request_type, user):
         return False
     if not user or user == "Guest":
         return False

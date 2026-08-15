@@ -26,7 +26,7 @@
   "fields": [
     {"fieldname": "step_index", "fieldtype": "Int", "in_list_view": 1, "label": "Step Index"},
     {"fieldname": "step_key", "fieldtype": "Data", "label": "Stable Step Key", "read_only": 1, "search_index": 1, "unique": 1},
-    {"fieldname": "origin", "fieldtype": "Select", "label": "Origin", "options": "base\nadd_sign", "default": "base", "read_only": 1},
+    {"fieldname": "origin", "fieldtype": "Select", "label": "Origin", "options": "base\nadd_sign\ncontract_delivery", "default": "base", "read_only": 1},
     {"fieldname": "parent_step_key", "fieldtype": "Data", "label": "Parent Step Key", "read_only": 1, "search_index": 1},
     {"fieldname": "add_sign_position", "fieldtype": "Select", "label": "Add Sign Position", "options": "before\nafter", "read_only": 1},
     {"fieldname": "add_sign_opinion", "fieldtype": "Small Text", "label": "Add Sign Opinion", "read_only": 1},

@@ -138,9 +138,23 @@ class FrappeBusinessDocumentStore:
         if not name:
             raise BusinessDocumentError("父审批单不存在")
         doc = frappe.get_doc("OA Approval Request", name)
-        if not frappe.has_permission(
-            "OA Approval Request", ptype=ptype, doc=doc, user=frappe.session.user
-        ):
+        user = frappe.session.user
+        allowed = frappe.has_permission(
+            "OA Approval Request", ptype=ptype, doc=doc, user=user
+        )
+        if not allowed and ptype == "write" and getattr(doc, "request_type", None) in {
+            "采购申请", "购买申请", "采购付款",
+        }:
+            employee = frappe.db.get_value(
+                "Employee", {"user_id": user, "status": "Active"}, "name"
+            )
+            roles = set(frappe.get_roles(user) or [])
+            allowed = (
+                getattr(doc, "owner", None) == user
+                or (employee and getattr(doc, "employee", None) == employee)
+                or bool(roles & {"System Manager", "Purchase User", "Purchase Manager", "Accounts User"})
+            )
+        if not allowed:
             raise BusinessDocumentError("无权访问父审批单")
         return doc
 

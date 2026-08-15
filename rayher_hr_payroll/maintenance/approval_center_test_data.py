@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 from datetime import date, timedelta
@@ -196,7 +197,9 @@ class FrappeSeedStore:
             join tabUser u on u.name=e.user_id and u.enabled=1
             join tabUser su on su.name=s.user_id and su.enabled=1
             where e.status='Active' and coalesce(e.user_id, '') != ''
-            order by e.name
+            order by case when s.user_id in (
+                'person046@staff.example.invalid', 'person060@staff.example.invalid'
+            ) then 1 else 0 end, e.name
             limit 1
             """,
             as_dict=True,
@@ -211,15 +214,28 @@ class FrappeSeedStore:
             }
 
         project = None
+        fallback_project = None
+        applicant_user = str((applicant or {}).get("user") or "").strip()
         project_fields = ["name", "project_name", "project_owner", "project_owner_name"]
         for row in frappe.get_all("Project", fields=project_fields, order_by="modified desc", limit_page_length=0):
             owner = str(row.get("project_owner") or "").strip()
-            if owner and frappe.db.get_value("User", owner, "enabled"):
+            if not owner or not frappe.db.get_value("User", owner, "enabled"):
+                continue
+            fallback_project = fallback_project or dict(row)
+            if owner != applicant_user:
                 project = dict(row)
                 break
+        project = project or fallback_project
 
-        supplier = frappe.db.get_value("Supplier", {}, "name")
-        return {"applicant": applicant, "project": project, "supplier": supplier, "roles": roles}
+        supplier_master = frappe.db.get_value("Supplier", {}, "name")
+        supplier = supplier_master or "OA示例企业028（仅审批中心）"
+        return {
+            "applicant": applicant,
+            "project": project,
+            "supplier": supplier,
+            "supplier_master_exists": bool(supplier_master),
+            "roles": roles,
+        }
 
     def existing(self, batch_id):
         prefix = PREFIX.format(batch_id=batch_id) + "%"
@@ -280,8 +296,10 @@ class FrappeSeedStore:
     def _create_evidence(request_name, batch_id, document_type, index):
         from rayher_hr_payroll.business_documents import attach
 
-        filename = "oa-test-{0}-{1}-{2}.pdf".format(batch_id, index, document_type)
-        content = b"%PDF-1.4\n% OA approval center isolated test evidence\n%%EOF\n"
+        filename = "oa-test-{0}-{1}-{2}.png".format(batch_id, index, document_type)
+        content = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
         file_doc = frappe.get_doc({
             "doctype": "File",
             "file_name": filename,
@@ -306,7 +324,10 @@ class FrappeSeedStore:
         key = scenario["scenario_key"]
         future = (date.today() + timedelta(days=30)).isoformat()
         if scenario["request_type"] == REQUEST_PROCUREMENT:
-            payload.update({"expected_delivery_date": future, "purchaser_user": applicant["user"]})
+            payload.update({
+                "expected_delivery_date": future,
+                "purchaser_user": prerequisites["roles"]["production_asset_owner"]["user"],
+            })
             if key.startswith("project_"):
                 payload.update({"procurement_scope": "项目采购", "project": project["name"]})
             else:
@@ -328,6 +349,14 @@ class FrappeSeedStore:
                     "non_project_department": applicant["department"] or "测试部门",
                 })
         else:
+            payload["business_lines"] = [{
+                "item_name": "OA审批测试付款-{0}".format(index),
+                "specification": "关联采购申请付款",
+                "quantity": 1,
+                "unit": "笔",
+                "unit_price": 50,
+                "remarks": "批次隔离测试数据",
+            }]
             source_key = {
                 "full_prepayment_overdue": "project_production_asset",
                 "partial_prepayment": "project_non_fixed",
@@ -434,10 +463,13 @@ class FrappeSeedStore:
             )
             for name in todos:
                 frappe.delete_doc("ToDo", name, ignore_permissions=True, force=True)
-            for name in ledgers:
-                frappe.delete_doc("OA Approval Amount Ledger", name, ignore_permissions=True, force=True)
-            for row in documents:
-                frappe.delete_doc("OA Business Document", row.name, ignore_permissions=True, force=True)
+            if ledgers:
+                frappe.db.delete("OA Approval Amount Ledger", {"name": ["in", ledgers]})
+            if documents:
+                frappe.db.delete(
+                    "OA Business Document",
+                    {"name": ["in", [row.name for row in documents]]},
+                )
             for name in reversed(names):
                 frappe.delete_doc("OA Approval Request", name, ignore_permissions=True, force=True)
             for row in documents:

@@ -139,9 +139,18 @@ def resolve_role(role_key, *, store=None):
         rows = list(store.employees_for_designation(spec["designation"]) or [])
         if not rows:
             raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到在职人员")
-        if len(rows) > 1:
-            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}找到多个在职人员，无法唯一解析")
-        result = _snapshot(role_key, spec, rows[0])
+        eligible = [
+            row for row in rows
+            if _text(_get(row, "user_id")) and store.is_user_enabled(_text(_get(row, "user_id")).lower())
+        ]
+        if len(eligible) > 1:
+            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}找到多个具备启用账号的在职人员，无法唯一解析")
+        if len(eligible) == 1:
+            result = _snapshot(role_key, spec, eligible[0])
+        elif len(rows) == 1:
+            result = _snapshot(role_key, spec, rows[0])
+        else:
+            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到关联启用账号的在职人员")
     if not result["user"]:
         raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有关联用户账号")
     if not store.is_user_enabled(result["user"]):

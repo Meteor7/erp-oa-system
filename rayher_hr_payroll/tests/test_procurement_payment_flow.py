@@ -231,3 +231,27 @@ def test_payment_completion_initializes_arrival_and_writeoff_state(oa_entry):
     assert doc.arrival_status == "未到货"
     assert doc.inspection_status == "未验收"
     assert doc.prepayment_writeoff_status == "待核销"
+
+
+def test_completed_procurement_approval_sets_payable_approved_amount():
+    from types import SimpleNamespace
+    from decimal import Decimal
+    from rayher_hr_payroll.api import oa_entry
+
+    step = SimpleNamespace(step_index=1)
+    doc = SimpleNamespace(
+        steps=[step],
+        request_type=oa_entry.REQUEST_PROCUREMENT,
+        workflow_status=oa_entry.STATUS_PENDING,
+        business_status="待审批",
+        current_step_index=1,
+        current_step_label="PMC",
+        amount=Decimal("123.45"),
+        approved_amount=None,
+    )
+
+    oa_entry._advance_after_step(doc, step)
+
+    assert doc.workflow_status == oa_entry.STATUS_COMPLETED
+    assert doc.business_status == "合同待登记"
+    assert doc.approved_amount == Decimal("123.45")

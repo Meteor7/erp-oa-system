@@ -286,9 +286,8 @@
     },
     {
       "fieldname": "supplier",
-      "fieldtype": "Link",
-      "label": "Supplier",
-      "options": "Supplier"
+      "fieldtype": "Data",
+      "label": "Supplier Snapshot"
     },
     {
       "fieldname": "payment_stage",
@@ -416,7 +415,7 @@
       "fieldname": "asset_category",
       "fieldtype": "Select",
       "label": "Asset Category",
-      "options": "非电子类固定资产（人事/行政）\n电子类固定资产（IT）\n其他"
+      "options": "非电子类固定资产（人事/行政）\n电子类固定资产（IT）\n生产设备、生产工具及器具\n其他"
     },
     {
       "fieldname": "source_type",

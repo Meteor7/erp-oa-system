@@ -680,7 +680,7 @@ def test_expense_approval_dynamic_schema_contract():
     step_fields = _fields_by_name(step)
     expected_step_fields = {
         "step_key": ("Data", None),
-        "origin": ("Select", "base\nadd_sign"),
+        "origin": ("Select", "base\nadd_sign\ncontract_delivery"),
         "parent_step_key": ("Data", None),
         "add_sign_position": ("Select", "before\nafter"),
         "add_sign_opinion": ("Small Text", None),
@@ -726,5 +726,12 @@ def test_oa_request_asset_category_select_matches_six_stage_workflow():
     assert fields["asset_category"]["options"].split("\n") == [
         "非电子类固定资产（人事/行政）",
         "电子类固定资产（IT）",
+        "生产设备、生产工具及器具",
         "其他",
     ]
+
+
+def test_procurement_payment_supplier_is_an_oa_snapshot_until_master_integration():
+    fields = {field["fieldname"]: field for field in load_doctype("oa_approval_request")["fields"]}
+    assert fields["supplier"]["fieldtype"] == "Data"
+    assert fields["supplier"]["label"] == "Supplier Snapshot"

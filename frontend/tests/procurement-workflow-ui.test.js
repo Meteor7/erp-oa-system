@@ -44,7 +44,7 @@ test("evidence gates visible lifecycle actions before the server revalidates", (
 
 test("forms use real project options and conditional business fields", () => {
   const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /project_entry\.list_projects/);
+  assert.match(source, /oa_entry\.list_approval_center_projects/);
   assert.match(source, /<select v-model='form\.project'/);
   assert.match(source, /form\.procurement_scope === "项目采购"/);
   assert.match(source, /non_project_allocation_type/);

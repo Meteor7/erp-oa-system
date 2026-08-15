@@ -58,7 +58,7 @@ const submitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.submit_a
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
 const attacher = createResource({ url: 'rayher_hr_payroll.api.oa_entry.attach_approval_business_document' });
 const documentLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_approval_business_documents', method: 'GET' });
-const projectLoader = createResource({ url: 'rayher_hr_payroll.api.project_entry.list_projects', method: 'GET', auto: true });
+const projectLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_approval_center_projects', method: 'GET', auto: true });
 const userLoader = createResource({ url: 'rayher_hr_payroll.api.project_entry.list_project_owners', method: 'GET', auto: true });
 const sourceLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_approval_center_dashboard', method: 'GET', makeParams: () => ({ kind: 'request', limit: 500 }), auto: true });
 const mineLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'mine', request_type: config.value.requestType, limit: 100 }), auto: true });

@@ -106,6 +106,17 @@ def test_missing_disabled_and_duplicate_role_holders_block_submission():
         resolve_role("finance_manager", store=store)
 
 
+def test_designation_role_ignores_people_without_an_enabled_account():
+    store = MemoryStore()
+    eligible = employee()
+    unbound = employee("EMP-2", "未绑定账号", "")
+    disabled = employee("EMP-3", "停用账号", "disabled@example.com")
+    store.by_designation["财务主管"] = [eligible, unbound, disabled]
+    store.enabled_users.add("zhang@example.com")
+
+    assert resolve_role("finance_manager", store=store)["employee"] == "EMP-1"
+
+
 def test_unknown_role_key_is_rejected():
     with pytest.raises(ApprovalRoleResolutionError, match="未知审批角色"):
         resolve_role("unknown", store=MemoryStore())

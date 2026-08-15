@@ -1142,6 +1142,8 @@ def _advance_after_step(doc, step):
         doc.workflow_status = STATUS_COMPLETED
         doc.current_step_index = 0
         doc.current_step_label = ""
+        if doc.request_type in {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}:
+            doc.approved_amount = getattr(doc, "amount", None) or 0
         if doc.request_type == REQUEST_PROCUREMENT and _clean(getattr(doc, "business_status", None)) == "待审批":
             doc.business_status = "合同待登记"
         return
@@ -3370,6 +3372,16 @@ def save_approval_center_draft(request_type, payload, name=None):
 @frappe.whitelist(methods=["POST"])
 def submit_approval_center_draft(name):
     return submit_request(name)
+
+
+@frappe.whitelist()
+def list_approval_center_projects(limit=500):
+    from rayher_hr_payroll.approval_center import ApprovalCenterError, project_options
+
+    try:
+        return project_options(limit=limit)
+    except ApprovalCenterError as exc:
+        frappe.throw(str(exc))
 
 
 @frappe.whitelist()
