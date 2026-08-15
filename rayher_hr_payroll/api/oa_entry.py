@@ -15,14 +15,27 @@ from rayher_hr_payroll.oa_approval import (
     ADMIN_ASSET,
     IT_ASSET,
     OTHER_ASSET,
+    PRODUCTION_ASSET,
+    REQUEST_DIRECT_PURCHASE,
     REQUEST_EXPENSE_PAYMENT,
     REQUEST_LEAVE,
+    REQUEST_PROCUREMENT,
+    REQUEST_PROCUREMENT_PAYMENT,
     ApprovalRouteError,
     build_route,
     leave_copy_recipients,
     normalize_asset_category,
 )
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access, visible_request_types
+from rayher_hr_payroll.oa_role_resolver import (
+    ApprovalRoleResolutionError,
+    resolve_role,
+)
+from rayher_hr_payroll.procurement_workflow import (
+    ProcurementWorkflowError,
+    validate_payment_submission,
+    validate_procurement_submission,
+)
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
@@ -32,8 +45,8 @@ from rayher_hr_payroll.oa_organization import (
     resolve_stage_two_supervisor,
 )
 
-REQUEST_TYPES = [REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT]
-ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, OTHER_ASSET]
+REQUEST_TYPES = [REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT]
+ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, PRODUCTION_ASSET, OTHER_ASSET]
 
 STATUS_DRAFT = "\u8349\u7a3f"
 STATUS_PENDING = "\u5f85\u5ba1\u6279"
@@ -64,6 +77,45 @@ INVOICE_UPLOADED = "\u5df2\u4e0a\u4f20"
 INVOICE_VERIFIED = "\u5df2\u9a8c\u8bc1"
 INVOICE_CONFIRMED = "\u5df2\u786e\u8ba4"
 INVOICE_DUPLICATE = "\u91cd\u590d\u53d1\u7968"
+
+
+def _resolve_approval_roles(request_type, *, department="", asset_category="", purchase_method=""):
+    if request_type == REQUEST_LEAVE:
+        keys = ["hr_manager", "general_manager" if "财务" in _clean(department) else "vice_manager"]
+    elif request_type == REQUEST_EXPENSE_PAYMENT:
+        keys = ["finance_auditor", "finance_manager", "general_manager"]
+        if "财务" not in _clean(department):
+            keys.append("vice_manager")
+        if asset_category == ADMIN_ASSET:
+            keys.append("hr_manager")
+        elif asset_category == PRODUCTION_ASSET:
+            keys.append("production_asset_owner")
+    elif request_type == REQUEST_PROCUREMENT:
+        keys = ["pmc"]
+        if asset_category == PRODUCTION_ASSET:
+            keys.append("production_asset_owner")
+    elif request_type == REQUEST_DIRECT_PURCHASE:
+        keys = ["hr_manager", "vice_manager"] if _clean(purchase_method) == "京东购买" else []
+    elif request_type == REQUEST_PROCUREMENT_PAYMENT:
+        keys = ["finance_auditor", "vice_manager", "general_manager"]
+    else:
+        keys = []
+    try:
+        return {key: resolve_role(key) for key in dict.fromkeys(keys)}
+    except ApprovalRoleResolutionError as exc:
+        raise ApprovalRouteError(str(exc)) from exc
+
+
+def _request_business_document_types(request_name):
+    if not request_name:
+        return set()
+    rows = frappe.get_all(
+        "OA Business Document",
+        filters={"request": request_name},
+        fields=["document_type"],
+        limit_page_length=0,
+    )
+    return {_clean(row.get("document_type")) for row in rows if _clean(row.get("document_type"))}
 
 
 def _save_document(doc):
@@ -962,6 +1014,18 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "paid_by": getattr(doc, "paid_by", None),
         "paid_on": getattr(doc, "paid_on", None),
         "reason": doc.reason,
+        "business_status": getattr(doc, "business_status", None) or "",
+        "procurement_scope": getattr(doc, "procurement_scope", None),
+        "expected_delivery_date": getattr(doc, "expected_delivery_date", None),
+        "project": getattr(doc, "project", None),
+        "project_owner": getattr(doc, "project_owner", None),
+        "project_owner_name": getattr(doc, "project_owner_name", None),
+        "purchase_method": getattr(doc, "purchase_method", None),
+        "supplier": getattr(doc, "supplier", None),
+        "payment_stage": getattr(doc, "payment_stage", None),
+        "arrival_status": getattr(doc, "arrival_status", None),
+        "inspection_status": getattr(doc, "inspection_status", None),
+        "prepayment_writeoff_status": getattr(doc, "prepayment_writeoff_status", None),
         "workflow_status": doc.workflow_status,
         "kanban_status": _kanban_status(doc.workflow_status),
         "current_step_index": doc.current_step_index,
@@ -1300,16 +1364,40 @@ def _submit_draft(doc):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT:
         doc.asset_category = _required_asset_category(getattr(doc, "asset_category", None))
-    _validate_expense_project_groups(doc)
-    summary = invoice_service.validate_request_invoices(doc, submitting=True)
-    if isinstance(summary, dict):
-        doc.invoice_count = summary.get("invoice_count", 0)
-        doc.invoice_status = summary.get("invoice_status", "")
-    ctx = _route_context(department=doc.department, supervisor=doc.supervisor, asset_category=doc.asset_category, request_type=doc.request_type)
-    route = preview_route(doc.request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=True)
+        _validate_expense_project_groups(doc)
+        summary = invoice_service.validate_request_invoices(doc, submitting=True)
+        if isinstance(summary, dict):
+            doc.invoice_count = summary.get("invoice_count", 0)
+            doc.invoice_status = summary.get("invoice_status", "")
+    elif doc.request_type == REQUEST_PROCUREMENT:
+        try:
+            validate_procurement_submission(doc)
+        except ProcurementWorkflowError as exc:
+            frappe.throw(str(exc))
+    elif doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
+        try:
+            validate_payment_submission(doc, evidence=_request_business_document_types(doc.name))
+        except ProcurementWorkflowError as exc:
+            frappe.throw(str(exc))
+    ctx = _route_context(
+        department=getattr(doc, "department", None),
+        supervisor=getattr(doc, "supervisor", None),
+        asset_category=getattr(doc, "asset_category", None),
+        request_type=doc.request_type,
+    )
+    doc.department = ctx["department"]
+    doc.supervisor = ctx["supervisor"]
+    route = preview_route(
+        doc.request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=True,
+        project_owner=getattr(doc, "project_owner", None),
+        project_owner_name=getattr(doc, "project_owner_name", None),
+        purchase_method=getattr(doc, "purchase_method", None),
+    )
     doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])
     doc.workflow_status = route["steps"][0]["status"]
+    if doc.request_type in {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT}:
+        doc.business_status = "待审批"
     doc.current_step_index = 1
     doc.current_step_label = route["steps"][0]["label"]
     _append_request_event(doc, "提交申请", old_status, doc.workflow_status)
@@ -1368,10 +1456,17 @@ def get_options():
 
 
 @frappe.whitelist()
-def preview_route(request_type, department=None, supervisor=None, asset_category=None, active=True):
+def preview_route(
+    request_type, department=None, supervisor=None, asset_category=None, active=True,
+    project_owner=None, project_owner_name=None, purchase_method=None,
+):
     require_request_type_access(request_type)
     try:
         ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
+        roles = _resolve_approval_roles(
+            request_type, department=ctx["department"], asset_category=ctx["asset_category"],
+            purchase_method=purchase_method,
+        )
         steps = build_route(
             request_type,
             department=ctx["department"],
@@ -1380,9 +1475,13 @@ def preview_route(request_type, department=None, supervisor=None, asset_category
             supervisor_decision=ctx.get("supervisor_decision"),
             applicant_user=ctx.get("applicant_user"),
             asset_category=ctx["asset_category"],
+            project_owner=project_owner,
+            project_owner_name=project_owner_name,
+            purchase_method=purchase_method,
+            roles=roles,
         )
         copied_to = (
-            leave_copy_recipients(ctx.get("applicant_user"))
+            leave_copy_recipients(ctx.get("applicant_user"), roles=roles)
             if request_type == REQUEST_LEAVE
             else []
         )
@@ -1392,6 +1491,7 @@ def preview_route(request_type, department=None, supervisor=None, asset_category
             "context": ctx,
             "steps": _serialize_route_steps(steps, active=_to_bool(active)),
             "copied_to": copied_to,
+            "role_snapshots": list(roles.values()),
         }
     except ApprovalRouteError as exc:
         frappe.throw(str(exc))
@@ -2877,6 +2977,11 @@ def save_approval_center_draft(request_type, payload, name=None):
         return _approval_center_result(save_draft(request_type, payload, name=name))
     except ApprovalCenterError as exc:
         frappe.throw(str(exc))
+
+
+@frappe.whitelist(methods=["POST"])
+def submit_approval_center_draft(name):
+    return submit_request(name)
 
 
 @frappe.whitelist()

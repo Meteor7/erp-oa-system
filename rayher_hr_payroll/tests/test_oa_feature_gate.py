@@ -43,16 +43,22 @@ def test_switches_are_independent_and_reversible(gate):
     assert module.boot_access_flags("employee@example.com") == {
         "leave_approval": False,
         "expense_reimbursement": True,
-        "procurement_application": False,
-        "direct_purchase_application": False,
-        "procurement_payment": False,
+        "procurement_application": True,
+        "direct_purchase_application": True,
+        "procurement_payment": True,
     }
 
 
 def test_denial_query_and_document_permissions(gate):
     module, frappe = gate
     frappe.conf.update(leave_approval_admin_only=1, expense_reimbursement_admin_only=1)
-    assert module.oa_request_query("employee@example.com") == "1=0"
+    query = module.oa_request_query("employee@example.com")
+    assert query != "1=0"
+    assert all(request_type in query for request_type in (
+        module.REQUEST_PROCUREMENT, module.REQUEST_DIRECT_PURCHASE, module.REQUEST_PROCUREMENT_PAYMENT
+    ))
+    assert module.REQUEST_LEAVE not in query
+    assert module.REQUEST_EXPENSE_PAYMENT not in query
     assert module.oa_request_has_permission(
         {"request_type": module.REQUEST_LEAVE}, user="employee@example.com"
     ) is False
@@ -70,10 +76,11 @@ def test_open_switch_defers_to_existing_permissions(gate):
         module.can_access_request_type("unknown", "employee@example.com")
 
 
-def test_unconfigured_new_routes_are_always_administrator_only(gate):
+def test_procurement_routes_are_open_without_opening_unknown_types(gate):
     module, _frappe = gate
-    for request_type in module.DRAFT_ONLY_REQUEST_TYPES:
-        assert module.can_access_request_type(request_type, "employee@example.com") is False
-        assert module.can_access_request_type(request_type, "manager@example.com") is False
-        assert module.can_access_request_type(request_type, "Administrator") is True
-        assert module.can_access_request_type(request_type, "admin@staff.example.invalid") is True
+    assert module.DRAFT_ONLY_REQUEST_TYPES == set()
+    for request_type in (module.REQUEST_PROCUREMENT, module.REQUEST_DIRECT_PURCHASE, module.REQUEST_PROCUREMENT_PAYMENT):
+        assert module.can_access_request_type(request_type, "employee@example.com") is True
+        assert module.can_access_request_type(request_type, "manager@example.com") is True
+    with pytest.raises(ValueError):
+        module.can_access_request_type("unknown", "employee@example.com")

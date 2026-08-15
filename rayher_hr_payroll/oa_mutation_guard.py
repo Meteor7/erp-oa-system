@@ -14,11 +14,7 @@ from rayher_hr_payroll.oa_document_types import (
 
 
 DRAFT_STATUS = "草稿"
-CLOSED_REQUEST_TYPES = {
-    REQUEST_PROCUREMENT,
-    REQUEST_DIRECT_PURCHASE,
-    REQUEST_PROCUREMENT_PAYMENT,
-}
+CLOSED_REQUEST_TYPES = set()
 SERVER_OWNED_FIELDS = {
     "request_type",
     "company",
@@ -47,6 +43,13 @@ SERVER_OWNED_FIELDS = {
     "expense_lines",
     "business_lines",
     "operation_log",
+    "business_status",
+    "project_owner",
+    "project_owner_name",
+    "arrival_status",
+    "inspection_status",
+    "prepayment_writeoff_status",
+    "received_quantity",
 }
 NEW_DOCUMENT_ALLOWED_VALUES = {
     "workflow_status": {None, "", DRAFT_STATUS},
@@ -154,11 +157,11 @@ def _changed_server_fields(doc, before):
 
 
 def validate_request_mutation(doc):
-    if _closed_route_is_not_draft(doc):
-        frappe.throw("审批流程尚未启用，当前仅可保存草稿。", frappe.PermissionError)
-
     if _authorized():
         return
+
+    if _closed_route_is_not_draft(doc):
+        frappe.throw("审批流程尚未启用，当前仅可保存草稿。", frappe.PermissionError)
 
     before_getter = getattr(doc, "get_doc_before_save", None)
     before = before_getter() if callable(before_getter) else None

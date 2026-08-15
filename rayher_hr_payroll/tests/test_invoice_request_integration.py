@@ -62,6 +62,7 @@ def restore_service_frappe(monkeypatch):
     monkeypatch.setattr(service, "frappe", frappe_stub)
     monkeypatch.setattr(oa_entry, "frappe", frappe_stub)
     monkeypatch.setattr(oa_entry, "now_datetime", frappe_stub.utils.now_datetime)
+    monkeypatch.setattr(oa_entry, "_resolve_approval_roles", lambda *_args, **_kwargs: _procurement_role_snapshots())
     frappe_stub.session.user = "alice@example.com"
     frappe_stub.get_roles = lambda user=None: ["Employee"]
     frappe_stub.local = types.SimpleNamespace(site="test.localhost")
@@ -3116,3 +3117,86 @@ def test_final_handle_step_confirms_payment_atomically(monkeypatch):
     assert doc.paid_by == "person067@staff.example.invalid"
     assert doc.paid_on is not None
     assert json.loads(doc.operation_log)[-1]["action"] == "确认付款"
+
+
+def _procurement_role_snapshots():
+    def row(role_key, label, user, name):
+        return {"role_key": role_key, "role_label": label, "user": user, "employee": "EMP-" + role_key, "employee_name": name}
+    return {
+        "pmc": row("pmc", "PMC", "person076@staff.example.invalid", "演示员工178"),
+        "production_asset_owner": row("production_asset_owner", "生产设备负责人", "person074@staff.example.invalid", "演示员工241"),
+        "finance_auditor": row("finance_auditor", "财务审核", "person067@staff.example.invalid", "演示员工13"),
+        "vice_manager": row("vice_manager", "副总经理", "person046@staff.example.invalid", "演示员工21"),
+        "general_manager": row("general_manager", "总经理", "person060@staff.example.invalid", "演示员工29"),
+        "hr_manager": row("hr_manager", "人事经理", "person047@staff.example.invalid", "演示员工10"),
+        "finance_manager": row("finance_manager", "财务主管", "person072@staff.example.invalid", "演示员工16"),
+    }
+
+
+def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypatch):
+    real_preview_route = oa_entry.preview_route
+    environment = _install_request_environment(monkeypatch)
+    monkeypatch.setattr(oa_entry, "preview_route", real_preview_route)
+    doc = RequestDocument(environment, {
+        "doctype": service.REQUEST_DOCTYPE,
+        "name": "PROC-1",
+        "owner": "alice@example.com",
+        "employee": "EMP-1",
+        "employee_name": "Alice",
+        "request_type": "采购申请",
+        "workflow_status": oa_entry.STATUS_DRAFT,
+        "business_status": "",
+        "department": "研发部",
+        "supervisor": "直属领导",
+        "asset_nature": "非固定资产",
+        "fixed_asset_category": "",
+        "asset_category": oa_entry.OTHER_ASSET,
+        "procurement_scope": "项目采购",
+        "expected_delivery_date": "2026-09-10",
+        "project": "PRJ-1",
+        "project_owner": "owner@example.com",
+        "project_owner_name": "项目主管",
+        "business_lines": [Row(item_name="芯片", quantity=2, amount=20)],
+        "steps": [],
+        "operation_log": "[]",
+    })
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_employee_context", lambda user=None: {
+        "employee": "EMP-1", "employee_name": "Alice", "applicant_user": "alice@example.com",
+        "department": "研发部", "supervisor": "直属领导", "supervisor_user": "boss@example.com",
+        "supervisor_decision": "approve", "supervisor_path": ["直属领导"],
+    })
+    monkeypatch.setattr(oa_entry, "_resolve_approval_roles", lambda *_args, **_kwargs: _procurement_role_snapshots())
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current, authorized_expense_lines=None: {
+        "workflow_status": current.workflow_status,
+        "business_status": current.business_status,
+        "current_step_label": current.current_step_label,
+    })
+    result = oa_entry.submit_request("PROC-1")
+    assert result["workflow_status"] == oa_entry.STATUS_PENDING
+    assert result["business_status"] == "待审批"
+    assert result["current_step_label"] == "PMC：演示员工178"
+    assert [row.label for row in doc.steps] == ["PMC：演示员工178", "直属主管：直属领导", "项目主管：项目主管"]
+    assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
+
+
+def test_procurement_submit_rejects_other_users_and_duplicate_submission(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(environment, {
+        "doctype": service.REQUEST_DOCTYPE, "name": "PROC-2", "owner": "other@example.com",
+        "employee": "EMP-OTHER", "request_type": "采购申请", "workflow_status": oa_entry.STATUS_DRAFT,
+        "steps": [], "operation_log": "[]",
+    })
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValidationError("无权编辑")))
+    with pytest.raises(ValidationError, match="无权编辑"):
+        oa_entry.submit_request("PROC-2")
+    assert doc.workflow_status == oa_entry.STATUS_DRAFT
+
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+    doc.workflow_status = oa_entry.STATUS_PENDING
+    with pytest.raises(ValidationError, match="草稿"):
+        oa_entry.submit_request("PROC-2")

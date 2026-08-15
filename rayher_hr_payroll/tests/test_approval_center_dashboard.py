@@ -13,6 +13,7 @@ class MemoryStore:
         self.rows = []
         self.allowed = user in {"Administrator", "admin@staff.example.invalid"}
         self.sources = {}
+        self.projects = {}
 
     def require_draft_access(self, request_type):
         if not self.allowed:
@@ -24,6 +25,9 @@ class MemoryStore:
             "employee_name": "管理员",
             "department": "",
             "company": "QIHENG DEMO",
+            "supervisor": "直属领导",
+            "supervisor_user": "boss@example.com",
+            "supervisor_decision": "approve",
         }
 
     def save_draft(self, request_type, values, name=None):
@@ -43,6 +47,11 @@ class MemoryStore:
         if name not in self.sources:
             raise approval_center.ApprovalCenterError("来源申请不存在")
         return self.sources[name]
+
+    def resolve_project(self, name):
+        if name not in self.projects:
+            raise approval_center.ApprovalCenterError("所属项目不存在")
+        return self.projects[name]
 
     def source_balance(self, source):
         return source.get("balance") or {
@@ -66,10 +75,36 @@ def valid_payload():
     }
 
 
+def procurement_payload(**overrides):
+    value = valid_payload()
+    value.update({
+        "procurement_scope": "项目采购",
+        "expected_delivery_date": "2026-09-10",
+        "project": "PRJ-1",
+        "purchaser_user": "buyer@example.com",
+    })
+    value.update(overrides)
+    return value
+
+
+def payment_payload(**overrides):
+    value = valid_payload()
+    value.update({
+        "source_request": "SRC-1",
+        "supplier": "SUP-1",
+        "payment_stage": "预付款",
+        "prepayment_percentage": 30,
+        "has_balance_payment": 1,
+    })
+    value.update(overrides)
+    return value
+
+
 def test_draft_recalculates_lines_and_keeps_all_workflow_fields_closed():
     store = MemoryStore()
+    store.projects["PRJ-1"] = {"name": "PRJ-1", "project_owner": "owner@example.com", "project_owner_name": "项目主管"}
     result = approval_center.save_draft(
-        approval_center.REQUEST_PROCUREMENT, valid_payload(), store=store
+        approval_center.REQUEST_PROCUREMENT, procurement_payload(), store=store
     )
     assert result.workflow_status == "草稿"
     assert result.current_step_index == 0
@@ -113,8 +148,7 @@ def test_procurement_payment_source_must_be_completed_procurement_and_is_snapsho
         "workflow_status": "待审批", "currency": "CNY", "approved_amount": 100,
         "modified": "2026-08-06 11:00:00",
     }
-    payload = valid_payload()
-    payload["source_request"] = "SRC-1"
+    payload = payment_payload()
     with pytest.raises(approval_center.ApprovalCenterError, match="已完成"):
         approval_center.save_draft(approval_center.REQUEST_PROCUREMENT_PAYMENT, payload, store=store)
     store.sources["SRC-1"]["workflow_status"] = "已完成"
@@ -178,3 +212,53 @@ def test_payment_dashboard_does_not_accept_client_department_scope():
 def test_unknown_dashboard_kind_rejected():
     with pytest.raises(approval_center.ApprovalCenterError, match="看板"):
         approval_center.dashboard("all", store=MemoryStore())
+
+def test_procurement_draft_snapshots_project_owner_and_server_identity():
+    store = MemoryStore()
+    store.projects["PRJ-1"] = {
+        "name": "PRJ-1", "project_owner": "owner@example.com", "project_owner_name": "项目主管"
+    }
+    result = approval_center.save_draft(
+        approval_center.REQUEST_PROCUREMENT, procurement_payload(), store=store
+    )
+    assert result.project == "PRJ-1"
+    assert result.project_owner == "owner@example.com"
+    assert result.project_owner_name == "项目主管"
+    assert result.expected_delivery_date == "2026-09-10"
+    assert result.supervisor == "直属领导"
+
+
+def test_procurement_rejects_missing_delivery_and_project_owner():
+    store = MemoryStore()
+    store.projects["PRJ-1"] = {"name": "PRJ-1", "project_owner": ""}
+    with pytest.raises(approval_center.ApprovalCenterError, match="项目负责人"):
+        approval_center.save_draft(
+            approval_center.REQUEST_PROCUREMENT, procurement_payload(), store=store
+        )
+    store.projects["PRJ-1"]["project_owner"] = "owner@example.com"
+    with pytest.raises(approval_center.ApprovalCenterError, match="意向交期"):
+        approval_center.save_draft(
+            approval_center.REQUEST_PROCUREMENT, procurement_payload(expected_delivery_date=""), store=store
+        )
+
+
+def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
+    direct = approval_center.save_draft(
+        approval_center.REQUEST_DIRECT_PURCHASE,
+        {**valid_payload(), "purchase_method": "京东购买"},
+        store=MemoryStore(),
+    )
+    assert direct.purchase_method == "京东购买"
+
+    store = MemoryStore()
+    store.sources["SRC-1"] = {
+        "name": "SRC-1", "request_type": approval_center.REQUEST_PROCUREMENT,
+        "workflow_status": "已完成", "currency": "CNY", "approved_amount": 100,
+        "modified": "2026-08-15 10:00:00",
+    }
+    payment = approval_center.save_draft(
+        approval_center.REQUEST_PROCUREMENT_PAYMENT, payment_payload(), store=store
+    )
+    assert payment.supplier == "SUP-1"
+    assert payment.payment_stage == "预付款"
+    assert payment.prepayment_percentage == 30

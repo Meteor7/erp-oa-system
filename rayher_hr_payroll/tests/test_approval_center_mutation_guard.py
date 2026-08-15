@@ -57,13 +57,13 @@ def test_client_cannot_change_request_identity_or_amount(guard):
             module.validate_request_mutation(changed)
 
 
-def test_closed_route_cannot_advance_even_inside_authorized_context(guard):
+def test_procurement_route_advances_only_inside_authorized_context(guard):
     module, frappe = guard
-    for status in ("待审批", ""):
-        doc = Doc({"request_type": module.REQUEST_PROCUREMENT, "workflow_status": status})
-        with module.authorized_oa_action():
-            with pytest.raises(frappe.PermissionError, match="尚未启用"):
-                module.validate_request_mutation(doc)
+    doc = Doc({"request_type": module.REQUEST_PROCUREMENT, "workflow_status": "待审批", "current_step_index": 1})
+    with pytest.raises(frappe.PermissionError, match="服务端字段|审批服务"):
+        module.validate_request_mutation(doc)
+    with module.authorized_oa_action():
+        module.validate_request_mutation(doc)
 
 
 def test_authorized_existing_action_can_change_state_and_context_clears(guard):

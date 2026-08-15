@@ -5,7 +5,12 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import frappe
 
-from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT
+from rayher_hr_payroll.oa_approval import OTHER_ASSET, PRODUCTION_ASSET, REQUEST_EXPENSE_PAYMENT
+from rayher_hr_payroll.procurement_workflow import (
+    PAYMENT_STAGES,
+    ProcurementWorkflowError,
+    validate_procurement_submission,
+)
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_PROCUREMENT,
@@ -30,10 +35,17 @@ SERVER_FIELDS = {
     "employee_name", "department", "company", "copied_to", "current_step_index",
     "current_step_label", "currency", "paid_by", "paid_on", "operation_log",
     "approved_amount_snapshot", "source_modified", "payment_source_kind",
+    "business_status", "project_owner", "project_owner_name", "arrival_status",
+    "inspection_status", "prepayment_writeoff_status", "received_quantity",
 }
 ALLOWED_PAYLOAD_FIELDS = {
     "subject", "reason", "urgency", "asset_nature", "fixed_asset_category",
-    "business_lines", "source_request",
+    "business_lines", "source_request", "procurement_scope", "expected_delivery_date",
+    "project", "non_project_allocation_type", "non_project_cost_center",
+    "non_project_department", "purchaser_user", "contract_delivery_date",
+    "delivery_change_reason", "purchase_method", "supplier", "payment_stage",
+    "prepayment_percentage", "has_balance_payment", "expected_arrival_date",
+    "prepayment_risk_note",
 }
 
 
@@ -134,7 +146,7 @@ class FrappeApprovalCenterStore:
         rows = frappe.get_all(
             "Employee",
             filters={"user_id": user, "status": "Active"},
-            fields=["name", "employee_name", "department", "company"],
+            fields=["name", "employee_name", "department", "company", "reports_to"],
             limit_page_length=2,
         )
         if len(rows) > 1:
@@ -143,11 +155,24 @@ class FrappeApprovalCenterStore:
         company = _get(row, "company")
         if not company:
             company = frappe.defaults.get_user_default("Company") or ""
+        supervisor_employee = _get(row, "reports_to") or ""
+        supervisor = ""
+        supervisor_user = ""
+        if supervisor_employee:
+            supervisor_row = frappe.db.get_value(
+                "Employee", supervisor_employee, ["employee_name", "user_id", "status"], as_dict=True
+            ) or {}
+            if _get(supervisor_row, "status") == "Active":
+                supervisor = _get(supervisor_row, "employee_name") or supervisor_employee
+                supervisor_user = _get(supervisor_row, "user_id") or ""
         return {
             "employee": _get(row, "name"),
             "employee_name": _get(row, "employee_name") or "",
             "department": _get(row, "department") or "",
             "company": company,
+            "supervisor": supervisor,
+            "supervisor_user": supervisor_user,
+            "supervisor_decision": "approve" if supervisor else "",
         }
 
     def save_draft(self, request_type, values, name=None):
@@ -155,6 +180,9 @@ class FrappeApprovalCenterStore:
 
         if name:
             doc = frappe.get_doc("OA Approval Request", name)
+            user = frappe.session.user
+            if user not in {"Administrator", "admin@staff.example.invalid"} and _get(doc, "owner") != user:
+                raise ApprovalCenterError("只能修改本人创建的草稿")
             if not frappe.has_permission("OA Approval Request", "write", doc=doc):
                 raise ApprovalCenterError("无权修改该草稿")
             if doc.request_type != request_type or doc.workflow_status != DRAFT_STATUS:
@@ -190,6 +218,12 @@ class FrappeApprovalCenterStore:
             raise ApprovalCenterError("无权使用来源申请")
         return source
 
+    def resolve_project(self, name):
+        project = frappe.get_doc("Project", name)
+        if not frappe.has_permission("Project", "read", doc=project):
+            raise ApprovalCenterError("无权使用所属项目")
+        return project
+
     def source_balance(self, source):
         from rayher_hr_payroll.approval_amount_ledger import source_balance
 
@@ -222,6 +256,58 @@ def save_draft(request_type, payload, name=None, *, store=None):
         raise ApprovalCenterError("固定资产类别无效")
     if asset_nature != "固定资产":
         fixed_category = ""
+
+    procurement_scope = _text(values.get("procurement_scope"), "采购范围", 20)
+    expected_delivery_date = _text(values.get("expected_delivery_date"), "意向交期", 10)
+    project_name = _text(values.get("project"), "所属项目", 140)
+    project_owner = ""
+    project_owner_name = ""
+    allocation_type = _text(values.get("non_project_allocation_type"), "非项目归属", 20)
+    non_project_cost_center = _text(values.get("non_project_cost_center"), "成本中心", 140)
+    non_project_department = _text(values.get("non_project_department"), "所属部门", 140)
+    purchaser_user = _text(values.get("purchaser_user"), "采购经办人", 140)
+    purchase_method = _text(values.get("purchase_method"), "购买方式", 20)
+    supplier = _text(values.get("supplier"), "供应商", 140)
+    payment_stage = _text(values.get("payment_stage"), "付款阶段", 20)
+    prepayment_percentage = _decimal(values.get("prepayment_percentage") or 0, "预付款比例")
+    has_balance_payment = 1 if values.get("has_balance_payment") in (1, "1", True) else 0
+    expected_arrival_date = _text(values.get("expected_arrival_date"), "预计到货日期", 10)
+    prepayment_risk_note = _text(values.get("prepayment_risk_note"), "预付款风险说明", 1000)
+
+    if request_type == REQUEST_PROCUREMENT:
+        if project_name:
+            project = store.resolve_project(project_name)
+            project_owner = _text(_get(project, "project_owner"), "项目负责人", 140)
+            project_owner_name = _text(_get(project, "project_owner_name"), "项目负责人姓名", 140) or project_owner
+        try:
+            validate_procurement_submission({
+                "procurement_scope": procurement_scope,
+                "expected_delivery_date": expected_delivery_date,
+                "project": project_name,
+                "project_owner": project_owner,
+                "non_project_allocation_type": allocation_type,
+                "non_project_cost_center": non_project_cost_center,
+                "non_project_department": non_project_department,
+            })
+        except ProcurementWorkflowError as exc:
+            raise ApprovalCenterError(str(exc))
+    elif any((procurement_scope, project_name, allocation_type, non_project_cost_center, non_project_department)):
+        raise ApprovalCenterError("采购范围和项目归属只属于采购申请")
+
+    if request_type == REQUEST_DIRECT_PURCHASE:
+        if purchase_method not in {"京东购买", "其他购买"}:
+            raise ApprovalCenterError("购买申请必须选择京东购买或其他购买")
+    elif purchase_method:
+        raise ApprovalCenterError("购买方式只属于购买申请")
+
+    if request_type == REQUEST_PROCUREMENT_PAYMENT:
+        if not supplier:
+            raise ApprovalCenterError("采购付款必须选择供应商")
+        if payment_stage not in PAYMENT_STAGES:
+            raise ApprovalCenterError("付款阶段无效")
+    elif any((supplier, payment_stage, prepayment_percentage, has_balance_payment, expected_arrival_date, prepayment_risk_note)):
+        raise ApprovalCenterError("采购付款字段只属于采购付款")
+
     source_request = _text(values.get("source_request"), "来源申请", 140)
     if request_type != REQUEST_PROCUREMENT_PAYMENT and source_request:
         raise ApprovalCenterError("只有采购付款草稿可以关联来源申请")
@@ -242,11 +328,30 @@ def save_draft(request_type, payload, name=None, *, store=None):
         "employee": identity.get("employee"),
         "employee_name": identity.get("employee_name") or "",
         "department": identity.get("department") or "",
+        "supervisor": identity.get("supervisor") or "",
         "subject": _text(values.get("subject"), "主题", 140, required=True),
         "urgency": _text(values.get("urgency") or "一般", "紧急程度", 20),
         "reason": _text(values.get("reason"), "申请说明", 1000),
         "asset_nature": asset_nature,
         "fixed_asset_category": fixed_category,
+        "asset_category": PRODUCTION_ASSET if fixed_category == PRODUCTION_ASSET else OTHER_ASSET,
+        "business_status": "",
+        "procurement_scope": procurement_scope or None,
+        "expected_delivery_date": expected_delivery_date or None,
+        "project": project_name or None,
+        "project_owner": project_owner or None,
+        "project_owner_name": project_owner_name,
+        "non_project_allocation_type": allocation_type or None,
+        "non_project_cost_center": non_project_cost_center or None,
+        "non_project_department": non_project_department or None,
+        "purchaser_user": purchaser_user or None,
+        "purchase_method": purchase_method or None,
+        "supplier": supplier or None,
+        "payment_stage": payment_stage or None,
+        "prepayment_percentage": prepayment_percentage,
+        "has_balance_payment": has_balance_payment,
+        "expected_arrival_date": expected_arrival_date or None,
+        "prepayment_risk_note": prepayment_risk_note,
         "amount": total,
         "currency": "CNY",
         "approved_amount": None,

@@ -10,14 +10,13 @@ from rayher_hr_payroll.oa_document_types import (
 )
 
 ADMIN_USERS = {"Administrator", "admin@staff.example.invalid"}
-DRAFT_ONLY_REQUEST_TYPES = {
-    REQUEST_PROCUREMENT,
-    REQUEST_DIRECT_PURCHASE,
-    REQUEST_PROCUREMENT_PAYMENT,
-}
+DRAFT_ONLY_REQUEST_TYPES = set()
 FEATURE_CONFIG_BY_REQUEST_TYPE = {
     REQUEST_LEAVE: "leave_approval_admin_only",
     REQUEST_EXPENSE_PAYMENT: "expense_reimbursement_admin_only",
+    REQUEST_PROCUREMENT: "procurement_application_admin_only",
+    REQUEST_DIRECT_PURCHASE: "direct_purchase_application_admin_only",
+    REQUEST_PROCUREMENT_PAYMENT: "procurement_payment_admin_only",
 }
 BOOT_FLAG_BY_REQUEST_TYPE = {
     REQUEST_LEAVE: "leave_approval",
@@ -42,8 +41,6 @@ def _truthy(value):
 
 
 def is_admin_only(request_type):
-    if request_type in DRAFT_ONLY_REQUEST_TYPES:
-        return True
     conf = getattr(frappe, "conf", {}) or {}
     key = _feature_key(request_type)
     value = conf.get(key, 0) if hasattr(conf, "get") else getattr(conf, key, 0)
@@ -51,9 +48,9 @@ def is_admin_only(request_type):
 
 
 def can_access_request_type(request_type, user=None):
+    if request_type not in FEATURE_CONFIG_BY_REQUEST_TYPE:
+        raise ValueError(f"Unsupported OA request type: {request_type}")
     user = user or getattr(getattr(frappe, "session", None), "user", "")
-    if request_type in DRAFT_ONLY_REQUEST_TYPES:
-        return user in ADMIN_USERS
     return user in ADMIN_USERS or not is_admin_only(request_type)
 
 
@@ -69,7 +66,7 @@ def visible_request_types(request_types, user=None):
 def boot_access_flags(user=None):
     return {
         BOOT_FLAG_BY_REQUEST_TYPE[item]: can_access_request_type(item, user)
-        for item in (*FEATURE_CONFIG_BY_REQUEST_TYPE, *DRAFT_ONLY_REQUEST_TYPES)
+        for item in FEATURE_CONFIG_BY_REQUEST_TYPE
     }
 
 
