@@ -49,12 +49,20 @@ test("procurement pages save and submit through the real workflow engine", () =>
   assert.match(pre, /驳回原因/);
 });
 
-test("dashboard renders all five money meanings and historical unclassified", () => {
+test("dashboard renders money, fixed-asset and prepayment risk drilldowns", () => {
   const source = read("../src/pages/ApprovalDashboard.vue");
-  for (const label of ["申请金额", "批准金额", "占用金额", "已付金额", "可用余额", "历史未分类"]) {
+  for (const label of [
+    "申请金额", "批准金额", "占用金额", "已付金额", "可用余额", "历史未分类",
+    "固定资产", "非固定资产", "100%预付款逾期", "待到货", "待验收",
+    "验收不合格", "待预付款核销", "显示全部",
+  ]) {
     assert.ok(source.includes(label), label);
   }
   assert.match(source, /get_approval_center_dashboard/);
+  assert.match(source, /asset_summary/);
+  assert.match(source, /prepayment_risk_summary/);
+  assert.match(source, /selectedNames/);
+  assert.match(source, /filteredRows/);
 });
 
 test("existing payment and reimbursement aliases remain on OA approvals", () => {

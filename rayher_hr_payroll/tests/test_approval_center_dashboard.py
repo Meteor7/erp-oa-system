@@ -271,3 +271,48 @@ def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
     assert payment.supplier == "SUP-1"
     assert payment.payment_stage == "预付款"
     assert payment.prepayment_percentage == 30
+
+def test_payment_dashboard_has_fixed_asset_categories_and_real_prepayment_risk_drilldowns():
+    store = MemoryStore()
+    store.rows = [
+        {
+            "name": "PAY-FIXED-OVERDUE", "request_type": approval_center.REQUEST_PROCUREMENT_PAYMENT,
+            "subject": "生产设备预付款", "workflow_status": "已付款", "business_status": "待到货",
+            "amount": 100, "approved_amount": 0, "asset_nature": "固定资产",
+            "fixed_asset_category": "生产设备、生产工具及器具", "payment_stage": "预付款",
+            "prepayment_percentage": 100, "expected_arrival_date": "2000-01-01", "arrival_status": "未到货",
+            "inspection_status": "未验收", "prepayment_writeoff_status": "待核销", "owner": "a", "modified": "now",
+        },
+        {
+            "name": "PAY-NONFIXED-INSPECT", "request_type": approval_center.REQUEST_PROCUREMENT_PAYMENT,
+            "subject": "材料到货", "workflow_status": "已付款", "business_status": "待验收",
+            "amount": 60, "approved_amount": 0, "asset_nature": "非固定资产", "fixed_asset_category": "",
+            "payment_stage": "预付款", "prepayment_percentage": 50, "expected_arrival_date": "2099-01-01",
+            "arrival_status": "全部到货", "inspection_status": "待验收", "prepayment_writeoff_status": "无需核销",
+            "owner": "a", "modified": "now",
+        },
+        {
+            "name": "PAY-FIXED-REJECT", "request_type": approval_center.REQUEST_PROCUREMENT_PAYMENT,
+            "subject": "电子设备", "workflow_status": "已付款", "business_status": "换货中",
+            "amount": 40, "approved_amount": 0, "asset_nature": "固定资产",
+            "fixed_asset_category": "电子设备、研发专用设备、仪器仪表", "payment_stage": "全额付款",
+            "prepayment_percentage": 0, "arrival_status": "全部到货", "inspection_status": "验收不合格",
+            "prepayment_writeoff_status": "无需核销", "owner": "a", "modified": "now",
+        },
+    ]
+
+    result = approval_center.dashboard("payment", store=store)
+
+    assert result["asset_summary"]["fixed_asset"] == {
+        "label": "固定资产", "count": 2, "applied_amount": Decimal("140.00"),
+        "names": ["PAY-FIXED-OVERDUE", "PAY-FIXED-REJECT"],
+    }
+    assert result["asset_summary"]["non_fixed_asset"]["names"] == ["PAY-NONFIXED-INSPECT"]
+    categories = {row["label"]: row for row in result["asset_summary"]["categories"]}
+    assert categories["生产设备、生产工具及器具"]["names"] == ["PAY-FIXED-OVERDUE"]
+    assert result["prepayment_risk_summary"]["pending_arrival"]["names"] == ["PAY-FIXED-OVERDUE"]
+    assert result["prepayment_risk_summary"]["pending_inspection"]["names"] == ["PAY-NONFIXED-INSPECT"]
+    assert result["prepayment_risk_summary"]["inspection_rejected"]["names"] == ["PAY-FIXED-REJECT"]
+    assert result["prepayment_risk_summary"]["pending_writeoff"]["names"] == ["PAY-FIXED-OVERDUE"]
+    assert result["prepayment_risk_summary"]["overdue_full_prepayment"]["names"] == ["PAY-FIXED-OVERDUE"]
+

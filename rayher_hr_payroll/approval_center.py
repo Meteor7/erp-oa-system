@@ -11,6 +11,7 @@ from rayher_hr_payroll.procurement_workflow import (
     NON_PROJECT_ALLOCATION_TYPES,
     PAYMENT_STAGES,
     ProcurementWorkflowError,
+    derive_prepayment_overdue,
     validate_procurement_submission,
 )
 from rayher_hr_payroll.oa_document_types import (
@@ -211,7 +212,9 @@ class FrappeApprovalCenterStore:
             fields=[
                 "name", "request_type", "subject", "workflow_status", "amount",
                 "approved_amount", "asset_nature", "fixed_asset_category", "owner",
-                "source_request", "modified",
+                "source_request", "modified", "business_status", "payment_stage",
+                "prepayment_percentage", "expected_arrival_date", "arrival_status",
+                "inspection_status", "prepayment_writeoff_status", "has_balance_payment",
             ],
             order_by="modified desc",
             limit_page_length=limit,
@@ -411,6 +414,69 @@ def _money(value):
     return _decimal(value or 0, "金额")
 
 
+def _summary_bucket(label):
+    return {"label": label, "count": 0, "applied_amount": Decimal("0.00"), "names": []}
+
+
+def _add_summary_record(bucket, row):
+    bucket["count"] += 1
+    bucket["applied_amount"] += _money(row.get("applied_amount"))
+    bucket["names"].append(row["name"])
+
+
+def _dashboard_drilldowns(kind, rows):
+    asset_summary = {
+        "fixed_asset": _summary_bucket("固定资产"),
+        "non_fixed_asset": _summary_bucket("非固定资产"),
+        "historical_unclassified": _summary_bucket("历史未分类"),
+        "categories": [],
+    }
+    category_buckets = {}
+    prepayment_risk_summary = {
+        "pending_arrival": _summary_bucket("待到货"),
+        "pending_inspection": _summary_bucket("待验收"),
+        "inspection_rejected": _summary_bucket("验收不合格"),
+        "pending_writeoff": _summary_bucket("待预付款核销"),
+        "overdue_full_prepayment": _summary_bucket("100%预付款逾期"),
+    }
+
+    for row in rows:
+        asset_nature = row.get("asset_nature") or ""
+        if asset_nature == "固定资产":
+            _add_summary_record(asset_summary["fixed_asset"], row)
+            category = row.get("fixed_asset_category") or "固定资产未分类"
+            bucket = category_buckets.setdefault(category, _summary_bucket(category))
+            _add_summary_record(bucket, row)
+        elif asset_nature == "非固定资产":
+            _add_summary_record(asset_summary["non_fixed_asset"], row)
+        else:
+            _add_summary_record(asset_summary["historical_unclassified"], row)
+
+        if kind != "payment" or row.get("request_type") != REQUEST_PROCUREMENT_PAYMENT:
+            continue
+        if row.get("workflow_status") in {"已完成", "已付款"} and row.get("business_status") != "已关闭":
+            arrival_status = row.get("arrival_status") or "未到货"
+            inspection_status = row.get("inspection_status") or "未验收"
+            if arrival_status not in {"全部到货", "已关闭"}:
+                _add_summary_record(prepayment_risk_summary["pending_arrival"], row)
+            if arrival_status in {"全部到货", "已关闭"} and inspection_status in {"", "未验收", "待验收"}:
+                _add_summary_record(prepayment_risk_summary["pending_inspection"], row)
+            if inspection_status == "验收不合格":
+                _add_summary_record(prepayment_risk_summary["inspection_rejected"], row)
+            if row.get("prepayment_writeoff_status") == "待核销":
+                _add_summary_record(prepayment_risk_summary["pending_writeoff"], row)
+            try:
+                if derive_prepayment_overdue(row):
+                    _add_summary_record(prepayment_risk_summary["overdue_full_prepayment"], row)
+            except ProcurementWorkflowError:
+                pass
+
+    asset_summary["categories"] = [
+        category_buckets[label] for label in sorted(category_buckets)
+    ]
+    return asset_summary, prepayment_risk_summary
+
+
 def dashboard(kind, limit=200, *, store=None):
     if kind == "request":
         request_types = REQUEST_DASHBOARD_TYPES
@@ -444,8 +510,18 @@ def dashboard(kind, limit=200, *, store=None):
             "subject": _get(source, "subject") or "",
             "workflow_status": _get(source, "workflow_status") or "",
             "asset_classification": asset_classification,
+            "asset_nature": asset_nature,
+            "fixed_asset_category": _get(source, "fixed_asset_category") or "",
             "owner": _get(source, "owner") or "",
             "modified": _get(source, "modified"),
+            "business_status": _get(source, "business_status") or "",
+            "payment_stage": _get(source, "payment_stage") or "",
+            "prepayment_percentage": _get(source, "prepayment_percentage"),
+            "expected_arrival_date": _get(source, "expected_arrival_date"),
+            "arrival_status": _get(source, "arrival_status") or "",
+            "inspection_status": _get(source, "inspection_status") or "",
+            "prepayment_writeoff_status": _get(source, "prepayment_writeoff_status") or "",
+            "has_balance_payment": _get(source, "has_balance_payment"),
             "applied_amount": applied,
             "approved_amount": _money(balance.get("approved_amount")),
             "reserved_amount": _money(balance.get("reserved_amount")),
@@ -455,4 +531,11 @@ def dashboard(kind, limit=200, *, store=None):
         rows.append(row)
         for key in summary:
             summary[key] += row[key]
-    return {"kind": kind, "summary": summary, "rows": rows}
+    asset_summary, prepayment_risk_summary = _dashboard_drilldowns(kind, rows)
+    return {
+        "kind": kind,
+        "summary": summary,
+        "asset_summary": asset_summary,
+        "prepayment_risk_summary": prepayment_risk_summary,
+        "rows": rows,
+    }
