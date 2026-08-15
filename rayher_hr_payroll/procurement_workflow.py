@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal, InvalidOperation
+
+
+PROJECT_PROCUREMENT = "项目采购"
+NON_PROJECT_PROCUREMENT = "非项目采购"
+PROCUREMENT_SCOPES = {PROJECT_PROCUREMENT, NON_PROJECT_PROCUREMENT}
+NON_PROJECT_ALLOCATION_TYPES = {"成本中心", "部门", "非项目采购"}
+PAYMENT_STAGES = {"预付款", "到货款", "尾款", "全额付款"}
+ARRIVAL_STATUSES = {"未到货", "部分到货", "全部到货", "关闭未交数量", "退货中", "换货中"}
+INSPECTION_STATUSES = {"未验收", "待验收", "验收通过", "验收不合格"}
+WRITE_OFF_STATUSES = {"无需核销", "待核销", "已核销"}
+ARRIVAL_EVIDENCE = {"送货单", "收料单", "入库单"}
+ACCEPTANCE_EVIDENCE = "验收资料"
+
+
+class ProcurementWorkflowError(ValueError):
+    pass
+
+
+def _get(source, key, default=None):
+    if isinstance(source, dict):
+        return source.get(key, default)
+    return getattr(source, key, default)
+
+
+def _text(value):
+    return str(value or "").strip()
+
+
+def _decimal(value, label):
+    try:
+        return Decimal(str(value if value not in (None, "") else 0))
+    except (InvalidOperation, ValueError, TypeError):
+        raise ProcurementWorkflowError(f"{label}格式无效")
+
+
+def _date(value, label):
+    text = _text(value)
+    if not text:
+        raise ProcurementWorkflowError(f"{label}不能为空")
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise ProcurementWorkflowError(f"{label}格式无效")
+
+
+def _evidence_types(evidence):
+    result = set()
+    for item in evidence or ():
+        if isinstance(item, dict):
+            value = item.get("document_type") or item.get("doc_type") or item.get("type")
+        else:
+            value = item
+        value = _text(value)
+        if value:
+            result.add(value)
+    return result
+
+
+def validate_procurement_submission(doc, evidence=None):
+    scope = _text(_get(doc, "procurement_scope"))
+    if scope not in PROCUREMENT_SCOPES:
+        raise ProcurementWorkflowError("采购范围必须选择项目采购或非项目采购")
+    _date(_get(doc, "expected_delivery_date"), "意向交期")
+    if scope == PROJECT_PROCUREMENT:
+        if not _text(_get(doc, "project")):
+            raise ProcurementWorkflowError("所属项目不能为空")
+        if not _text(_get(doc, "project_owner")):
+            raise ProcurementWorkflowError("项目负责人没有关联有效账号")
+        return
+    allocation = _text(_get(doc, "non_project_allocation_type"))
+    if allocation not in NON_PROJECT_ALLOCATION_TYPES:
+        raise ProcurementWorkflowError("非项目归属必须选择成本中心、部门或非项目采购")
+    if allocation == "成本中心" and not _text(_get(doc, "non_project_cost_center")):
+        raise ProcurementWorkflowError("非项目采购选择成本中心时必须填写成本中心")
+    if allocation == "部门" and not _text(_get(doc, "non_project_department")):
+        raise ProcurementWorkflowError("非项目采购选择部门时必须填写所属部门")
+
+
+def validate_payment_submission(doc, evidence=None):
+    if not _text(_get(doc, "source_request")):
+        raise ProcurementWorkflowError("采购付款必须关联采购申请")
+    if not _text(_get(doc, "supplier")):
+        raise ProcurementWorkflowError("采购付款必须选择供应商")
+    stage = _text(_get(doc, "payment_stage"))
+    if stage not in PAYMENT_STAGES:
+        raise ProcurementWorkflowError("付款阶段无效")
+    evidence_types = _evidence_types(evidence)
+    percentage = _decimal(_get(doc, "prepayment_percentage"), "预付款比例")
+    if percentage < 0 or percentage > 100:
+        raise ProcurementWorkflowError("预付款比例必须在0到100之间")
+    if stage == "预付款":
+        if percentage <= 0:
+            raise ProcurementWorkflowError("预付款比例必须大于0")
+        if not ({"合同", "PO"} & evidence_types):
+            raise ProcurementWorkflowError("预付款必须提供合同或PO")
+        if "付款计划" not in evidence_types:
+            raise ProcurementWorkflowError("预付款必须提供付款计划")
+        if percentage == 100:
+            _date(_get(doc, "expected_arrival_date"), "预计到货日期")
+            if not _text(_get(doc, "prepayment_risk_note")):
+                raise ProcurementWorkflowError("100%预付款必须填写预付款风险说明")
+    if stage in {"到货款", "尾款"}:
+        if _text(_get(doc, "arrival_status")) not in {"全部到货", "关闭未交数量"}:
+            raise ProcurementWorkflowError("到货款或尾款提交前必须全部到货或关闭未交数量")
+        if _text(_get(doc, "inspection_status")) != "验收通过":
+            raise ProcurementWorkflowError("到货款或尾款提交前必须验收通过")
+        if ACCEPTANCE_EVIDENCE not in evidence_types:
+            raise ProcurementWorkflowError("到货款或尾款必须提供验收资料")
+
+
+def transition_business_state(doc, action, payload=None, evidence=None):
+    payload = payload or {}
+    evidence_types = _evidence_types(evidence)
+    business_status = _text(_get(doc, "business_status"))
+    arrival_status = _text(_get(doc, "arrival_status")) or "未到货"
+    if action == "record_arrival":
+        if business_status not in {"待到货", "部分到货"}:
+            raise ProcurementWorkflowError("当前状态不能登记到货")
+        if not (ARRIVAL_EVIDENCE & evidence_types):
+            raise ProcurementWorkflowError("登记到货必须提供送货单、收料单或入库单作为到货证明")
+        quantity = _decimal(payload.get("quantity"), "到货数量")
+        ordered = _decimal(_get(doc, "ordered_quantity"), "订单数量")
+        received = _decimal(_get(doc, "received_quantity"), "累计到货数量")
+        if quantity <= 0:
+            raise ProcurementWorkflowError("到货数量必须大于0")
+        if ordered <= 0:
+            raise ProcurementWorkflowError("订单数量必须大于0")
+        total = received + quantity
+        if total > ordered:
+            raise ProcurementWorkflowError("累计到货数量不能超过订单数量")
+        next_status = "全部到货" if total == ordered else "部分到货"
+        return {
+            "business_status": next_status,
+            "arrival_status": next_status,
+            "received_quantity": int(total) if total == total.to_integral() else float(total),
+        }
+    if action == "pass_inspection":
+        if arrival_status not in {"全部到货", "关闭未交数量"}:
+            raise ProcurementWorkflowError("货物未全部到货或关闭未交数量，不能验收通过")
+        if business_status not in {"待验收", "全部到货", "关闭未交数量"}:
+            raise ProcurementWorkflowError("当前状态不能验收通过")
+        if ACCEPTANCE_EVIDENCE not in evidence_types:
+            raise ProcurementWorkflowError("验收通过必须提供验收资料")
+        return {"business_status": "验收通过", "inspection_status": "验收通过"}
+    raise ProcurementWorkflowError(f"不支持的采购状态操作：{_text(action)}")
+
+
+def derive_prepayment_overdue(doc, *, today=None):
+    if _text(_get(doc, "payment_stage")) != "预付款":
+        return False
+    if _decimal(_get(doc, "prepayment_percentage"), "预付款比例") != 100:
+        return False
+    if _text(_get(doc, "arrival_status")) in {"全部到货", "关闭未交数量"}:
+        return False
+    expected = _text(_get(doc, "expected_arrival_date"))
+    if not expected:
+        return False
+    expected_date = _date(expected, "预计到货日期")
+    return expected_date < (today or date.today())

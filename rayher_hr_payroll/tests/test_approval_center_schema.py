@@ -96,3 +96,20 @@ def test_foundation_patch_only_reloads_schema_and_never_guesses_history(monkeypa
         ("rayher_hr_payroll", "doctype", "oa_approval_amount_ledger"),
         ("rayher_hr_payroll", "doctype", "oa_business_document"),
     ] * 2
+
+
+def test_procurement_fields_separate_approval_and_business_state():
+    result = fields("oa_approval_request")
+    assert result["business_status"]["read_only"] == 1
+    assert result["procurement_scope"]["options"] == "\n项目采购\n非项目采购"
+    assert result["expected_delivery_date"]["fieldtype"] == "Date"
+    assert result["project"]["options"] == "Project"
+    assert result["project_owner"]["options"] == "User"
+    assert result["project_owner"]["read_only"] == 1
+    assert result["purchase_method"]["options"] == "\n京东购买\n其他购买"
+    assert result["supplier"]["options"] == "Supplier"
+    assert result["payment_stage"]["options"] == "\n预付款\n到货款\n尾款\n全额付款"
+    assert result["prepayment_percentage"]["fieldtype"] == "Percent"
+    assert result["arrival_status"]["read_only"] == 1
+    assert result["inspection_status"]["read_only"] == 1
+    assert result["prepayment_writeoff_status"]["read_only"] == 1

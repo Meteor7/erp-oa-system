@@ -25,6 +25,29 @@
     "approved_amount",
     "asset_nature",
     "fixed_asset_category",
+    "business_status",
+    "procurement_scope",
+    "expected_delivery_date",
+    "project",
+    "project_owner",
+    "project_owner_name",
+    "non_project_allocation_type",
+    "non_project_cost_center",
+    "non_project_department",
+    "purchaser_user",
+    "contract_delivery_date",
+    "delivery_change_reason",
+    "purchase_method",
+    "supplier",
+    "payment_stage",
+    "prepayment_percentage",
+    "has_balance_payment",
+    "expected_arrival_date",
+    "prepayment_risk_note",
+    "arrival_status",
+    "inspection_status",
+    "prepayment_writeoff_status",
+    "received_quantity",
     "payment_source_kind",
     "source_request",
     "approved_amount_snapshot",
@@ -167,6 +190,149 @@
       "fieldtype": "Select",
       "label": "Fixed Asset Category",
       "options": "\n办公家具、工具及器具\n电子设备、研发专用设备、仪器仪表\n生产设备、生产工具及器具"
+    },
+    {
+      "default": "",
+      "fieldname": "business_status",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Business Status",
+      "options": "\n待审批\n合同待登记\n合同交期待确认\n采购执行中\n待付款\n待到货\n预付款逾期\n部分到货\n全部到货\n待验收\n验收通过\n验收不合格\n催办中\n供应商退款中\n退货中\n换货中\n待核销\n已核销\n已关闭",
+      "read_only": 1
+    },
+    {
+      "fieldname": "procurement_scope",
+      "fieldtype": "Select",
+      "label": "Procurement Scope",
+      "options": "\n项目采购\n非项目采购"
+    },
+    {
+      "fieldname": "expected_delivery_date",
+      "fieldtype": "Date",
+      "label": "Expected Delivery Date"
+    },
+    {
+      "fieldname": "project",
+      "fieldtype": "Link",
+      "label": "Project",
+      "options": "Project"
+    },
+    {
+      "fieldname": "project_owner",
+      "fieldtype": "Link",
+      "label": "Project Owner",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "project_owner_name",
+      "fieldtype": "Data",
+      "label": "Project Owner Name",
+      "read_only": 1
+    },
+    {
+      "fieldname": "non_project_allocation_type",
+      "fieldtype": "Select",
+      "label": "Non Project Allocation Type",
+      "options": "\n成本中心\n部门\n非项目采购"
+    },
+    {
+      "fieldname": "non_project_cost_center",
+      "fieldtype": "Link",
+      "label": "Non Project Cost Center",
+      "options": "Cost Center"
+    },
+    {
+      "fieldname": "non_project_department",
+      "fieldtype": "Link",
+      "label": "Non Project Department",
+      "options": "Department"
+    },
+    {
+      "fieldname": "purchaser_user",
+      "fieldtype": "Link",
+      "label": "Purchaser",
+      "options": "User"
+    },
+    {
+      "fieldname": "contract_delivery_date",
+      "fieldtype": "Date",
+      "label": "Contract Delivery Date"
+    },
+    {
+      "fieldname": "delivery_change_reason",
+      "fieldtype": "Small Text",
+      "label": "Delivery Change Reason"
+    },
+    {
+      "fieldname": "purchase_method",
+      "fieldtype": "Select",
+      "label": "Purchase Method",
+      "options": "\n京东购买\n其他购买"
+    },
+    {
+      "fieldname": "supplier",
+      "fieldtype": "Link",
+      "label": "Supplier",
+      "options": "Supplier"
+    },
+    {
+      "fieldname": "payment_stage",
+      "fieldtype": "Select",
+      "label": "Payment Stage",
+      "options": "\n预付款\n到货款\n尾款\n全额付款"
+    },
+    {
+      "fieldname": "prepayment_percentage",
+      "fieldtype": "Percent",
+      "label": "Prepayment Percentage"
+    },
+    {
+      "default": "0",
+      "fieldname": "has_balance_payment",
+      "fieldtype": "Check",
+      "label": "Has Balance Payment"
+    },
+    {
+      "fieldname": "expected_arrival_date",
+      "fieldtype": "Date",
+      "label": "Expected Arrival Date"
+    },
+    {
+      "fieldname": "prepayment_risk_note",
+      "fieldtype": "Small Text",
+      "label": "Prepayment Risk Note"
+    },
+    {
+      "default": "未到货",
+      "fieldname": "arrival_status",
+      "fieldtype": "Select",
+      "label": "Arrival Status",
+      "options": "未到货\n部分到货\n全部到货\n关闭未交数量\n退货中\n换货中",
+      "read_only": 1
+    },
+    {
+      "default": "未验收",
+      "fieldname": "inspection_status",
+      "fieldtype": "Select",
+      "label": "Inspection Status",
+      "options": "未验收\n待验收\n验收通过\n验收不合格",
+      "read_only": 1
+    },
+    {
+      "default": "无需核销",
+      "fieldname": "prepayment_writeoff_status",
+      "fieldtype": "Select",
+      "label": "Prepayment Write-off Status",
+      "options": "无需核销\n待核销\n已核销",
+      "read_only": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "received_quantity",
+      "fieldtype": "Float",
+      "label": "Received Quantity",
+      "read_only": 1
     },
     {
       "fieldname": "payment_source_kind",
