@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import frappe
 
 from rayher_hr_payroll.oa_approval import OTHER_ASSET, PRODUCTION_ASSET, REQUEST_EXPENSE_PAYMENT
 from rayher_hr_payroll.procurement_workflow import (
+    NON_PROJECT_ALLOCATION_TYPES,
     PAYMENT_STAGES,
     ProcurementWorkflowError,
     validate_procurement_submission,
@@ -284,11 +286,12 @@ def save_draft(request_type, payload, name=None, *, store=None):
     expected_arrival_date = _text(values.get("expected_arrival_date"), "预计到货日期", 10)
     prepayment_risk_note = _text(values.get("prepayment_risk_note"), "预付款风险说明", 1000)
 
+    if request_type in {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE} and project_name:
+        project = store.resolve_project(project_name)
+        project_owner = _text(_get(project, "project_owner"), "项目负责人", 140)
+        project_owner_name = _text(_get(project, "project_owner_name"), "项目负责人姓名", 140) or project_owner
+
     if request_type == REQUEST_PROCUREMENT:
-        if project_name:
-            project = store.resolve_project(project_name)
-            project_owner = _text(_get(project, "project_owner"), "项目负责人", 140)
-            project_owner_name = _text(_get(project, "project_owner_name"), "项目负责人姓名", 140) or project_owner
         try:
             validate_procurement_submission({
                 "procurement_scope": procurement_scope,
@@ -301,12 +304,23 @@ def save_draft(request_type, payload, name=None, *, store=None):
             })
         except ProcurementWorkflowError as exc:
             raise ApprovalCenterError(str(exc))
-    elif any((procurement_scope, project_name, allocation_type, non_project_cost_center, non_project_department)):
-        raise ApprovalCenterError("采购范围和项目归属只属于采购申请")
+    elif request_type != REQUEST_DIRECT_PURCHASE and any((procurement_scope, project_name, allocation_type, non_project_cost_center, non_project_department)):
+        raise ApprovalCenterError("采购范围和项目归属只属于采购申请或购买申请")
 
     if request_type == REQUEST_DIRECT_PURCHASE:
         if purchase_method not in {"京东购买", "其他购买"}:
             raise ApprovalCenterError("购买申请必须选择京东购买或其他购买")
+        try:
+            date.fromisoformat(expected_delivery_date)
+        except (TypeError, ValueError):
+            raise ApprovalCenterError("购买申请必须填写有效意向交期")
+        if not project_name:
+            if allocation_type not in NON_PROJECT_ALLOCATION_TYPES:
+                raise ApprovalCenterError("购买申请必须选择项目或非项目成本归属")
+            if allocation_type == "成本中心" and not non_project_cost_center:
+                raise ApprovalCenterError("购买申请选择成本中心时必须填写成本中心")
+            if allocation_type == "部门" and not non_project_department:
+                raise ApprovalCenterError("购买申请选择部门时必须填写所属部门")
     elif purchase_method:
         raise ApprovalCenterError("购买方式只属于购买申请")
 

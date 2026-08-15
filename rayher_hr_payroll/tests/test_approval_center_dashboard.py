@@ -245,12 +245,19 @@ def test_procurement_rejects_missing_delivery_and_project_owner():
 
 
 def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
+    direct_store = MemoryStore()
+    direct_store.projects["PRJ-1"] = {"name": "PRJ-1", "project_owner": "owner@example.com", "project_owner_name": "项目主管"}
     direct = approval_center.save_draft(
         approval_center.REQUEST_DIRECT_PURCHASE,
-        {**valid_payload(), "purchase_method": "京东购买"},
-        store=MemoryStore(),
+        {
+            **valid_payload(), "purchase_method": "京东购买",
+            "expected_delivery_date": "2026-09-10", "project": "PRJ-1",
+        },
+        store=direct_store,
     )
     assert direct.purchase_method == "京东购买"
+    assert direct.project == "PRJ-1"
+    assert direct.project_owner == "owner@example.com"
 
     store = MemoryStore()
     store.sources["SRC-1"] = {

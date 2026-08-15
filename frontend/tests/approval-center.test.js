@@ -37,14 +37,16 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /ApprovalDashboard\.vue/);
 });
 
-test("draft pages expose save only and explain that workflows are closed", () => {
+test("procurement pages save and submit through the real workflow engine", () => {
   const pre = read("../src/pages/PreRequestCenter.vue");
-  assert.match(pre, /审批流程尚未配置，当前仅可保存本地草稿。/);
+  assert.doesNotMatch(pre, /审批流程尚未配置/);
   assert.match(pre, /save_approval_center_draft/);
-  assert.match(pre, /attach_approval_business_document/);
-  assert.doesNotMatch(pre, />提交审批</);
-  assert.doesNotMatch(pre, /approved_amount\s*:/);
-  assert.doesNotMatch(pre, /workflow_status\s*:/);
+  assert.match(pre, /submit_approval_center_draft/);
+  assert.match(pre, />提交审批</);
+  assert.match(pre, /current_step_label/);
+  assert.match(pre, /row in selectedRequest.steps/);
+  assert.match(pre, /reject_target/);
+  assert.match(pre, /驳回原因/);
 });
 
 test("dashboard renders all five money meanings and historical unclassified", () => {
@@ -59,4 +61,7 @@ test("existing payment and reimbursement aliases remain on OA approvals", () => 
   const source = read("../src/pages/OAApprovals.vue");
   assert.ok(source.includes("/approval/reimbursement"));
   assert.ok(source.includes("/approval/corporate-payment"));
+  assert.match(source, /reject_target/);
+  assert.match(source, /rejection_targets/);
+  assert.match(source, /驳回原因必填/);
 });

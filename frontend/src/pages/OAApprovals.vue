@@ -157,6 +157,7 @@ const message = ref('');
 const errMsg = ref('');
 const saving = ref(false);
 const actionNote = ref('');
+const rejectTargetByRequest = reactive({});
 const purchaseTab = ref('board');
 const showManualForm = ref(false);
 const selectedRequestName = ref('');
@@ -577,7 +578,12 @@ async function markPaid(row) {
 async function act(row, action) {
   errMsg.value = '';
   try {
-    await actor.submit({ name: row.name, action, note: actionNote.value.trim() });
+    const params = { name: row.name, action, note: actionNote.value.trim() };
+    if (action === 'reject') {
+      if (!params.note) throw new Error('驳回原因必填');
+      params.reject_target = rejectTargetByRequest[row.name] || row.rejection_targets?.[0]?.target || 'applicant';
+    }
+    await actor.submit(params);
     actionNote.value = '';
     await reloadLists();
   } catch (error) {
@@ -893,6 +899,7 @@ watch(requestRows, (rows) => {
                   <td class='px-3 py-2'>{{ row.current_step_label }}</td>
                   <td class='px-3 py-2 text-right whitespace-nowrap'>
                     <button class='text-green-700 hover:underline mr-3' @click='act(row, "approve")'>{{ row.current_step_mode === 'handle' ? T.handle : T.approve }}</button>
+                    <select v-if='row.current_step_mode !== "handle"' v-model='rejectTargetByRequest[row.name]' class='mr-2 rounded border border-gray-300 px-1 py-0.5 text-xs'><option v-for='target in row.rejection_targets || []' :key='target.target' :value='target.target'>{{ target.label }}</option></select>
                     <button v-if='row.current_step_mode !== "handle"' class='text-red-600 hover:underline' @click='act(row, "reject")'>{{ T.reject }}</button>
                   </td>
                 </tr>
@@ -936,7 +943,8 @@ watch(requestRows, (rows) => {
                 <td class='px-3 py-2'>{{ row.current_step_label }}</td>
                 <td class='px-3 py-2 text-right whitespace-nowrap'>
                   <button class='text-green-700 hover:underline mr-3' @click='act(row, "approve")'>{{ row.current_step_mode === 'handle' ? T.handle : T.approve }}</button>
-                  <button v-if='row.current_step_mode !== "handle"' class='text-red-600 hover:underline' @click='act(row, "reject")'>{{ T.reject }}</button>
+                  <select v-if='row.current_step_mode !== "handle"' v-model='rejectTargetByRequest[row.name]' class='mr-2 rounded border border-gray-300 px-1 py-0.5 text-xs'><option v-for='target in row.rejection_targets || []' :key='target.target' :value='target.target'>{{ target.label }}</option></select>
+                    <button v-if='row.current_step_mode !== "handle"' class='text-red-600 hover:underline' @click='act(row, "reject")'>{{ T.reject }}</button>
                 </td>
               </tr>
               <tr v-if='!(pending.data || []).length'><td colspan='4' class='text-center text-gray-400 py-6'>{{ T.empty }}</td></tr>
