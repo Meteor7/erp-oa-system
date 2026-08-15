@@ -2973,11 +2973,11 @@ def test_leave_route_ignores_client_department_and_supervisor(monkeypatch):
     assert context["department"] == "研发部 - RAY"
     assert context["supervisor"] == "演示员工132"
     assert [step["label"] for step in route["steps"]] == [
-        "直属主管：演示员工132", "演示员工10", "演示员工37"
+        "直属主管：演示员工132", "人事经理", "演示员工21"
     ]
     assert route["copied_to"] == [
-        {"label": "演示员工10", "user": "person047@staff.example.invalid"},
-        {"label": "演示员工37", "user": "person046@staff.example.invalid"},
+        {"label": "人事经理", "user": "person047@staff.example.invalid"},
+        {"label": "演示员工21", "user": "person046@staff.example.invalid"},
     ]
 
 
