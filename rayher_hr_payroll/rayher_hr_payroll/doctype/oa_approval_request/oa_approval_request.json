@@ -293,7 +293,7 @@
       "fieldname": "payment_stage",
       "fieldtype": "Select",
       "label": "Payment Stage",
-      "options": "\n预付款\n到货款\n尾款\n全额付款"
+      "options": "\n预付款\n到货款\n尾款\n到货后全额付款"
     },
     {
       "fieldname": "prepayment_percentage",

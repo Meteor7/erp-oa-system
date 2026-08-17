@@ -3227,7 +3227,17 @@ def test_procurement_payment_submit_reserves_source_amount_in_same_request_trans
     environment.committed[doc.name] = doc
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(oa_entry, "validate_payment_submission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        oa_entry.approval_amount_ledger,
+        "source_balance",
+        lambda *_args, **_kwargs: {
+            "approved_amount": Decimal("100"),
+            "reserved_amount": Decimal("0"),
+            "paid_amount": Decimal("0"),
+            "available_amount": Decimal("100"),
+        },
+    )
+    monkeypatch.setattr(oa_entry, "validate_payment_submission", lambda *_args, **_kwargs: "预付款")
     monkeypatch.setattr(oa_entry, "_request_business_document_types", lambda *_args, **_kwargs: {"合同", "付款计划"})
     reserved = []
     monkeypatch.setattr(oa_entry, "_reserve_procurement_payment", lambda current: reserved.append((current.source_request, current.name)))

@@ -39,17 +39,31 @@ def role(key, label, user, name):
     return {"role_key": key, "role_label": label, "user": user, "employee_name": name}
 
 
-def test_every_procurement_payment_stage_uses_finance_li_wang_then_finance_handle():
+def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
     roles = {
         "finance_auditor": role("finance_auditor", "财务审核", "finance@example.com", "演示员工13"),
         "vice_manager": role("vice_manager", "副总经理", "li@example.com", "演示员工21"),
         "general_manager": role("general_manager", "总经理", "wang@example.com", "演示员工29"),
     }
-    for stage in ("预付款", "到货款", "尾款", "全额付款"):
-        steps = build_route(REQUEST_PROCUREMENT_PAYMENT, roles=roles)
-        assert [row["label"] for row in steps] == [
+
+    prepayment = build_route(
+        REQUEST_PROCUREMENT_PAYMENT, payment_stage="预付款", roles=roles
+    )
+    assert [row["label"] for row in prepayment] == [
+        "演示员工21", "演示员工29", "财务确认付款：演示员工13"
+    ]
+    assert [row["mode"] for row in prepayment] == ["approve", "approve", "handle"]
+
+    for stage in ("到货款", "尾款", "到货后全额付款"):
+        post_arrival = build_route(
+            REQUEST_PROCUREMENT_PAYMENT, payment_stage=stage, roles=roles
+        )
+        assert [row["label"] for row in post_arrival] == [
             "财务审核：演示员工13", "演示员工21", "演示员工29", "财务确认付款：演示员工13"
         ], stage
+        assert [row["mode"] for row in post_arrival] == [
+            "approve", "approve", "approve", "handle"
+        ]
 
 
 def test_arrival_requires_date_and_proof_and_tracks_partial_then_full_quantity():
@@ -144,7 +158,7 @@ def install_lifecycle(monkeypatch, oa_entry, doc, evidence_rows):
     monkeypatch.setattr(oa_entry, "now_datetime", lambda: "2026-08-15 12:00:00")
     monkeypatch.setattr(oa_entry.invoice_service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(oa_entry, "_load_request", lambda *_args, **_kwargs: doc)
-    monkeypatch.setattr(oa_entry, "_require_procurement_lifecycle_access", lambda current: None, raising=False)
+    monkeypatch.setattr(oa_entry, "_require_procurement_lifecycle_access", lambda current, action=None: None, raising=False)
     monkeypatch.setattr(oa_entry, "_active_request_business_documents", lambda name: list(evidence_rows), raising=False)
     monkeypatch.setattr(oa_entry, "_save_document", lambda current: current)
     monkeypatch.setattr(oa_entry, "_sync_assignments_after_save", lambda current: current)
@@ -177,6 +191,50 @@ def test_lifecycle_endpoints_apply_evidence_backed_changes_and_audit_names(monke
     assert doc.exception_direction == "换货"
 
 
+def test_completed_procurement_source_can_record_arrival_before_first_payment(monkeypatch, oa_entry):
+    source_doc = lifecycle_request(
+        name="PROC-NO-PREPAY-1",
+        request_type="采购申请",
+        workflow_status="已完成",
+        business_status="采购执行中",
+        payment_stage="",
+        prepayment_percentage=0,
+    )
+    source_doc.purchaser_user = "buyer@example.com"
+    docs = [{"name": "OABD-DELIVERY", "document_type": "送货单", "supersedes": ""}]
+    install_lifecycle(monkeypatch, oa_entry, source_doc, docs)
+    access_calls = []
+    monkeypatch.setattr(
+        oa_entry,
+        "_require_procurement_lifecycle_access",
+        lambda current, action: access_calls.append((current.request_type, action)),
+    )
+
+    result = oa_entry.record_arrival(source_doc.name, 10, "2026-08-12")
+
+    assert access_calls == [("采购申请", "record_arrival")]
+    assert result["arrival_status"] == "全部到货"
+    assert result["business_status"] == "待验收"
+
+
+def test_procurement_source_lifecycle_access_is_limited_to_arrival_and_inspection(monkeypatch, oa_entry):
+    source_doc = lifecycle_request(
+        request_type="采购申请",
+        workflow_status="已完成",
+        business_status="采购执行中",
+    )
+    source_doc.purchaser_user = "buyer@example.com"
+    oa_entry.frappe.local.session = SimpleNamespace(user="buyer@example.com")
+    monkeypatch.setattr(oa_entry.frappe, "get_roles", lambda *_args, **_kwargs: ["Purchase User"])
+    monkeypatch.setattr(oa_entry.frappe, "_", lambda message: message)
+    monkeypatch.setattr(oa_entry.frappe, "throw", lambda message: (_ for _ in ()).throw(Exception(message)))
+
+    oa_entry._require_procurement_lifecycle_access(source_doc, "record_arrival")
+    oa_entry._require_procurement_lifecycle_access(source_doc, "pass_inspection")
+    with pytest.raises(Exception, match="只能在采购付款单"):
+        oa_entry._require_procurement_lifecycle_access(source_doc, "writeoff_prepayment")
+
+
 def test_arrival_endpoint_synchronizes_fulfillment_to_source_request(monkeypatch, oa_entry):
     payment_doc = lifecycle_request(source_request="PROC-SOURCE-1")
     source_doc = Request(
@@ -191,10 +249,12 @@ def test_arrival_endpoint_synchronizes_fulfillment_to_source_request(monkeypatch
         oa_entry.frappe,
         "get_doc",
         lambda doctype, name: source_doc if (doctype, name) == ("OA Approval Request", "PROC-SOURCE-1") else None,
+        raising=False,
     )
 
     oa_entry.record_arrival(payment_doc.name, 4, "2026-08-12")
 
+    assert source_doc.business_status == "部分到货"
     assert source_doc.received_quantity == 4
     assert source_doc.arrival_status == "部分到货"
     assert source_doc.arrival_date == "2026-08-12"

@@ -9,8 +9,8 @@ import frappe
 from rayher_hr_payroll.oa_approval import OTHER_ASSET, PRODUCTION_ASSET, REQUEST_EXPENSE_PAYMENT
 from rayher_hr_payroll.procurement_workflow import (
     NON_PROJECT_ALLOCATION_TYPES,
-    PAYMENT_STAGES,
     ProcurementWorkflowError,
+    derive_payment_stage,
     derive_prepayment_overdue,
     validate_procurement_submission,
 )
@@ -386,8 +386,6 @@ def save_draft(request_type, payload, name=None, *, store=None):
     if request_type == REQUEST_PROCUREMENT_PAYMENT:
         if not supplier:
             raise ApprovalCenterError("采购付款必须选择供应商")
-        if payment_stage not in PAYMENT_STAGES:
-            raise ApprovalCenterError("付款阶段无效")
     elif any((supplier, payment_stage, prepayment_percentage, has_balance_payment, expected_arrival_date, prepayment_risk_note)):
         raise ApprovalCenterError("采购付款字段只属于采购付款")
 
@@ -406,6 +404,25 @@ def save_draft(request_type, payload, name=None, *, store=None):
         if _money(_get(source_snapshot, "approved_amount")) <= 0:
             raise ApprovalCenterError("来源采购申请批准金额无效")
     fulfillment = _source_fulfillment_snapshot(source_snapshot)
+    source_payment_balance = store.source_balance(source_snapshot) if source_snapshot else None
+    if request_type == REQUEST_PROCUREMENT_PAYMENT:
+        stage_values = {
+            "prepayment_percentage": prepayment_percentage,
+            "arrival_status": fulfillment.get("arrival_status") or "未到货",
+            "inspection_status": fulfillment.get("inspection_status") or "未验收",
+            "source_paid_amount": _get(source_payment_balance, "paid_amount") or 0,
+            "source_available_amount": _get(source_payment_balance, "available_amount") or 0,
+            "amount": total,
+        }
+        try:
+            payment_stage = derive_payment_stage(stage_values)
+        except ProcurementWorkflowError as exc:
+            raise ApprovalCenterError(str(exc))
+        if payment_stage == "预付款":
+            has_balance_payment = 1 if prepayment_percentage < 100 else 0
+        else:
+            has_balance_payment = 1 if total < _get(source_payment_balance, "available_amount") else 0
+            prepayment_percentage = Decimal("0")
     prepared = {
         "workflow_status": DRAFT_STATUS,
         "company": identity.get("company") or "",
@@ -436,7 +453,13 @@ def save_draft(request_type, payload, name=None, *, store=None):
         "has_balance_payment": has_balance_payment,
         "expected_arrival_date": expected_arrival_date or None,
         "prepayment_risk_note": prepayment_risk_note,
-        "ordered_quantity": _source_ordered_quantity(source_snapshot) if source_snapshot else None,
+        "ordered_quantity": (
+            _source_ordered_quantity(source_snapshot)
+            if source_snapshot
+            else _source_ordered_quantity({"business_lines": lines})
+            if request_type == REQUEST_PROCUREMENT
+            else None
+        ),
         "received_quantity": fulfillment.get("received_quantity", 0),
         "arrival_status": fulfillment.get("arrival_status") or ("未到货" if source_snapshot else None),
         "arrival_date": fulfillment.get("arrival_date"),

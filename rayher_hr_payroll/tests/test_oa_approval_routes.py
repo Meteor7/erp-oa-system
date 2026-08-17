@@ -346,19 +346,24 @@ def test_direct_purchase_jd_and_other_routes_are_distinct():
         supervisor_user="boss@example.com",
         roles=roles,
     )
-    assert labels(jd) == ["人事经理", "演示员工21"]
-    assert [step["approvers"] for step in jd] == [["hr@example.com"], ["vice@example.com"]]
+    assert labels(jd) == ["京东购买会签：人事经理、演示员工21"]
+    assert [step["approvers"] for step in jd] == [["hr@example.com", "vice@example.com"]]
+    assert modes(jd) == ["all"]
     assert labels(other) == ["直属主管：主管"]
 
 
-def test_procurement_payment_is_fixed_but_expense_payment_keeps_department_branching():
+def test_procurement_payment_is_stage_specific_but_expense_payment_keeps_department_branching():
     roles = procurement_roles()
-    procurement = build_procurement_payment_route(roles=roles)
-    assert labels(procurement) == ["财务审核：演示员工13", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
-    assert [step["approvers"] for step in procurement] == [
-        ["finance@example.com"], ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
+    prepayment = build_procurement_payment_route(payment_stage="预付款", roles=roles)
+    assert labels(prepayment) == ["演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert [step["approvers"] for step in prepayment] == [
+        ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
     ]
-    assert modes(procurement) == ["approve", "approve", "approve", "handle"]
+    assert modes(prepayment) == ["approve", "approve", "handle"]
+
+    tail = build_procurement_payment_route(payment_stage="尾款", roles=roles)
+    assert labels(tail) == ["财务审核：演示员工13", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert modes(tail) == ["approve", "approve", "approve", "handle"]
 
     buying_payment = build_expense_payment_route(
         department="销售部 - RAY",

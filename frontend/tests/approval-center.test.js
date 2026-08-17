@@ -45,6 +45,10 @@ test("procurement pages save and submit through the real workflow engine", () =>
   assert.match(pre, />提交审批</);
   assert.match(pre, /current_step_label/);
   assert.match(pre, /row in selectedRequest.steps/);
+  assert.match(pre, /currentStepMode/);
+  assert.match(pre, /办理完成/);
+  assert.match(pre, /审批通过/);
+  assert.doesNotMatch(pre, /通过\/办理/);
   assert.match(pre, /reject_target/);
   assert.match(pre, /驳回原因/);
 });

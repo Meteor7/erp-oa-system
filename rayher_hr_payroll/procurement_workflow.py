@@ -8,7 +8,7 @@ PROJECT_PROCUREMENT = "项目采购"
 NON_PROJECT_PROCUREMENT = "非项目采购"
 PROCUREMENT_SCOPES = {PROJECT_PROCUREMENT, NON_PROJECT_PROCUREMENT}
 NON_PROJECT_ALLOCATION_TYPES = {"成本中心", "部门", "非项目采购"}
-PAYMENT_STAGES = {"预付款", "到货款", "尾款", "全额付款"}
+PAYMENT_STAGES = {"预付款", "到货款", "尾款", "到货后全额付款"}
 ARRIVAL_STATUSES = {"未到货", "部分到货", "全部到货", "关闭未交数量", "退货中", "换货中"}
 INSPECTION_STATUSES = {"未验收", "待验收", "验收通过", "验收不合格"}
 WRITE_OFF_STATUSES = {"无需核销", "待核销", "已核销"}
@@ -81,21 +81,37 @@ def validate_procurement_submission(doc, evidence=None):
         raise ProcurementWorkflowError("非项目采购选择部门时必须填写所属部门")
 
 
+def derive_payment_stage(doc):
+    percentage = _decimal(_get(doc, "prepayment_percentage"), "预付款比例")
+    if percentage < 0 or percentage > 100:
+        raise ProcurementWorkflowError("预付款比例必须在0到100之间")
+    arrival_complete = _text(_get(doc, "arrival_status")) in {"全部到货", "关闭未交数量"}
+    inspection_passed = _text(_get(doc, "inspection_status")) == "验收通过"
+    if arrival_complete:
+        if not inspection_passed:
+            raise ProcurementWorkflowError("到货后付款提交前必须验收通过")
+        paid = _decimal(_get(doc, "source_paid_amount"), "来源已付金额")
+        available = _decimal(_get(doc, "source_available_amount"), "来源可用金额")
+        amount = _decimal(_get(doc, "amount"), "本次付款金额")
+        if paid > 0:
+            return "尾款"
+        if available > 0 and amount == available:
+            return "到货后全额付款"
+        return "到货款"
+    if percentage <= 0:
+        raise ProcurementWorkflowError("来源采购尚未完成到货验收且预付款比例为0，当前无需提交付款申请")
+    return "预付款"
+
+
 def validate_payment_submission(doc, evidence=None):
     if not _text(_get(doc, "source_request")):
         raise ProcurementWorkflowError("采购付款必须关联采购申请")
     if not _text(_get(doc, "supplier")):
         raise ProcurementWorkflowError("采购付款必须选择供应商")
-    stage = _text(_get(doc, "payment_stage"))
-    if stage not in PAYMENT_STAGES:
-        raise ProcurementWorkflowError("付款阶段无效")
+    stage = derive_payment_stage(doc)
     evidence_types = _evidence_types(evidence)
     percentage = _decimal(_get(doc, "prepayment_percentage"), "预付款比例")
-    if percentage < 0 or percentage > 100:
-        raise ProcurementWorkflowError("预付款比例必须在0到100之间")
     if stage == "预付款":
-        if percentage <= 0:
-            raise ProcurementWorkflowError("预付款比例必须大于0")
         if not ({"合同", "PO"} & evidence_types):
             raise ProcurementWorkflowError("预付款必须提供合同或PO")
         if "付款计划" not in evidence_types:
@@ -104,13 +120,12 @@ def validate_payment_submission(doc, evidence=None):
             _date(_get(doc, "expected_arrival_date"), "预计到货日期")
             if not _text(_get(doc, "prepayment_risk_note")):
                 raise ProcurementWorkflowError("100%预付款必须填写预付款风险说明")
-    if stage in {"到货款", "尾款"}:
-        if _text(_get(doc, "arrival_status")) not in {"全部到货", "关闭未交数量"}:
-            raise ProcurementWorkflowError("到货款或尾款提交前必须全部到货或关闭未交数量")
-        if _text(_get(doc, "inspection_status")) != "验收通过":
-            raise ProcurementWorkflowError("到货款或尾款提交前必须验收通过")
-        if ACCEPTANCE_EVIDENCE not in evidence_types:
-            raise ProcurementWorkflowError("到货款或尾款必须提供验收资料")
+        return stage
+    if ACCEPTANCE_EVIDENCE not in evidence_types:
+        raise ProcurementWorkflowError("到货后付款必须提供验收资料")
+    if "发票" not in evidence_types:
+        raise ProcurementWorkflowError("到货后付款必须提供发票")
+    return stage
 
 
 def transition_business_state(doc, action, payload=None, evidence=None):
@@ -119,7 +134,9 @@ def transition_business_state(doc, action, payload=None, evidence=None):
     business_status = _text(_get(doc, "business_status"))
     arrival_status = _text(_get(doc, "arrival_status")) or "未到货"
     if action == "record_arrival":
-        if business_status not in {"待到货", "部分到货", "预付款逾期", "催办中"}:
+        if business_status not in {
+            "合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中"
+        }:
             raise ProcurementWorkflowError("当前状态不能登记到货")
         if not (ARRIVAL_EVIDENCE & evidence_types):
             raise ProcurementWorkflowError("登记到货必须提供送货单、收料单或入库单作为到货证明")

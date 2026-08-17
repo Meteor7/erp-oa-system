@@ -22,8 +22,8 @@ test("payload separates procurement, direct purchase, and payment-only fields", 
     subject: "申请", reason: "原因", urgency: "一般", asset_nature: "非固定资产",
     fixed_asset_category: "", procurement_scope: "项目采购", expected_delivery_date: "2026-09-01",
     project: "PRJ-1", non_project_allocation_type: "部门", non_project_department: "研发部",
-    purchase_method: "京东购买", source_request: "PROC-1", supplier: "SUP-1", payment_stage: "预付款",
-    prepayment_percentage: 100, has_balance_payment: false, expected_arrival_date: "2026-09-10",
+    purchase_method: "京东购买", source_request: "PROC-1", supplier: "SUP-1",
+    prepayment_percentage: 100, expected_arrival_date: "2026-09-10",
     prepayment_risk_note: "风险已评估", business_lines: [],
   };
   const procurement = buildApprovalCenterPayload(form, "采购申请");
@@ -35,11 +35,15 @@ test("payload separates procurement, direct purchase, and payment-only fields", 
   assert.equal(direct.payment_stage, undefined);
   assert.equal(payment.source_request, "PROC-1");
   assert.equal(payment.purchase_method, undefined);
+  assert.equal(payment.payment_stage, undefined);
+  assert.equal(payment.has_balance_payment, undefined);
 });
 
 test("evidence gates visible lifecycle actions before the server revalidates", () => {
-  assert.equal(canRecordArrival({ workflow_status: "已付款", business_status: "待到货" }, ["送货单"]), true);
-  assert.equal(canRecordArrival({ workflow_status: "已付款", business_status: "待到货" }, []), false);
+  assert.equal(canRecordArrival({ request_type: "采购付款", workflow_status: "已付款", business_status: "待到货" }, ["送货单"]), true);
+  assert.equal(canRecordArrival({ request_type: "采购付款", workflow_status: "已付款", business_status: "待到货" }, []), false);
+  assert.equal(canRecordArrival({ request_type: "采购申请", workflow_status: "已完成", business_status: "采购执行中" }, ["送货单"]), true);
+  assert.equal(canRecordArrival({ request_type: "采购申请", workflow_status: "待审批", business_status: "采购执行中" }, ["送货单"]), false);
   assert.equal(canCloseProcurement({ inspection_status: "验收通过", prepayment_writeoff_status: "已核销", has_balance_payment: 0 }, ["发票", "验收资料", "采购完成报告"]), true);
 });
 
@@ -59,11 +63,15 @@ test("organization preflight blocks request forms before a doomed submit", () =>
 test("forms use real project options and conditional business fields", () => {
   const source = read("../src/pages/PreRequestCenter.vue");
   assert.match(source, /oa_entry\.list_approval_center_projects/);
+  assert.match(source, /view: 'all'/);
   assert.match(source, /<select v-model='form\.project'/);
   assert.match(source, /form\.procurement_scope === "项目采购"/);
   assert.match(source, /non_project_allocation_type/);
   assert.match(source, /purchase_method/);
-  assert.match(source, /payment_stage/);
+  assert.doesNotMatch(source, /<select v-model='form\.payment_stage'/);
+  assert.doesNotMatch(source, /<option>全额付款<\/option>/);
+  assert.match(source, /系统判定付款阶段/);
+  assert.match(source, /isProcurementOrPayment/);
   assert.match(source, /prepayment_risk_note/);
   assert.match(source, /record_arrival/);
   assert.match(source, /record_inspection/);

@@ -53,8 +53,27 @@ def test_seed_is_idempotent_and_records_generated_steps_and_current_approvers():
     procurement = next(row for row in first["records"] if row["scenario_key"] == "project_production_asset")
     assert procurement["step_labels"][:3] == ["PMC审批", "直属上级审批", "项目主管审批"]
     assert procurement["step_labels"][-1] == "生产设备负责人审批"
-    payment = next(row for row in first["records"] if row["request_type"] == "采购付款")
-    assert payment["step_labels"] == ["财务审核", "演示员工21审批", "演示员工29审批", "财务付款"]
+    jd = next(row for row in first["records"] if row["scenario_key"] == "jd_office_asset")
+    assert jd["step_labels"] == ["京东购买会签：人事经理、演示员工21"]
+    assert set(jd["steps"][0]["approvers"]) == {"hr@example.com", "vice@example.com"}
+
+    prepayment = next(row for row in first["records"] if row["scenario_key"] == "full_prepayment_overdue")
+    assert prepayment["step_labels"] == ["演示员工21", "演示员工29", "财务确认付款"]
+
+    tail = next(row for row in first["records"] if row["scenario_key"] == "tail_payment_pending")
+    assert tail["step_labels"] == ["财务审核", "演示员工21", "演示员工29", "财务确认付款"]
+
+
+def test_catalog_covers_server_derived_payment_stages_without_manual_full_payment():
+    rows = seed_data.scenario_catalog("STAGES-20260817")
+    keys = {row["scenario_key"] for row in rows if row["request_type"] == "采购付款"}
+    assert keys == {
+        "full_prepayment_overdue",
+        "partial_prepayment_paid",
+        "tail_payment_pending",
+        "post_arrival_full_payment_pending",
+    }
+    assert all("payment_stage" not in row for row in rows)
 
 
 def test_cleanup_is_dry_by_default_and_exactly_scoped_to_batch():

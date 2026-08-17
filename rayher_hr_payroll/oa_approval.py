@@ -318,31 +318,45 @@ def build_direct_purchase_route(
     method = _clean(purchase_method)
     snapshots = _roles(roles)
     if method == "京东购买":
-        steps = []
         hr = snapshots["hr_manager"]
         vice = snapshots["vice_manager"]
-        _append_unique_approval(steps, "人事经理", _role_user(hr, "人事经理"), applicant_user=applicant_user)
-        _append_unique_approval(
-            steps, _role_label(vice, name_only=True), _role_user(vice, "副总经理"), applicant_user=applicant_user
-        )
-        return steps
+        approvers = []
+        for label, user_id in (
+            ("人事经理", _role_user(hr, "人事经理")),
+            (_role_label(vice, name_only=True), _role_user(vice, "副总经理")),
+        ):
+            if user_id != _clean(applicant_user).lower() and user_id not in approvers:
+                approvers.append(user_id)
+        if not approvers:
+            raise ApprovalRouteError("京东购买会签路线不能为空")
+        return [_step(
+            "京东购买会签：人事经理、" + _role_label(vice, name_only=True),
+            mode="all",
+            approvers=approvers,
+        )]
     if method == "其他购买":
         return _stage_two_steps(supervisor, supervisor_user, supervisor_decision, roles)
     raise ApprovalRouteError("购买申请必须选择京东购买或其他购买")
 
 
-def build_procurement_payment_route(*, roles=None):
+def build_procurement_payment_route(*, payment_stage, roles=None):
+    stage = _clean(payment_stage)
+    if stage not in {"预付款", "到货款", "尾款", "到货后全额付款"}:
+        raise ApprovalRouteError(f"采购付款阶段无效：{stage}")
     snapshots = _roles(roles)
     finance = snapshots["finance_auditor"]
     vice = snapshots["vice_manager"]
     general = snapshots["general_manager"]
     finance_user = _role_user(finance, "财务审核")
-    return [
-        _step(_role_label(finance, with_name=True), approvers=[finance_user]),
+    steps = []
+    if stage != "预付款":
+        steps.append(_step(_role_label(finance, with_name=True), approvers=[finance_user]))
+    steps.extend([
         _step(_role_label(vice, name_only=True), approvers=[_role_user(vice, "副总经理")]),
         _step(_role_label(general, name_only=True), approvers=[_role_user(general, "总经理")]),
         _handle("财务确认付款：" + _clean(finance.get("employee_name")), approvers=[finance_user]),
-    ]
+    ])
+    return steps
 
 
 def build_route(
@@ -357,6 +371,7 @@ def build_route(
     project_owner=None,
     project_owner_name=None,
     purchase_method=None,
+    payment_stage=None,
     roles=None,
 ):
     if request_type == REQUEST_LEAVE:
@@ -389,7 +404,7 @@ def build_route(
             roles=roles,
         )
     if request_type == REQUEST_PROCUREMENT_PAYMENT:
-        return build_procurement_payment_route(roles=roles)
+        return build_procurement_payment_route(payment_stage=payment_stage, roles=roles)
     if request_type == REQUEST_EXPENSE_PAYMENT:
         return build_expense_payment_route(
             department=department,

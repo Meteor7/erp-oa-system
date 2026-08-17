@@ -34,6 +34,49 @@ def payment_request(**overrides):
     return value
 
 
+def test_payment_submission_derives_prepayment_without_client_stage():
+    request = payment_request(payment_stage="", prepayment_percentage=100)
+    request.update(
+        expected_arrival_date="2026-09-20",
+        prepayment_risk_note="供应商长期合作，合同约定逾期退款",
+    )
+    assert validate_payment_submission(
+        request, evidence={"合同", "付款计划"}
+    ) == "预付款"
+
+
+def test_post_arrival_payment_requires_invoice_and_derives_tail_from_paid_amount():
+    request = payment_request(
+        payment_stage="",
+        prepayment_percentage=0,
+        arrival_status="全部到货",
+        inspection_status="验收通过",
+        source_paid_amount=30,
+        source_available_amount=70,
+        amount=70,
+    )
+    with pytest.raises(ProcurementWorkflowError, match="发票"):
+        validate_payment_submission(request, evidence={"验收资料"})
+    assert validate_payment_submission(
+        request, evidence={"验收资料", "发票"}
+    ) == "尾款"
+
+
+def test_post_arrival_first_full_payment_has_unambiguous_stage():
+    request = payment_request(
+        payment_stage="全额付款",
+        prepayment_percentage=0,
+        arrival_status="全部到货",
+        inspection_status="验收通过",
+        source_paid_amount=0,
+        source_available_amount=100,
+        amount=100,
+    )
+    assert validate_payment_submission(
+        request, evidence={"验收资料", "发票"}
+    ) == "到货后全额付款"
+
+
 def test_project_procurement_requires_delivery_project_and_owner():
     validate_procurement_submission(project_request())
     for field, message in (
@@ -84,18 +127,24 @@ def test_100_percent_prepayment_requires_arrival_date_risk_note_and_documents():
     validate_payment_submission(request, evidence={"合同", "付款计划"})
 
 
-def test_tail_payment_requires_full_arrival_acceptance_and_evidence():
+def test_tail_payment_requires_full_arrival_acceptance_invoice_and_evidence():
     request = payment_request(
         payment_stage="尾款",
+        prepayment_percentage=0,
         arrival_status="部分到货",
         inspection_status="待验收",
+        source_paid_amount=30,
+        source_available_amount=70,
+        amount=70,
     )
-    with pytest.raises(ProcurementWorkflowError, match="全部到货"):
-        validate_payment_submission(request, evidence={"验收资料"})
+    with pytest.raises(ProcurementWorkflowError, match="到货验收"):
+        validate_payment_submission(request, evidence={"验收资料", "发票"})
     request.update(arrival_status="全部到货", inspection_status="验收通过")
     with pytest.raises(ProcurementWorkflowError, match="验收资料"):
         validate_payment_submission(request, evidence=set())
-    validate_payment_submission(request, evidence={"验收资料"})
+    with pytest.raises(ProcurementWorkflowError, match="发票"):
+        validate_payment_submission(request, evidence={"验收资料"})
+    assert validate_payment_submission(request, evidence={"验收资料", "发票"}) == "尾款"
 
 
 def test_arrival_transition_enforces_quantity_and_proof():

@@ -47,10 +47,10 @@ def scenario_catalog(batch_id):
         ("nonproject_non_fixed", REQUEST_PROCUREMENT, "非项目常规采购", "非固定资产", ""),
         ("jd_office_asset", REQUEST_DIRECT_PURCHASE, "京东办公资产购买", "固定资产", FIXED_OFFICE),
         ("other_direct_purchase", REQUEST_DIRECT_PURCHASE, "其他渠道购买", "非固定资产", ""),
-        ("full_prepayment_overdue", REQUEST_PROCUREMENT_PAYMENT, "100%预付款逾期待到货", "固定资产", FIXED_PRODUCTION),
-        ("partial_prepayment", REQUEST_PROCUREMENT_PAYMENT, "部分预付款待审批", "非固定资产", ""),
-        ("full_payment_pending_inspection", REQUEST_PROCUREMENT_PAYMENT, "全额付款待验收", "固定资产", FIXED_ELECTRONIC),
-        ("full_payment_rejected_inspection", REQUEST_PROCUREMENT_PAYMENT, "全额付款验收不合格", "非固定资产", ""),
+        ("full_prepayment_overdue", REQUEST_PROCUREMENT_PAYMENT, "100%预付款已付待到货", "固定资产", FIXED_PRODUCTION),
+        ("partial_prepayment_paid", REQUEST_PROCUREMENT_PAYMENT, "部分预付款已付且验收通过", "非固定资产", ""),
+        ("tail_payment_pending", REQUEST_PROCUREMENT_PAYMENT, "尾款待财务审核", "非固定资产", ""),
+        ("post_arrival_full_payment_pending", REQUEST_PROCUREMENT_PAYMENT, "无预付款到货验收后全额付款", "固定资产", FIXED_ELECTRONIC),
     ]
     rows = []
     for key, request_type, label, asset_nature, category in base:
@@ -128,16 +128,21 @@ def _memory_steps(scenario, prerequisites):
             rows.append(("生产设备负责人审批", roles["production_asset_owner"]["user"]))
     elif scenario["request_type"] == REQUEST_DIRECT_PURCHASE:
         if scenario["scenario_key"].startswith("jd_"):
-            rows = [("人事经理审批", roles["hr_manager"]["user"]), ("演示员工21审批", roles["vice_manager"]["user"])]
-        else:
-            rows = [("直属上级审批", applicant["supervisor_user"])]
+            return [{
+                "label": "京东购买会签：人事经理、演示员工21",
+                "mode": "all",
+                "approvers": [roles["hr_manager"]["user"], roles["vice_manager"]["user"]],
+            }]
+        rows = [("直属上级审批", applicant["supervisor_user"])]
     else:
-        rows = [
-            ("财务审核", roles["finance_auditor"]["user"]),
-            ("演示员工21审批", roles["vice_manager"]["user"]),
-            ("演示员工29审批", roles["general_manager"]["user"]),
-            ("财务付款", roles["finance_auditor"]["user"]),
-        ]
+        rows = []
+        if scenario["scenario_key"] in {"tail_payment_pending", "post_arrival_full_payment_pending"}:
+            rows.append(("财务审核", roles["finance_auditor"]["user"]))
+        rows.extend([
+            ("演示员工21", roles["vice_manager"]["user"]),
+            ("演示员工29", roles["general_manager"]["user"]),
+            ("财务确认付款", roles["finance_auditor"]["user"]),
+        ])
     return [{"label": label, "approvers": [user]} for label, user in rows]
 
 
@@ -349,26 +354,32 @@ class FrappeSeedStore:
                     "non_project_department": applicant["department"] or "测试部门",
                 })
         else:
+            from rayher_hr_payroll import approval_amount_ledger
+
+            source_key = {
+                "full_prepayment_overdue": "project_production_asset",
+                "partial_prepayment_paid": "project_non_fixed",
+                "tail_payment_pending": "project_non_fixed",
+                "post_arrival_full_payment_pending": "nonproject_electronic_asset",
+            }[key]
+            source_name = sources[source_key]
+            balance = approval_amount_ledger.source_balance(source_name)
+            available = Decimal(str(balance["available_amount"]))
+            amount = available
+            if key == "partial_prepayment_paid":
+                amount = (Decimal(str(balance["approved_amount"])) / Decimal("2")).quantize(Decimal("0.01"))
             payload["business_lines"] = [{
                 "item_name": "OA审批测试付款-{0}".format(index),
                 "specification": "关联采购申请付款",
                 "quantity": 1,
                 "unit": "笔",
-                "unit_price": 50,
+                "unit_price": amount,
                 "remarks": "批次隔离测试数据",
             }]
-            source_key = {
-                "full_prepayment_overdue": "project_production_asset",
-                "partial_prepayment": "project_non_fixed",
-                "full_payment_pending_inspection": "nonproject_electronic_asset",
-                "full_payment_rejected_inspection": "nonproject_non_fixed",
-            }[key]
             payload.update({
-                "source_request": sources[source_key],
+                "source_request": source_name,
                 "supplier": prerequisites["supplier"],
-                "payment_stage": "预付款" if "prepayment" in key else "全额付款",
-                "prepayment_percentage": 100 if key == "full_prepayment_overdue" else 50 if key == "partial_prepayment" else 0,
-                "has_balance_payment": 1 if key == "partial_prepayment" else 0,
+                "prepayment_percentage": 100 if key == "full_prepayment_overdue" else 50 if key == "partial_prepayment_paid" else 0,
                 "expected_arrival_date": (date.today() - timedelta(days=5)).isoformat() if key == "full_prepayment_overdue" else future,
                 "prepayment_risk_note": "100%预付款逾期预警与催办测试" if key == "full_prepayment_overdue" else "",
             })
@@ -385,18 +396,42 @@ class FrappeSeedStore:
         original_user = frappe.session.user
         applicant_user = prerequisites["applicant"]["user"]
         sources = {}
+        payments = {}
         created = []
         try:
             for index, scenario in enumerate(scenarios, 1):
                 frappe.set_user(applicant_user)
+                key = scenario["scenario_key"]
+
+                if key in {"tail_payment_pending", "post_arrival_full_payment_pending"}:
+                    if key == "tail_payment_pending":
+                        fulfillment_name = payments["partial_prepayment_paid"]
+                    else:
+                        fulfillment_name = sources["nonproject_electronic_asset"]
+                    fulfillment_doc = frappe.get_doc("OA Approval Request", fulfillment_name)
+                    if fulfillment_doc.arrival_status not in {"全部到货", "关闭未交数量"}:
+                        self._create_evidence(fulfillment_name, batch_id, "送货单", index)
+                        record_arrival(
+                            fulfillment_name,
+                            fulfillment_doc.ordered_quantity,
+                            date.today().isoformat(),
+                            "测试到货",
+                        )
+                        self._create_evidence(fulfillment_name, batch_id, "验收资料", index)
+                        record_inspection(fulfillment_name, "通过", "测试验收通过")
+
                 payload = self._payload(scenario, prerequisites, index, sources)
                 doc = save_draft(scenario["request_type"], payload)
-                if scenario["request_type"] == REQUEST_PROCUREMENT_PAYMENT and scenario["scenario_key"] in {
-                    "full_prepayment_overdue", "partial_prepayment",
-                }:
-                    self._create_evidence(doc.name, batch_id, "合同", index)
-                    self._create_evidence(doc.name, batch_id, "付款计划", index)
-                summary = submit_request(doc.name)
+
+                if scenario["request_type"] == REQUEST_PROCUREMENT_PAYMENT:
+                    if key in {"full_prepayment_overdue", "partial_prepayment_paid"}:
+                        self._create_evidence(doc.name, batch_id, "合同", index)
+                        self._create_evidence(doc.name, batch_id, "付款计划", index)
+                    else:
+                        self._create_evidence(doc.name, batch_id, "验收资料", index)
+                        self._create_evidence(doc.name, batch_id, "发票", index)
+
+                submit_request(doc.name)
                 submitted = frappe.get_doc("OA Approval Request", doc.name)
                 steps, current = self._step_snapshot(submitted)
                 row = {
@@ -406,26 +441,16 @@ class FrappeSeedStore:
                     "step_labels": [step["label"] for step in steps],
                     "current_approvers": current,
                     "workflow_status": submitted.workflow_status,
+                    "payment_stage": getattr(submitted, "payment_stage", None),
                 }
                 created.append(row)
 
                 if scenario["request_type"] == REQUEST_PROCUREMENT:
                     self._approve_to_end(doc.name)
-                    sources[scenario["scenario_key"]] = doc.name
-                elif scenario["scenario_key"] in {
-                    "full_prepayment_overdue", "full_payment_pending_inspection",
-                    "full_payment_rejected_inspection",
-                }:
+                    sources[key] = doc.name
+                elif key in {"full_prepayment_overdue", "partial_prepayment_paid"}:
                     self._approve_to_end(doc.name)
-                    if scenario["scenario_key"] in {
-                        "full_payment_pending_inspection", "full_payment_rejected_inspection",
-                    }:
-                        frappe.set_user(applicant_user)
-                        self._create_evidence(doc.name, batch_id, "送货单", index)
-                        record_arrival(doc.name, 1, date.today().isoformat(), "测试到货")
-                        if scenario["scenario_key"] == "full_payment_rejected_inspection":
-                            self._create_evidence(doc.name, batch_id, "验收资料", index)
-                            record_inspection(doc.name, "不合格", "测试验收异常", "换货")
+                    payments[key] = doc.name
             frappe.db.commit()
             return created
         except Exception:

@@ -1423,10 +1423,20 @@ def _submit_draft(doc):
         except ProcurementWorkflowError as exc:
             frappe.throw(str(exc))
     elif doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
+        balance = approval_amount_ledger.source_balance(doc.source_request)
+        doc.source_paid_amount = balance["paid_amount"]
+        doc.source_available_amount = balance["available_amount"]
         try:
-            validate_payment_submission(doc, evidence=_request_business_document_types(doc.name))
+            doc.payment_stage = validate_payment_submission(
+                doc, evidence=_request_business_document_types(doc.name)
+            )
         except ProcurementWorkflowError as exc:
             frappe.throw(str(exc))
+        if doc.payment_stage == "预付款":
+            doc.has_balance_payment = 1 if Decimal(str(doc.prepayment_percentage or 0)) < 100 else 0
+        else:
+            doc.prepayment_percentage = 0
+            doc.has_balance_payment = 1 if Decimal(str(doc.amount or 0)) < balance["available_amount"] else 0
     ctx = _route_context(
         department=getattr(doc, "department", None),
         supervisor=getattr(doc, "supervisor", None),
@@ -1440,6 +1450,7 @@ def _submit_draft(doc):
         project_owner=getattr(doc, "project_owner", None),
         project_owner_name=getattr(doc, "project_owner_name", None),
         purchase_method=getattr(doc, "purchase_method", None),
+        payment_stage=getattr(doc, "payment_stage", None),
     )
     doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])
@@ -1506,7 +1517,7 @@ def get_options():
 @frappe.whitelist()
 def preview_route(
     request_type, department=None, supervisor=None, asset_category=None, active=True,
-    project_owner=None, project_owner_name=None, purchase_method=None,
+    project_owner=None, project_owner_name=None, purchase_method=None, payment_stage=None,
 ):
     require_request_type_access(request_type)
     try:
@@ -1526,6 +1537,7 @@ def preview_route(
             project_owner=project_owner,
             project_owner_name=project_owner_name,
             purchase_method=purchase_method,
+            payment_stage=payment_stage,
             roles=roles,
         )
         copied_to = (
@@ -2141,11 +2153,20 @@ def register_contract_delivery(name, contract_delivery_date, reason=None):
         return _summarize_doc(doc)
 
 
-def _require_procurement_lifecycle_access(doc):
-    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
-        frappe.throw(frappe._("只有采购付款单可以登记到货、验收和核销。"))
-    if getattr(doc, "workflow_status", None) != STATUS_PAID:
-        frappe.throw(frappe._("采购付款完成后才能登记到货、验收和核销。"))
+def _require_procurement_lifecycle_access(doc, action):
+    request_type = getattr(doc, "request_type", None)
+    workflow_status = getattr(doc, "workflow_status", None)
+    source_actions = {"record_arrival", "record_inspection", "pass_inspection", "fail_inspection"}
+    if request_type == REQUEST_PROCUREMENT:
+        if action not in source_actions:
+            frappe.throw(frappe._("预付款跟进、核销和关闭只能在采购付款单办理。"))
+        if workflow_status != STATUS_COMPLETED:
+            frappe.throw(frappe._("采购申请审批完成后才能登记到货和验收。"))
+    elif request_type == REQUEST_PROCUREMENT_PAYMENT:
+        if workflow_status != STATUS_PAID:
+            frappe.throw(frappe._("采购付款完成后才能登记到货、验收和核销。"))
+    else:
+        frappe.throw(frappe._("只有采购申请或采购付款单可以登记采购履约状态。"))
     user = _clean(getattr(frappe.session, "user", None))
     roles = set(frappe.get_roles(user))
     allowed = {_clean(getattr(doc, "owner", None)), _clean(getattr(doc, "purchaser_user", None))}
@@ -2167,7 +2188,7 @@ def _audit_detail_value(value):
 
 
 PROCUREMENT_FULFILLMENT_FIELDS = (
-    "received_quantity", "arrival_status", "arrival_date", "inspection_status",
+    "business_status", "received_quantity", "arrival_status", "arrival_date", "inspection_status",
     "inspection_failure_reason", "exception_direction", "followup_status",
     "prepayment_writeoff_status",
 )
@@ -2217,7 +2238,7 @@ def record_arrival(name, quantity, arrival_date, reason=None):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_lifecycle_access(doc)
+        _require_procurement_lifecycle_access(doc, "record_arrival")
         note = _bounded_optional_text(reason, "到货说明", 500)
         return _apply_procurement_lifecycle_transition(
             doc,
@@ -2234,7 +2255,7 @@ def record_inspection(name, outcome, reason=None, direction=None):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_lifecycle_access(doc)
+        _require_procurement_lifecycle_access(doc, "record_inspection")
         normalized_outcome = _bounded_optional_text(outcome, "验收结果", 20)
         note = _bounded_optional_text(reason, "验收说明", 500)
         action = "pass_inspection" if normalized_outcome == "通过" else "fail_inspection" if normalized_outcome == "不合格" else ""
@@ -2255,7 +2276,7 @@ def record_prepayment_followup(name, status, reason):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_lifecycle_access(doc)
+        _require_procurement_lifecycle_access(doc, "record_followup")
         note = _bounded_optional_text(reason, "跟进说明", 500)
         return _apply_procurement_lifecycle_transition(
             doc,
@@ -2272,7 +2293,7 @@ def writeoff_prepayment(name, reason=None):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_lifecycle_access(doc)
+        _require_procurement_lifecycle_access(doc, "writeoff_prepayment")
         note = _bounded_optional_text(reason, "核销说明", 500)
         return _apply_procurement_lifecycle_transition(doc, "writeoff_prepayment", {}, "预付款核销", note)
 
@@ -2283,7 +2304,7 @@ def close_procurement(name, reason=None):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_lifecycle_access(doc)
+        _require_procurement_lifecycle_access(doc, "close_procurement")
         note = _bounded_optional_text(reason, "关闭说明", 500)
         return _apply_procurement_lifecycle_transition(doc, "close_procurement", {}, "关闭采购", note)
 
@@ -2937,6 +2958,7 @@ def _reset_request_to_draft(doc, note=""):
         project_owner=getattr(doc, "project_owner", None),
         project_owner_name=getattr(doc, "project_owner_name", None),
         purchase_method=getattr(doc, "purchase_method", None),
+        payment_stage=getattr(doc, "payment_stage", None),
     )
     doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])

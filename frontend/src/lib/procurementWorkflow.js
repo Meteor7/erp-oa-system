@@ -52,9 +52,7 @@ export function buildApprovalCenterPayload(form, requestType) {
       ...common,
       source_request: form.source_request,
       supplier: form.supplier,
-      payment_stage: form.payment_stage,
       prepayment_percentage: Number(form.prepayment_percentage || 0),
-      has_balance_payment: form.has_balance_payment ? 1 : 0,
       expected_arrival_date: form.expected_arrival_date,
       prepayment_risk_note: form.prepayment_risk_note,
     };
@@ -63,14 +61,18 @@ export function buildApprovalCenterPayload(form, requestType) {
 }
 
 const hasAny = (types, required) => required.some((item) => types.includes(item));
+const lifecycleReady = (request) => (
+  (request?.request_type === "采购付款" && request?.workflow_status === "已付款")
+  || (request?.request_type === "采购申请" && request?.workflow_status === "已完成")
+);
 export function canRecordArrival(request, documentTypes) {
-  return request?.workflow_status === "已付款"
-    && ["待到货", "部分到货", "预付款逾期", "催办中"].includes(request?.business_status)
+  return lifecycleReady(request)
+    && ["合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中"].includes(request?.business_status)
     && hasAny(documentTypes || [], ["送货单", "收料单", "入库单"]);
 }
 
 export function canRecordInspection(request, documentTypes) {
-  return request?.workflow_status === "已付款"
+  return lifecycleReady(request)
     && ["全部到货", "关闭未交数量"].includes(request?.arrival_status)
     && (documentTypes || []).includes("验收资料");
 }

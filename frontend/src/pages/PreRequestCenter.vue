@@ -21,13 +21,14 @@ const config = computed(() => ({
 const isProcurement = computed(() => config.value.requestType === '采购申请');
 const isDirectPurchase = computed(() => config.value.requestType === '购买申请');
 const isPayment = computed(() => config.value.requestType === '采购付款');
+const isProcurementOrPayment = computed(() => isProcurement.value || isPayment.value);
 const blankLine = () => ({ item_name: '', specification: '', quantity: 1, unit: '个', unit_price: 0, remarks: '' });
 const blankForm = () => ({
   subject: '', reason: '', urgency: '一般', asset_nature: '非固定资产', fixed_asset_category: '',
   procurement_scope: '项目采购', expected_delivery_date: '', project: '',
   non_project_allocation_type: '非项目采购', non_project_cost_center: '', non_project_department: '',
-  purchaser_user: '', purchase_method: '京东购买', source_request: '', supplier: '', payment_stage: '预付款',
-  prepayment_percentage: 30, has_balance_payment: true, expected_arrival_date: '', prepayment_risk_note: '',
+  purchaser_user: '', purchase_method: '京东购买', source_request: '', supplier: '',
+  prepayment_percentage: 30, expected_arrival_date: '', prepayment_risk_note: '',
   business_lines: [blankLine()],
 });
 const form = reactive(blankForm());
@@ -65,6 +66,7 @@ const userLoader = createResource({ url: 'rayher_hr_payroll.api.project_entry.li
 const sourceLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_approval_center_dashboard', method: 'GET', makeParams: () => ({ kind: 'request', limit: 500 }), auto: true });
 const mineLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'mine', request_type: config.value.requestType, limit: 100 }), auto: true });
 const pendingLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'pending', request_type: config.value.requestType, limit: 100 }), auto: true });
+const allLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'all', request_type: config.value.requestType, limit: 100 }), auto: true });
 const contractRegistrar = createResource({ url: 'rayher_hr_payroll.api.oa_entry.register_contract_delivery' });
 const arrivalRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.record_arrival' });
 const inspectionRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.record_inspection' });
@@ -79,11 +81,36 @@ const organizationWarning = computed(() => organizationPreflightMessage(
 const projects = computed(() => (projectLoader.data || []).filter((row) => row.status !== 'Cancelled'));
 const purchasers = computed(() => userLoader.data || []);
 const paymentSources = computed(() => (sourceLoader.data?.rows || []).filter((row) => row.request_type === '采购申请' && row.workflow_status === '已完成' && Number(row.available_amount) > 0));
+const selectedPaymentSource = computed(() => paymentSources.value.find((row) => row.name === form.source_request) || null);
+const requestedPaymentAmount = computed(() => (form.business_lines || []).reduce(
+  (total, row) => total + Number(row.quantity || 0) * Number(row.unit_price || 0),
+  0,
+));
+const paymentStageHint = computed(() => {
+  const source = selectedPaymentSource.value;
+  if (!source) return '请选择来源采购申请';
+  const arrived = ['全部到货', '关闭未交数量'].includes(source.arrival_status);
+  if (arrived && source.inspection_status === '验收通过') {
+    if (Number(source.paid_amount || 0) > 0) return '尾款';
+    if (requestedPaymentAmount.value > 0
+      && Math.abs(requestedPaymentAmount.value - Number(source.available_amount || 0)) < 0.005) {
+      return '到货后全额付款';
+    }
+    return '到货款';
+  }
+  return Number(form.prepayment_percentage || 0) > 0
+    ? '预付款'
+    : '当前无需付款（等待到货验收）';
+});
 const requestRows = computed(() => {
-  const rows = [...(mineLoader.data || []), ...(pendingLoader.data || [])];
+  const rows = [...(mineLoader.data || []), ...(pendingLoader.data || []), ...(allLoader.data || [])];
   return [...new Map(rows.map((row) => [row.name, row])).values()];
 });
 const selectedRequest = computed(() => requestRows.value.find((row) => row.name === selectedRequestName.value) || requestRows.value[0] || null);
+const currentStep = computed(() => (selectedRequest.value?.steps || []).find(
+  (row) => Number(row.step_index) === Number(selectedRequest.value?.current_step_index),
+) || null);
+const currentStepMode = computed(() => currentStep.value?.mode || 'approve');
 const activeRequestName = computed(() => selectedRequest.value?.name || draftName.value);
 const activeDocumentTypes = computed(() => {
   const latest = new Map();
@@ -91,8 +118,8 @@ const activeDocumentTypes = computed(() => {
   return [...latest.keys()];
 });
 const showContractRegistration = computed(() => isProcurement.value && selectedRequest.value?.workflow_status === '已完成' && selectedRequest.value?.business_status !== '合同交期待确认');
-const showArrival = computed(() => isPayment.value && canRecordArrival(selectedRequest.value, activeDocumentTypes.value));
-const showInspection = computed(() => isPayment.value && canRecordInspection(selectedRequest.value, activeDocumentTypes.value));
+const showArrival = computed(() => isProcurementOrPayment.value && canRecordArrival(selectedRequest.value, activeDocumentTypes.value));
+const showInspection = computed(() => isProcurementOrPayment.value && canRecordInspection(selectedRequest.value, activeDocumentTypes.value));
 const showWriteoff = computed(() => isPayment.value && canWriteoffPrepayment(selectedRequest.value, activeDocumentTypes.value));
 const showClose = computed(() => isPayment.value && canCloseProcurement(selectedRequest.value, activeDocumentTypes.value));
 
@@ -100,7 +127,7 @@ function addLine() { if (form.business_lines.length < 100) form.business_lines.p
 function removeLine(index) { if (form.business_lines.length > 1) form.business_lines.splice(index, 1); }
 function cleanPayload() { return buildApprovalCenterPayload(form, config.value.requestType); }
 function fail(exception, fallback) { error.value = normalizeServerError(exception, fallback); }
-async function reloadRequests() { await Promise.all([mineLoader.reload(), pendingLoader.reload(), sourceLoader.reload()]); }
+async function reloadRequests() { await Promise.all([mineLoader.reload(), pendingLoader.reload(), allLoader.reload(), sourceLoader.reload()]); }
 
 async function saveDraft() {
   saving.value = true; error.value = ''; message.value = '';
@@ -223,11 +250,11 @@ watch(selectedRequest, (row) => { if (row?.name) { selectedRequestName.value = r
         </template>
         <label v-if='isPayment' class='text-sm'>关联采购申请<select v-model='form.source_request' class='mt-1 w-full rounded border px-3 py-2'><option value=''>请选择</option><option v-for='source in paymentSources' :key='source.name' :value='source.name'>{{ source.name }} · {{ source.subject }} · 可用 {{ source.available_amount }}</option></select></label>
         <label v-if='isPayment' class='text-sm'>供应商<input v-model='form.supplier' class='mt-1 w-full rounded border px-3 py-2' /></label>
-        <label v-if='isPayment' class='text-sm'>付款阶段<select v-model='form.payment_stage' class='mt-1 w-full rounded border px-3 py-2'><option>预付款</option><option>到货款</option><option>尾款</option><option>全额付款</option></select></label>
-        <label v-if='isPayment && form.payment_stage === "预付款"' class='text-sm'>预付款比例<input v-model.number='form.prepayment_percentage' type='number' min='0' max='100' class='mt-1 w-full rounded border px-3 py-2' /></label>
-        <label v-if='isPayment && form.payment_stage === "预付款"' class='flex items-center gap-2 pt-6 text-sm'><input v-model='form.has_balance_payment' type='checkbox' />存在后续尾款</label>
-        <label v-if='isPayment && Number(form.prepayment_percentage) === 100' class='text-sm'>预计到货日期<input v-model='form.expected_arrival_date' type='date' class='mt-1 w-full rounded border px-3 py-2' /></label>
-        <label v-if='isPayment && Number(form.prepayment_percentage) === 100' class='text-sm xl:col-span-2'>100%预付款风险说明<textarea v-model='form.prepayment_risk_note' class='mt-1 w-full rounded border px-3 py-2'></textarea></label>
+        <div v-if='isPayment' class='text-sm'>系统判定付款阶段<div class='mt-1 rounded border bg-gray-50 px-3 py-2 font-medium'>{{ paymentStageHint }}</div></div>
+        <label v-if='isPayment && paymentStageHint === "预付款"' class='text-sm'>付款计划预付款比例<input v-model.number='form.prepayment_percentage' type='number' min='0' max='100' class='mt-1 w-full rounded border px-3 py-2' /></label>
+        <div v-if='isPayment && paymentStageHint === "预付款"' class='pt-6 text-sm text-gray-500'>是否存在后续尾款由系统按预付款比例判断</div>
+        <label v-if='isPayment && paymentStageHint === "预付款" && Number(form.prepayment_percentage) === 100' class='text-sm'>预计到货日期<input v-model='form.expected_arrival_date' type='date' class='mt-1 w-full rounded border px-3 py-2' /></label>
+        <label v-if='isPayment && paymentStageHint === "预付款" && Number(form.prepayment_percentage) === 100' class='text-sm xl:col-span-2'>100%预付款风险说明<textarea v-model='form.prepayment_risk_note' class='mt-1 w-full rounded border px-3 py-2'></textarea></label>
         <label class='text-sm md:col-span-2 xl:col-span-3'>申请说明<textarea v-model='form.reason' class='mt-1 w-full rounded border px-3 py-2' maxlength='1000'></textarea></label>
       </div>
     </section>
@@ -245,9 +272,9 @@ watch(selectedRequest, (row) => { if (row?.name) { selectedRequestName.value = r
       <div v-if='selectedRequest' class='space-y-4 rounded-lg border bg-white p-5 shadow-sm'>
         <div class='grid gap-3 text-sm md:grid-cols-4'><div><span class='text-gray-500'>申请单</span><div>{{ selectedRequest.name }}</div></div><div><span class='text-gray-500'>审批状态</span><div>{{ selectedRequest.workflow_status }}</div></div><div><span class='text-gray-500'>业务状态</span><div>{{ selectedRequest.business_status || '-' }}</div></div><div><span class='text-gray-500'>当前审批人/节点</span><div>{{ selectedRequest.current_step_label || '-' }}</div></div></div>
         <div><h3 class='text-sm font-medium'>审批轨迹</h3><ol class='mt-2 space-y-2'><li v-for='row in selectedRequest.steps || []' :key='row.step_key' class='flex justify-between rounded bg-gray-50 px-3 py-2 text-sm'><span>{{ row.step_index }}. {{ row.label }}</span><span>{{ row.status }}</span></li></ol></div>
-        <div v-if='selectedRequest.can_act' class='rounded border p-3'><textarea v-model='actionNote' class='w-full rounded border px-3 py-2 text-sm' placeholder='审批意见（可选）'></textarea><div class='mt-2 flex gap-2'><button class='rounded bg-green-700 px-3 py-2 text-sm text-white' @click='act("approve")'>通过/办理</button></div><div class='mt-3 grid gap-2 md:grid-cols-3'><select v-model='rejectTarget' class='rounded border px-3 py-2 text-sm'><option v-for='target in selectedRequest.rejection_targets || []' :key='target.target' :value='target.target'>{{ target.label }}</option></select><input v-model='rejectReason' class='rounded border px-3 py-2 text-sm' placeholder='驳回原因（必填）' /><button class='rounded bg-red-600 px-3 py-2 text-sm text-white' @click='act("reject")'>定向驳回</button></div></div>
+        <div v-if='selectedRequest.can_act' class='rounded border p-3'><textarea v-model='actionNote' class='w-full rounded border px-3 py-2 text-sm' placeholder='审批意见（可选）'></textarea><div class='mt-2 flex gap-2'><button class='rounded bg-green-700 px-3 py-2 text-sm text-white' @click='act("approve")'>{{ currentStepMode === "handle" ? "办理完成" : "审批通过" }}</button></div><div class='mt-3 grid gap-2 md:grid-cols-3'><select v-model='rejectTarget' class='rounded border px-3 py-2 text-sm'><option v-for='target in selectedRequest.rejection_targets || []' :key='target.target' :value='target.target'>{{ target.label }}</option></select><input v-model='rejectReason' class='rounded border px-3 py-2 text-sm' placeholder='驳回原因（必填）' /><button class='rounded bg-red-600 px-3 py-2 text-sm text-white' @click='act("reject")'>定向驳回</button></div></div>
         <div v-if='showContractRegistration' class='grid gap-2 rounded border p-3 md:grid-cols-3'><input v-model='contractDate' type='date' class='rounded border px-3 py-2 text-sm' /><input v-model='contractReason' class='rounded border px-3 py-2 text-sm' placeholder='延期时必须填写原因' /><button class='rounded bg-gray-900 px-3 py-2 text-sm text-white' @click='registerContract'>登记合同交期</button></div>
-        <div v-if='isPayment && selectedRequest.workflow_status === "已付款"' class='space-y-3 rounded border p-3'><div class='text-sm'>到货 {{ selectedRequest.received_quantity }}/{{ selectedRequest.ordered_quantity }} · {{ selectedRequest.arrival_status }} · {{ selectedRequest.inspection_status }}</div><div v-if='showArrival' class='flex gap-2'><input v-model.number='arrivalQuantity' type='number' class='w-28 rounded border px-3 py-2 text-sm' placeholder='到货数量' /><input v-model='arrivalDate' type='date' class='rounded border px-3 py-2 text-sm' /><button class='rounded bg-gray-900 px-3 py-2 text-sm text-white' @click='recordArrival'>登记到货</button></div><div v-if='showInspection' class='grid gap-2 md:grid-cols-4'><select v-model='inspectionOutcome' class='rounded border px-3 py-2'><option>通过</option><option>不合格</option></select><select v-if='inspectionOutcome === "不合格"' v-model='inspectionDirection' class='rounded border px-3 py-2'><option>退货</option><option>换货</option></select><input v-model='inspectionReason' class='rounded border px-3 py-2' placeholder='验收说明/不合格原因' /><button class='rounded bg-gray-900 px-3 py-2 text-white' @click='recordInspection'>登记验收</button></div><div v-if='selectedRequest.payment_stage === "预付款"' class='grid gap-2 md:grid-cols-3'><select v-model='followupStatus' class='rounded border px-3 py-2'><option>催办中</option><option>供应商退款中</option><option>退货中</option><option>换货中</option></select><input v-model='followupReason' class='rounded border px-3 py-2' placeholder='异常跟进说明' /><button class='rounded border px-3 py-2' @click='recordFollowup'>记录跟进</button></div><div class='flex gap-2'><button v-if='showWriteoff' class='rounded bg-blue-700 px-3 py-2 text-white' @click='writeoff'>预付款核销</button><button v-if='showClose' class='rounded bg-gray-900 px-3 py-2 text-white' @click='closeOrder'>关闭采购</button></div></div>
+        <div v-if='isProcurementOrPayment && ((isPayment && selectedRequest.workflow_status === "已付款") || (isProcurement && selectedRequest.workflow_status === "已完成"))' class='space-y-3 rounded border p-3'><div class='text-sm'>到货 {{ selectedRequest.received_quantity }}/{{ selectedRequest.ordered_quantity }} · {{ selectedRequest.arrival_status }} · {{ selectedRequest.inspection_status }}</div><div v-if='showArrival' class='flex gap-2'><input v-model.number='arrivalQuantity' type='number' class='w-28 rounded border px-3 py-2 text-sm' placeholder='到货数量' /><input v-model='arrivalDate' type='date' class='rounded border px-3 py-2 text-sm' /><button class='rounded bg-gray-900 px-3 py-2 text-sm text-white' @click='recordArrival'>登记到货</button></div><div v-if='showInspection' class='grid gap-2 md:grid-cols-4'><select v-model='inspectionOutcome' class='rounded border px-3 py-2'><option>通过</option><option>不合格</option></select><select v-if='inspectionOutcome === "不合格"' v-model='inspectionDirection' class='rounded border px-3 py-2'><option>退货</option><option>换货</option></select><input v-model='inspectionReason' class='rounded border px-3 py-2' placeholder='验收说明/不合格原因' /><button class='rounded bg-gray-900 px-3 py-2 text-white' @click='recordInspection'>登记验收</button></div><div v-if='selectedRequest.payment_stage === "预付款"' class='grid gap-2 md:grid-cols-3'><select v-model='followupStatus' class='rounded border px-3 py-2'><option>催办中</option><option>供应商退款中</option><option>退货中</option><option>换货中</option></select><input v-model='followupReason' class='rounded border px-3 py-2' placeholder='异常跟进说明' /><button class='rounded border px-3 py-2' @click='recordFollowup'>记录跟进</button></div><div class='flex gap-2'><button v-if='showWriteoff' class='rounded bg-blue-700 px-3 py-2 text-white' @click='writeoff'>预付款核销</button><button v-if='showClose' class='rounded bg-gray-900 px-3 py-2 text-white' @click='closeOrder'>关闭采购</button></div></div>
       </div>
     </section>
 

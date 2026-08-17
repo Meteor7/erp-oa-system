@@ -109,7 +109,7 @@ def test_procurement_fields_separate_approval_and_business_state():
     assert result["purchase_method"]["options"] == "\n京东购买\n其他购买"
     assert result["supplier"]["fieldtype"] == "Data"
     assert result["supplier"]["label"] == "Supplier Snapshot"
-    assert result["payment_stage"]["options"] == "\n预付款\n到货款\n尾款\n全额付款"
+    assert result["payment_stage"]["options"] == "\n预付款\n到货款\n尾款\n到货后全额付款"
     assert result["prepayment_percentage"]["fieldtype"] == "Percent"
     assert result["arrival_status"]["read_only"] == 1
     assert result["inspection_status"]["read_only"] == 1

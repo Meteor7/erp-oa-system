@@ -138,6 +138,7 @@ def test_draft_recalculates_lines_and_keeps_all_workflow_fields_closed():
     assert result.currency == "CNY"
     assert result.amount == Decimal("39.70")
     assert result.business_lines[0]["amount"] == Decimal("24.70")
+    assert result.ordered_quantity == Decimal("5.0000")
     assert result.company == "QIHENG DEMO"
 
 
