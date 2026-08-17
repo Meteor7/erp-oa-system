@@ -7,6 +7,7 @@ import {
   canCloseProcurement,
   canRecordArrival,
   normalizeServerError,
+  organizationPreflightMessage,
 } from "../src/lib/procurementWorkflow.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -41,6 +42,19 @@ test("evidence gates visible lifecycle actions before the server revalidates", (
   assert.equal(canRecordArrival({ workflow_status: "已付款", business_status: "待到货" }, []), false);
   assert.equal(canCloseProcurement({ inspection_status: "验收通过", prepayment_writeoff_status: "已核销", has_balance_payment: 0 }, ["发票", "验收资料", "采购完成报告"]), true);
 });
+
+test("organization preflight blocks request forms before a doomed submit", () => {
+  assert.match(organizationPreflightMessage("采购申请", {}), /在职员工/);
+  assert.match(organizationPreflightMessage("购买申请", { employee: "EMP-1" }), /直属上级/);
+  assert.equal(organizationPreflightMessage("采购申请", {
+    employee: "EMP-1", supervisor_user: "manager@example.com",
+  }), "");
+  assert.equal(organizationPreflightMessage("采购申请", {
+    employee: "EMP-1", supervisor_decision: "skip",
+  }), "");
+  assert.equal(organizationPreflightMessage("采购付款", {}), "");
+});
+
 
 test("forms use real project options and conditional business fields", () => {
   const source = read("../src/pages/PreRequestCenter.vue");

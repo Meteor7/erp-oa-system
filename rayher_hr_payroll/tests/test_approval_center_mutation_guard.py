@@ -83,3 +83,38 @@ def test_new_native_document_must_be_an_empty_draft(guard):
     module.validate_request_mutation(Doc({"request_type": module.REQUEST_LEAVE, "workflow_status": "草稿"}))
     with pytest.raises(frappe.PermissionError, match="服务端字段"):
         module.validate_request_mutation(Doc({"request_type": module.REQUEST_LEAVE, "workflow_status": "草稿", "amount": 1}))
+
+
+@pytest.mark.parametrize(
+    ("field", "before_value", "after_value"),
+    [
+        ("supplier", "供应商A", "供应商B"),
+        ("payment_stage", "预付款", "尾款"),
+        ("expected_delivery_date", "2026-09-01", "2026-10-01"),
+        ("project", "PROJ-A", "PROJ-B"),
+        ("business_lines", [{"item_name": "A"}], [{"item_name": "B"}]),
+    ],
+)
+def test_active_request_rejects_business_content_changes(guard, field, before_value, after_value):
+    module, frappe = guard
+    before = Doc({
+        "request_type": module.REQUEST_PROCUREMENT_PAYMENT,
+        "workflow_status": "待审批",
+        field: before_value,
+    })
+    changed = Doc(dict(before, **{field: after_value}), before=before)
+
+    with pytest.raises(frappe.PermissionError, match="审批中业务字段"):
+        module.validate_request_mutation(changed)
+
+
+def test_draft_business_content_remains_editable(guard):
+    module, _frappe = guard
+    before = Doc({
+        "request_type": module.REQUEST_PROCUREMENT_PAYMENT,
+        "workflow_status": "草稿",
+        "supplier": "供应商A",
+    })
+    changed = Doc(dict(before, supplier="供应商B"), before=before)
+
+    module.validate_request_mutation(changed)

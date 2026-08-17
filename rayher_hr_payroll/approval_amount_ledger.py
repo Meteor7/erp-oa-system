@@ -207,6 +207,27 @@ def source_balance(source, *, store=None):
     return _balance(current, store.events(_name(current)))
 
 
+def linked_payment_balance(payment, *, store=None):
+    store = _store(store)
+    current_payment = store.get_request(payment)
+    payment_name = _name(current_payment)
+    source_name = _name(_get(current_payment, "source_request"))
+    if not payment_name or not source_name:
+        raise ApprovalAmountError("付款申请未关联来源申请")
+    amount = _money(_get(current_payment, "amount"), "付款金额")
+    reserved, paid = _event_totals(store.events(source_name), payment_name)
+    available = (amount - reserved - paid).quantize(CENT)
+    if reserved < 0 or paid < 0 or available < 0:
+        raise ApprovalAmountError("付款申请金额流水余额不合法")
+    approved = amount if _get(current_payment, "workflow_status") in {"待办理", "已完成", "已付款"} else Decimal("0.00")
+    return {
+        "approved_amount": approved,
+        "reserved_amount": reserved,
+        "paid_amount": paid,
+        "available_amount": available,
+    }
+
+
 def _same_event(existing, source_name, linked_name, event_type):
     return (
         _get(existing, "source_request") == source_name

@@ -6,6 +6,17 @@ export function normalizeServerError(error, fallback = "操作失败") {
   return stripTags(candidate) || fallback;
 }
 
+export function organizationPreflightMessage(requestType, context = {}) {
+  if (!["采购申请", "购买申请"].includes(requestType)) return "";
+  if (!context?.employee) {
+    return "当前账号未关联在职员工，不能提交；请使用真实申请人账号或先维护员工账号关联。";
+  }
+  if (!context?.supervisor_user && context?.supervisor_decision !== "skip") {
+    return "当前员工未配置可用的直属上级审批账号，不能提交；请先维护员工直属上级及其登录账号。";
+  }
+  return "";
+}
+
 const commonPayload = (form) => ({
   subject: form.subject,
   reason: form.reason,

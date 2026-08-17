@@ -31,12 +31,13 @@ class MemoryStore:
         self.sources[doc.name] = doc
         return doc
 
-    def payment(self, amount=60, request_type=ledger.REQUEST_PROCUREMENT_PAYMENT, source_request=None, approved_amount_snapshot=None):
+    def payment(self, amount=60, request_type=ledger.REQUEST_PROCUREMENT_PAYMENT, source_request=None, approved_amount_snapshot=None, workflow_status="待审批"):
         latest_source = list(self.sources.values())[-1] if self.sources else None
         doc = SimpleNamespace(
             name=f"PAY-{len(self.payments) + 1}",
             request_type=request_type,
             amount=amount,
+            workflow_status=workflow_status,
             source_request=source_request or (latest_source.name if latest_source else ""),
             approved_amount_snapshot=(
                 approved_amount_snapshot if approved_amount_snapshot is not None
@@ -99,6 +100,29 @@ def test_reserve_pay_refund_lifecycle():
         "reserved_amount": Decimal("0.00"),
         "paid_amount": Decimal("50.00"),
         "available_amount": Decimal("50.00"),
+    }
+
+
+def test_linked_payment_balance_is_scoped_to_one_payment():
+    store = MemoryStore()
+    source = store.source(approved_amount=100)
+    paid = store.payment(amount=60, workflow_status="已付款")
+    pending = store.payment(amount=40, workflow_status="待审批")
+    ledger.reserve(source, paid, "reserve:paid", store=store)
+    ledger.mark_paid(source, paid, "pay:paid", store=store)
+    ledger.reserve(source, pending, "reserve:pending", store=store)
+
+    assert ledger.linked_payment_balance(paid, store=store) == {
+        "approved_amount": Decimal("60.00"),
+        "reserved_amount": Decimal("0.00"),
+        "paid_amount": Decimal("60.00"),
+        "available_amount": Decimal("0.00"),
+    }
+    assert ledger.linked_payment_balance(pending, store=store) == {
+        "approved_amount": Decimal("0.00"),
+        "reserved_amount": Decimal("40.00"),
+        "paid_amount": Decimal("0.00"),
+        "available_amount": Decimal("0.00"),
     }
 
 

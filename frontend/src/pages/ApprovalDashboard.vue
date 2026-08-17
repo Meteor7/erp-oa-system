@@ -85,6 +85,10 @@ const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
 
 <template>
   <div class="space-y-5">
+    <section v-if="resource.loading" class="rounded-lg border bg-white p-10 text-center text-sm text-gray-500 shadow-sm">
+      正在加载看板数据…
+    </section>
+    <template v-else>
     <section class="rounded-lg border bg-white p-6 shadow-sm">
       <h1 class="text-xl font-semibold">{{ title }}</h1>
       <p class="mt-1 text-sm text-gray-500">只展示当前登录账号在服务端权限范围内可见的单据。</p>
@@ -172,5 +176,6 @@ const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
         <p v-if="!filteredRows.length" class="py-10 text-center text-gray-400">当前分类暂无可见单据。</p>
       </div>
     </section>
+    </template>
   </div>
 </template>

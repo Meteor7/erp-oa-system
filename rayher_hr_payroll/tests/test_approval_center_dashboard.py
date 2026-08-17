@@ -15,6 +15,7 @@ class MemoryStore:
         self.sources = {}
         self.projects = {}
         self.project_rows = []
+        self.payment_balances = {}
 
     def require_draft_access(self, request_type):
         if not self.allowed:
@@ -64,6 +65,12 @@ class MemoryStore:
             "paid_amount": Decimal("0"),
             "available_amount": Decimal(str(source.get("approved_amount") or 0)),
         }
+
+    def payment_balance(self, payment):
+        return self.payment_balances.get(
+            payment["name"],
+            approval_center._zero_balance(payment.get("approved_amount")),
+        )
 
 
 def valid_payload():
@@ -261,6 +268,31 @@ def test_procurement_rejects_missing_delivery_and_project_owner():
         )
 
 
+def test_tail_payment_draft_inherits_source_fulfillment_snapshot():
+    store = MemoryStore()
+    store.sources["SRC-1"] = {
+        "name": "SRC-1", "request_type": approval_center.REQUEST_PROCUREMENT,
+        "workflow_status": "已完成", "currency": "CNY", "approved_amount": 100,
+        "modified": "2026-08-16 10:00:00",
+        "business_lines": [{"quantity": 5}],
+        "received_quantity": 5, "arrival_status": "全部到货",
+        "arrival_date": "2026-08-16", "inspection_status": "验收通过",
+        "inspection_failure_reason": "", "exception_direction": "",
+        "followup_status": "", "prepayment_writeoff_status": "无需核销",
+    }
+
+    result = approval_center.save_draft(
+        approval_center.REQUEST_PROCUREMENT_PAYMENT,
+        payment_payload(payment_stage="尾款", prepayment_percentage=0),
+        store=store,
+    )
+
+    assert result.received_quantity == Decimal("5.0000")
+    assert result.arrival_status == "全部到货"
+    assert result.arrival_date == "2026-08-16"
+    assert result.inspection_status == "验收通过"
+
+
 def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
     direct_store = MemoryStore()
     direct_store.projects["PRJ-1"] = {"name": "PRJ-1", "project_owner": "owner@example.com", "project_owner_name": "项目主管"}
@@ -333,3 +365,44 @@ def test_payment_dashboard_has_fixed_asset_categories_and_real_prepayment_risk_d
     assert result["prepayment_risk_summary"]["pending_writeoff"]["names"] == ["PAY-FIXED-OVERDUE"]
     assert result["prepayment_risk_summary"]["overdue_full_prepayment"]["names"] == ["PAY-FIXED-OVERDUE"]
 
+
+
+def test_payment_dashboard_uses_payment_scoped_ledger_amounts():
+    store = MemoryStore()
+    store.rows = [
+        {
+            "name": "PAY-PAID", "request_type": approval_center.REQUEST_PROCUREMENT_PAYMENT,
+            "subject": "已付款", "workflow_status": "已付款", "business_status": "待到货",
+            "amount": 50, "approved_amount": 0, "asset_nature": "非固定资产",
+            "fixed_asset_category": "", "source_request": "SRC-1", "owner": "a", "modified": "now",
+        },
+        {
+            "name": "PAY-RESERVED", "request_type": approval_center.REQUEST_PROCUREMENT_PAYMENT,
+            "subject": "待审批", "workflow_status": "待审批", "business_status": "待审批",
+            "amount": 50, "approved_amount": 0, "asset_nature": "非固定资产",
+            "fixed_asset_category": "", "source_request": "SRC-2", "owner": "a", "modified": "now",
+        },
+    ]
+    store.payment_balances = {
+        "PAY-PAID": {
+            "approved_amount": Decimal("50"), "reserved_amount": Decimal("0"),
+            "paid_amount": Decimal("50"), "available_amount": Decimal("0"),
+        },
+        "PAY-RESERVED": {
+            "approved_amount": Decimal("0"), "reserved_amount": Decimal("50"),
+            "paid_amount": Decimal("0"), "available_amount": Decimal("0"),
+        },
+    }
+
+    result = approval_center.dashboard("payment", store=store)
+
+    assert result["summary"] == {
+        "applied_amount": Decimal("100.00"),
+        "approved_amount": Decimal("50.00"),
+        "reserved_amount": Decimal("50.00"),
+        "paid_amount": Decimal("50.00"),
+        "available_amount": Decimal("0.00"),
+    }
+    by_name = {row["name"]: row for row in result["rows"]}
+    assert by_name["PAY-PAID"]["paid_amount"] == Decimal("50.00")
+    assert by_name["PAY-RESERVED"]["reserved_amount"] == Decimal("50.00")

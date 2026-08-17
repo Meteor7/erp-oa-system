@@ -2166,6 +2166,33 @@ def _audit_detail_value(value):
     return value
 
 
+PROCUREMENT_FULFILLMENT_FIELDS = (
+    "received_quantity", "arrival_status", "arrival_date", "inspection_status",
+    "inspection_failure_reason", "exception_direction", "followup_status",
+    "prepayment_writeoff_status",
+)
+
+
+def _sync_procurement_fulfillment_to_source(payment_doc):
+    source_name = _clean(getattr(payment_doc, "source_request", None))
+    if not source_name:
+        return None
+    source = frappe.get_doc("OA Approval Request", source_name)
+    if getattr(source, "request_type", None) != REQUEST_PROCUREMENT:
+        frappe.throw(frappe._("采购付款关联的来源申请类型无效。"))
+    for fieldname in PROCUREMENT_FULFILLMENT_FIELDS:
+        setattr(source, fieldname, getattr(payment_doc, fieldname, None))
+    _append_request_event(
+        source,
+        "同步采购履约",
+        getattr(source, "business_status", None),
+        getattr(source, "business_status", None),
+        details={"payment_request": payment_doc.name},
+    )
+    _save_document(source)
+    return source
+
+
 def _apply_procurement_lifecycle_transition(doc, action, payload, event_action, note=""):
     evidence = _active_request_business_documents(doc.name)
     old_status = _clean(getattr(doc, "business_status", None))
@@ -2179,6 +2206,7 @@ def _apply_procurement_lifecycle_transition(doc, action, payload, event_action, 
     details.update({key: _audit_detail_value(value) for key, value in (payload or {}).items() if value not in (None, "")})
     _append_request_event(doc, event_action, old_status, getattr(doc, "business_status", None), note, details)
     _save_document(doc)
+    _sync_procurement_fulfillment_to_source(doc)
     _sync_assignments_after_save(doc)
     return _summarize_doc(doc)
 
@@ -3359,7 +3387,7 @@ def _approval_center_result(value):
     return value
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def save_approval_center_draft(request_type, payload, name=None):
     from rayher_hr_payroll.approval_center import ApprovalCenterError, save_draft
 
@@ -3394,7 +3422,7 @@ def get_approval_center_dashboard(kind, limit=200):
         frappe.throw(str(exc))
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def attach_approval_business_document(request, document_type, file_ref):
     from rayher_hr_payroll.business_documents import BusinessDocumentError, attach
 

@@ -9,6 +9,7 @@ import {
   canRecordInspection,
   canWriteoffPrepayment,
   normalizeServerError,
+  organizationPreflightMessage,
 } from '../lib/procurementWorkflow';
 
 const route = useRoute();
@@ -53,6 +54,7 @@ const followupReason = ref('');
 const documentTypes = ['需求申请', '报价单', '价格审批表', 'PR', 'PO', '合同', '付款计划', '发票', '验收资料', '送货单', '收料单', '入库单', '付款回单', '采购完成报告'];
 const fixedCategories = ['办公家具、工具及器具', '电子设备、研发专用设备、仪器仪表', '生产设备、生产工具及器具'];
 
+const optionLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_options', method: 'GET', auto: true });
 const saver = createResource({ url: 'rayher_hr_payroll.api.oa_entry.save_approval_center_draft' });
 const submitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.submit_approval_center_draft' });
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
@@ -70,6 +72,10 @@ const followupRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.r
 const writeoffRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.writeoff_prepayment' });
 const closeRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.close_procurement' });
 
+const organizationWarning = computed(() => organizationPreflightMessage(
+  config.value.requestType,
+  optionLoader.data?.context || {},
+));
 const projects = computed(() => (projectLoader.data || []).filter((row) => row.status !== 'Cancelled'));
 const purchasers = computed(() => userLoader.data || []);
 const paymentSources = computed(() => (sourceLoader.data?.rows || []).filter((row) => row.request_type === '采购申请' && row.workflow_status === '已完成' && Number(row.available_amount) > 0));
@@ -109,7 +115,9 @@ async function saveDraft() {
   finally { saving.value = false; }
 }
 async function submitApproval() {
-  saving.value = true; error.value = ''; message.value = '';
+  error.value = ''; message.value = '';
+  if (organizationWarning.value) { error.value = organizationWarning.value; return; }
+  saving.value = true;
   try {
     let name = draftName.value;
     if (!name) {
@@ -191,6 +199,7 @@ watch(selectedRequest, (row) => { if (row?.name) { selectedRequestName.value = r
   <div class='space-y-5'>
     <section class='rounded-lg border bg-white p-6 shadow-sm'>
       <div class='flex items-start justify-between gap-4'><div><h1 class='text-xl font-semibold'>{{ config.title }}</h1><p class='mt-1 text-sm text-gray-500'>审批中心 · 表单、资料、审批与履约状态一体化</p></div><span v-if='draftName' class='rounded bg-gray-100 px-3 py-1 text-sm'>{{ draftName }}</span></div>
+      <div v-if='organizationWarning' class='mt-4 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900'>{{ organizationWarning }}</div>
       <div class='mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
         <label class='text-sm'>主题<input v-model='form.subject' class='mt-1 w-full rounded border px-3 py-2' maxlength='140' /></label>
         <label class='text-sm'>紧急程度<select v-model='form.urgency' class='mt-1 w-full rounded border px-3 py-2'><option>一般</option><option>加急</option></select></label>
@@ -228,7 +237,7 @@ watch(selectedRequest, (row) => { if (row?.name) { selectedRequestName.value = r
       <div class='overflow-x-auto'><table class='min-w-full text-sm'><thead><tr class='border-b text-left text-gray-500'><th class='p-2'>物品名称</th><th class='p-2'>规格</th><th class='p-2'>数量</th><th class='p-2'>单位</th><th class='p-2'>单价</th><th class='p-2'>备注</th><th></th></tr></thead><tbody>
         <tr v-for='(line, index) in form.business_lines' :key='index' class='border-b'><td class='p-2'><input v-model='line.item_name' class='w-40 rounded border px-2 py-1.5' /></td><td class='p-2'><input v-model='line.specification' class='w-32 rounded border px-2 py-1.5' /></td><td class='p-2'><input v-model.number='line.quantity' type='number' min='0.0001' step='0.0001' class='w-24 rounded border px-2 py-1.5' /></td><td class='p-2'><input v-model='line.unit' class='w-20 rounded border px-2 py-1.5' /></td><td class='p-2'><input v-model.number='line.unit_price' type='number' min='0' step='0.01' class='w-28 rounded border px-2 py-1.5' /></td><td class='p-2'><input v-model='line.remarks' class='w-40 rounded border px-2 py-1.5' /></td><td><button type='button' class='text-red-600' @click='removeLine(index)'>删除</button></td></tr>
       </tbody></table></div>
-      <div class='mt-4 flex flex-wrap items-center gap-3'><button type='button' class='rounded border px-4 py-2 disabled:opacity-50' :disabled='saving' @click='saveDraft'>保存草稿</button><button type='button' class='rounded bg-gray-900 px-4 py-2 text-white disabled:opacity-50' :disabled='saving' @click='submitApproval'>提交审批</button><span class='text-sm text-green-700'>{{ message }}</span><span class='text-sm text-red-600'>{{ error }}</span></div>
+      <div class='mt-4 flex flex-wrap items-center gap-3'><button type='button' class='rounded border px-4 py-2 disabled:opacity-50' :disabled='saving' @click='saveDraft'>保存草稿</button><button type='button' class='rounded bg-gray-900 px-4 py-2 text-white disabled:opacity-50' :disabled='saving || Boolean(organizationWarning)' @click='submitApproval'>提交审批</button><span class='text-sm text-green-700'>{{ message }}</span><span class='text-sm text-red-600'>{{ error }}</span></div>
     </section>
 
     <section class='grid gap-5 xl:grid-cols-[360px_1fr]'>

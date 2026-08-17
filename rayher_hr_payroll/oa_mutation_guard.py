@@ -59,6 +59,16 @@ SERVER_OWNED_FIELDS = {
     "exception_direction",
     "followup_status",
 }
+DRAFT_ONLY_BUSINESS_FIELDS = {
+    "subject", "reason", "urgency", "asset_nature", "fixed_asset_category",
+    "asset_category", "procurement_scope", "expected_delivery_date", "project",
+    "non_project_allocation_type", "non_project_cost_center",
+    "non_project_department", "purchaser_user", "purchase_method", "supplier",
+    "payment_stage", "prepayment_percentage", "has_balance_payment",
+    "expected_arrival_date", "prepayment_risk_note", "source_request",
+    "business_lines",
+}
+
 NEW_DOCUMENT_ALLOWED_VALUES = {
     "workflow_status": {None, "", DRAFT_STATUS},
     "current_step_index": {None, "", 0, "0"},
@@ -156,6 +166,14 @@ def _new_document_has_server_values(doc):
     return False
 
 
+def _changed_business_fields(doc, before):
+    return [
+        field
+        for field in sorted(DRAFT_ONLY_BUSINESS_FIELDS)
+        if _normal(_get(doc, field)) != _normal(_get(before, field))
+    ]
+
+
 def _changed_server_fields(doc, before):
     return [
         field
@@ -177,6 +195,15 @@ def validate_request_mutation(doc):
         if _new_document_has_server_values(doc):
             frappe.throw("禁止客户端写入审批服务端字段。", frappe.PermissionError)
         return
+
+    if _get(before, "workflow_status") != DRAFT_STATUS:
+        business_changes = _changed_business_fields(doc, before)
+        if business_changes:
+            frappe.throw(
+                "禁止修改审批中业务字段：" + "、".join(business_changes)
+                + "；请先定向驳回申请人后重新提交。",
+                frappe.PermissionError,
+            )
 
     changed = _changed_server_fields(doc, before)
     if changed:

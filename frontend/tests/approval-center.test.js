@@ -65,6 +65,14 @@ test("dashboard renders money, fixed-asset and prepayment risk drilldowns", () =
   assert.match(source, /filteredRows/);
 });
 
+test("dashboard shows an explicit loading state instead of false zero totals", () => {
+  const source = read("../src/pages/ApprovalDashboard.vue");
+  assert.match(source, /resource\.loading/);
+  assert.match(source, /正在加载看板数据/);
+  assert.match(source, /v-else/);
+});
+
+
 test("existing payment and reimbursement aliases remain on OA approvals", () => {
   const source = read("../src/pages/OAApprovals.vue");
   assert.ok(source.includes("/approval/reimbursement"));

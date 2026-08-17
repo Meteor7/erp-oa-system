@@ -259,9 +259,23 @@ class FrappeApprovalCenterStore:
             return source_balance(target)
         return _zero_balance(_get(source, "approved_amount"))
 
+    def payment_balance(self, payment):
+        from rayher_hr_payroll.approval_amount_ledger import linked_payment_balance
+
+        if not _get(payment, "source_request"):
+            return _zero_balance(_get(payment, "approved_amount"))
+        return linked_payment_balance(_name(payment))
+
 
 def _store(store):
     return store or FrappeApprovalCenterStore()
+
+
+FULFILLMENT_SNAPSHOT_FIELDS = (
+    "arrival_status", "arrival_date", "inspection_status",
+    "inspection_failure_reason", "exception_direction", "followup_status",
+    "prepayment_writeoff_status",
+)
 
 
 def _source_ordered_quantity(source):
@@ -269,6 +283,18 @@ def _source_ordered_quantity(source):
     for row in list(_get(source, "business_lines", []) or []):
         total += _decimal(_get(row, "quantity"), "来源采购数量", positive=True, places=QUANTITY_UNIT)
     return total.quantize(QUANTITY_UNIT)
+
+
+def _source_fulfillment_snapshot(source):
+    if not source:
+        return {}
+    result = {field: _get(source, field) for field in FULFILLMENT_SNAPSHOT_FIELDS}
+    result["received_quantity"] = _decimal(
+        _get(source, "received_quantity") or 0,
+        "来源采购累计到货数量",
+        places=QUANTITY_UNIT,
+    )
+    return result
 
 
 def project_options(limit=500, *, store=None):
@@ -379,6 +405,7 @@ def save_draft(request_type, payload, name=None, *, store=None):
             raise ApprovalCenterError("来源采购申请必须为人民币")
         if _money(_get(source_snapshot, "approved_amount")) <= 0:
             raise ApprovalCenterError("来源采购申请批准金额无效")
+    fulfillment = _source_fulfillment_snapshot(source_snapshot)
     prepared = {
         "workflow_status": DRAFT_STATUS,
         "company": identity.get("company") or "",
@@ -410,10 +437,14 @@ def save_draft(request_type, payload, name=None, *, store=None):
         "expected_arrival_date": expected_arrival_date or None,
         "prepayment_risk_note": prepayment_risk_note,
         "ordered_quantity": _source_ordered_quantity(source_snapshot) if source_snapshot else None,
-        "received_quantity": 0,
-        "arrival_status": "未到货" if source_snapshot else None,
-        "inspection_status": "未验收" if source_snapshot else None,
-        "prepayment_writeoff_status": "无需核销",
+        "received_quantity": fulfillment.get("received_quantity", 0),
+        "arrival_status": fulfillment.get("arrival_status") or ("未到货" if source_snapshot else None),
+        "arrival_date": fulfillment.get("arrival_date"),
+        "inspection_status": fulfillment.get("inspection_status") or ("未验收" if source_snapshot else None),
+        "inspection_failure_reason": fulfillment.get("inspection_failure_reason") or "",
+        "exception_direction": fulfillment.get("exception_direction") or "",
+        "followup_status": fulfillment.get("followup_status") or "",
+        "prepayment_writeoff_status": fulfillment.get("prepayment_writeoff_status") or "无需核销",
         "amount": total,
         "currency": "CNY",
         "approved_amount": None,
@@ -526,7 +557,9 @@ def dashboard(kind, limit=200, *, store=None):
     for source in store.list_requests(request_types, limit):
         applied = _money(_get(source, "amount"))
         approved = _money(_get(source, "approved_amount"))
-        if _get(source, "workflow_status") == "已完成" and approved > 0:
+        if kind == "payment" and _get(source, "request_type") == REQUEST_PROCUREMENT_PAYMENT:
+            balance = store.payment_balance(source)
+        elif _get(source, "workflow_status") == "已完成" and approved > 0:
             balance = store.source_balance(source)
         else:
             balance = _zero_balance(approved)

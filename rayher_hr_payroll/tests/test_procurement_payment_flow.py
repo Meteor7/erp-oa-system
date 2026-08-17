@@ -177,6 +177,30 @@ def test_lifecycle_endpoints_apply_evidence_backed_changes_and_audit_names(monke
     assert doc.exception_direction == "换货"
 
 
+def test_arrival_endpoint_synchronizes_fulfillment_to_source_request(monkeypatch, oa_entry):
+    payment_doc = lifecycle_request(source_request="PROC-SOURCE-1")
+    source_doc = Request(
+        name="PROC-SOURCE-1", request_type="采购申请", workflow_status="已完成",
+        arrival_status="未到货", received_quantity=0, arrival_date=None,
+        inspection_status="未验收", inspection_failure_reason="",
+        exception_direction="", followup_status="", prepayment_writeoff_status="无需核销",
+    )
+    docs = [{"name": "OABD-DELIVERY", "document_type": "送货单", "supersedes": ""}]
+    install_lifecycle(monkeypatch, oa_entry, payment_doc, docs)
+    monkeypatch.setattr(
+        oa_entry.frappe,
+        "get_doc",
+        lambda doctype, name: source_doc if (doctype, name) == ("OA Approval Request", "PROC-SOURCE-1") else None,
+    )
+
+    oa_entry.record_arrival(payment_doc.name, 4, "2026-08-12")
+
+    assert source_doc.received_quantity == 4
+    assert source_doc.arrival_status == "部分到货"
+    assert source_doc.arrival_date == "2026-08-12"
+    assert source_doc.inspection_status == "未验收"
+
+
 def test_writeoff_and_close_endpoints_require_active_evidence(monkeypatch, oa_entry):
     doc = lifecycle_request(
         business_status="验收通过", arrival_status="全部到货", inspection_status="验收通过",
