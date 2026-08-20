@@ -83,6 +83,7 @@ def example_prerequisites():
             "pmc": {"user": "pmc@example.com", "employee_name": "演示员工178"},
             "hr_manager": {"user": "hr@example.com", "employee_name": "人事经理"},
             "finance_auditor": {"user": "finance@example.com", "employee_name": "财务审核"},
+            "finance_manager": {"user": "manager@example.com", "employee_name": "财务主管"},
             "vice_manager": {"user": "vice@example.com", "employee_name": "演示员工21"},
             "general_manager": {"user": "general@example.com", "employee_name": "演示员工29"},
             "production_asset_owner": {"user": "production@example.com", "employee_name": "生产设备负责人"},
@@ -104,8 +105,8 @@ def _validate_prerequisites(values):
         missing.append("供应商")
     roles = (values or {}).get("roles") or {}
     for key, label in (
-        ("pmc", "PMC"), ("hr_manager", "人事经理"), ("finance_auditor", "财务审核"),
-        ("vice_manager", "演示员工21"), ("general_manager", "演示员工29"),
+        ("pmc", "PMC"), ("hr_manager", "人事经理"), ("finance_auditor", "财务确认付款"),
+        ("finance_manager", "财务主管"), ("vice_manager", "演示员工21"), ("general_manager", "演示员工29"),
         ("production_asset_owner", "生产设备负责人"),
     ):
         if not (roles.get(key) or {}).get("user"):
@@ -135,14 +136,12 @@ def _memory_steps(scenario, prerequisites):
             }]
         rows = [("直属上级审批", applicant["supervisor_user"])]
     else:
-        rows = []
-        if scenario["scenario_key"] in {"tail_payment_pending", "post_arrival_full_payment_pending"}:
-            rows.append(("财务审核", roles["finance_auditor"]["user"]))
-        rows.extend([
+        rows = [
+            ("财务主管审核", roles["finance_manager"]["user"]),
             ("演示员工21", roles["vice_manager"]["user"]),
             ("演示员工29", roles["general_manager"]["user"]),
             ("财务确认付款", roles["finance_auditor"]["user"]),
-        ])
+        ]
     return [{"label": label, "approvers": [user]} for label, user in rows]
 
 
@@ -185,7 +184,7 @@ class FrappeSeedStore:
     def prerequisites(self):
         roles = {}
         for role_key in (
-            "pmc", "hr_manager", "finance_auditor", "vice_manager",
+            "pmc", "hr_manager", "finance_auditor", "finance_manager", "vice_manager",
             "general_manager", "production_asset_owner",
         ):
             snapshot = resolve_role(role_key)
@@ -421,6 +420,14 @@ class FrappeSeedStore:
                         record_inspection(fulfillment_name, "通过", "测试验收通过")
 
                 payload = self._payload(scenario, prerequisites, index, sources)
+                if scenario["request_type"] == REQUEST_PROCUREMENT_PAYMENT:
+                    source = frappe.get_doc("OA Approval Request", payload["source_request"])
+                    purchaser = str(source.purchaser_user or "").strip()
+                    if not purchaser:
+                        raise ApprovalCenterTestDataError(
+                            "{0}来源采购申请缺少采购经办人".format(source.name)
+                        )
+                    frappe.set_user(purchaser)
                 doc = save_draft(scenario["request_type"], payload)
 
                 if scenario["request_type"] == REQUEST_PROCUREMENT_PAYMENT:
@@ -465,27 +472,40 @@ class FrappeSeedStore:
             "OA Approval Request", filters={"subject": ["like", prefix]},
             pluck="name", limit_page_length=0,
         )
+        documents = frappe.get_all(
+            "OA Business Document", filters={"request": ["in", names]},
+            fields=["name", "file"], limit_page_length=0,
+        ) if names else []
+        todos = frappe.get_all(
+            "ToDo",
+            filters={"reference_type": "OA Approval Request", "reference_name": ["in", names]},
+            pluck="name", limit_page_length=0,
+        ) if names else []
+        ledgers = frappe.get_all(
+            "OA Approval Amount Ledger",
+            filters=[["OA Approval Amount Ledger", "linked_request", "in", names]],
+            pluck="name", limit_page_length=0,
+        ) if names else []
+        batch_files = frappe.get_all(
+            "File",
+            filters={"file_name": ["like", "oa-test-{0}-%".format(batch_id)]},
+            pluck="name",
+            limit_page_length=0,
+        )
+        counts = {
+            "matched_count": len(names),
+            "document_count": len(documents),
+            "todo_count": len(todos),
+            "ledger_count": len(ledgers),
+            "file_count": len(batch_files),
+        }
         if dry_run:
-            return {"matched_count": len(names), "deleted_count": 0}
-        if not names:
-            return {"matched_count": 0, "deleted_count": 0}
+            return {**counts, "deleted_count": 0}
+        if not names and not batch_files:
+            return {**counts, "deleted_count": 0}
         original_user = frappe.session.user
         try:
             frappe.set_user("Administrator")
-            documents = frappe.get_all(
-                "OA Business Document", filters={"request": ["in", names]},
-                fields=["name", "file"], limit_page_length=0,
-            )
-            todos = frappe.get_all(
-                "ToDo",
-                filters={"reference_type": "OA Approval Request", "reference_name": ["in", names]},
-                pluck="name", limit_page_length=0,
-            )
-            ledgers = frappe.get_all(
-                "OA Approval Amount Ledger",
-                filters=[["OA Approval Amount Ledger", "linked_request", "in", names]],
-                pluck="name", limit_page_length=0,
-            )
             for name in todos:
                 frappe.delete_doc("ToDo", name, ignore_permissions=True, force=True)
             if ledgers:
@@ -497,12 +517,11 @@ class FrappeSeedStore:
                 )
             for name in reversed(names):
                 frappe.delete_doc("OA Approval Request", name, ignore_permissions=True, force=True)
-            for row in documents:
-                if row.file and frappe.db.exists("File", {"file_url": row.file}):
-                    file_name = frappe.db.get_value("File", {"file_url": row.file}, "name")
+            for file_name in batch_files:
+                if frappe.db.exists("File", file_name):
                     frappe.delete_doc("File", file_name, ignore_permissions=True, force=True)
             frappe.db.commit()
-            return {"matched_count": len(names), "deleted_count": len(names)}
+            return {**counts, "deleted_count": len(names), "deleted_file_count": len(batch_files)}
         except Exception:
             frappe.db.rollback()
             raise

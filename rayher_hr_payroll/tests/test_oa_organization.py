@@ -5,6 +5,7 @@ from rayher_hr_payroll.oa_organization import (
     OrganizationResolutionError,
     direct_supervisor_name,
     resolve_stage_two_supervisor,
+    resolve_top_executive,
 )
 
 
@@ -123,6 +124,18 @@ def test_every_active_employee_name_is_present_in_the_approved_mapping():
     }
 
     assert active_names <= set(DIRECT_SUPERVISOR_BY_EMPLOYEE)
+
+
+def test_other_purchase_executive_resolves_through_department_chain():
+    software = resolve_top_executive("演示员工150", resolve_user)
+    finance = resolve_top_executive("演示员工13", resolve_user)
+
+    assert software.executive_name == "演示员工21"
+    assert software.user_id == "person046@staff.example.invalid"
+    assert software.traversed == ("演示员工132", "Philippe", "演示员工21")
+    assert finance.executive_name == "演示员工29"
+    assert finance.user_id == "person060@staff.example.invalid"
+    assert finance.traversed == ("演示员工16", "演示员工29")
 
 
 def test_unknown_employee_fails_closed():

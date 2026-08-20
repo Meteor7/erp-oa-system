@@ -131,6 +131,13 @@ class SupervisorResolution:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class ExecutiveResolution:
+    executive_name: str
+    user_id: str
+    traversed: tuple[str, ...] = ()
+
+
 def _clean(value):
     return str(value or "").strip()
 
@@ -141,6 +148,49 @@ def direct_supervisor_name(employee_name, mapping=None):
     if employee not in supervisors:
         raise OrganizationResolutionError(f"员工 {employee or '<空>'} 未配置部门主管")
     return _clean(supervisors[employee])
+
+
+def resolve_top_executive(
+    employee_name: str,
+    resolve_user: Callable[[str], str | None],
+    *,
+    mapping: Mapping[str, str] | None = None,
+) -> ExecutiveResolution:
+    employee = _clean(employee_name)
+    supervisors = mapping or DIRECT_SUPERVISOR_BY_EMPLOYEE
+    if not employee:
+        raise OrganizationResolutionError("员工姓名不能为空")
+    if employee in TOP_EXECUTIVES:
+        user_id = _clean(resolve_user(employee))
+        if not user_id:
+            raise OrganizationResolutionError(f"高管 {employee} 没有关联可用账号")
+        return ExecutiveResolution(employee, user_id)
+
+    current = employee
+    traversed = []
+    visited = {employee}
+    while current:
+        if current not in supervisors:
+            raise OrganizationResolutionError(
+                f"员工 {employee} 的主管链未连接到演示员工37或演示员工28"
+            )
+        current = _clean(supervisors[current])
+        if not current or current == "BOARD":
+            raise OrganizationResolutionError(
+                f"员工 {employee} 的主管链未连接到演示员工37或演示员工28"
+            )
+        if current in visited:
+            chain = " -> ".join([*traversed, current])
+            raise OrganizationResolutionError(f"组织主管配置存在循环：{chain}")
+        visited.add(current)
+        traversed.append(current)
+        if current in TOP_EXECUTIVES:
+            user_id = _clean(resolve_user(current))
+            if not user_id:
+                raise OrganizationResolutionError(f"高管 {current} 没有关联可用账号")
+            return ExecutiveResolution(current, user_id, tuple(traversed))
+
+    raise OrganizationResolutionError(f"员工 {employee} 的主管链无法解析")
 
 
 def resolve_stage_two_supervisor(

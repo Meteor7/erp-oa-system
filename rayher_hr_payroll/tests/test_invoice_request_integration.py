@@ -2081,7 +2081,7 @@ def test_finance_classification_updates_only_expense_accounts(monkeypatch):
     step = Row(
         step_index=1,
         step_key="step-finance",
-        label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance",
+        label="\u8d22\u52a1\u5ba1\u6838\uff1afinance",
         mode="approve",
         approvers='["finance@example.com"]',
         approved_by="[]",
@@ -2145,7 +2145,7 @@ def test_finance_approval_is_blocked_until_all_expense_items_are_classified(monk
         expense_account_level_2="",
         expense_description="client visit",
     )
-    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance", mode="approve")
+    step = Row(label="\u8d22\u52a1\u5ba1\u6838\uff1afinance", mode="approve")
     doc = Row(request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, expense_lines=[line])
     with pytest.raises(ValidationError, match="\u8d39\u7528\u79d1\u76ee"):
         oa_entry._validate_finance_classification(doc, step)
@@ -2165,7 +2165,7 @@ def test_finance_classification_rejects_mismatched_account_levels(monkeypatch):
     )
     step = Row(
         step_index=1,
-        label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance",
+        label="\u8d22\u52a1\u5ba1\u6838\uff1afinance",
         mode="approve",
         approvers='["finance@example.com"]',
         approved_by="[]",
@@ -2209,7 +2209,7 @@ def test_action_request_enforces_finance_classification_before_approve(monkeypat
     step = Row(
         step_index=1,
         step_key="step-finance",
-        label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance",
+        label="\u8d22\u52a1\u5ba1\u6838\uff1afinance",
         mode="approve",
         approvers='["finance@example.com"]',
         approved_by="[]",
@@ -2245,7 +2245,7 @@ def test_action_request_enforces_finance_classification_before_approve(monkeypat
 
 
 def test_request_capabilities_are_server_authoritative_for_finance(monkeypatch):
-    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1afinance", mode="approve")
+    step = Row(label="\u8d22\u52a1\u5ba1\u6838\uff1afinance", mode="approve")
     doc = Row(
         request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
         workflow_status=oa_entry.STATUS_PENDING,
@@ -2622,7 +2622,7 @@ def test_business_executive_system_manager_and_framework_administrator_are_oa_ov
 
 
 def test_override_capabilities_expose_finance_classification_and_action_scope(monkeypatch):
-    step = Row(label="\u8d22\u52a1\u5ba1\u8ba1\uff1a\u6f14\u793a\u5458\u5de513", mode="approve", approvers='["person067@staff.example.invalid"]')
+    step = Row(label="\u8d22\u52a1\u5ba1\u6838\uff1a\u6f14\u793a\u5458\u5de513", mode="approve", approvers='["person067@staff.example.invalid"]')
     doc = Row(
         request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
         workflow_status=oa_entry.STATUS_PENDING,
@@ -3171,10 +3171,11 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
     environment.committed[doc.name] = doc
     monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(oa_entry, "_employee_context", lambda user=None: {
+    monkeypatch.setattr(oa_entry, "_employee_context", lambda user=None, employee=None: {
         "employee": "EMP-1", "employee_name": "Alice", "applicant_user": "alice@example.com",
         "department": "研发部", "supervisor": "直属领导", "supervisor_user": "boss@example.com",
         "supervisor_decision": "approve", "supervisor_path": ["直属领导"],
+        "upper_supervisor": "演示员工21", "upper_supervisor_user": "vice@example.com",
     })
     monkeypatch.setattr(oa_entry, "_resolve_approval_roles", lambda *_args, **_kwargs: _procurement_role_snapshots())
     assignment_syncs = []
@@ -3191,6 +3192,115 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
     assert [row.label for row in doc.steps] == ["PMC：演示员工178", "直属主管：直属领导", "项目主管：项目主管"]
     assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
     assert assignment_syncs == [("PROC-1", "PMC：演示员工178")]
+
+
+def test_zero_step_procurement_and_direct_purchase_are_rejected(monkeypatch):
+    for request_type in (
+        oa_entry.REQUEST_PROCUREMENT,
+        oa_entry.REQUEST_DIRECT_PURCHASE,
+    ):
+        doc = Row(
+            request_type=request_type,
+            workflow_status=oa_entry.STATUS_DRAFT,
+            business_status="",
+            current_step_index=0,
+            current_step_label="",
+            amount=88,
+            approved_amount=None,
+            copied_to="[]",
+            steps=[],
+            operation_log="[]",
+            asset_category=oa_entry.OTHER_ASSET,
+        )
+        if request_type == oa_entry.REQUEST_PROCUREMENT:
+            doc.procurement_scope = "非项目采购"
+            doc.expected_delivery_date = "2026-09-10"
+            doc.non_project_allocation_type = "非项目采购"
+            doc.project = ""
+            doc.project_owner = ""
+        monkeypatch.setattr(oa_entry, "_route_context", lambda **_kwargs: {
+            "department": "研发部", "supervisor": "演示员工21", "asset_category": oa_entry.OTHER_ASSET,
+        })
+        monkeypatch.setattr(oa_entry, "preview_route", lambda *_args, **_kwargs: {
+            "steps": [], "copied_to": [],
+        })
+        monkeypatch.setattr(oa_entry, "_append_steps", lambda current, _steps: setattr(current, "steps", []))
+
+        with pytest.raises(ValidationError, match="审批路线不能为空"):
+            oa_entry._submit_draft(doc)
+
+        assert doc.workflow_status == oa_entry.STATUS_DRAFT
+
+
+def test_expense_asset_classification_populates_payment_dashboard_fields():
+    assert oa_entry._expense_dashboard_classification(oa_entry.ADMIN_ASSET) == {
+        "asset_category": oa_entry.ADMIN_ASSET,
+        "asset_nature": "固定资产",
+        "fixed_asset_category": "办公家具、工具及器具",
+    }
+    assert oa_entry._expense_dashboard_classification(oa_entry.IT_ASSET) == {
+        "asset_category": oa_entry.IT_ASSET,
+        "asset_nature": "固定资产",
+        "fixed_asset_category": "电子设备、研发专用设备、仪器仪表",
+    }
+    assert oa_entry._expense_dashboard_classification(oa_entry.OTHER_ASSET) == {
+        "asset_category": oa_entry.OTHER_ASSET,
+        "asset_nature": "非固定资产",
+        "fixed_asset_category": "",
+    }
+
+
+def test_leave_and_expense_business_statuses_follow_business_lifecycle():
+    leave_step = Row(step_index=1)
+    leave = Row(
+        steps=[leave_step],
+        request_type=oa_entry.REQUEST_LEAVE,
+        workflow_status=oa_entry.STATUS_PENDING,
+        business_status="待审批",
+        current_step_index=1,
+        current_step_label="人事经理",
+    )
+    oa_entry._advance_after_step(leave, leave_step)
+    assert leave.workflow_status == oa_entry.STATUS_COMPLETED
+    assert leave.business_status == "已完成"
+
+    approval = Row(step_index=1)
+    payment = Row(step_index=2, label="确认付款：演示员工13", mode="handle", status=oa_entry.STATUS_WAIT_FLOW)
+    expense = Row(
+        steps=[approval, payment],
+        request_type=oa_entry.REQUEST_EXPENSE_PAYMENT,
+        workflow_status=oa_entry.STATUS_PENDING,
+        business_status="待审批",
+        current_step_index=1,
+        current_step_label="演示员工29",
+    )
+    oa_entry._advance_after_step(expense, approval)
+    assert expense.workflow_status == oa_entry.STATUS_WAIT_HANDLE
+    assert expense.business_status == "待付款"
+
+    expense.amount = 200
+    oa_entry._advance_after_step(expense, payment)
+    assert expense.workflow_status == oa_entry.STATUS_COMPLETED
+    assert expense.approved_amount == 200
+
+
+def test_direct_purchase_completion_updates_business_status():
+    step = Row(step_index=1)
+    doc = Row(
+        steps=[step],
+        request_type=oa_entry.REQUEST_DIRECT_PURCHASE,
+        workflow_status=oa_entry.STATUS_PENDING,
+        business_status="待审批",
+        current_step_index=1,
+        current_step_label="直属主管",
+        amount=88,
+    )
+
+    oa_entry._advance_after_step(doc, step)
+
+    assert doc.workflow_status == oa_entry.STATUS_COMPLETED
+    assert doc.business_status == "待付款"
+    assert doc.current_step_index == 0
 
 
 def test_procurement_submit_rejects_other_users_and_duplicate_submission(monkeypatch):

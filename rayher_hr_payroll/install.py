@@ -4,7 +4,7 @@ from rayher_hr_payroll.custom_fields import CUSTOM_FIELDS
 from rayher_hr_payroll.rd_expense_accounts import DEFAULT_PATHS, ensure_paths
 from rayher_hr_payroll.access_control import ensure_access_control
 from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workflow_masters
-from rayher_hr_payroll.oa_role_resolver import bootstrap_pmc
+from rayher_hr_payroll.oa_role_resolver import bootstrap_pmc, bootstrap_procurement_manager
 from rayher_hr_payroll.api.timesheet_entry import ensure_rd_activity_types
 from rayher_hr_payroll.api.project_entry import (
     backfill_project_owner_accounts,
@@ -121,6 +121,7 @@ def after_install():
     ensure_paths(DEFAULT_PATHS, created_from="系统初始化")
     backfill_project_owner_accounts()
     bootstrap_pmc()
+    bootstrap_procurement_manager()
     relink_project_documents()
     ensure_notifications()
     ensure_hidden_workspaces()

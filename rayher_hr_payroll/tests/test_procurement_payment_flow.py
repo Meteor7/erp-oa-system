@@ -42,6 +42,7 @@ def role(key, label, user, name):
 def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
     roles = {
         "finance_auditor": role("finance_auditor", "财务审核", "finance@example.com", "演示员工13"),
+        "finance_manager": role("finance_manager", "财务主管", "manager@example.com", "演示员工16"),
         "vice_manager": role("vice_manager", "副总经理", "li@example.com", "演示员工21"),
         "general_manager": role("general_manager", "总经理", "wang@example.com", "演示员工29"),
     }
@@ -49,17 +50,24 @@ def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
     prepayment = build_route(
         REQUEST_PROCUREMENT_PAYMENT, payment_stage="预付款", roles=roles
     )
-    assert [row["label"] for row in prepayment] == [
-        "演示员工21", "演示员工29", "财务确认付款：演示员工13"
+    expected_labels = [
+        "财务主管：演示员工16", "演示员工21", "演示员工29", "财务确认付款：演示员工13"
     ]
-    assert [row["mode"] for row in prepayment] == ["approve", "approve", "handle"]
+    assert [row["label"] for row in prepayment] == expected_labels
+    assert [row["approvers"] for row in prepayment] == [
+        ["manager@example.com"], ["li@example.com"], ["wang@example.com"], ["finance@example.com"]
+    ]
+    assert [row["mode"] for row in prepayment] == [
+        "approve", "approve", "approve", "handle"
+    ]
 
     for stage in ("到货款", "尾款", "到货后全额付款"):
         post_arrival = build_route(
             REQUEST_PROCUREMENT_PAYMENT, payment_stage=stage, roles=roles
         )
-        assert [row["label"] for row in post_arrival] == [
-            "财务审核：演示员工13", "演示员工21", "演示员工29", "财务确认付款：演示员工13"
+        assert [row["label"] for row in post_arrival] == expected_labels, stage
+        assert [row["approvers"] for row in post_arrival] == [
+            ["manager@example.com"], ["li@example.com"], ["wang@example.com"], ["finance@example.com"]
         ], stage
         assert [row["mode"] for row in post_arrival] == [
             "approve", "approve", "approve", "handle"
@@ -105,6 +113,57 @@ def test_inspection_pass_needs_acceptance_evidence_and_failure_needs_reason_dire
     failed = transition_business_state(doc, "fail_inspection", {"reason": "尺寸不符", "direction": "换货"}, evidence("验收资料"))
     assert failed["business_status"] == "换货中"
     assert failed["inspection_status"] == "验收不合格"
+
+
+def test_replacement_can_arrive_again_and_be_reinspected():
+    doc = payment(
+        business_status="待验收",
+        arrival_status="全部到货",
+        received_quantity=10,
+    )
+    failed = transition_business_state(
+        doc,
+        "fail_inspection",
+        {"reason": "尺寸不符", "direction": "换货"},
+        evidence("验收资料"),
+    )
+    assert failed["business_status"] == "换货中"
+    assert failed["arrival_status"] == "换货中"
+    assert failed["received_quantity"] == 0
+
+    for key, value in failed.items():
+        setattr(doc, key, value)
+    replacement = transition_business_state(
+        doc,
+        "record_arrival",
+        {"quantity": 10, "arrival_date": "2026-08-16"},
+        evidence("送货单"),
+    )
+    assert replacement["business_status"] == "待验收"
+    assert replacement["arrival_status"] == "全部到货"
+    assert replacement["inspection_status"] == "未验收"
+    assert replacement["followup_status"] == ""
+
+
+def test_supplier_refund_completion_requires_refund_receipt():
+    doc = payment(
+        business_status="供应商退款中",
+        arrival_status="退货中",
+        received_quantity=10,
+    )
+    with pytest.raises(ProcurementWorkflowError, match="退款回单"):
+        transition_business_state(doc, "complete_supplier_refund", evidence=[])
+    result = transition_business_state(
+        doc,
+        "complete_supplier_refund",
+        evidence=evidence("退款回单"),
+    )
+    assert result == {
+        "business_status": "已退款",
+        "arrival_status": "关闭未交数量",
+        "followup_status": "供应商退款完成",
+        "prepayment_writeoff_status": "无需核销",
+    }
 
 
 def test_prepayment_overdue_followup_writeoff_and_no_tail_close_rules():
@@ -276,6 +335,38 @@ def test_writeoff_and_close_endpoints_require_active_evidence(monkeypatch, oa_en
     docs.append({"name": "OABD-REPORT", "document_type": "采购完成报告", "supersedes": ""})
     result = oa_entry.close_procurement(doc.name, "无尾款关闭")
     assert result["business_status"] == "已关闭"
+
+
+def test_supplier_refund_endpoint_posts_ledger_and_closes_refund_state(monkeypatch, oa_entry):
+    doc = lifecycle_request(
+        business_status="供应商退款中",
+        arrival_status="退货中",
+        source_request="PROC-SOURCE-1",
+    )
+    docs = [{"name": "OABD-REFUND", "document_type": "退款回单", "supersedes": ""}]
+    install_lifecycle(monkeypatch, oa_entry, doc, docs)
+    monkeypatch.setattr(
+        oa_entry.approval_amount_ledger,
+        "linked_payment_balance",
+        lambda _name: {"paid_amount": 100},
+    )
+    refunds = []
+    monkeypatch.setattr(
+        oa_entry.approval_amount_ledger,
+        "refund",
+        lambda source, payment, amount, key, note="": refunds.append(
+            (source, payment, amount, key, note)
+        ),
+    )
+
+    result = oa_entry.complete_supplier_refund(doc.name, "退款到账")
+
+    assert result["business_status"] == "已退款"
+    assert result["arrival_status"] == "关闭未交数量"
+    assert refunds == [
+        ("PROC-SOURCE-1", doc.name, 100, f"refund:{doc.name}:complete", "退款到账")
+    ]
+    assert json.loads(doc.operation_log)[-1]["action"] == "确认供应商退款"
 
 
 def test_active_business_documents_exclude_superseded_versions(monkeypatch, oa_entry):

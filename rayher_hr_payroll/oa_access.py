@@ -93,6 +93,7 @@ def _sql_row_scope(user, roles, identity, actors):
         clauses.append(
             f"{table}.employee = {frappe.db.escape(identity['employee'])}"
         )
+    clauses.append(f"{table}.purchaser_user = {frappe.db.escape(user)}")
     actor_checks = [
         "JSON_CONTAINS(step.approvers, {0})".format(
             frappe.db.escape(json.dumps(actor, ensure_ascii=False))
@@ -175,6 +176,8 @@ def _can_read(doc, user, roles, identity):
         return True
     if _is_owner(doc, user, identity):
         return True
+    if _get(doc, "request_type") == REQUEST_PROCUREMENT and _get(doc, "purchaser_user") == user:
+        return True
     return _is_current_approver(doc, _actor_names(user, identity))
 
 
@@ -190,6 +193,8 @@ def oa_request_has_permission(doc, ptype=None, user=None):
     roles = _roles(user)
     identity = _active_identity(user)
     if ptype in READ_PTYPES:
+        if request_type == REQUEST_PROCUREMENT and _get(doc, "purchaser_user") == user:
+            return True
         return None if _can_read(doc, user, roles, identity) else False
     if ptype == "create":
         return None if _is_applicant(doc, user, identity) else False

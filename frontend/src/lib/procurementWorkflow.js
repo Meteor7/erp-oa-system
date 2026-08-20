@@ -40,6 +40,7 @@ export function buildApprovalCenterPayload(form, requestType) {
   if (requestType === "采购申请") {
     return {
       ...common,
+      applicant_employee: form.applicant_employee || "",
       procurement_scope: form.procurement_scope,
       ...(form.procurement_scope === "项目采购" ? { project: form.project } : allocationPayload({ ...form, project: "" })),
     };
@@ -67,7 +68,7 @@ const lifecycleReady = (request) => (
 );
 export function canRecordArrival(request, documentTypes) {
   return lifecycleReady(request)
-    && ["合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中"].includes(request?.business_status)
+    && ["合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"].includes(request?.business_status)
     && hasAny(documentTypes || [], ["送货单", "收料单", "入库单"]);
 }
 
@@ -75,6 +76,13 @@ export function canRecordInspection(request, documentTypes) {
   return lifecycleReady(request)
     && ["全部到货", "关闭未交数量"].includes(request?.arrival_status)
     && (documentTypes || []).includes("验收资料");
+}
+
+export function canCompleteSupplierRefund(request, documentTypes) {
+  return request?.request_type === "采购付款"
+    && request?.workflow_status === "已付款"
+    && ["供应商退款中", "退货中"].includes(request?.business_status)
+    && (documentTypes || []).includes("退款回单");
 }
 
 export function canWriteoffPrepayment(request, documentTypes) {

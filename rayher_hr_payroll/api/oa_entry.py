@@ -47,10 +47,16 @@ from rayher_hr_payroll.oa_organization import (
     TOP_EXECUTIVES,
     OrganizationResolutionError,
     resolve_stage_two_supervisor,
+    resolve_top_executive,
 )
 
 REQUEST_TYPES = [REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT]
 ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, PRODUCTION_ASSET, OTHER_ASSET]
+EXPENSE_FIXED_CATEGORY_BY_ASSET = {
+    ADMIN_ASSET: "办公家具、工具及器具",
+    IT_ASSET: "电子设备、研发专用设备、仪器仪表",
+    PRODUCTION_ASSET: PRODUCTION_ASSET,
+}
 
 STATUS_DRAFT = "\u8349\u7a3f"
 STATUS_PENDING = "\u5f85\u5ba1\u6279"
@@ -99,9 +105,13 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
         if asset_category == PRODUCTION_ASSET:
             keys.append("production_asset_owner")
     elif request_type == REQUEST_DIRECT_PURCHASE:
-        keys = ["hr_manager", "vice_manager"] if _clean(purchase_method) == "京东购买" else []
+        keys = (
+            ["hr_manager", "vice_manager"]
+            if _clean(purchase_method) == "京东购买"
+            else ["vice_manager", "general_manager"]
+        )
     elif request_type == REQUEST_PROCUREMENT_PAYMENT:
-        keys = ["finance_auditor", "vice_manager", "general_manager"]
+        keys = ["finance_auditor", "finance_manager", "vice_manager", "general_manager"]
     else:
         keys = []
     try:
@@ -448,41 +458,74 @@ def _enabled_employee_user(employee_name):
     return ""
 
 
-def _employee_context(user=None):
-    user = user or frappe.session.user
-    if user == "Guest":
+def _can_submit_procurement_for_others(user=None):
+    candidate = _clean(user or frappe.session.user).lower()
+    if not candidate:
+        return False
+    try:
+        return candidate == _clean(resolve_role("pmc").get("user")).lower()
+    except (ApprovalRoleResolutionError, RuntimeError):
+        return False
+
+
+def _employee_context(user=None, employee=None):
+    user = _clean(user or frappe.session.user).lower()
+    if user == "guest":
         frappe.throw(frappe._("请先登录。"))
-    row = frappe.db.get_value(
-        "Employee", {"user_id": user}, ["name", "employee_name", "department", "reports_to"], as_dict=True
-    )
+
+    requested_employee = _clean(employee)
+    fields = ["name", "employee_name", "department", "reports_to", "user_id"]
+    if requested_employee:
+        row = frappe.db.get_value(
+            "Employee", {"name": requested_employee, "status": "Active"}, fields, as_dict=True
+        )
+        if not row:
+            raise ApprovalRouteError("代提交的申请人不是在职员工")
+        employee_user = _clean(row.get("user_id")).lower()
+        if employee_user != user and not _can_submit_procurement_for_others(user):
+            raise ApprovalRouteError("只有 PMC 演示员工178可以代其他员工提交采购申请")
+    else:
+        row = frappe.db.get_value(
+            "Employee", {"user_id": user, "status": "Active"}, fields, as_dict=True
+        )
+
     if not row:
         return {
             "employee": None,
             "employee_name": "",
-            "applicant_user": str(user).lower(),
+            "applicant_user": user,
             "department": "",
             "supervisor": "",
             "supervisor_user": "",
             "supervisor_decision": "",
             "supervisor_path": [],
+            "upper_supervisor": "",
+            "upper_supervisor_user": "",
         }
 
     employee_name = _clean(row.employee_name or row.name)
+    applicant_user = _clean(row.get("user_id")).lower() or user
     context = {
         "employee": row.name,
         "employee_name": employee_name,
-        "applicant_user": str(user).lower(),
+        "applicant_user": applicant_user,
         "department": _display_department(row.department),
         "supervisor": "",
         "supervisor_user": "",
         "supervisor_decision": "",
         "supervisor_path": [],
+        "upper_supervisor": "",
+        "upper_supervisor_user": "",
     }
     if employee_name in DIRECT_SUPERVISOR_BY_EMPLOYEE:
         try:
             resolution = resolve_stage_two_supervisor(employee_name, _enabled_employee_user)
         except OrganizationResolutionError as exc:
             frappe.throw(str(exc))
+        try:
+            executive = resolve_top_executive(employee_name, _enabled_employee_user)
+        except OrganizationResolutionError:
+            executive = None
         context.update(
             {
                 "supervisor": resolution.supervisor_name,
@@ -490,27 +533,50 @@ def _employee_context(user=None):
                 "supervisor_decision": resolution.decision,
                 "supervisor_path": list(resolution.traversed),
                 "supervisor_reason": resolution.reason,
+                "upper_supervisor": executive.executive_name if executive else "",
+                "upper_supervisor_user": executive.user_id if executive else "",
             }
         )
         return context
 
-    # Compatibility for active Employees not yet represented in the organization map.
-    if row.get("reports_to"):
+    # Compatibility for active Employees not yet represented in the approved map.
+    reports_to = _clean(row.get("reports_to"))
+    if reports_to:
         supervisor_row = frappe.db.get_value(
             "Employee",
-            row.reports_to,
-            ["employee_name", "user_id", "status"],
+            reports_to,
+            ["employee_name", "user_id", "status", "reports_to"],
             as_dict=True,
         )
         if supervisor_row and _clean(supervisor_row.get("status")) == "Active":
             context["supervisor"] = _clean(
-                supervisor_row.get("employee_name") or row.reports_to
+                supervisor_row.get("employee_name") or reports_to
             )
-            context["supervisor_user"] = _enabled_employee_user(
-                context["supervisor"]
+            context["supervisor_user"] = _clean(supervisor_row.get("user_id")).lower()
+            context["supervisor_decision"] = (
+                "skip" if context["supervisor"] in TOP_EXECUTIVES else "approve"
             )
+            cursor = supervisor_row
+            visited = {row.name}
+            for _index in range(20):
+                manager_name = _clean(cursor.get("employee_name"))
+                if manager_name in TOP_EXECUTIVES:
+                    context["upper_supervisor"] = manager_name
+                    context["upper_supervisor_user"] = _clean(cursor.get("user_id")).lower()
+                    break
+                parent = _clean(cursor.get("reports_to"))
+                if not parent or parent in visited:
+                    break
+                visited.add(parent)
+                cursor = frappe.db.get_value(
+                    "Employee",
+                    parent,
+                    ["employee_name", "user_id", "status", "reports_to"],
+                    as_dict=True,
+                ) or {}
+                if _clean(cursor.get("status")) != "Active":
+                    break
     return context
-
 
 def _leave_employee_context(user=None):
     """Resolve leave identity and the immediate approver from server-owned data."""
@@ -620,8 +686,14 @@ def _route_context(
     asset_category=None,
     *,
     request_type=None,
+    applicant_employee=None,
 ):
-    ctx = _leave_employee_context() if request_type == REQUEST_LEAVE else _employee_context()
+    if request_type == REQUEST_LEAVE:
+        ctx = _leave_employee_context()
+    elif request_type == REQUEST_PROCUREMENT and applicant_employee:
+        ctx = _employee_context(employee=applicant_employee)
+    else:
+        ctx = _employee_context()
     if request_type == REQUEST_LEAVE:
         if not ctx.get("employee"):
             raise ApprovalRouteError("当前账号未关联在职员工，不能提交请假申请")
@@ -1142,12 +1214,18 @@ def _advance_after_step(doc, step):
         doc.workflow_status = STATUS_COMPLETED
         doc.current_step_index = 0
         doc.current_step_label = ""
-        if doc.request_type in {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}:
+        if doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}:
             doc.approved_amount = getattr(doc, "amount", None) or 0
         if doc.request_type == REQUEST_PROCUREMENT and _clean(getattr(doc, "business_status", None)) == "待审批":
             doc.business_status = "合同待登记"
+        elif doc.request_type == REQUEST_DIRECT_PURCHASE and _clean(getattr(doc, "business_status", None)) == "待审批":
+            doc.business_status = "待付款"
+        elif doc.request_type == REQUEST_LEAVE:
+            doc.business_status = "已完成"
         return
     doc.workflow_status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
+    if doc.request_type == REQUEST_EXPENSE_PAYMENT and next_step.mode == "handle":
+        doc.business_status = "待付款"
     doc.current_step_index = next_step.step_index
     doc.current_step_label = next_step.label
     next_step.status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
@@ -1336,6 +1414,11 @@ def _build_request_doc(
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
 
     initial_status = steps[0]["status"] if submit else STATUS_DRAFT
+    expense_asset = (
+        _expense_dashboard_classification(ctx.get("asset_category"))
+        if request_type == REQUEST_EXPENSE_PAYMENT
+        else {"asset_nature": "", "fixed_asset_category": ""}
+    )
     doc = frappe.get_doc(
         {
             "doctype": "OA Approval Request",
@@ -1354,6 +1437,9 @@ def _build_request_doc(
             "to_date": to_date,
             "amount": total if request_type == REQUEST_EXPENSE_PAYMENT else _money(amount),
             "asset_category": ctx.get("asset_category"),
+            "asset_nature": expense_asset["asset_nature"],
+            "fixed_asset_category": expense_asset["fixed_asset_category"],
+            "business_status": "待审批" if submit else "",
             "source_type": source_type or SOURCE_MANUAL,
             "source_summary": source_summary or "",
             "payment_type": _canonical_payment_type(payment_type),
@@ -1402,6 +1488,16 @@ def _required_asset_category(value):
         frappe.throw(str(exc))
 
 
+def _expense_dashboard_classification(asset_category):
+    normalized = normalize_asset_category(asset_category)
+    fixed_category = EXPENSE_FIXED_CATEGORY_BY_ASSET.get(normalized, "")
+    return {
+        "asset_category": normalized,
+        "asset_nature": "固定资产" if fixed_category else "非固定资产",
+        "fixed_asset_category": fixed_category,
+    }
+
+
 def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
@@ -1412,6 +1508,8 @@ def _submit_draft(doc):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT:
         doc.asset_category = _required_asset_category(getattr(doc, "asset_category", None))
+        for fieldname, value in _expense_dashboard_classification(doc.asset_category).items():
+            setattr(doc, fieldname, value)
         _validate_expense_project_groups(doc)
         summary = invoice_service.validate_request_invoices(doc, submitting=True)
         if isinstance(summary, dict):
@@ -1442,6 +1540,7 @@ def _submit_draft(doc):
         supervisor=getattr(doc, "supervisor", None),
         asset_category=getattr(doc, "asset_category", None),
         request_type=doc.request_type,
+        applicant_employee=getattr(doc, "employee", None),
     )
     doc.department = ctx["department"]
     doc.supervisor = ctx["supervisor"]
@@ -1451,14 +1550,17 @@ def _submit_draft(doc):
         project_owner_name=getattr(doc, "project_owner_name", None),
         purchase_method=getattr(doc, "purchase_method", None),
         payment_stage=getattr(doc, "payment_stage", None),
+        applicant_employee=getattr(doc, "employee", None),
     )
     doc.copied_to = _json_list(route.get("copied_to") or [])
-    _append_steps(doc, route["steps"])
-    doc.workflow_status = route["steps"][0]["status"]
-    if doc.request_type in {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT}:
-        doc.business_status = "待审批"
+    steps = route["steps"]
+    _append_steps(doc, steps)
+    if not steps:
+        frappe.throw(frappe._("审批路线不能为空，请先维护申请人的组织审批关系。"))
+    doc.workflow_status = steps[0]["status"]
+    doc.business_status = "待审批"
     doc.current_step_index = 1
-    doc.current_step_label = route["steps"][0]["label"]
+    doc.current_step_label = steps[0]["label"]
     _append_request_event(doc, "提交申请", old_status, doc.workflow_status)
 
 
@@ -1511,6 +1613,7 @@ def get_options():
         },
         "can_manage_expense": bool(roles & FINANCE_ROLES),
         "can_see_all": bool(roles & PRIVILEGED_ROLES),
+        "can_submit_procurement_for_others": _can_submit_procurement_for_others(),
     }
 
 
@@ -1518,10 +1621,17 @@ def get_options():
 def preview_route(
     request_type, department=None, supervisor=None, asset_category=None, active=True,
     project_owner=None, project_owner_name=None, purchase_method=None, payment_stage=None,
+    applicant_employee=None,
 ):
     require_request_type_access(request_type)
     try:
-        ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
+        ctx = _route_context(
+            department=department,
+            supervisor=supervisor,
+            asset_category=asset_category,
+            request_type=request_type,
+            applicant_employee=applicant_employee,
+        )
         roles = _resolve_approval_roles(
             request_type, department=ctx["department"], asset_category=ctx["asset_category"],
             purchase_method=purchase_method,
@@ -1538,6 +1648,8 @@ def preview_route(
             project_owner_name=project_owner_name,
             purchase_method=purchase_method,
             payment_stage=payment_stage,
+            upper_supervisor=ctx.get("upper_supervisor"),
+            upper_supervisor_user=ctx.get("upper_supervisor_user"),
             roles=roles,
         )
         copied_to = (
@@ -1787,7 +1899,7 @@ def save_draft_expense_sources(name, source_lines):
 
 
 
-FINANCE_AUDIT_LABEL_PREFIX = "\u8d22\u52a1\u5ba1\u8ba1"
+FINANCE_AUDIT_LABEL_PREFIX = "\u8d22\u52a1\u5ba1\u6838"
 
 
 def _is_finance_audit_step(step):
@@ -2028,9 +2140,19 @@ def _step_snapshot(doc, prefix, role_label):
     return {"label": role_label, "user": ""}
 
 
+def _request_applicant_user(doc):
+    employee = _clean(getattr(doc, "employee", None))
+    user = (
+        _clean(frappe.db.get_value("Employee", employee, "user_id"))
+        if employee
+        else ""
+    )
+    return user or _clean(getattr(doc, "owner", None))
+
+
 def _contract_copy_snapshot(doc):
     return {
-        "applicant": {"label": "申请人", "user": _clean(getattr(doc, "owner", None))},
+        "applicant": {"label": "申请人", "user": _request_applicant_user(doc)},
         "purchaser": {"label": "采购经办人", "user": _clean(getattr(doc, "purchaser_user", None))},
         "pmc": _step_snapshot(doc, "PMC", "PMC"),
         "supervisor": _step_snapshot(doc, "直属主管", "直属上级"),
@@ -2285,6 +2407,55 @@ def record_prepayment_followup(name, status, reason):
             "预付款异常跟进",
             note,
         )
+
+
+@frappe.whitelist(methods=["POST"])
+def complete_supplier_refund(name, reason=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_lifecycle_access(doc, "complete_supplier_refund")
+        if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+            frappe.throw(frappe._("只有采购付款单可以确认供应商退款。"))
+        note = _bounded_optional_text(reason, "退款说明", 500)
+        evidence = _active_request_business_documents(doc.name)
+        old_status = _clean(getattr(doc, "business_status", None))
+        try:
+            updates = transition_business_state(
+                doc,
+                "complete_supplier_refund",
+                payload={"reason": note},
+                evidence=evidence,
+            )
+            balance = approval_amount_ledger.linked_payment_balance(doc.name)
+            refund_amount = Decimal(str(balance.get("paid_amount") or 0))
+            if refund_amount <= 0:
+                raise approval_amount_ledger.ApprovalAmountError("当前付款单没有可退款的已付金额")
+            approval_amount_ledger.refund(
+                doc.source_request,
+                doc.name,
+                refund_amount,
+                f"refund:{doc.name}:complete",
+                note=note,
+            )
+        except (ProcurementWorkflowError, approval_amount_ledger.ApprovalAmountError) as error:
+            frappe.throw(frappe._(str(error)))
+        for fieldname, value in updates.items():
+            setattr(doc, fieldname, value)
+        details = _evidence_audit(evidence)
+        details["refund_amount"] = float(refund_amount)
+        _append_request_event(
+            doc,
+            "确认供应商退款",
+            old_status,
+            doc.business_status,
+            note,
+            details,
+        )
+        _save_document(doc)
+        _sync_assignments_after_save(doc)
+        return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -2907,6 +3078,8 @@ def action_request(name, action="approve", note=None, reject_target=None):
             if doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
                 _mark_procurement_payment_paid(doc)
                 _set_procurement_payment_paid_state(doc)
+            else:
+                doc.business_status = "已付款"
             doc.workflow_status = STATUS_PAID
             doc.paid_by = actor
             doc.paid_on = step.acted_on or now_datetime()
@@ -2931,6 +3104,7 @@ def mark_paid(name, note=None):
             frappe.throw(frappe._("\u53ea\u6709\u5ba1\u6279\u5df2\u901a\u8fc7\u7684\u5355\u636e\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
         old_status = doc.workflow_status
         doc.workflow_status = STATUS_PAID
+        doc.business_status = "已付款"
         doc.paid_by = sorted(_actor_names())[0]
         doc.paid_on = now_datetime()
         if note:
@@ -2948,6 +3122,7 @@ def _reset_request_to_draft(doc, note=""):
         supervisor=doc.supervisor,
         asset_category=doc.asset_category,
         request_type=doc.request_type,
+        applicant_employee=getattr(doc, "employee", None),
     )
     route = preview_route(
         doc.request_type,
@@ -2959,10 +3134,12 @@ def _reset_request_to_draft(doc, note=""):
         project_owner_name=getattr(doc, "project_owner_name", None),
         purchase_method=getattr(doc, "purchase_method", None),
         payment_stage=getattr(doc, "payment_stage", None),
+        applicant_employee=getattr(doc, "employee", None),
     )
     doc.copied_to = _json_list(route.get("copied_to") or [])
     _append_steps(doc, route["steps"])
     doc.workflow_status = STATUS_DRAFT
+    doc.business_status = ""
     doc.current_step_index = 0
     doc.current_step_label = ""
     _append_request_event(doc, "撤回申请", old_status, STATUS_DRAFT, note, details)
@@ -3070,6 +3247,7 @@ def withdraw_payment(name, note=None):
             frappe.throw(frappe._("只有已付款报销单可以撤回付款。"))
         old_status = doc.workflow_status
         doc.workflow_status = STATUS_COMPLETED
+        doc.business_status = "待付款"
         doc.paid_by = ""
         doc.paid_on = None
         _append_request_event(doc, "撤回付款", old_status, STATUS_COMPLETED, note)
@@ -3430,6 +3608,62 @@ def list_approval_center_projects(limit=500):
 
     try:
         return project_options(limit=limit)
+    except ApprovalCenterError as exc:
+        frappe.throw(str(exc))
+
+
+@frappe.whitelist()
+def list_procurement_applicants():
+    require_request_type_access(REQUEST_PROCUREMENT)
+    context = _employee_context()
+    if not context.get("employee"):
+        return []
+    if _can_submit_procurement_for_others():
+        rows = frappe.get_all(
+            "Employee",
+            filters={"status": "Active"},
+            fields=["name", "employee_name", "department", "user_id"],
+            order_by="employee_name asc, name asc",
+            limit_page_length=0,
+        )
+    else:
+        rows = [{
+            "name": context["employee"],
+            "employee_name": context["employee_name"],
+            "department": context["department"],
+            "user_id": context["applicant_user"],
+        }]
+    return [{
+        "name": row.get("name"),
+        "employee_name": row.get("employee_name") or row.get("name"),
+        "department": _display_department(row.get("department")),
+        "user": row.get("user_id") or "",
+        "has_account": 1 if row.get("user_id") else 0,
+    } for row in rows]
+
+
+@frappe.whitelist()
+def list_procurement_users():
+    require_request_type_access(REQUEST_PROCUREMENT)
+    try:
+        purchaser = resolve_role("procurement_manager")
+    except ApprovalRoleResolutionError as exc:
+        frappe.throw(str(exc))
+    return [{
+        "name": purchaser["user"],
+        "full_name": purchaser["employee_name"] or purchaser["role_label"],
+        "employee": purchaser["employee"],
+        "designation": purchaser["role_label"],
+        "is_default": 1,
+    }]
+
+
+@frappe.whitelist()
+def list_procurement_payment_sources(limit=500):
+    from rayher_hr_payroll.approval_center import ApprovalCenterError, procurement_payment_source_options
+
+    try:
+        return procurement_payment_source_options(limit=limit)
     except ApprovalCenterError as exc:
         frappe.throw(str(exc))
 

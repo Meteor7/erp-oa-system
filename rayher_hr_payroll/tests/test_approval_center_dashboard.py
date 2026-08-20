@@ -16,6 +16,8 @@ class MemoryStore:
         self.projects = {}
         self.project_rows = []
         self.payment_balances = {}
+        self.payment_initiator_allowed = True
+        self.default_purchaser = "buyer@example.com"
 
     def require_draft_access(self, request_type):
         if not self.allowed:
@@ -58,6 +60,9 @@ class MemoryStore:
     def list_projects(self, limit):
         return self.project_rows[:limit]
 
+    def list_procurement_payment_sources(self, limit):
+        return self.rows[:limit]
+
     def source_balance(self, source):
         return source.get("balance") or {
             "approved_amount": Decimal(str(source.get("approved_amount") or 0)),
@@ -71,6 +76,12 @@ class MemoryStore:
             payment["name"],
             approval_center._zero_balance(payment.get("approved_amount")),
         )
+
+    def can_initiate_procurement_payment(self, source):
+        return self.payment_initiator_allowed
+
+    def default_purchaser_user(self):
+        return self.default_purchaser
 
 
 def valid_payload():
@@ -124,6 +135,54 @@ def test_procurement_project_options_expose_only_minimal_owner_snapshot():
     }]
 
 
+def test_payment_source_options_return_only_completed_available_procurements():
+    store = MemoryStore(user="buyer@example.com")
+    store.allowed = True
+    store.rows = [
+        {
+            "name": "PROC-1", "request_type": "采购申请", "subject": "可付款",
+            "workflow_status": "已完成", "approved_amount": 100,
+            "purchaser_user": "buyer@example.com",
+        },
+        {
+            "name": "PROC-2", "request_type": "采购申请", "subject": "无余额",
+            "workflow_status": "已完成", "approved_amount": 100,
+            "purchaser_user": "buyer@example.com",
+            "balance": {"approved_amount": 100, "reserved_amount": 100, "paid_amount": 0, "available_amount": 0},
+        },
+        {
+            "name": "DIRECT-1", "request_type": "购买申请", "subject": "错误类型",
+            "workflow_status": "已完成", "approved_amount": 100,
+        },
+    ]
+
+    result = approval_center.procurement_payment_source_options(store=store)
+
+    assert [row["name"] for row in result] == ["PROC-1"]
+    assert result[0]["purchaser_user"] == "buyer@example.com"
+    assert result[0]["available_amount"] == Decimal("100")
+
+
+def test_frappe_payment_source_query_is_scoped_to_purchaser_or_finance(monkeypatch):
+    calls = []
+    monkeypatch.setattr(approval_center.frappe, "session", SimpleNamespace(user="buyer@example.com"))
+    monkeypatch.setattr(approval_center.frappe, "get_roles", lambda _user=None: ["Employee"])
+    monkeypatch.setattr(
+        approval_center.frappe,
+        "get_all",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or [],
+    )
+    store = approval_center.FrappeApprovalCenterStore()
+
+    store.list_procurement_payment_sources(50)
+    assert calls[-1][1]["filters"]["purchaser_user"] == "buyer@example.com"
+
+    approval_center.frappe.session.user = "finance@example.com"
+    monkeypatch.setattr(approval_center.frappe, "get_roles", lambda _user=None: ["Accounts User"])
+    store.list_procurement_payment_sources(50)
+    assert "purchaser_user" not in calls[-1][1]["filters"]
+
+
 def test_draft_recalculates_lines_and_keeps_all_workflow_fields_closed():
     store = MemoryStore()
     store.projects["PRJ-1"] = {"name": "PRJ-1", "project_owner": "owner@example.com", "project_owner_name": "项目主管"}
@@ -140,6 +199,53 @@ def test_draft_recalculates_lines_and_keeps_all_workflow_fields_closed():
     assert result.business_lines[0]["amount"] == Decimal("24.70")
     assert result.ordered_quantity == Decimal("5.0000")
     assert result.company == "QIHENG DEMO"
+
+
+def test_pmc_can_save_procurement_for_selected_employee_and_others_cannot_forge_it():
+    store = MemoryStore(user="pmc@example.com")
+    store.allowed = True
+    selected = {
+        "employee": "EMP-OTHER",
+        "employee_name": "其他员工",
+        "department": "软件部",
+        "company": "QIHENG DEMO",
+        "supervisor": "演示员工132",
+        "supervisor_user": "junzhang@example.com",
+        "supervisor_decision": "approve",
+    }
+    store.resolve_procurement_applicant = lambda employee: (
+        selected if employee == "EMP-OTHER" else store.identity()
+    )
+    store.projects["PRJ-1"] = {
+        "name": "PRJ-1",
+        "project_owner": "owner@example.com",
+        "project_owner_name": "项目主管",
+    }
+
+    result = approval_center.save_draft(
+        approval_center.REQUEST_PROCUREMENT,
+        procurement_payload(applicant_employee="EMP-OTHER"),
+        store=store,
+    )
+
+    assert result.employee == "EMP-OTHER"
+    assert result.employee_name == "其他员工"
+    assert result.department == "软件部"
+
+
+def test_procurement_purchaser_is_resolved_server_side_and_cannot_be_forged():
+    store = MemoryStore()
+    store.default_purchaser = "manager@example.com"
+    store.projects["PRJ-1"] = {
+        "name": "PRJ-1", "project_owner": "owner@example.com",
+        "project_owner_name": "项目主管",
+    }
+    result = approval_center.save_draft(
+        approval_center.REQUEST_PROCUREMENT,
+        procurement_payload(purchaser_user="forged@example.com"),
+        store=store,
+    )
+    assert result.purchaser_user == "manager@example.com"
 
 
 def test_non_admin_and_server_owned_payload_fields_fail_closed():
@@ -166,6 +272,24 @@ def test_line_validation_is_bounded_and_fail_closed():
 
 
 
+def test_frappe_source_resolution_allows_only_custom_purchaser_read(monkeypatch):
+    source = SimpleNamespace(name="SRC-1", request_type=approval_center.REQUEST_PROCUREMENT)
+    monkeypatch.setattr(approval_center.frappe, "get_doc", lambda *_args: source)
+    monkeypatch.setattr(approval_center.frappe, "has_permission", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(approval_center.frappe, "session", SimpleNamespace(user="buyer@example.com"))
+    from rayher_hr_payroll import oa_access
+    monkeypatch.setattr(
+        oa_access,
+        "oa_request_has_permission",
+        lambda doc, ptype=None, user=None: True if user == "buyer@example.com" else False,
+    )
+
+    assert approval_center.FrappeApprovalCenterStore().resolve_source("SRC-1") is source
+    approval_center.frappe.session.user = "other@example.com"
+    with pytest.raises(approval_center.ApprovalCenterError, match="无权"):
+        approval_center.FrappeApprovalCenterStore().resolve_source("SRC-1")
+
+
 def test_procurement_payment_source_must_be_completed_procurement_and_is_snapshotted():
     store = MemoryStore()
     store.sources["SRC-1"] = {
@@ -178,6 +302,12 @@ def test_procurement_payment_source_must_be_completed_procurement_and_is_snapsho
     with pytest.raises(approval_center.ApprovalCenterError, match="已完成"):
         approval_center.save_draft(approval_center.REQUEST_PROCUREMENT_PAYMENT, payload, store=store)
     store.sources["SRC-1"]["workflow_status"] = "已完成"
+    store.payment_initiator_allowed = False
+    with pytest.raises(approval_center.ApprovalCenterError, match="采购经办人或财务"):
+        approval_center.save_draft(
+            approval_center.REQUEST_PROCUREMENT_PAYMENT, payload, store=store
+        )
+    store.payment_initiator_allowed = True
     result = approval_center.save_draft(
         approval_center.REQUEST_PROCUREMENT_PAYMENT, payload, store=store
     )
@@ -228,6 +358,19 @@ def test_request_dashboard_uses_visible_rows_and_preserves_historical_unclassifi
         "paid_amount": Decimal("30.00"),
         "available_amount": Decimal("40.00"),
     }
+
+
+def test_request_dashboard_exposes_purchaser_for_payment_source_filtering():
+    store = MemoryStore()
+    store.rows = [{
+        "name": "PROC-1", "request_type": "采购申请", "subject": "采购",
+        "workflow_status": "已完成", "amount": 100, "approved_amount": 100,
+        "asset_nature": "非固定资产", "purchaser_user": "buyer@example.com",
+    }]
+
+    result = approval_center.dashboard("request", store=store)
+
+    assert result["rows"][0]["purchaser_user"] == "buyer@example.com"
 
 
 def test_payment_dashboard_does_not_accept_client_department_scope():

@@ -12,6 +12,7 @@ PAYMENT_STAGES = {"预付款", "到货款", "尾款", "到货后全额付款"}
 ARRIVAL_STATUSES = {"未到货", "部分到货", "全部到货", "关闭未交数量", "退货中", "换货中"}
 INSPECTION_STATUSES = {"未验收", "待验收", "验收通过", "验收不合格"}
 WRITE_OFF_STATUSES = {"无需核销", "待核销", "已核销"}
+REFUND_EVIDENCE = "退款回单"
 ARRIVAL_EVIDENCE = {"送货单", "收料单", "入库单"}
 ACCEPTANCE_EVIDENCE = "验收资料"
 FOLLOWUP_STATUSES = {"催办中", "供应商退款中", "退货中", "换货中"}
@@ -135,7 +136,7 @@ def transition_business_state(doc, action, payload=None, evidence=None):
     arrival_status = _text(_get(doc, "arrival_status")) or "未到货"
     if action == "record_arrival":
         if business_status not in {
-            "合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中"
+            "合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"
         }:
             raise ProcurementWorkflowError("当前状态不能登记到货")
         if not (ARRIVAL_EVIDENCE & evidence_types):
@@ -152,13 +153,16 @@ def transition_business_state(doc, action, payload=None, evidence=None):
         if total > ordered:
             raise ProcurementWorkflowError("累计到货数量不能超过订单数量")
         complete = total == ordered
-        return {
+        result = {
             "business_status": "待验收" if complete else "部分到货",
             "arrival_status": "全部到货" if complete else "部分到货",
             "received_quantity": int(total) if total == total.to_integral() else float(total),
             "arrival_date": arrival_date,
             "inspection_status": "未验收",
         }
+        if business_status == "换货中":
+            result["followup_status"] = ""
+        return result
     if action in {"pass_inspection", "fail_inspection"}:
         if arrival_status not in {"全部到货", "关闭未交数量"}:
             raise ProcurementWorkflowError("货物未全部到货或关闭未交数量，不能登记验收结果")
@@ -179,11 +183,15 @@ def transition_business_state(doc, action, payload=None, evidence=None):
             raise ProcurementWorkflowError("验收不合格必须填写原因")
         if direction not in {"退货", "换货"}:
             raise ProcurementWorkflowError("验收不合格必须选择退货或换货方向")
+        replacement = direction == "换货"
         return {
-            "business_status": "退货中" if direction == "退货" else "换货中",
+            "business_status": "换货中" if replacement else "退货中",
+            "arrival_status": "换货中" if replacement else "退货中",
+            "received_quantity": 0 if replacement else _get(doc, "received_quantity"),
             "inspection_status": "验收不合格",
             "inspection_failure_reason": reason,
             "exception_direction": direction,
+            "followup_status": "换货中" if replacement else "退货中",
         }
     if action == "record_followup":
         status = _text(payload.get("status"))
@@ -194,6 +202,17 @@ def transition_business_state(doc, action, payload=None, evidence=None):
         if _text(_get(doc, "payment_stage")) != "预付款":
             raise ProcurementWorkflowError("只有预付款可以登记异常跟进")
         return {"business_status": status, "followup_status": status}
+    if action == "complete_supplier_refund":
+        if business_status not in {"供应商退款中", "退货中"}:
+            raise ProcurementWorkflowError("只有供应商退款中或退货中的付款可以确认退款")
+        if REFUND_EVIDENCE not in evidence_types:
+            raise ProcurementWorkflowError("确认供应商退款必须提供退款回单")
+        return {
+            "business_status": "已退款",
+            "arrival_status": "关闭未交数量",
+            "followup_status": "供应商退款完成",
+            "prepayment_writeoff_status": "无需核销",
+        }
     if action == "writeoff_prepayment":
         if _text(_get(doc, "payment_stage")) != "预付款" or _decimal(_get(doc, "prepayment_percentage"), "预付款比例") != 100:
             raise ProcurementWorkflowError("只有100%预付款可以执行预付款核销")

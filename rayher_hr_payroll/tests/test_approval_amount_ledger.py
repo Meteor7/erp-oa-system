@@ -187,6 +187,7 @@ def test_frappe_store_locks_source_row_for_update(monkeypatch):
                 "name": "SRC-1", "request_type": ledger.REQUEST_PROCUREMENT,
                 "workflow_status": "已完成", "approved_amount": 100,
                 "currency": "CNY", "owner": "alice@example.com", "employee": "EMP-A",
+                "purchaser_user": "buyer@example.com",
             }]
 
     monkeypatch.setattr(ledger.frappe, "db", DB())
@@ -198,6 +199,28 @@ def test_frappe_store_locks_source_row_for_update(monkeypatch):
     assert calls[0][1] == ("SRC-1",)
     assert calls[1][1] == ("PAY-1",)
     assert all("FOR UPDATE" in query for query, _values, _as_dict in calls)
+    assert "purchaser_user" in calls[0][0]
+
+
+def test_frappe_store_allows_assigned_purchaser_or_finance(monkeypatch):
+    store = ledger.FrappeLedgerStore()
+    source = {
+        "owner": "owner@example.com",
+        "employee": "EMP-OWNER",
+        "purchaser_user": "buyer@example.com",
+    }
+    monkeypatch.setattr(ledger.frappe, "session", SimpleNamespace(user="buyer@example.com"))
+    monkeypatch.setattr(ledger.frappe, "get_roles", lambda user=None: ["Employee"])
+    monkeypatch.setattr(ledger.frappe, "get_all", lambda *args, **kwargs: [])
+    assert store.can_use_source(source) is True
+
+    ledger.frappe.session.user = "finance@example.com"
+    monkeypatch.setattr(ledger.frappe, "get_roles", lambda user=None: ["Accounts User"])
+    assert store.can_use_source(source) is True
+
+    ledger.frappe.session.user = "other@example.com"
+    monkeypatch.setattr(ledger.frappe, "get_roles", lambda user=None: ["Employee"])
+    assert store.can_use_source(source) is False
 
 
 

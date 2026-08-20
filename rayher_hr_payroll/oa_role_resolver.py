@@ -9,10 +9,14 @@ ROLE_SPECS = {
     "vice_manager": {"label": "副总经理", "designation": "副总经理"},
     "general_manager": {"label": "总经理", "designation": "总经理"},
     "production_asset_owner": {"label": "生产设备负责人", "designation": "生产主管"},
+    "procurement_manager": {"label": "采购经理", "designation": "采购经理"},
 }
 PMC_EMPLOYEE = "HR-EMP-90017"
 PMC_EMPLOYEE_NAME = "演示员工178"
 PMC_USER = "person076@staff.example.invalid"
+PROCUREMENT_MANAGER_EMPLOYEE = "HR-EMP-90018"
+PROCUREMENT_MANAGER_NAME = "演示员工216"
+PROCUREMENT_MANAGER_USER = "person033@staff.example.invalid"
 
 
 class ApprovalRoleResolutionError(ValueError):
@@ -92,6 +96,35 @@ class FrappeRoleStore:
         import frappe
 
         frappe.db.set_value("Employee", employee, "user_id", user)
+
+    def ensure_user_roles(self, user, roles):
+        import frappe
+
+        doc = frappe.get_doc("User", user)
+        existing = set(frappe.get_roles(user) or [])
+        missing = [role for role in roles if role not in existing]
+        if missing:
+            doc.add_roles(*missing)
+
+    def ensure_employee_permissions(self, employee, user):
+        import frappe
+
+        employee_doc = frappe.get_doc("Employee", employee)
+        for allow, value, applicable in (
+            ("Employee", employee_doc.name, "Employee"),
+            ("Company", employee_doc.company, None),
+        ):
+            if not value or frappe.db.exists(
+                "User Permission", {"user": user, "allow": allow, "for_value": value}
+            ):
+                continue
+            values = {
+                "doctype": "User Permission", "user": user,
+                "allow": allow, "for_value": value,
+            }
+            if applicable:
+                values.update({"applicable_for": applicable, "apply_to_all_doctypes": 0})
+            frappe.get_doc(values).insert(ignore_permissions=True)
 
     def upsert_assignment(self, role_key, role_label, employee, user):
         import frappe
@@ -193,3 +226,50 @@ def bootstrap_pmc(*, store=None):
         "employee": PMC_EMPLOYEE,
         "employee_name": PMC_EMPLOYEE_NAME,
     }
+
+
+def bootstrap_procurement_manager(*, store=None):
+    """Ensure the active procurement manager has an operational account.
+
+    Existing enabled account links are resolved by designation, so personnel
+    changes do not require code changes. The named fallback provisions the
+    current incumbent only when the designation has no usable account yet.
+    """
+    store = _store(store)
+    try:
+        resolved = resolve_role("procurement_manager", store=store)
+    except ApprovalRoleResolutionError as resolution_error:
+        employee = store.get_employee(PROCUREMENT_MANAGER_EMPLOYEE)
+        if (
+            not employee
+            or _text(_get(employee, "employee_name")) != PROCUREMENT_MANAGER_NAME
+            or _text(_get(employee, "status")) != "Active"
+        ):
+            raise resolution_error
+        existing_employee_user = _text(_get(employee, "user_id")).lower()
+        if existing_employee_user and existing_employee_user != PROCUREMENT_MANAGER_USER:
+            raise ApprovalRoleResolutionError(
+                f"演示员工216已绑定其他账号：{existing_employee_user}"
+            )
+        user = store.get_user(PROCUREMENT_MANAGER_USER)
+        if user and not int(_get(user, "enabled") or 0):
+            raise ApprovalRoleResolutionError("演示员工216账号已存在但未启用")
+        if not user:
+            store.create_user({
+                "email": PROCUREMENT_MANAGER_USER,
+                "first_name": PROCUREMENT_MANAGER_NAME,
+                "enabled": 1,
+                "send_welcome_email": 0,
+                "roles": ["Employee", "Purchase User"],
+            })
+        if not existing_employee_user:
+            store.bind_employee_user(PROCUREMENT_MANAGER_EMPLOYEE, PROCUREMENT_MANAGER_USER)
+        resolved = resolve_role("procurement_manager", store=store)
+
+    ensure_roles = getattr(store, "ensure_user_roles", None)
+    if callable(ensure_roles):
+        ensure_roles(resolved["user"], ["Employee", "Purchase User"])
+    ensure_permissions = getattr(store, "ensure_employee_permissions", None)
+    if callable(ensure_permissions):
+        ensure_permissions(resolved["employee"], resolved["user"])
+    return resolved

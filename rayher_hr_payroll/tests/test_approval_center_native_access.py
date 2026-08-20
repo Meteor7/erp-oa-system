@@ -59,6 +59,23 @@ def test_closed_new_type_is_invisible_to_employee_but_visible_to_administrator(a
     assert module.oa_request_has_permission(doc, "read", "Administrator") is None
 
 
+def test_procurement_purchaser_can_read_assigned_source(access, monkeypatch):
+    module, _frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    doc = {
+        "request_type": module.REQUEST_PROCUREMENT,
+        "owner": "bob@example.com",
+        "employee": "EMP-B",
+        "purchaser_user": "alice@example.com",
+        "workflow_status": "已完成",
+        "steps": [],
+    }
+    assert module.oa_request_has_permission(doc, "read", "alice@example.com") is True
+    assert module.oa_request_has_permission(doc, "write", "alice@example.com") is False
+    query = module.oa_request_query("alice@example.com")
+    assert "purchaser_user = 'alice@example.com'" in query
+
+
 def test_owner_can_read_and_write_only_existing_draft(access):
     module, _frappe = access
     draft = {"request_type": module.REQUEST_LEAVE, "owner": "alice@example.com", "employee": "EMP-A", "workflow_status": "草稿", "steps": []}

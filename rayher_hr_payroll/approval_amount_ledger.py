@@ -70,7 +70,7 @@ class FrappeLedgerStore:
         name = _name(source)
         rows = frappe.db.sql(
             """SELECT name, request_type, workflow_status, approved_amount,
-                      currency, owner, employee, modified
+                      currency, owner, employee, purchaser_user, modified
                  FROM `tabOA Approval Request`
                 WHERE name = %s
                 FOR UPDATE""",
@@ -126,9 +126,10 @@ class FrappeLedgerStore:
 
     def can_use_source(self, source):
         user = str(frappe.session.user or "")
-        if user == "Administrator" or "System Manager" in set(frappe.get_roles(user) or []):
+        roles = set(frappe.get_roles(user) or [])
+        if user == "Administrator" or roles & {"System Manager", "Accounts User"}:
             return True
-        if _get(source, "owner") == user:
+        if _get(source, "owner") == user or _get(source, "purchaser_user") == user:
             return True
         rows = frappe.get_all(
             "Employee",

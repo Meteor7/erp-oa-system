@@ -284,7 +284,7 @@ def build_procurement_route(
     steps = []
     pmc = snapshots["pmc"]
     _append_unique_approval(
-        steps, _role_label(pmc, with_name=True), _role_user(pmc, "PMC"), applicant_user=applicant_user
+        steps, _role_label(pmc, with_name=True), _role_user(pmc, "PMC")
     )
     decision = _clean(supervisor_decision)
     if decision != "skip" and not (not decision and _top_supervisor(supervisor, supervisor_user, roles)):
@@ -306,14 +306,12 @@ def build_procurement_route(
             steps, _role_label(production, with_name=True), _role_user(production, "生产设备负责人"),
             applicant_user=applicant_user,
         )
-    if not steps:
-        raise ApprovalRouteError("采购申请审批路线不能为空")
     return steps
 
 
 def build_direct_purchase_route(
     *, purchase_method, supervisor, supervisor_user, supervisor_decision=None,
-    applicant_user=None, roles=None,
+    applicant_user=None, upper_supervisor=None, upper_supervisor_user=None, roles=None,
 ):
     method = _clean(purchase_method)
     snapshots = _roles(roles)
@@ -335,7 +333,41 @@ def build_direct_purchase_route(
             approvers=approvers,
         )]
     if method == "其他购买":
-        return _stage_two_steps(supervisor, supervisor_user, supervisor_decision, roles)
+        name = _clean(supervisor)
+        user_id = _clean(supervisor_user).lower()
+        decision = _clean(supervisor_decision)
+        if decision not in {"", "approve", "skip"}:
+            raise ApprovalRouteError(f"不支持的直属主管决策：{decision}")
+        steps = []
+        if decision != "skip":
+            if not name:
+                raise ApprovalRouteError("其他购买缺少直属部门主管")
+            if not user_id:
+                raise ApprovalRouteError(f"直属部门主管 {name} 没有关联可用账号")
+            _append_unique_approval(
+                steps,
+                "直属部门主管：" + name,
+                user_id,
+                applicant_user=applicant_user,
+            )
+
+        executive_name = _clean(upper_supervisor)
+        executive_user = _clean(upper_supervisor_user).lower()
+        if not executive_name and _top_supervisor(name, user_id, snapshots):
+            executive_name, executive_user = name, user_id
+        if not executive_name or not executive_user:
+            raise ApprovalRouteError("其他购买缺少部门主管的上级审批人")
+        if not _top_supervisor(executive_name, executive_user, snapshots):
+            raise ApprovalRouteError("其他购买的部门主管上级必须是演示员工21或演示员工29")
+        _append_unique_approval(
+            steps,
+            "部门主管上级：" + executive_name,
+            executive_user,
+            applicant_user=applicant_user,
+        )
+        if not steps:
+            raise ApprovalRouteError("高管本人不适用员工其他购买审批流程")
+        return steps
     raise ApprovalRouteError("购买申请必须选择京东购买或其他购买")
 
 
@@ -345,18 +377,19 @@ def build_procurement_payment_route(*, payment_stage, roles=None):
         raise ApprovalRouteError(f"采购付款阶段无效：{stage}")
     snapshots = _roles(roles)
     finance = snapshots["finance_auditor"]
+    finance_manager = snapshots["finance_manager"]
     vice = snapshots["vice_manager"]
     general = snapshots["general_manager"]
-    finance_user = _role_user(finance, "财务审核")
-    steps = []
-    if stage != "预付款":
-        steps.append(_step(_role_label(finance, with_name=True), approvers=[finance_user]))
-    steps.extend([
+    finance_user = _role_user(finance, "财务确认付款")
+    return [
+        _step(
+            _role_label(finance_manager, with_name=True),
+            approvers=[_role_user(finance_manager, "财务主管")],
+        ),
         _step(_role_label(vice, name_only=True), approvers=[_role_user(vice, "副总经理")]),
         _step(_role_label(general, name_only=True), approvers=[_role_user(general, "总经理")]),
         _handle("财务确认付款：" + _clean(finance.get("employee_name")), approvers=[finance_user]),
-    ])
-    return steps
+    ]
 
 
 def build_route(
@@ -372,6 +405,8 @@ def build_route(
     project_owner_name=None,
     purchase_method=None,
     payment_stage=None,
+    upper_supervisor=None,
+    upper_supervisor_user=None,
     roles=None,
 ):
     if request_type == REQUEST_LEAVE:
@@ -401,6 +436,8 @@ def build_route(
             supervisor_user=supervisor_user,
             supervisor_decision=supervisor_decision,
             applicant_user=applicant_user,
+            upper_supervisor=upper_supervisor,
+            upper_supervisor_user=upper_supervisor_user,
             roles=roles,
         )
     if request_type == REQUEST_PROCUREMENT_PAYMENT:

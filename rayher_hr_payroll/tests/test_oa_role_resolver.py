@@ -7,6 +7,7 @@ from rayher_hr_payroll.oa_role_resolver import (
     ApprovalRoleResolutionError,
     ROLE_SPECS,
     bootstrap_pmc,
+    bootstrap_procurement_manager,
     resolve_role,
 )
 
@@ -21,6 +22,8 @@ class MemoryStore:
         self.created_users = []
         self.bindings = []
         self.saved_assignments = []
+        self.ensured_roles = []
+        self.ensured_permissions = []
 
     def get_assignment(self, role_key):
         return self.assignments.get(role_key)
@@ -45,6 +48,12 @@ class MemoryStore:
     def bind_employee_user(self, employee, user):
         self.bindings.append((employee, user))
         self.employees[employee]["user_id"] = user
+
+    def ensure_user_roles(self, user, roles):
+        self.ensured_roles.append((user, list(roles)))
+
+    def ensure_employee_permissions(self, employee, user):
+        self.ensured_permissions.append((employee, user))
 
     def upsert_assignment(self, role_key, role_label, employee, user):
         row = {
@@ -145,6 +154,34 @@ def test_bootstrap_pmc_creates_account_binds_employee_and_is_idempotent():
     assert len(store.bindings) == 1
 
 
+def test_bootstrap_procurement_manager_creates_account_binds_employee_and_roles():
+    store = MemoryStore()
+    row = {
+        "name": "HR-EMP-90018", "employee_name": "演示员工216", "status": "Active",
+        "user_id": "", "designation": "采购经理",
+    }
+    store.employees["HR-EMP-90018"] = row
+    store.by_designation["采购经理"] = [row]
+
+    result = bootstrap_procurement_manager(store=store)
+
+    assert result["user"] == "person033@staff.example.invalid"
+    assert store.created_users == [{
+        "email": "person033@staff.example.invalid",
+        "first_name": "演示员工216",
+        "enabled": 1,
+        "send_welcome_email": 0,
+        "roles": ["Employee", "Purchase User"],
+    }]
+    assert store.bindings == [("HR-EMP-90018", "person033@staff.example.invalid")]
+    assert store.ensured_roles == [
+        ("person033@staff.example.invalid", ["Employee", "Purchase User"])
+    ]
+    assert store.ensured_permissions == [
+        ("HR-EMP-90018", "person033@staff.example.invalid")
+    ]
+
+
 def test_bootstrap_refuses_wrong_or_inactive_employee():
     store = MemoryStore()
     store.employees["HR-EMP-90017"] = {
@@ -166,4 +203,5 @@ def test_role_assignment_doctype_has_unique_role_and_user_links():
     assert set(ROLE_SPECS) == {
         "pmc", "hr_manager", "finance_auditor", "finance_manager",
         "vice_manager", "general_manager", "production_asset_owner",
+        "procurement_manager",
     }

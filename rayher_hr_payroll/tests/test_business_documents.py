@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -75,8 +77,18 @@ class MemoryStore:
 def test_allowed_document_types_match_approved_archive_scope():
     assert documents.DOCUMENT_TYPES == (
         "需求申请", "报价单", "价格审批表", "PR", "PO", "合同", "付款计划",
-        "发票", "验收资料", "送货单", "收料单", "入库单", "付款回单", "采购完成报告",
+        "发票", "验收资料", "送货单", "收料单", "入库单", "付款回单", "退款回单", "采购完成报告",
     )
+
+
+def test_doctype_document_type_options_match_runtime_scope():
+    doctype_path = (
+        Path(__file__).parents[1]
+        / "rayher_hr_payroll/doctype/oa_business_document/oa_business_document.json"
+    )
+    metadata = json.loads(doctype_path.read_text(encoding="utf-8"))
+    field = next(row for row in metadata["fields"] if row.get("fieldname") == "document_type")
+    assert tuple(field["options"].splitlines()) == documents.DOCUMENT_TYPES
 
 
 def test_attach_requires_parent_write_and_list_requires_parent_read():

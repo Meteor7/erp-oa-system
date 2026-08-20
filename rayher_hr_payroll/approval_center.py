@@ -14,6 +14,7 @@ from rayher_hr_payroll.procurement_workflow import (
     derive_prepayment_overdue,
     validate_procurement_submission,
 )
+from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_PROCUREMENT,
@@ -51,7 +52,7 @@ ALLOWED_PAYLOAD_FIELDS = {
     "non_project_department", "purchaser_user", "contract_delivery_date",
     "delivery_change_reason", "purchase_method", "supplier", "payment_stage",
     "prepayment_percentage", "has_balance_payment", "expected_arrival_date",
-    "prepayment_risk_note",
+    "prepayment_risk_note", "applicant_employee",
 }
 
 
@@ -181,6 +182,65 @@ class FrappeApprovalCenterStore:
             "supervisor_decision": "approve" if supervisor else "",
         }
 
+    def resolve_procurement_applicant(self, employee):
+        requested = _text(employee, "申请人", 140)
+        current = self.identity()
+        if not requested or requested == _text(current.get("employee"), "申请人", 140):
+            return current
+        user = str(frappe.session.user or "").strip().lower()
+        try:
+            pmc_user = str(resolve_role("pmc").get("user") or "").strip().lower()
+        except ApprovalRoleResolutionError as exc:
+            raise ApprovalCenterError(str(exc))
+        if user != pmc_user:
+            raise ApprovalCenterError("只有 PMC 演示员工178可以代其他员工提交采购申请")
+        row = frappe.db.get_value(
+            "Employee",
+            {"name": requested, "status": "Active"},
+            ["name", "employee_name", "department", "company", "reports_to"],
+            as_dict=True,
+        )
+        if not row:
+            raise ApprovalCenterError("代提交的申请人不是在职员工")
+        supervisor = {}
+        if _get(row, "reports_to"):
+            supervisor = frappe.db.get_value(
+                "Employee",
+                _get(row, "reports_to"),
+                ["employee_name", "user_id", "status"],
+                as_dict=True,
+            ) or {}
+        return {
+            "employee": _get(row, "name"),
+            "employee_name": _get(row, "employee_name") or _get(row, "name"),
+            "department": _get(row, "department") or "",
+            "company": _get(row, "company") or "",
+            "supervisor": (
+                _get(supervisor, "employee_name") or _get(row, "reports_to") or ""
+                if _get(supervisor, "status") == "Active"
+                else ""
+            ),
+            "supervisor_user": (
+                _get(supervisor, "user_id") or ""
+                if _get(supervisor, "status") == "Active"
+                else ""
+            ),
+            "supervisor_decision": "approve" if _get(supervisor, "status") == "Active" else "",
+        }
+
+    def can_initiate_procurement_payment(self, source):
+        user = str(frappe.session.user or "").strip()
+        roles = set(frappe.get_roles(user) or [])
+        if user in {"Administrator", "admin@staff.example.invalid"} or roles & {"System Manager", "Accounts User"}:
+            return True
+        return _text(_get(source, "purchaser_user"), "采购经办人", 140) == user
+
+    def default_purchaser_user(self):
+        try:
+            return resolve_role("procurement_manager")["user"]
+        except ApprovalRoleResolutionError as exc:
+            raise ApprovalCenterError(str(exc))
+
     def save_draft(self, request_type, values, name=None):
         from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 
@@ -212,7 +272,7 @@ class FrappeApprovalCenterStore:
             fields=[
                 "name", "request_type", "subject", "workflow_status", "amount",
                 "approved_amount", "asset_nature", "fixed_asset_category", "owner",
-                "source_request", "modified", "business_status", "payment_stage",
+                "purchaser_user", "source_request", "modified", "business_status", "payment_stage",
                 "prepayment_percentage", "expected_arrival_date", "arrival_status",
                 "inspection_status", "prepayment_writeoff_status", "has_balance_payment",
             ],
@@ -221,8 +281,14 @@ class FrappeApprovalCenterStore:
         )
 
     def resolve_source(self, name):
+        from rayher_hr_payroll.oa_access import oa_request_has_permission
+
         source = frappe.get_doc("OA Approval Request", name)
-        if not frappe.has_permission("OA Approval Request", "read", doc=source):
+        framework_allowed = frappe.has_permission("OA Approval Request", "read", doc=source)
+        purchaser_allowed = (
+            oa_request_has_permission(source, "read", frappe.session.user) is True
+        )
+        if not framework_allowed and not purchaser_allowed:
             raise ApprovalCenterError("无权使用来源申请")
         return source
 
@@ -244,6 +310,27 @@ class FrappeApprovalCenterStore:
             "Project",
             filters={"status": ["!=", "Cancelled"], "project_owner": ["!=", ""]},
             fields=["name", "project_name", "status", "project_owner", "project_owner_name"],
+            order_by="modified desc",
+            limit_page_length=limit,
+        )
+
+    def list_procurement_payment_sources(self, limit):
+        user = str(frappe.session.user or "").strip()
+        roles = set(frappe.get_roles(user) or [])
+        filters = {
+            "request_type": REQUEST_PROCUREMENT,
+            "workflow_status": "已完成",
+        }
+        if user not in {"Administrator", "admin@staff.example.invalid"} and not roles & {"System Manager", "Accounts User"}:
+            filters["purchaser_user"] = user
+        return frappe.get_all(
+            "OA Approval Request",
+            filters=filters,
+            fields=[
+                "name", "request_type", "subject", "workflow_status", "approved_amount",
+                "purchaser_user", "business_status", "arrival_status", "inspection_status",
+                "expected_arrival_date", "modified",
+            ],
             order_by="modified desc",
             limit_page_length=limit,
         )
@@ -311,6 +398,39 @@ def project_options(limit=500, *, store=None):
     ]
 
 
+def procurement_payment_source_options(limit=500, *, store=None):
+    try:
+        limit = max(1, min(int(limit or 500), 500))
+    except (TypeError, ValueError):
+        raise ApprovalCenterError("采购付款来源数量格式无效")
+    store = _store(store)
+    store.require_draft_access(REQUEST_PROCUREMENT_PAYMENT)
+    result = []
+    for source in store.list_procurement_payment_sources(limit):
+        if _get(source, "request_type") != REQUEST_PROCUREMENT or _get(source, "workflow_status") != "已完成":
+            continue
+        balance = store.source_balance(source)
+        available = _money(balance.get("available_amount"))
+        if available <= 0:
+            continue
+        result.append({
+            "name": _name(source),
+            "request_type": REQUEST_PROCUREMENT,
+            "subject": _get(source, "subject") or "",
+            "workflow_status": "已完成",
+            "purchaser_user": _get(source, "purchaser_user") or "",
+            "business_status": _get(source, "business_status") or "",
+            "arrival_status": _get(source, "arrival_status") or "",
+            "inspection_status": _get(source, "inspection_status") or "",
+            "expected_arrival_date": _get(source, "expected_arrival_date") or "",
+            "approved_amount": _money(balance.get("approved_amount")),
+            "reserved_amount": _money(balance.get("reserved_amount")),
+            "paid_amount": _money(balance.get("paid_amount")),
+            "available_amount": available,
+        })
+    return result
+
+
 def save_draft(request_type, payload, name=None, *, store=None):
     if request_type not in DRAFT_TYPES:
         raise ApprovalCenterError("草稿类型无效")
@@ -318,7 +438,16 @@ def save_draft(request_type, payload, name=None, *, store=None):
     store.require_draft_access(request_type)
     values = _payload(payload)
     lines, total = _lines(values.get("business_lines"))
+    applicant_employee = _text(values.get("applicant_employee"), "申请人", 140)
     identity = store.identity()
+    if request_type == REQUEST_PROCUREMENT:
+        resolver = getattr(store, "resolve_procurement_applicant", None)
+        if callable(resolver):
+            identity = resolver(applicant_employee)
+        elif applicant_employee and applicant_employee != _get(identity, "employee"):
+            raise ApprovalCenterError("当前存储实现不支持代其他员工提交采购申请")
+    elif applicant_employee:
+        raise ApprovalCenterError("代申请人只属于采购申请")
     asset_nature = _text(values.get("asset_nature"), "资产属性", 20, required=True)
     if asset_nature not in ASSET_NATURES:
         raise ApprovalCenterError("资产属性无效")
@@ -337,6 +466,14 @@ def save_draft(request_type, payload, name=None, *, store=None):
     non_project_cost_center = _text(values.get("non_project_cost_center"), "成本中心", 140)
     non_project_department = _text(values.get("non_project_department"), "所属部门", 140)
     purchaser_user = _text(values.get("purchaser_user"), "采购经办人", 140)
+    if request_type == REQUEST_PROCUREMENT:
+        resolver = getattr(store, "default_purchaser_user", None)
+        if callable(resolver):
+            purchaser_user = _text(resolver(), "采购经办人", 140, required=True)
+        elif not purchaser_user:
+            raise ApprovalCenterError("采购申请未配置采购经办人")
+    elif purchaser_user:
+        raise ApprovalCenterError("采购经办人只属于采购申请")
     purchase_method = _text(values.get("purchase_method"), "购买方式", 20)
     supplier = _text(values.get("supplier"), "供应商", 140)
     payment_stage = _text(values.get("payment_stage"), "付款阶段", 20)
@@ -403,6 +540,8 @@ def save_draft(request_type, payload, name=None, *, store=None):
             raise ApprovalCenterError("来源采购申请必须为人民币")
         if _money(_get(source_snapshot, "approved_amount")) <= 0:
             raise ApprovalCenterError("来源采购申请批准金额无效")
+        if not store.can_initiate_procurement_payment(source_snapshot):
+            raise ApprovalCenterError("只有来源采购申请的采购经办人或财务可以发起采购付款")
     fulfillment = _source_fulfillment_snapshot(source_snapshot)
     source_payment_balance = store.source_balance(source_snapshot) if source_snapshot else None
     if request_type == REQUEST_PROCUREMENT_PAYMENT:
@@ -599,6 +738,7 @@ def dashboard(kind, limit=200, *, store=None):
             "asset_nature": asset_nature,
             "fixed_asset_category": _get(source, "fixed_asset_category") or "",
             "owner": _get(source, "owner") or "",
+            "purchaser_user": _get(source, "purchaser_user") or "",
             "modified": _get(source, "modified"),
             "business_status": _get(source, "business_status") or "",
             "payment_stage": _get(source, "payment_stage") or "",

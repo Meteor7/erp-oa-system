@@ -318,6 +318,34 @@ def test_procurement_route_skips_top_supervisor_and_omits_project_for_non_projec
     assert labels(steps) == ["PMC：演示员工178"]
 
 
+def test_procurement_route_keeps_pmc_when_pmc_is_the_applicant():
+    roles = procurement_roles()
+    steps = build_procurement_route(
+        supervisor="演示员工21",
+        supervisor_user="vice@example.com",
+        supervisor_decision="skip",
+        applicant_user="pmc@example.com",
+        project_owner="",
+        asset_category=OTHER_ASSET,
+        roles=roles,
+    )
+    assert labels(steps) == ["PMC：演示员工178"]
+    assert steps[0]["approvers"] == ["pmc@example.com"]
+
+
+def test_other_purchase_routes_once_when_direct_supervisor_is_top_executive():
+    steps = build_direct_purchase_route(
+        purchase_method="其他购买",
+        supervisor="演示员工21",
+        supervisor_user="vice@example.com",
+        supervisor_decision="skip",
+        applicant_user="employee@example.com",
+        roles=procurement_roles(),
+    )
+    assert labels(steps) == ["部门主管上级：演示员工21"]
+    assert steps[0]["approvers"] == ["vice@example.com"]
+
+
 def test_procurement_route_deduplicates_same_supervisor_and_project_owner():
     roles = procurement_roles()
     roles["pmc"]["user"] = "same@example.com"
@@ -344,25 +372,33 @@ def test_direct_purchase_jd_and_other_routes_are_distinct():
         purchase_method="其他购买",
         supervisor="主管",
         supervisor_user="boss@example.com",
+        upper_supervisor="演示员工21",
+        upper_supervisor_user="vice@example.com",
         roles=roles,
     )
     assert labels(jd) == ["京东购买会签：人事经理、演示员工21"]
     assert [step["approvers"] for step in jd] == [["hr@example.com", "vice@example.com"]]
     assert modes(jd) == ["all"]
-    assert labels(other) == ["直属主管：主管"]
+    assert labels(other) == ["直属部门主管：主管", "部门主管上级：演示员工21"]
+    assert [step["approvers"] for step in other] == [
+        ["boss@example.com"], ["vice@example.com"]
+    ]
 
 
 def test_procurement_payment_is_stage_specific_but_expense_payment_keeps_department_branching():
     roles = procurement_roles()
     prepayment = build_procurement_payment_route(payment_stage="预付款", roles=roles)
-    assert labels(prepayment) == ["演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert labels(prepayment) == ["财务主管：演示员工16", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
     assert [step["approvers"] for step in prepayment] == [
-        ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
+        ["manager@example.com"], ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
     ]
-    assert modes(prepayment) == ["approve", "approve", "handle"]
+    assert modes(prepayment) == ["approve", "approve", "approve", "handle"]
 
     tail = build_procurement_payment_route(payment_stage="尾款", roles=roles)
-    assert labels(tail) == ["财务审核：演示员工13", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert labels(tail) == ["财务主管：演示员工16", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert [step["approvers"] for step in tail] == [
+        ["manager@example.com"], ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
+    ]
     assert modes(tail) == ["approve", "approve", "approve", "handle"]
 
     buying_payment = build_expense_payment_route(
