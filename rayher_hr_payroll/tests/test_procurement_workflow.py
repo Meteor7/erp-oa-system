@@ -17,6 +17,15 @@ def project_request(**overrides):
         "expected_delivery_date": "2026-09-10",
         "project": "RD-001",
         "project_owner": "owner@example.com",
+        "business_lines": [{
+            "category_code": "1.ELC.3",
+            "item_name": "测试物料",
+            "specification": "标准规格",
+            "product_desc": "测试采购物料",
+            "brand": "测试品牌",
+            "quantity": 1,
+            "unit": "个",
+        }],
     }
     value.update(overrides)
     return value
@@ -86,6 +95,28 @@ def test_project_procurement_requires_delivery_project_and_owner():
     ):
         with pytest.raises(ProcurementWorkflowError, match=message):
             validate_procurement_submission(project_request(**{field: ""}))
+
+
+def test_procurement_submission_requires_material_category_and_details():
+    with pytest.raises(ProcurementWorkflowError, match="至少添加一项采购明细"):
+        validate_procurement_submission(project_request(business_lines=[]))
+    with pytest.raises(ProcurementWorkflowError, match="至少需要填写到三级"):
+        validate_procurement_submission(project_request(business_lines=[{
+            "category_code": "1.ELC", "item_name": "物料", "specification": "规格",
+            "product_desc": "描述", "brand": "品牌", "quantity": 1, "unit": "个",
+        }]))
+    validate_procurement_submission(project_request(business_lines=[{
+        "category_code": "1.ELC.3", "item_name": "物料", "specification": "规格",
+        "product_desc": "", "brand": "品牌", "quantity": 1, "unit": "个",
+    }]))
+
+
+def test_procurement_submission_accepts_category_depth_at_or_above_three():
+    for category_code in ("1.ELC.3", "1.ELC.3.3", "1.ELC.3.3.03", "1.ELC.3.3.03.001"):
+        validate_procurement_submission(project_request(business_lines=[{
+            "category_code": category_code, "item_name": "物料", "specification": "规格",
+            "product_desc": "", "brand": "品牌", "quantity": 1, "unit": "个",
+        }]))
 
 
 def test_non_project_procurement_requires_explicit_allocation():

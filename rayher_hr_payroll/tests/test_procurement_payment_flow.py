@@ -14,6 +14,88 @@ from rayher_hr_payroll.procurement_workflow import (
 )
 
 
+class PaymentLine(SimpleNamespace):
+    def as_dict(self):
+        return vars(self).copy()
+
+
+def payment_po(**overrides):
+    values = {
+        "name": "PO-TEST-1", "status": "供应商制作中", "contract_status": "已生效",
+        "currency": "CNY", "supplier": "示例企业028", "source_price_approvals": "PA-1",
+        "lines": [PaymentLine(name="LINE-1", material_serial="MAT-1", item_name="控制器",
+                              quantity=10, received_quantity=0, inspection_status="未验收")],
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def payment_plan_row(**overrides):
+    values = {
+        "name": "PLAN-1", "installment_no": 1, "installment_name": "第1期",
+        "payment_stage": "到货款", "planned_date": "2026-09-10", "trigger_condition": "全部到货",
+        "invoice_requirement": "付款前提供", "percentage": 30, "amount": 3000,
+        "paid_amount": 0, "status": "待审批", "payment_request": "",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_payment_work_item_is_visible_before_conditions_are_met(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain
+
+    monkeypatch.setattr(procurement_chain, "_can_record_receipt", lambda: True)
+    monkeypatch.setattr(procurement_chain, "_can_purchase", lambda: False)
+    monkeypatch.setattr(procurement_chain, "_fulfillment_records", lambda _name: [])
+    item = procurement_chain._payment_work_item(
+        payment_po(), payment_plan_row(trigger_condition="验收通过")
+    )
+
+    assert item["work_status"] == "待到货资料"
+    assert item["blockers"] == ["验收前需全部到货", "本期要求验收通过"]
+    assert item["can_record_receipt"] == 1
+    assert item["can_push_payment"] == 0
+    assert item["lines"][0]["material_serial"] == "MAT-1"
+
+
+def test_payment_work_item_becomes_actionable_after_receipt_and_inspection(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain
+
+    line = PaymentLine(name="LINE-1", material_serial="MAT-1", item_name="控制器",
+                       quantity=10, received_quantity=10, inspection_status="已通过")
+    monkeypatch.setattr(procurement_chain, "_can_record_receipt", lambda: False)
+    monkeypatch.setattr(procurement_chain, "_can_purchase", lambda: True)
+    monkeypatch.setattr(procurement_chain, "_fulfillment_records", lambda _name: [
+        {"record_type": "到货"}, {"record_type": "验收"},
+    ])
+    item = procurement_chain._payment_work_item(
+        payment_po(lines=[line]), payment_plan_row(trigger_condition="验收通过")
+    )
+
+    assert item["work_status"] == "可提交付款审批"
+    assert item["blockers"] == []
+    assert item["can_push_payment"] == 1
+
+
+def test_supplier_payment_plan_requires_full_percentage_and_amount(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain
+
+    monkeypatch.setattr(procurement_chain.frappe, "throw", lambda message: (_ for _ in ()).throw(ValueError(message)))
+    valid = procurement_chain._normalize_supplier_payment_plan([{
+        "installment_name": "预付款", "payment_stage": "预付款", "percentage": 30,
+        "amount": 300, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供",
+    }, {
+        "installment_name": "尾款", "payment_stage": "尾款", "percentage": 70,
+        "amount": 700, "trigger_condition": "验收通过", "invoice_requirement": "付款前提供",
+    }], 1000)
+    assert [row["amount"] for row in valid] == [300.0, 700.0]
+    with pytest.raises(ValueError, match="100%"):
+        procurement_chain._normalize_supplier_payment_plan([{
+            "payment_stage": "预付款", "percentage": 30, "amount": 1000,
+            "trigger_condition": "合同生效", "invoice_requirement": "付款后提供",
+        }], 1000)
+
+
 def payment(**overrides):
     values = {
         "payment_stage": "预付款",
@@ -41,7 +123,8 @@ def role(key, label, user, name):
 
 def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
     roles = {
-        "finance_auditor": role("finance_auditor", "财务审核", "finance@example.com", "演示员工13"),
+        "finance_auditor": role("finance_auditor", "出纳", "finance@example.com", "演示员工32"),
+        "finance_accountant": role("finance_accountant", "总账会计", "accountant@example.com", "演示员工19"),
         "finance_manager": role("finance_manager", "财务主管", "manager@example.com", "演示员工16"),
         "vice_manager": role("vice_manager", "副总经理", "li@example.com", "演示员工21"),
         "general_manager": role("general_manager", "总经理", "wang@example.com", "演示员工29"),
@@ -51,14 +134,14 @@ def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
         REQUEST_PROCUREMENT_PAYMENT, payment_stage="预付款", roles=roles
     )
     expected_labels = [
-        "财务主管：演示员工16", "演示员工21", "演示员工29", "财务确认付款：演示员工13"
+        "演示员工21", "总账会计：演示员工19", "财务主管：演示员工16", "出纳：演示员工32", "总经理付款：演示员工29"
     ]
     assert [row["label"] for row in prepayment] == expected_labels
     assert [row["approvers"] for row in prepayment] == [
-        ["manager@example.com"], ["li@example.com"], ["wang@example.com"], ["finance@example.com"]
+        ["li@example.com"], ["accountant@example.com"], ["manager@example.com"], ["finance@example.com"], ["wang@example.com"]
     ]
     assert [row["mode"] for row in prepayment] == [
-        "approve", "approve", "approve", "handle"
+        "approve", "approve", "approve", "approve", "handle"
     ]
 
     for stage in ("到货款", "尾款", "到货后全额付款"):
@@ -67,10 +150,10 @@ def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
         )
         assert [row["label"] for row in post_arrival] == expected_labels, stage
         assert [row["approvers"] for row in post_arrival] == [
-            ["manager@example.com"], ["li@example.com"], ["wang@example.com"], ["finance@example.com"]
+            ["li@example.com"], ["accountant@example.com"], ["manager@example.com"], ["finance@example.com"], ["wang@example.com"]
         ], stage
         assert [row["mode"] for row in post_arrival] == [
-            "approve", "approve", "approve", "handle"
+            "approve", "approve", "approve", "approve", "handle"
         ]
 
 
@@ -186,6 +269,10 @@ def test_prepayment_overdue_followup_writeoff_and_no_tail_close_rules():
         transition_business_state(doc, "close_procurement", evidence=evidence("发票", "验收资料"))
     closed = transition_business_state(doc, "close_procurement", evidence=evidence("发票", "验收资料", "采购完成报告"))
     assert closed == {"business_status": "已关闭"}
+
+    doc.business_status = "已关闭"
+    with pytest.raises(ProcurementWorkflowError, match="已经关闭"):
+        transition_business_state(doc, "close_procurement", evidence=evidence("发票", "验收资料", "采购完成报告"))
 
     with pytest.raises(ProcurementWorkflowError, match="尾款"):
         transition_business_state(payment(has_balance_payment=1, business_status="已核销", arrival_status="全部到货", inspection_status="验收通过", prepayment_writeoff_status="已核销"), "close_procurement", evidence=evidence("发票", "验收资料", "采购完成报告"))
@@ -399,6 +486,25 @@ def test_procurement_payment_ledger_helpers_use_revisioned_keys(monkeypatch, oa_
     ]
 
 
+def test_po_payment_ledger_helpers_use_po_plan_without_oa_amount_ledger(monkeypatch, oa_entry):
+    doc = lifecycle_request(
+        workflow_status="待审批",
+        source_request="PROC-ZERO-AMOUNT",
+        source_purchase_order="PO-1",
+        source_po_payment_plan_row="PLAN-1",
+    )
+    statuses = []
+    monkeypatch.setattr(oa_entry, "_sync_payment_plan_row", lambda current, status: statuses.append(status))
+    monkeypatch.setattr(oa_entry.approval_amount_ledger, "reserve", lambda *_args, **_kwargs: pytest.fail("PO payment must not reserve OA amount"))
+    monkeypatch.setattr(oa_entry.approval_amount_ledger, "release_all_reserved", lambda *_args, **_kwargs: pytest.fail("PO payment must not release OA amount"))
+    monkeypatch.setattr(oa_entry.approval_amount_ledger, "mark_paid", lambda *_args, **_kwargs: pytest.fail("PO payment must not pay OA amount"))
+
+    oa_entry._reserve_procurement_payment(doc)
+    oa_entry._release_procurement_payment_reservation(doc, "驳回重填")
+    oa_entry._mark_procurement_payment_paid(doc)
+
+    assert statuses == ["已下推", "待下推", "已付款"]
+
 def test_payment_completion_initializes_arrival_and_writeoff_state(oa_entry):
     doc = lifecycle_request(payment_stage="预付款", prepayment_percentage=100, business_status="待审批")
     oa_entry._set_procurement_payment_paid_state(doc)
@@ -406,6 +512,30 @@ def test_payment_completion_initializes_arrival_and_writeoff_state(oa_entry):
     assert doc.arrival_status == "未到货"
     assert doc.inspection_status == "未验收"
     assert doc.prepayment_writeoff_status == "待核销"
+
+
+def test_completed_procurement_price_approval_moves_to_execution():
+    from types import SimpleNamespace
+    from decimal import Decimal
+    from rayher_hr_payroll.api import oa_entry
+
+    step = SimpleNamespace(step_index=1, label="价格审批：副总经理：演示员工21")
+    doc = SimpleNamespace(
+        steps=[step],
+        request_type=oa_entry.REQUEST_PROCUREMENT,
+        workflow_status=oa_entry.STATUS_PENDING,
+        business_status="待价格审批",
+        current_step_index=1,
+        current_step_label=step.label,
+        amount=Decimal("123.45"),
+        approved_amount=None,
+    )
+
+    oa_entry._advance_after_step(doc, step)
+
+    assert doc.workflow_status == oa_entry.STATUS_COMPLETED
+    assert doc.business_status == "价格已批准/待补充合同信息"
+    assert doc.approved_amount == Decimal("123.45")
 
 
 def test_completed_procurement_approval_sets_payable_approved_amount():
@@ -428,5 +558,7 @@ def test_completed_procurement_approval_sets_payable_approved_amount():
     oa_entry._advance_after_step(doc, step)
 
     assert doc.workflow_status == oa_entry.STATUS_COMPLETED
-    assert doc.business_status == "合同待登记"
+    # Demand approval now ends the OA stage; contract/PR execution is handled
+    # by the downstream procurement chain.
+    assert doc.business_status == "需求已批准/待询价"
     assert doc.approved_amount == Decimal("123.45")

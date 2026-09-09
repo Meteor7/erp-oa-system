@@ -20,6 +20,12 @@ from rayher_hr_payroll.oa_document_types import (
     REQUEST_PROCUREMENT,
     REQUEST_PROCUREMENT_PAYMENT,
 )
+from rayher_hr_payroll.oa_organization import (
+    DIRECT_SUPERVISOR_BY_EMPLOYEE,
+    TOP_EXECUTIVES,
+    OrganizationResolutionError,
+    resolve_stage_two_supervisor,
+)
 
 
 CENT = Decimal("0.01")
@@ -43,7 +49,7 @@ SERVER_FIELDS = {
     "pending_contract_delivery_date", "delivery_change_reason", "arrival_status",
     "inspection_status", "prepayment_writeoff_status", "ordered_quantity",
     "received_quantity", "arrival_date", "inspection_failure_reason",
-    "exception_direction", "followup_status",
+    "exception_direction", "followup_status", "source_payment_plan_installment",
 }
 ALLOWED_PAYLOAD_FIELDS = {
     "subject", "reason", "urgency", "asset_nature", "fixed_asset_category",
@@ -52,7 +58,8 @@ ALLOWED_PAYLOAD_FIELDS = {
     "non_project_department", "purchaser_user", "contract_delivery_date",
     "delivery_change_reason", "purchase_method", "supplier", "payment_stage",
     "prepayment_percentage", "has_balance_payment", "expected_arrival_date",
-    "prepayment_risk_note", "applicant_employee",
+    "prepayment_risk_note", "applicant_employee", "source_payment_plan_row",
+    "source_purchase_order", "source_po_payment_plan_row",
 }
 
 
@@ -74,7 +81,66 @@ def _name(value):
     return str(value if isinstance(value, str) else _get(value, "name") or "").strip()
 
 
-def _text(value, label, limit, *, required=False):
+def _enabled_employee_user(employee_name):
+    candidate = _name(employee_name)
+    if not candidate:
+        return ""
+    for filters in (
+        {"employee_name": candidate, "status": "Active"},
+        {"name": candidate, "status": "Active"},
+    ):
+        employee_user = frappe.db.get_value("Employee", filters, "user_id")
+        if not employee_user:
+            continue
+        enabled_user = frappe.db.get_value(
+            "User", {"name": employee_user, "enabled": 1}, "name"
+        )
+        if enabled_user:
+            return str(enabled_user).strip().lower()
+    return ""
+
+
+def _resolved_supervisor(employee_name, reports_to=""):
+    employee_name = _name(employee_name)
+    if employee_name in DIRECT_SUPERVISOR_BY_EMPLOYEE or employee_name in TOP_EXECUTIVES:
+        try:
+            resolution = resolve_stage_two_supervisor(
+                employee_name, _enabled_employee_user
+            )
+        except OrganizationResolutionError as exc:
+            raise ApprovalCenterError(str(exc)) from exc
+        return {
+            "supervisor": resolution.supervisor_name,
+            "supervisor_user": resolution.user_id,
+            "supervisor_decision": resolution.decision,
+            "supervisor_path": list(resolution.traversed),
+        }
+
+    supervisor = {}
+    if reports_to:
+        supervisor = frappe.db.get_value(
+            "Employee",
+            reports_to,
+            ["employee_name", "user_id", "status"],
+            as_dict=True,
+        ) or {}
+    if _get(supervisor, "status") != "Active":
+        return {
+            "supervisor": "", "supervisor_user": "",
+            "supervisor_decision": "", "supervisor_path": [],
+        }
+    supervisor_name = _get(supervisor, "employee_name") or reports_to
+    return {
+        "supervisor": supervisor_name,
+        "supervisor_user": _enabled_employee_user(supervisor_name),
+        "supervisor_decision": (
+            "skip" if supervisor_name in TOP_EXECUTIVES else "approve"
+        ),
+        "supervisor_path": [supervisor_name],
+    }
+
+
+def _text(value, label="文本", limit=140, *, required=False):
     if value is None:
         value = ""
     if not isinstance(value, str):
@@ -121,16 +187,41 @@ def _lines(values):
         raise ApprovalCenterError("采购明细必须为1到100行")
     result = []
     total = Decimal("0.00")
-    allowed = {"item_name", "specification", "quantity", "unit", "unit_price", "remarks"}
+    allowed = {
+        "material_code", "category_code", "category_path", "item_name", "specification",
+        "product_desc", "brand", "product_name", "product_desc_en", "brand_en", "material_attr",
+        "quantity", "unit", "unit_price", "remarks",
+    }
+    # UI-only state may be present in drafts created by older frontend bundles.
+    # Ignore it at the API boundary; never persist client-provided serials or picker state.
+    ignored_client_fields = {
+        "material_serial", "category_parts", "category_query", "category_open",
+        "category_picker_parent", "category_picker_path", "material_query", "material_open",
+        "category_name", "amount",
+    }
     for index, row in enumerate(values, 1):
-        if not isinstance(row, dict) or set(row) - allowed:
+        if not isinstance(row, dict):
             raise ApprovalCenterError(f"第{index}行采购明细格式无效")
+        unknown = set(row) - allowed - ignored_client_fields
+        if unknown:
+            raise ApprovalCenterError(
+                f"第{index}行采购明细包含未知字段：" + "、".join(sorted(unknown))
+            )
         quantity = _decimal(row.get("quantity"), f"第{index}行数量", positive=True, places=QUANTITY_UNIT)
         unit_price = _decimal(row.get("unit_price"), f"第{index}行单价")
         amount = (quantity * unit_price).quantize(CENT, rounding=ROUND_HALF_UP)
         item = {
+            "material_code": _text(row.get("material_code"), f"第{index}行物料编号", 140),
+            "category_code": _text(row.get("category_code"), f"第{index}行物料编号层级", 140),
+            "category_path": _text(row.get("category_path"), f"第{index}行分类路径", 500),
             "item_name": _text(row.get("item_name"), f"第{index}行物品名称", 140, required=True),
             "specification": _text(row.get("specification"), f"第{index}行规格", 140),
+            "product_desc": _text(row.get("product_desc"), f"第{index}行产品描述", 2000),
+            "brand": _text(row.get("brand"), f"第{index}行品牌", 140),
+            "product_name": _text(row.get("product_name"), f"第{index}行英文名称", 140),
+            "product_desc_en": _text(row.get("product_desc_en"), f"第{index}行英文描述", 2000),
+            "brand_en": _text(row.get("brand_en"), f"第{index}行英文品牌", 140),
+            "material_attr": _text(row.get("material_attr"), f"第{index}行物料属性", 40),
             "quantity": quantity,
             "unit": _text(row.get("unit"), f"第{index}行单位", 40, required=True),
             "unit_price": unit_price,
@@ -162,24 +253,15 @@ class FrappeApprovalCenterStore:
         company = _get(row, "company")
         if not company:
             company = frappe.defaults.get_user_default("Company") or ""
-        supervisor_employee = _get(row, "reports_to") or ""
-        supervisor = ""
-        supervisor_user = ""
-        if supervisor_employee:
-            supervisor_row = frappe.db.get_value(
-                "Employee", supervisor_employee, ["employee_name", "user_id", "status"], as_dict=True
-            ) or {}
-            if _get(supervisor_row, "status") == "Active":
-                supervisor = _get(supervisor_row, "employee_name") or supervisor_employee
-                supervisor_user = _get(supervisor_row, "user_id") or ""
+        supervisor = _resolved_supervisor(
+            _get(row, "employee_name"), _get(row, "reports_to")
+        )
         return {
             "employee": _get(row, "name"),
             "employee_name": _get(row, "employee_name") or "",
             "department": _get(row, "department") or "",
             "company": company,
-            "supervisor": supervisor,
-            "supervisor_user": supervisor_user,
-            "supervisor_decision": "approve" if supervisor else "",
+            **supervisor,
         }
 
     def resolve_procurement_applicant(self, employee):
@@ -202,30 +284,15 @@ class FrappeApprovalCenterStore:
         )
         if not row:
             raise ApprovalCenterError("代提交的申请人不是在职员工")
-        supervisor = {}
-        if _get(row, "reports_to"):
-            supervisor = frappe.db.get_value(
-                "Employee",
-                _get(row, "reports_to"),
-                ["employee_name", "user_id", "status"],
-                as_dict=True,
-            ) or {}
+        supervisor = _resolved_supervisor(
+            _get(row, "employee_name"), _get(row, "reports_to")
+        )
         return {
             "employee": _get(row, "name"),
             "employee_name": _get(row, "employee_name") or _get(row, "name"),
             "department": _get(row, "department") or "",
             "company": _get(row, "company") or "",
-            "supervisor": (
-                _get(supervisor, "employee_name") or _get(row, "reports_to") or ""
-                if _get(supervisor, "status") == "Active"
-                else ""
-            ),
-            "supervisor_user": (
-                _get(supervisor, "user_id") or ""
-                if _get(supervisor, "status") == "Active"
-                else ""
-            ),
-            "supervisor_decision": "approve" if _get(supervisor, "status") == "Active" else "",
+            **supervisor,
         }
 
     def can_initiate_procurement_payment(self, source):
@@ -251,13 +318,27 @@ class FrappeApprovalCenterStore:
                 raise ApprovalCenterError("只能修改本人创建的草稿")
             if not frappe.has_permission("OA Approval Request", "write", doc=doc):
                 raise ApprovalCenterError("无权修改该草稿")
-            if doc.request_type != request_type or doc.workflow_status != DRAFT_STATUS:
+            withdrawn_procurement = (
+                request_type == REQUEST_PROCUREMENT
+                and _get(doc, "workflow_status") == DRAFT_STATUS
+                and _get(doc, "business_status") == "已撤回"
+            )
+            if doc.request_type != request_type or (
+                doc.workflow_status != DRAFT_STATUS and not withdrawn_procurement
+            ):
                 raise ApprovalCenterError("只能修改同类型草稿")
+            if withdrawn_procurement:
+                doc.business_status = ""
         else:
             doc = frappe.new_doc("OA Approval Request")
-        doc.update({key: value for key, value in values.items() if key != "business_lines"})
+        doc.update({key: value for key, value in values.items() if key not in {"business_lines", "direct_purchase_lines"}})
         doc.request_type = request_type
-        doc.set("business_lines", values["business_lines"])
+        if request_type == REQUEST_DIRECT_PURCHASE:
+            doc.set("business_lines", [])
+            doc.set("direct_purchase_lines", values.get("direct_purchase_lines", []))
+        else:
+            doc.set("business_lines", values.get("business_lines", []))
+            doc.set("direct_purchase_lines", [])
         with authorized_oa_action():
             if doc.is_new():
                 doc.insert(ignore_permissions=True)
@@ -272,7 +353,7 @@ class FrappeApprovalCenterStore:
             fields=[
                 "name", "request_type", "subject", "workflow_status", "amount",
                 "approved_amount", "asset_nature", "fixed_asset_category", "owner",
-                "purchaser_user", "source_request", "modified", "business_status", "payment_stage",
+                "purchaser_user", "source_request", "source_purchase_order", "source_po_payment_plan_row", "modified", "business_status", "payment_stage",
                 "prepayment_percentage", "expected_arrival_date", "arrival_status",
                 "inspection_status", "prepayment_writeoff_status", "has_balance_payment",
             ],
@@ -320,20 +401,28 @@ class FrappeApprovalCenterStore:
         filters = {
             "request_type": REQUEST_PROCUREMENT,
             "workflow_status": "已完成",
+            "contract_status": "已生效",
         }
         if user not in {"Administrator", "admin@staff.example.invalid"} and not roles & {"System Manager", "Accounts User"}:
             filters["purchaser_user"] = user
-        return frappe.get_all(
+        names = frappe.get_all(
             "OA Approval Request",
             filters=filters,
-            fields=[
-                "name", "request_type", "subject", "workflow_status", "approved_amount",
-                "purchaser_user", "business_status", "arrival_status", "inspection_status",
-                "expected_arrival_date", "modified",
-            ],
+            pluck="name",
             order_by="modified desc",
             limit_page_length=limit,
         )
+        return [frappe.get_doc("OA Approval Request", name) for name in names]
+
+    def payment_plan_row_in_use(self, row_name, current_name=None):
+        filters = {
+            "request_type": REQUEST_PROCUREMENT_PAYMENT,
+            "source_payment_plan_row": row_name,
+            "workflow_status": ["not in", ["已拒绝"]],
+        }
+        if current_name:
+            filters["name"] = ["!=", current_name]
+        return bool(frappe.db.exists("OA Approval Request", filters))
 
     def source_balance(self, source):
         from rayher_hr_payroll.approval_amount_ledger import source_balance
@@ -409,25 +498,94 @@ def procurement_payment_source_options(limit=500, *, store=None):
     for source in store.list_procurement_payment_sources(limit):
         if _get(source, "request_type") != REQUEST_PROCUREMENT or _get(source, "workflow_status") != "已完成":
             continue
+        if _get(source, "contract_status") != "已生效":
+            continue
         balance = store.source_balance(source)
         available = _money(balance.get("available_amount"))
         if available <= 0:
             continue
-        result.append({
-            "name": _name(source),
-            "request_type": REQUEST_PROCUREMENT,
-            "subject": _get(source, "subject") or "",
-            "workflow_status": "已完成",
-            "purchaser_user": _get(source, "purchaser_user") or "",
-            "business_status": _get(source, "business_status") or "",
-            "arrival_status": _get(source, "arrival_status") or "",
-            "inspection_status": _get(source, "inspection_status") or "",
-            "expected_arrival_date": _get(source, "expected_arrival_date") or "",
-            "approved_amount": _money(balance.get("approved_amount")),
-            "reserved_amount": _money(balance.get("reserved_amount")),
-            "paid_amount": _money(balance.get("paid_amount")),
-            "available_amount": available,
-        })
+        for row in list(_get(source, "payment_plan", []) or []):
+            row_name = _name(row)
+            if _get(row, "status") != "待下推" or not row_name:
+                continue
+            in_use = getattr(store, "payment_plan_row_in_use", lambda *args: False)
+            if in_use(row_name):
+                continue
+            trigger = str(_get(row, "trigger_condition") or "").strip()
+            if "验收" in trigger and _get(source, "inspection_status") != "验收通过":
+                continue
+            if "到货" in trigger and _get(source, "arrival_status") not in {"全部到货", "关闭未交数量"}:
+                continue
+            amount = _money(_get(row, "amount"))
+            if amount <= 0 or amount > available:
+                continue
+            result.append({
+                "name": _name(source),
+                "payment_plan_row": row_name,
+                "installment_no": int(_get(row, "installment_no") or 0),
+                "installment_name": _get(row, "installment_name") or "",
+                "payment_stage": _get(row, "payment_stage") or "",
+                "percentage": _decimal(_get(row, "percentage") or 0, "付款比例"),
+                "planned_date": _get(row, "planned_date") or "",
+                "trigger_condition": _get(row, "trigger_condition") or "",
+                "invoice_requirement": _get(row, "invoice_requirement") or "",
+                "amount": amount,
+                "supplier": _get(source, "supplier") or "",
+                "business_lines": [
+                    {
+                        key: _get(line, key)
+                        for key in ("item_name", "specification", "quantity", "unit", "unit_price", "amount", "remarks")
+                    }
+                    for line in list(_get(source, "business_lines", []) or [])
+                ],
+                "request_type": REQUEST_PROCUREMENT,
+                "subject": _get(source, "subject") or "",
+                "workflow_status": "已完成",
+                "purchaser_user": _get(source, "purchaser_user") or "",
+                "business_status": _get(source, "business_status") or "",
+                "arrival_status": _get(source, "arrival_status") or "",
+                "inspection_status": _get(source, "inspection_status") or "",
+                "expected_arrival_date": _get(source, "expected_arrival_date") or "",
+                "approved_amount": _money(balance.get("approved_amount")),
+                "reserved_amount": _money(balance.get("reserved_amount")),
+                "paid_amount": _money(balance.get("paid_amount")),
+                "available_amount": available,
+            })
+    # PO-owned payment plans are the current procurement payment source.  The
+    # memory-store unit tests do not bind a Frappe request context, so avoid
+    # touching the database in that isolated mode.
+    try:
+        po_names = frappe.get_all(
+            "OA Purchase Order", filters={"contract_status": "已生效", "status": ["not in", ["草稿", "待采购确认", "待合同复核", "待电子用印", "已取消"]]},
+            pluck="name", order_by="modified desc", limit_page_length=limit,
+        )
+    except RuntimeError:
+        po_names = []
+    for po_name in po_names:
+        po = frappe.get_doc("OA Purchase Order", po_name)
+        for row in list(getattr(po, "payment_plan", []) or []):
+            row_name = _name(row)
+            if not row_name or _get(row, "status") not in {"待审批", "审批中"}:
+                continue
+            trigger = str(_get(row, "trigger_condition") or "").strip()
+            if "验收" in trigger and not all(_get(line, "inspection_status") == "已通过" for line in (getattr(po, "lines", []) or [])):
+                continue
+            if "到货" in trigger and not all(Decimal(str(_get(line, "received_quantity") or 0)) >= Decimal(str(_get(line, "quantity") or 0)) for line in (getattr(po, "lines", []) or [])):
+                continue
+            result.append({
+                "name": po.name, "payment_plan_row": row_name, "source_purchase_order": po.name,
+                "source_po_payment_plan_row": row_name, "installment_no": int(_get(row, "installment_no") or 0),
+                "installment_name": _get(row, "installment_name") or "", "payment_stage": _get(row, "payment_stage") or "",
+                "percentage": _decimal(_get(row, "percentage") or 0, "付款比例"), "planned_date": _get(row, "planned_date") or "",
+                "trigger_condition": _get(row, "trigger_condition") or "", "invoice_requirement": _get(row, "invoice_requirement") or "",
+                "amount": _money(_get(row, "amount")), "supplier": _get(po, "supplier") or "",
+                "business_lines": [{key: _get(line, key) for key in ("item_name", "specification", "quantity", "unit", "unit_price", "amount", "remarks")} for line in (getattr(po, "lines", []) or [])],
+                "request_type": REQUEST_PROCUREMENT, "subject": f"{po.name} · {_get(row, 'installment_name') or ''}",
+                "workflow_status": "已完成", "purchaser_user": _get(po, "owner") or "", "business_status": _get(po, "status") or "",
+                "arrival_status": "", "inspection_status": "", "expected_arrival_date": _get(row, "planned_date") or "",
+                "approved_amount": _money(_get(po, "total_amount")), "reserved_amount": _money(0), "paid_amount": _money(0),
+                "available_amount": _money(_get(row, "amount")),
+            })
     return result
 
 
@@ -438,6 +596,17 @@ def save_draft(request_type, payload, name=None, *, store=None):
     store.require_draft_access(request_type)
     values = _payload(payload)
     lines, total = _lines(values.get("business_lines"))
+    direct_lines = []
+    if request_type == REQUEST_DIRECT_PURCHASE:
+        direct_lines = [
+            {key: line.get(key) for key in ("item_name", "specification", "product_desc", "quantity", "unit", "unit_price", "remarks")}
+            for line in values.get("business_lines", [])
+        ]
+    if request_type == REQUEST_PROCUREMENT:
+        for line in lines:
+            line["unit_price"] = Decimal("0.00")
+            line["amount"] = Decimal("0.00")
+        total = Decimal("0.00")
     applicant_employee = _text(values.get("applicant_employee"), "申请人", 140)
     identity = store.identity()
     if request_type == REQUEST_PROCUREMENT:
@@ -452,7 +621,11 @@ def save_draft(request_type, payload, name=None, *, store=None):
     if asset_nature not in ASSET_NATURES:
         raise ApprovalCenterError("资产属性无效")
     fixed_category = _text(values.get("fixed_asset_category"), "固定资产类别", 80)
-    if asset_nature == "固定资产" and fixed_category not in FIXED_ASSET_CATEGORIES:
+    if request_type == REQUEST_PROCUREMENT:
+        # Procurement requests keep only the broad asset nature for later
+        # accounting; detailed fixed-asset categories belong to direct purchase.
+        fixed_category = ""
+    elif asset_nature == "固定资产" and fixed_category not in FIXED_ASSET_CATEGORIES:
         raise ApprovalCenterError("固定资产类别无效")
     if asset_nature != "固定资产":
         fixed_category = ""
@@ -497,6 +670,7 @@ def save_draft(request_type, payload, name=None, *, store=None):
                 "non_project_allocation_type": allocation_type,
                 "non_project_cost_center": non_project_cost_center,
                 "non_project_department": non_project_department,
+                "business_lines": lines,
             })
         except ProcurementWorkflowError as exc:
             raise ApprovalCenterError(str(exc))
@@ -510,13 +684,6 @@ def save_draft(request_type, payload, name=None, *, store=None):
             date.fromisoformat(expected_delivery_date)
         except (TypeError, ValueError):
             raise ApprovalCenterError("购买申请必须填写有效意向交期")
-        if not project_name:
-            if allocation_type not in NON_PROJECT_ALLOCATION_TYPES:
-                raise ApprovalCenterError("购买申请必须选择项目或非项目成本归属")
-            if allocation_type == "成本中心" and not non_project_cost_center:
-                raise ApprovalCenterError("购买申请选择成本中心时必须填写成本中心")
-            if allocation_type == "部门" and not non_project_department:
-                raise ApprovalCenterError("购买申请选择部门时必须填写所属部门")
     elif purchase_method:
         raise ApprovalCenterError("购买方式只属于购买申请")
 
@@ -527,41 +694,92 @@ def save_draft(request_type, payload, name=None, *, store=None):
         raise ApprovalCenterError("采购付款字段只属于采购付款")
 
     source_request = _text(values.get("source_request"), "来源申请", 140)
-    if request_type != REQUEST_PROCUREMENT_PAYMENT and source_request:
-        raise ApprovalCenterError("只有采购付款草稿可以关联来源申请")
+    source_payment_plan_row = _text(values.get("source_payment_plan_row"), "付款计划期次", 140)
+    source_purchase_order = _text(values.get("source_purchase_order"), "来源 PO", 140)
+    source_po_payment_plan_row = _text(values.get("source_po_payment_plan_row"), "PO 付款计划期次", 140)
+    if request_type != REQUEST_PROCUREMENT_PAYMENT and (source_request or source_payment_plan_row or source_purchase_order or source_po_payment_plan_row):
+        raise ApprovalCenterError("只有采购付款草稿可以关联付款计划")
     source_snapshot = None
-    if source_request:
+    source_plan = None
+    if request_type == REQUEST_PROCUREMENT_PAYMENT and not ((source_request and source_payment_plan_row) or (source_purchase_order and source_po_payment_plan_row)):
+        raise ApprovalCenterError("采购付款必须选择已生效合同的付款计划期次")
+    if source_purchase_order:
+        po = frappe.get_doc("OA Purchase Order", source_purchase_order)
+        if _get(po, "contract_status") != "已生效":
+            raise ApprovalCenterError("来源 PO 合同必须已电子用印生效")
+        source_plan = next((row for row in list(_get(po, "payment_plan", []) or []) if _name(row) == source_po_payment_plan_row), None)
+        if not source_plan or _get(source_plan, "status") not in {"待审批", "审批中"}:
+            raise ApprovalCenterError("PO 付款计划期次不存在或当前不可下推")
+        supplier = _text(_get(po, "supplier"), "供应商", 140, required=True)
+        source_request = source_request or next((_text(_get(line, "source_request")) for line in list(_get(po, "lines", []) or []) if _text(_get(line, "source_request"))), "")
+        source_snapshot = {
+            "name": po.name, "request_type": REQUEST_PROCUREMENT, "workflow_status": "已完成",
+            "contract_status": "已生效", "currency": _get(po, "currency") or "CNY",
+            "approved_amount": _get(po, "total_amount") or 0, "supplier": supplier,
+            "purchaser_user": _get(po, "owner") or "", "project": "",
+            "payment_plan": list(_get(po, "payment_plan", []) or []),
+            "business_lines": list(_get(po, "lines", []) or []),
+            "modified": _get(po, "modified"),
+        }
+        source_lines = [{key: _get(row, key) for key in ("item_name", "specification", "quantity", "unit", "unit_price", "remarks")} for row in list(_get(po, "lines", []) or [])]
+        lines, ignored_total = _lines(source_lines)
+        total = _money(_get(source_plan, "amount"))
+        payment_stage = _text(_get(source_plan, "payment_stage"), "付款阶段", 20, required=True)
+        prepayment_percentage = _decimal(_get(source_plan, "percentage") or 0, "预付款比例") if payment_stage == "预付款" else Decimal("0")
+        has_balance_payment = 1 if any(_name(row) != source_po_payment_plan_row and _get(row, "status") in {"待审批", "审批中"} for row in list(_get(source_snapshot, "payment_plan", []) or [])) else 0
+    elif source_request:
         source_snapshot = store.resolve_source(source_request)
         if _get(source_snapshot, "request_type") != REQUEST_PROCUREMENT:
             raise ApprovalCenterError("采购付款只能关联采购申请")
-        if _get(source_snapshot, "workflow_status") != "已完成":
-            raise ApprovalCenterError("来源采购申请必须已完成")
+        if _get(source_snapshot, "workflow_status") != "已完成" or _get(source_snapshot, "contract_status") != "已生效":
+            raise ApprovalCenterError("来源采购合同必须已生效")
         if str(_get(source_snapshot, "currency") or "") != "CNY":
             raise ApprovalCenterError("来源采购申请必须为人民币")
         if _money(_get(source_snapshot, "approved_amount")) <= 0:
             raise ApprovalCenterError("来源采购申请批准金额无效")
         if not store.can_initiate_procurement_payment(source_snapshot):
             raise ApprovalCenterError("只有来源采购申请的采购经办人或财务可以发起采购付款")
-    fulfillment = _source_fulfillment_snapshot(source_snapshot)
-    source_payment_balance = store.source_balance(source_snapshot) if source_snapshot else None
-    if request_type == REQUEST_PROCUREMENT_PAYMENT:
-        stage_values = {
-            "prepayment_percentage": prepayment_percentage,
-            "arrival_status": fulfillment.get("arrival_status") or "未到货",
-            "inspection_status": fulfillment.get("inspection_status") or "未验收",
-            "source_paid_amount": _get(source_payment_balance, "paid_amount") or 0,
-            "source_available_amount": _get(source_payment_balance, "available_amount") or 0,
-            "amount": total,
+        source_plan = next(
+            (row for row in list(_get(source_snapshot, "payment_plan", []) or []) if _name(row) == source_payment_plan_row),
+            None,
+        )
+        if not source_plan or _get(source_plan, "status") != "待下推":
+            raise ApprovalCenterError("付款计划期次不存在或当前不可下推")
+        in_use = getattr(store, "payment_plan_row_in_use", lambda *args: False)
+        if in_use(source_payment_plan_row, _text(name, "草稿编号", 140) or None):
+            raise ApprovalCenterError("该付款计划期次已经生成采购付款单")
+        supplier = _text(_get(source_snapshot, "supplier"), "供应商", 140, required=True)
+        source_lines = [
+            {key: _get(row, key) for key in ("item_name", "specification", "quantity", "unit", "unit_price", "remarks")}
+            for row in list(_get(source_snapshot, "business_lines", []) or [])
+        ]
+        lines, ignored_total = _lines(source_lines)
+        total = _money(_get(source_plan, "amount"))
+        payment_stage = _text(_get(source_plan, "payment_stage"), "付款阶段", 20, required=True)
+        prepayment_percentage = _decimal(_get(source_plan, "percentage") or 0, "预付款比例") if payment_stage == "预付款" else Decimal("0")
+        has_balance_payment = 1 if any(
+            _name(row) != source_payment_plan_row and _get(row, "status") == "待下推"
+            for row in list(_get(source_snapshot, "payment_plan", []) or [])
+        ) else 0
+        if payment_stage == "预付款" and prepayment_percentage == 100:
+            expected_arrival_date = expected_arrival_date or _text(_get(source_plan, "planned_date"), "预计到货日期", 10)
+        # The payment request is created by procurement, but its business
+        # applicant remains the employee who submitted the source request.
+        # The current user remains the technical owner of the generated doc.
+        identity = {
+            **identity,
+            "employee": _get(source_snapshot, "employee") or identity.get("employee"),
+            "employee_name": _get(source_snapshot, "employee_name") or identity.get("employee_name"),
+            "department": _get(source_snapshot, "department") or identity.get("department"),
+            "company": _get(source_snapshot, "company") or identity.get("company"),
+            "supervisor": _get(source_snapshot, "supervisor") or identity.get("supervisor"),
         }
-        try:
-            payment_stage = derive_payment_stage(stage_values)
-        except ProcurementWorkflowError as exc:
-            raise ApprovalCenterError(str(exc))
-        if payment_stage == "预付款":
-            has_balance_payment = 1 if prepayment_percentage < 100 else 0
-        else:
-            has_balance_payment = 1 if total < _get(source_payment_balance, "available_amount") else 0
-            prepayment_percentage = Decimal("0")
+    fulfillment = _source_fulfillment_snapshot(source_snapshot)
+    source_payment_balance = (
+        {"approved_amount": _money(_get(source_snapshot, "approved_amount")), "paid_amount": _money(0), "reserved_amount": _money(0), "available_amount": _money(_get(source_snapshot, "approved_amount"))}
+        if source_purchase_order and source_snapshot
+        else store.source_balance(source_snapshot) if source_snapshot else None
+    )
     prepared = {
         "workflow_status": DRAFT_STATUS,
         "company": identity.get("company") or "",
@@ -611,10 +829,15 @@ def save_draft(request_type, payload, name=None, *, store=None):
         "currency": "CNY",
         "approved_amount": None,
         "source_request": source_request or None,
+        "source_payment_plan_row": source_payment_plan_row or None,
+        "source_purchase_order": source_purchase_order or None,
+        "source_po_payment_plan_row": source_po_payment_plan_row or None,
+        "source_payment_plan_installment": int(_get(source_plan, "installment_no") or 0) if source_plan else 0,
         "approved_amount_snapshot": _money(_get(source_snapshot, "approved_amount")) if source_snapshot else None,
         "source_modified": _get(source_snapshot, "modified") if source_snapshot else None,
-        "payment_source_kind": "关联采购申请" if source_request else None,
-        "business_lines": lines,
+        "payment_source_kind": "关联 PO" if source_purchase_order else ("关联采购申请" if source_request else None),
+        "business_lines": [] if request_type == REQUEST_DIRECT_PURCHASE else lines,
+        "direct_purchase_lines": direct_lines,
         "current_step_index": 0,
         "current_step_label": "",
         "steps": [],
@@ -739,6 +962,10 @@ def dashboard(kind, limit=200, *, store=None):
             "fixed_asset_category": _get(source, "fixed_asset_category") or "",
             "owner": _get(source, "owner") or "",
             "purchaser_user": _get(source, "purchaser_user") or "",
+            "source_request": _get(source, "source_request") or "",
+            "source_purchase_order": _get(source, "source_purchase_order") or "",
+            "source_po_payment_plan_row": _get(source, "source_po_payment_plan_row") or "",
+            "supplier": _get(source, "supplier") or "",
             "modified": _get(source, "modified"),
             "business_status": _get(source, "business_status") or "",
             "payment_stage": _get(source, "payment_stage") or "",

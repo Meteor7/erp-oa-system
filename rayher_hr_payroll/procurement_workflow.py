@@ -49,6 +49,10 @@ def _date(value, label):
         raise ProcurementWorkflowError(f"{label}格式无效")
 
 
+def _category_depth(value):
+    return len([part for part in _text(value).split(".") if part])
+
+
 def _evidence_types(evidence):
     result = set()
     for item in evidence or ():
@@ -63,6 +67,24 @@ def _evidence_types(evidence):
 
 
 def validate_procurement_submission(doc, evidence=None):
+    lines = list(_get(doc, "business_lines") or [])
+    if not lines:
+        raise ProcurementWorkflowError("请至少添加一项采购明细")
+    for index, line in enumerate(lines, start=1):
+        material_number = _text(_get(line, "material_code")) or _text(_get(line, "category_code"))
+        if _category_depth(material_number) < 3:
+            raise ProcurementWorkflowError(f"第{index}项物料编号至少需要填写到三级")
+        required = {
+            "物料名称": _get(line, "item_name"),
+            "规格型号": _get(line, "specification"),
+            "商品品牌": _get(line, "brand"),
+            "计量单位": _get(line, "unit"),
+        }
+        missing = [label for label, value in required.items() if not _text(value)]
+        if missing:
+            raise ProcurementWorkflowError(f"第{index}项物料资料不完整：" + "、".join(missing))
+        if _decimal(_get(line, "quantity"), f"第{index}项采购数量") <= 0:
+            raise ProcurementWorkflowError(f"第{index}项采购数量必须大于0")
     scope = _text(_get(doc, "procurement_scope"))
     if scope not in PROCUREMENT_SCOPES:
         raise ProcurementWorkflowError("采购范围必须选择项目采购或非项目采购")
@@ -136,7 +158,7 @@ def transition_business_state(doc, action, payload=None, evidence=None):
     arrival_status = _text(_get(doc, "arrival_status")) or "未到货"
     if action == "record_arrival":
         if business_status not in {
-            "合同待登记", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"
+            "合同待登记", "合同已生效", "付款计划已生成", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"
         }:
             raise ProcurementWorkflowError("当前状态不能登记到货")
         if not (ARRIVAL_EVIDENCE & evidence_types):
@@ -224,6 +246,8 @@ def transition_business_state(doc, action, payload=None, evidence=None):
             raise ProcurementWorkflowError("预付款核销必须提供验收资料")
         return {"business_status": "已核销", "prepayment_writeoff_status": "已核销"}
     if action == "close_procurement":
+        if _text(_get(doc, "business_status")) == "已关闭":
+            raise ProcurementWorkflowError("采购已经关闭")
         if bool(int(_get(doc, "has_balance_payment") or 0)):
             raise ProcurementWorkflowError("存在后续尾款的采购不能按无尾款流程关闭")
         if arrival_status not in {"全部到货", "关闭未交数量"} or _text(_get(doc, "inspection_status")) != "验收通过":

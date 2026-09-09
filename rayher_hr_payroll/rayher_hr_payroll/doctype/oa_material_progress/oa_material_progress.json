@@ -1,0 +1,237 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "creation": "2026-09-01 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "source_request",
+    "source_line",
+    "requester",
+    "requester_user",
+    "project",
+    "material_code",
+    "item_name",
+    "specification",
+    "product_desc",
+    "brand",
+    "quantity",
+    "unit",
+    "expected_delivery_date",
+    "progress_override",
+    "pr_number",
+    "po_number",
+    "supplier",
+    "current_handler",
+    "actual_delivery_date",
+    "po_closed",
+    "remarks",
+    "status",
+    "cancel_reason",
+    "material_serial",
+    "pr_numbers",
+    "price_approval_numbers",
+    "po_numbers"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_request",
+      "fieldtype": "Link",
+      "options": "OA Approval Request",
+      "label": "采购申请",
+      "reqd": 1,
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "source_line",
+      "fieldtype": "Data",
+      "label": "采购申请明细行",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "requester",
+      "fieldtype": "Data",
+      "label": "需求人",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "requester_user",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "需求人账号",
+      "read_only": 1
+    },
+    {
+      "fieldname": "project",
+      "fieldtype": "Data",
+      "label": "项目",
+      "read_only": 0
+    },
+    {
+      "fieldname": "material_code",
+      "fieldtype": "Data",
+      "label": "物料编码",
+      "read_only": 0,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "item_name",
+      "fieldtype": "Data",
+      "label": "物料名称",
+      "read_only": 0,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "specification",
+      "fieldtype": "Data",
+      "label": "规格型号",
+      "read_only": 0
+    },
+    {
+      "fieldname": "product_desc",
+      "fieldtype": "Small Text",
+      "label": "产品描述",
+      "read_only": 0
+    },
+    {
+      "fieldname": "brand",
+      "fieldtype": "Data",
+      "label": "品牌",
+      "read_only": 1
+    },
+    {
+      "fieldname": "quantity",
+      "fieldtype": "Float",
+      "label": "数量",
+      "read_only": 0,
+      "precision": "4"
+    },
+    {
+      "fieldname": "unit",
+      "fieldtype": "Data",
+      "label": "单位",
+      "read_only": 0
+    },
+    {
+      "fieldname": "expected_delivery_date",
+      "fieldtype": "Data",
+      "label": "期望交期",
+      "read_only": 0
+    },
+    {
+      "fieldname": "progress_override",
+      "fieldtype": "Data",
+      "label": "进度状态",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "pr_number",
+      "fieldtype": "Data",
+      "label": "PR 单号",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "po_number",
+      "fieldtype": "Data",
+      "label": "PO 单号",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "supplier",
+      "fieldtype": "Data",
+      "label": "供应商",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "current_handler",
+      "fieldtype": "Data",
+      "label": "当前环节人",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "actual_delivery_date",
+      "fieldtype": "Date",
+      "label": "实际交期"
+    },
+    {
+      "fieldname": "po_closed",
+      "fieldtype": "Check",
+      "label": "PO 已关闭"
+    },
+    {
+      "fieldname": "remarks",
+      "fieldtype": "Small Text",
+      "label": "备注"
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "options": "正常\n已取消",
+      "label": "记录状态",
+      "default": "正常",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "cancel_reason",
+      "fieldtype": "Small Text",
+      "label": "取消原因",
+      "read_only": 1
+    },
+    {
+      "fieldname": "material_serial",
+      "fieldtype": "Data",
+      "read_only": true,
+      "label": "物料流水号",
+      "in_list_view": true
+    },
+    {
+      "fieldname": "pr_numbers",
+      "fieldtype": "Small Text",
+      "read_only": true,
+      "label": "PR 单号",
+      "in_list_view": true
+    },
+    {
+      "fieldname": "price_approval_numbers",
+      "fieldtype": "Small Text",
+      "read_only": true,
+      "label": "价格审批单号",
+      "in_list_view": true
+    },
+    {
+      "fieldname": "po_numbers",
+      "fieldtype": "Small Text",
+      "read_only": true,
+      "label": "PO 单号",
+      "in_list_view": true
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "is_submittable": 0,
+  "links": [],
+  "modified": "2026-09-01 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher HR Payroll",
+  "name": "OA Material Progress",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1,
+  "istable": 0,
+  "autoname": "format:MP-{YYYY}-{#####}"
+}

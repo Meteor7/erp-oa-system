@@ -30,6 +30,22 @@ def test_rd_expense_item_has_source_row_key_for_duplicate_guard():
     assert {"source_row_key", "voucher_no", "amount", "direct_project"}.issubset(fieldnames(doc))
 
 
+def test_purchase_request_line_material_fields_are_optional_for_direct_purchase():
+    fields = {field["fieldname"]: field for field in load_doctype("oa_purchase_request_line")["fields"]}
+    for fieldname in ("category_code", "brand", "unit_price"):
+        assert fields[fieldname].get("reqd") != 1, fieldname
+
+
+def test_direct_purchase_has_a_separate_line_table():
+    parent = load_doctype("oa_approval_request")
+    fields = {field["fieldname"]: field for field in parent["fields"]}
+    assert fields["business_lines"]["options"] == "OA Purchase Request Line"
+    assert fields["direct_purchase_lines"]["options"] == "OA Direct Purchase Line"
+    direct = load_doctype("oa_direct_purchase_line")
+    assert direct["istable"] == 1
+    assert "category_code" not in fieldnames(direct)
+
+
 def test_rd_cost_allocation_has_source_snapshot_tables():
     doc = load_doctype("rd_cost_allocation")
     fields = {field["fieldname"]: field for field in doc["fields"]}
@@ -207,7 +223,12 @@ def test_oa_approval_doctypes_define_request_and_steps():
         'payee_name', 'branch', 'account_no', 'paid_by', 'paid_on', 'expense_lines', 'steps'
     }.issubset(request_fields)
     assert request_fields['expense_lines']['options'] == 'OA Approval Expense Line'
-    assert request_fields['payment_type']['options'].split('\n') == ['支付个人', '对公支付']
+    assert request_fields['payment_type']['fieldtype'] == 'Data'
+    assert 'options' not in request_fields['payment_type']
+    assert request_fields['invoice_handling_mode']['options'].split('\n') == ['已有发票', '暂未取得发票', '无需发票']
+    assert request_fields['invoice_followup_status']['options'].split('\n') == ['', '待收票', '已收票', '已核验', '无需发票']
+    assert request_fields['invoice_followup_status']['read_only'] == 1
+    assert request_fields['expected_invoice_date']['fieldtype'] == 'Date'
     assert {
         '\u8349\u7a3f', '\u5f85\u5ba1\u6279', '\u5f85\u529e\u7406', '\u5df2\u5b8c\u6210',
         '\u5df2\u62d2\u7edd', '\u5df2\u4ed8\u6b3e'

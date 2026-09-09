@@ -1,0 +1,182 @@
+{
+  "doctype": "DocType",
+  "name": "OA Purchase Order",
+  "module": "Rayher HR Payroll",
+  "autoname": "format:PO-{YYYY}-{#####}",
+  "engine": "InnoDB",
+  "track_changes": 1,
+  "field_order": [
+    "status",
+    "supplier",
+    "payment_method",
+    "currency",
+    "source_price_approvals",
+    "contract_delivery_date",
+    "contract_status",
+    "contract_version",
+    "contract_supplier_legal_name",
+    "contract_credit_code",
+    "contract_supplier_address",
+    "contract_contact",
+    "contract_bank_name",
+    "contract_bank_account",
+    "contract_entity",
+    "contract_template",
+    "contract_seal_user",
+    "contract_snapshot",
+    "contract_draft_content",
+    "contract_reviewed_by",
+    "contract_reviewed_on",
+    "contract_sealed_by",
+    "contract_sealed_on",
+    "total_amount",
+    "lines",
+    "payment_plan",
+    "tax_rate",
+    "paid_amount",
+    "payment_status",
+    "payment_reference",
+    "steps"
+  ],
+  "fields": [
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Status",
+      "options": "草稿\n待采购确认\n待合同复核\n待电子用印\n已生效\n供应商制作中\n到货验收中\n付款中\n已关闭\n已取消",
+      "default": "草稿",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "supplier",
+      "fieldtype": "Data",
+      "label": "Supplier",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "payment_method",
+      "fieldtype": "Data",
+      "label": "Payment Method",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "currency",
+      "fieldtype": "Data",
+      "label": "Currency",
+      "default": "CNY"
+    },
+    {
+      "fieldname": "source_price_approvals",
+      "fieldtype": "Small Text",
+      "label": "Source Price Approvals",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_delivery_date",
+      "fieldtype": "Date",
+      "label": "Contract Delivery Date"
+    },
+    {
+      "fieldname": "contract_status",
+      "fieldtype": "Select",
+      "label": "Contract Status",
+      "options": "\n待补充信息\n草稿待复核\n待电子用印\n已生效",
+      "default": "待补充信息",
+      "read_only": 1
+    },
+    {"fieldname":"contract_version","fieldtype":"Int","label":"Contract Version","default":0,"read_only":1},
+    {"fieldname":"contract_supplier_legal_name","fieldtype":"Data","label":"Supplier Legal Name"},
+    {"fieldname":"contract_credit_code","fieldtype":"Data","label":"Supplier Credit Code"},
+    {"fieldname":"contract_supplier_address","fieldtype":"Small Text","label":"Supplier Address"},
+    {"fieldname":"contract_contact","fieldtype":"Data","label":"Supplier Contact"},
+    {"fieldname":"contract_bank_name","fieldtype":"Data","label":"Supplier Bank Name"},
+    {"fieldname":"contract_bank_account","fieldtype":"Data","label":"Supplier Bank Account"},
+    {"fieldname":"contract_template","fieldtype":"Data","label":"Contract Template"},
+    {"fieldname":"contract_seal_user","fieldtype":"Link","options":"User","label":"Seal User"},
+    {"fieldname":"contract_snapshot","fieldtype":"Long Text","label":"Contract Snapshot","read_only":1},
+    {"fieldname":"contract_draft_content","fieldtype":"Long Text","label":"Contract Draft Content","read_only":1},
+    {"fieldname":"contract_reviewed_by","fieldtype":"Link","options":"User","label":"Contract Reviewed By","read_only":1},
+    {"fieldname":"contract_reviewed_on","fieldtype":"Datetime","label":"Contract Reviewed On","read_only":1},
+    {"fieldname":"contract_sealed_by","fieldtype":"Link","options":"User","label":"Contract Sealed By","read_only":1},
+    {"fieldname":"contract_sealed_on","fieldtype":"Datetime","label":"Contract Sealed On","read_only":1},
+    {
+      "fieldname": "total_amount",
+      "fieldtype": "Currency",
+      "label": "Total Amount",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "lines",
+      "fieldtype": "Table",
+      "options": "OA Purchase Order Line",
+      "label": "PO Lines"
+    },
+    {
+      "fieldname": "payment_plan",
+      "fieldtype": "Table",
+      "options": "OA Procurement Payment Plan Row",
+      "label": "PO Payment Plan"
+    },
+    {
+      "fieldname": "contract_entity",
+      "fieldtype": "Data",
+      "label": "Contract Entity"
+    },
+    {
+      "fieldname": "tax_rate",
+      "fieldtype": "Float",
+      "label": "Tax Rate",
+      "default": 0
+    },
+    {
+      "fieldname": "paid_amount",
+      "fieldtype": "Currency",
+      "label": "Paid Amount",
+      "default": 0,
+      "read_only": 1
+    },
+    {
+      "fieldname": "payment_status",
+      "fieldtype": "Data",
+      "label": "Payment Status",
+      "default": "待付款",
+      "read_only": 1
+    },
+    {
+      "fieldname": "payment_reference",
+      "fieldtype": "Data",
+      "label": "Payment Reference"
+    },
+    {
+      "fieldname": "steps",
+      "fieldtype": "Table",
+      "options": "OA Approval Step",
+      "label": "Approval Trail",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Purchase User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "report": 1,
+      "export": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC"
+}

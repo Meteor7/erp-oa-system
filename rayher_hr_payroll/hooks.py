@@ -32,6 +32,9 @@ fixtures = [
 ]
 
 doc_events = {
+    "OA Approval Request": {
+        "on_update": "rayher_hr_payroll.api.material_progress.sync_material_progress_for_request",
+    },
     "Project": {
         "validate": "rayher_hr_payroll.project_controls.validate_project_stage_lock",
     },
@@ -105,5 +108,6 @@ has_permission = {
 scheduler_events = {
     "daily": [
         "rayher_hr_payroll.maintenance.invoice_ocr_cleanup.cleanup_orphan_invoice_batches",
+        "rayher_hr_payroll.organization_master_data.sync_effective_leaver_statuses",
     ],
 }

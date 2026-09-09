@@ -40,6 +40,10 @@ REQUEST_SEARCH_LIMIT = 2000
 REQUEST_REASON_LIMIT = 1000
 FINANCE_ROLES = {"System Manager", "Accounts User"}
 ACTIVE_REQUEST_STATUSES = {"草稿"}
+POST_SUBMISSION_INVOICE_STATUSES = {"待审批", "待办理", "待流转", "已完成", "已付款"}
+INVOICE_MODE_PENDING = "暂未取得发票"
+INVOICE_FOLLOWUP_PENDING = "待收票"
+INVOICE_FOLLOWUP_RECEIVED = "已收票"
 WORKBENCH_STATUSES = {"排队中", "识别中", "待确认", "已确认", "疑似重复", "失败", "已排除"}
 WORKBENCH_PRIVILEGED_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager"}
 OPERATION_LOG_LIMIT = 100
@@ -1267,6 +1271,29 @@ def _assert_request_single_batch_current(request_name, batch_name):
         )
 
 
+def _can_supplement_request(request_doc, *, current=False):
+    if _get(request_doc, "request_type") != "费用付款申请":
+        return False
+    if _get(request_doc, "invoice_handling_mode") != INVOICE_MODE_PENDING:
+        return False
+    if _get(request_doc, "invoice_followup_status") not in {INVOICE_FOLLOWUP_PENDING, INVOICE_FOLLOWUP_RECEIVED}:
+        return False
+    if _get(request_doc, "workflow_status") not in POST_SUBMISSION_INVOICE_STATUSES:
+        return False
+    return invoice_permissions.can_edit_request(request_doc, _user(), current=current) or bool(_roles() & FINANCE_ROLES)
+
+
+def _append_request_invoice_event(request_doc, action, note=""):
+    try:
+        events = json.loads(_get(request_doc, "operation_log") or "[]")
+    except (TypeError, ValueError):
+        events = []
+    if not isinstance(events, list):
+        events = []
+    events.append({"action": action, "actor": _user(), "acted_on": str(_now()), "from_status": _get(request_doc, "workflow_status") or "", "to_status": _get(request_doc, "workflow_status") or "", "note": _bounded_note(note)})
+    _set(request_doc, "operation_log", json.dumps(events[-OPERATION_LOG_LIMIT:], ensure_ascii=False, default=str))
+
+
 def attach_batch_to_request(batch_name, request_doc):
     batch_name = str(batch_name or "").strip()
     request_name = _request_name(request_doc)
@@ -1289,13 +1316,18 @@ def attach_batch_to_request(batch_name, request_doc):
             locks.enter_context(_transaction_lock("record", record_name))
         batch = _require_batch(batch_name, owner_only=True, current=True)
         current_request = _current_doc(REQUEST_DOCTYPE, request_name)
-        _request_permission(current_request, "edit", current=True)
-        if str(_get(current_request, "workflow_status") or "") != "草稿":
-            _throw("只有草稿状态可以继续添加发票。")
+        workflow_status = str(_get(current_request, "workflow_status") or "")
+        supplementing = workflow_status != "草稿"
+        if supplementing:
+            if not _can_supplement_request(current_request, current=True):
+                _throw("当前单据状态或权限不允许补录发票。")
+        else:
+            _request_permission(current_request, "edit", current=True)
         batch_request = str(_get(batch, "request") or "")
         if batch_request and batch_request != request_name:
             _throw("\u8be5\u53d1\u7968\u6279\u6b21\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
-        _assert_request_single_batch_current(request_name, batch_name)
+        if not supplementing:
+            _assert_request_single_batch_current(request_name, batch_name)
         current_rows = _current_rows(
             RECORD_DOCTYPE,
             filters={"batch": batch_name},
@@ -1313,12 +1345,23 @@ def attach_batch_to_request(batch_name, request_doc):
             existing = str(_get(record, "request") or "")
             if existing and existing != request_name:
                 _throw("\u8be5\u53d1\u7968\u5df2\u5173\u8054\u5230\u5176\u4ed6\u62a5\u9500\u5355\u3002")
+        if supplementing:
+            included = [record for record in records if _get(record, "recognition_status") != "已排除"]
+            if not included:
+                _throw("补录批次中没有有效发票。")
+            blockers = submission_blockers(included, "")
+            if blockers:
+                _throw("；".join(blockers))
         for record in records:
             _set(record, "request", request_name)
             _save(record)
         _set(batch, "request", request_name)
         _save(batch)
-        _apply_request_invoice_summary(current_request, save=True, current=True)
+        _apply_request_invoice_summary(current_request, save=False, current=True)
+        if supplementing:
+            _set(current_request, "invoice_followup_status", INVOICE_FOLLOWUP_RECEIVED)
+            _append_request_invoice_event(current_request, "补录发票", batch_name)
+        _save(current_request)
         return current_request
 
 

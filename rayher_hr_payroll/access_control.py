@@ -33,7 +33,15 @@ ROLE_PROFILES = [
     },
     {
         "role_profile": "总控 Owner",
-        "roles": ["System Manager", "HR Manager", "Accounts User", "Department Manager"],
+        "roles": [
+            "System Manager",
+            "HR Manager",
+            "Accounts User",
+            "Department Manager",
+            "Employee",
+            "All Project Access",
+            BUSINESS_EXECUTIVE_ROLE,
+        ],
     },
 ]
 

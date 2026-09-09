@@ -9,6 +9,14 @@ ACTIVE_WORKFLOW_STATUSES = {"待审批", "待办理"}
 OPEN_TODO_STATUS = "Open"
 CLOSED_TODO_STATUS = "Closed"
 
+REQUEST_ROUTES = {
+    "请假申请": "/planck-semicon/approval/leave",
+    "采购申请": "/planck-semicon/approval/procurement",
+    "购买申请": "/planck-semicon/approval/direct-purchase",
+    "采购付款": "/planck-semicon/approval/procurement-payment",
+    "费用付款申请": "/planck-semicon/approval/reimbursement",
+}
+
 
 def _clean(value):
     return str(value or "").strip()
@@ -88,9 +96,117 @@ class FrappeAssignmentStore:
             todo.save(ignore_permissions=True)
         return todo
 
+    def notification_exists(self, *, for_user, document_name, key):
+        return bool(frappe.db.exists(
+            "Notification Log",
+            {
+                "for_user": for_user,
+                "document_type": "OA Approval Request",
+                "document_name": document_name,
+                "subject": ["like", f"%[{key}]%"],
+            },
+        ))
+
+    def create_notification(self, *, for_user, document_name, subject, content, link):
+        return frappe.get_doc({
+            "doctype": "Notification Log",
+            "for_user": for_user,
+            "type": "Alert",
+            "document_type": "OA Approval Request",
+            "document_name": document_name,
+            "subject": subject,
+            "email_content": content,
+            "link": link,
+        }).insert(ignore_permissions=True)
+
 
 def _row_value(row, key):
     return row.get(key) if isinstance(row, dict) else getattr(row, key, None)
+
+
+def _request_link(doc):
+    route = REQUEST_ROUTES.get(_clean(getattr(doc, "request_type", None)), "/planck-semicon/approval/request-dashboard")
+    return f"{route}?request={_clean(getattr(doc, 'name', None))}"
+
+
+def _assignment_message(doc, step, key):
+    request_type = _clean(getattr(doc, "request_type", None)) or "OA申请"
+    request_name = _clean(getattr(doc, "name", None))
+    applicant = _clean(getattr(doc, "employee_name", None)) or _clean(getattr(doc, "employee", None))
+    subject = _clean(getattr(doc, "subject", None))
+    node = _clean(getattr(step, "label", None)) or "待审批"
+    title = f"{request_type}待处理：{request_name} [{key}]"
+    content = f"申请人：{applicant}<br>主题：{subject}<br>当前节点：{node}"
+    return title, content
+
+
+def _sync_assignment_notification(doc, step, user, key, store):
+    if store.notification_exists(for_user=user, document_name=doc.name, key=key):
+        return
+    subject, content = _assignment_message(doc, step, key)
+    store.create_notification(
+        for_user=user,
+        document_name=doc.name,
+        subject=subject,
+        content=content,
+        link=_request_link(doc),
+    )
+
+
+def notify_rejected_applicant(doc, actor, reason, *, store=None, event_key=None):
+    store = store or FrappeAssignmentStore()
+    user = _clean(getattr(doc, "owner", None))
+    if not user:
+        employee = _clean(getattr(doc, "employee", None))
+        user = _clean(frappe.db.get_value("Employee", employee, "user_id")) if employee else ""
+    if not user:
+        return False
+    key = event_key or f"oa-rejection:{_clean(getattr(doc, 'name', None))}:{_clean(actor)}"
+    if store.notification_exists(for_user=user, document_name=doc.name, key=key):
+        return False
+    request_type = _clean(getattr(doc, "request_type", None)) or "OA申请"
+    subject = f"{request_type}已驳回：{doc.name} [{key}]"
+    content = (
+        f"驳回人：{_clean(actor)}<br>驳回原因：{_clean(reason)}"
+        f"<br>当前状态：{_clean(getattr(doc, 'workflow_status', None))}"
+    )
+    store.create_notification(
+        for_user=user,
+        document_name=doc.name,
+        subject=subject,
+        content=content,
+        link=_request_link(doc),
+    )
+    return True
+
+
+def notify_request_applicant(doc, status, *, actor=None, note=None, event_key=None, store=None):
+    """Notify the applicant when an OA request reaches a terminal business state."""
+    store = store or FrappeAssignmentStore()
+    user = _clean(getattr(doc, "owner", None))
+    if not user:
+        employee = _clean(getattr(doc, "employee", None))
+        user = _clean(frappe.db.get_value("Employee", employee, "user_id")) if employee else ""
+    if not user:
+        return False
+    key = event_key or f"oa-result:{_clean(getattr(doc, 'name', None))}:{_clean(status)}"
+    if store.notification_exists(for_user=user, document_name=doc.name, key=key):
+        return False
+    request_type = _clean(getattr(doc, "request_type", None)) or "OA申请"
+    subject = f"{request_type}{status}：{doc.name} [{key}]"
+    content = f"申请单：{doc.name}<br>当前状态：{_clean(status)}"
+    if actor:
+        content += f"<br>处理人：{_clean(actor)}"
+    if note:
+        content += f"<br>备注：{_clean(note)}"
+    store.create_notification(
+        for_user=user,
+        document_name=doc.name,
+        subject=subject,
+        content=content,
+        link=_request_link(doc),
+    )
+    return True
 
 
 def close_request_assignments(doc, *, store=None):
@@ -140,4 +256,6 @@ def sync_current_assignments(doc, previous_step=None, *, store=None):
                 allocated_to=user,
                 description=description,
             )
+        for user, key in sorted(desired.items()):
+            _sync_assignment_notification(doc, step, user, key, store)
     return sorted(desired)

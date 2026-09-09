@@ -1,0 +1,28 @@
+{
+  "autoname": "field:category_code",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": ["category_code", "category_name", "full_path", "parent_category", "level", "allow_request", "is_active", "source", "sort_order"],
+  "fields": [
+    {"fieldname":"category_code","fieldtype":"Data","label":"Category Code","reqd":1,"unique":1},
+    {"fieldname":"category_name","fieldtype":"Data","label":"Category Name","reqd":1},
+    {"fieldname":"full_path","fieldtype":"Small Text","label":"Full Path"},
+    {"fieldname":"parent_category","fieldtype":"Link","label":"Parent Category","options":"OA Procurement Category"},
+    {"fieldname":"level","fieldtype":"Int","label":"Level","reqd":1},
+    {"default":"1","fieldname":"allow_request","fieldtype":"Check","label":"Allow Employee Request"},
+    {"default":"1","fieldname":"is_active","fieldtype":"Check","label":"Active"},
+    {"default":"本地维护","fieldname":"source","fieldtype":"Data","label":"Source"},
+    {"fieldname":"sort_order","fieldtype":"Int","label":"Sort Order"}
+  ],
+  "index_web_pages_for_search": 0,
+  "module": "Rayher HR Payroll",
+  "name": "OA Procurement Category",
+  "permissions": [
+    {"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1},
+    {"role":"Employee","read":1},
+    {"role":"Purchase User","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}
+  ],
+  "sort_field": "category_code",
+  "sort_order": "ASC",
+  "track_changes": 1
+}

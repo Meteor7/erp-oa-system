@@ -1,0 +1,145 @@
+{
+  "doctype": "DocType",
+  "name": "OA Price Approval Quote",
+  "module": "Rayher HR Payroll",
+  "autoname": "format:QUOTE-{YYYY}-{#####}",
+  "engine": "InnoDB",
+  "track_changes": 1,
+  "field_order": [
+    "price_approval",
+    "price_line",
+    "source_pr",
+    "source_request",
+    "material_serial",
+    "supplier",
+    "unit_price",
+    "total_price",
+    "delivery_date",
+    "payment_method",
+    "payment_plan_json",
+    "is_recommended",
+    "note",
+    "currency",
+    "tax_rate",
+    "contract_entity"
+  ],
+  "fields": [
+    {
+      "fieldname": "price_approval",
+      "fieldtype": "Link",
+      "options": "OA Price Approval",
+      "label": "Price Approval",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "price_line",
+      "fieldtype": "Data",
+      "label": "Price Line",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_pr",
+      "fieldtype": "Link",
+      "options": "OA Procurement Request",
+      "label": "Source PR",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_request",
+      "fieldtype": "Link",
+      "options": "OA Approval Request",
+      "label": "Source OA",
+      "read_only": 1
+    },
+    {
+      "fieldname": "material_serial",
+      "fieldtype": "Data",
+      "label": "Material Serial",
+      "read_only": 1
+    },
+    {
+      "fieldname": "supplier",
+      "fieldtype": "Data",
+      "label": "Supplier",
+      "reqd": 1
+    },
+    {
+      "fieldname": "unit_price",
+      "fieldtype": "Currency",
+      "label": "Unit Price",
+      "reqd": 1
+    },
+    {
+      "fieldname": "total_price",
+      "fieldtype": "Currency",
+      "label": "Total Price",
+      "read_only": 1
+    },
+    {
+      "fieldname": "delivery_date",
+      "fieldtype": "Date",
+      "label": "Delivery Date"
+    },
+    {
+      "fieldname": "payment_method",
+      "fieldtype": "Data",
+      "label": "Payment Method"
+    },
+    {
+      "fieldname": "payment_plan_json",
+      "fieldtype": "Long Text",
+      "label": "Supplier Payment Plan"
+    },
+    {
+      "fieldname": "is_recommended",
+      "fieldtype": "Check",
+      "label": "Recommended"
+    },
+    {
+      "fieldname": "note",
+      "fieldtype": "Small Text",
+      "label": "Note"
+    },
+    {
+      "fieldname": "currency",
+      "fieldtype": "Data",
+      "label": "Currency",
+      "default": "CNY"
+    },
+    {
+      "fieldname": "tax_rate",
+      "fieldtype": "Float",
+      "label": "Tax Rate",
+      "default": 0
+    },
+    {
+      "fieldname": "contract_entity",
+      "fieldtype": "Data",
+      "label": "Contract Entity"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Purchase User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "report": 1,
+      "export": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC"
+}

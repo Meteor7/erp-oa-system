@@ -15,7 +15,7 @@ const invoiceApiSource = readFileSync(new URL('../../rayher_hr_payroll/api/invoi
 
 const C = {
   upload: '\u4e0a\u4f20\u53d1\u7968',
-  flow: '\u8d39\u7528\u62a5\u9500\u6d41',
+  flow: '付款/报销流',
   statistics: '\u8d39\u7528\u7edf\u8ba1',
   audit: '\u5ba1\u6279\u8bb0\u5f55',
   viewInvoice: '\u67e5\u770b\u53d1\u7968',
@@ -43,7 +43,9 @@ test('rayher SPA registers split approval pages', () => {
   assert.match(appSource, /采购申请/);
   assert.match(appSource, /购买申请/);
   assert.match(appSource, /采购付款/);
-  assert.match(appSource, /对公付款/);
+  assert.match(appSource, /付款\/报销/);
+  assert.doesNotMatch(appSource, /to: ['"]\/approval\/corporate-payment['"]/);
+  assert.match(routerSource, /path:\s*['"]\/approval\/corporate-payment['"],\s*redirect:\s*['"]\/approval\/reimbursement['"]/);
 });
 
 test('approval page keeps leave behavior and delegates expense reimbursement to its workbench', () => {

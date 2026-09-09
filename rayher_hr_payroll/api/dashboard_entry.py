@@ -1,8 +1,127 @@
 import frappe
+from frappe.utils import getdate, nowdate
 
 from rayher_hr_payroll.api._guards import require_rd_access, parse_period, RD_FINANCE_ROLES
 
 RD_TYPES = ("全时研发", "非全时研发", "研发辅助")
+
+
+def _can_view_procurement_financial():
+    user = str(frappe.session.user or "").strip().lower()
+    roles = set(frappe.get_roles(user) or [])
+    return user in {
+        "person033@staff.example.invalid", "person046@staff.example.invalid",
+        "person060@staff.example.invalid", "admin@staff.example.invalid", "administrator",
+    } or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
+
+
+def _procurement_overview():
+    from rayher_hr_payroll.approval_center import dashboard
+    from rayher_hr_payroll.api.procurement_chain import list_payment_work_items
+
+    request_rows = dashboard("request", limit=500).get("rows") or []
+    request_names = [row["name"] for row in request_rows if row.get("request_type") == "采购申请"]
+    pr_sources = set(frappe.get_all("OA Procurement Request Line", filters={"source_request": ["in", request_names]}, pluck="source_request", limit_page_length=0)) if request_names else set()
+    po_lines = frappe.get_all("OA Purchase Order Line", filters={"source_request": ["in", request_names]}, fields=["parent", "source_request", "quantity", "received_quantity", "inspection_status"], limit_page_length=0) if request_names else []
+    po_names = sorted({row.parent for row in po_lines})
+    pos = {row.name: row for row in frappe.get_all("OA Purchase Order", filters={"name": ["in", po_names]}, fields=["name", "status"], limit_page_length=0)} if po_names else {}
+    financial_access = _can_view_procurement_financial()
+    try:
+        work_items = list_payment_work_items(limit=1000) or []
+    except Exception as exc:
+        if not isinstance(exc, (frappe.PermissionError, frappe.ValidationError)):
+            raise
+        work_items = []
+    status_counts = {}
+    for item in work_items:
+        status = item.get("work_status") or "其他"
+        status_counts[status] = status_counts.get(status, 0) + 1
+    if financial_access:
+        cards = [
+            {"label": "进行中申请", "value": sum(1 for row in request_rows if row.get("workflow_status") not in {"已完成", "已拒绝"}), "route": "/approval/request-dashboard"},
+            {"label": "待到货/资料", "value": status_counts.get("待到货资料", 0), "route": "/approval/procurement-payment", "filter": "待到货资料"},
+            {"label": "待验收", "value": status_counts.get("待验收", 0), "route": "/approval/procurement-payment", "filter": "待验收"},
+            {"label": "可提交付款", "value": status_counts.get("可提交付款审批", 0), "route": "/approval/procurement-payment", "filter": "可提交付款审批"},
+            {"label": "付款审批中", "value": status_counts.get("付款审批中", 0) + status_counts.get("待实际付款", 0), "route": "/approval/payment-dashboard"},
+        ]
+    else:
+        po_sources = {row.source_request for row in po_lines}
+        cards = [
+            {"label": "进行中申请", "value": sum(1 for row in request_rows if row.get("workflow_status") not in {"已完成", "已拒绝"}), "route": "/approval/request-dashboard"},
+            {"label": "待提PR申请", "value": sum(1 for row in request_rows if row.get("workflow_status") == "已完成" and row["name"] not in pr_sources), "route": "/approval/request-dashboard"},
+            {"label": "采购执行中", "value": sum(1 for name in pr_sources if name not in po_sources), "route": "/approval/request-dashboard"},
+            {"label": "待到货物料", "value": sum(1 for row in po_lines if float(row.received_quantity or 0) < float(row.quantity or 0)), "route": "/approval/request-dashboard"},
+            {"label": "待验收物料", "value": sum(1 for row in po_lines if float(row.received_quantity or 0) >= float(row.quantity or 0) and row.inspection_status != "已通过"), "route": "/approval/request-dashboard"},
+            {"label": "已完成PO", "value": sum(1 for po in pos.values() if po.status == "已关闭"), "route": "/approval/request-dashboard"},
+        ]
+    amounts = {
+        "po_total": sum(float(item.get("amount") or 0) for item in work_items),
+        "paid": sum(float(item.get("paid_amount") or 0) for item in work_items),
+    }
+    amounts["unpaid"] = max(amounts["po_total"] - amounts["paid"], 0)
+    amounts["payable"] = sum(float(item.get("amount") or 0) for item in work_items if item.get("can_push_payment"))
+    # One payment period is one action item. Keep the first actionable blocker as
+    # the headline and retain the rest as context, otherwise one PO becomes a
+    # noisy list of near-duplicate alerts.
+    action_items, grouped = [], {}
+    for item in work_items:
+        blockers = list(item.get("blockers") or [])
+        if not blockers and not item.get("can_push_payment"):
+            continue
+        key = (item.get("po"), item.get("payment_plan_row"))
+        grouped.setdefault(key, []).append(item)
+    for key, items in grouped.items():
+        item = items[0]
+        blockers = []
+        for row in items:
+            for blocker in row.get("blockers") or []:
+                if blocker not in blockers:
+                    blockers.append(blocker)
+        if blockers:
+            headline = blockers[0]
+            severity = "urgent" if any(word in headline for word in ("逾期", "不合格", "拒绝")) else "attention"
+            action = "补齐资料" if "缺少" in headline else ("完成验收" if "验收" in headline else "查看付款条件")
+            status = "阻塞"
+        else:
+            headline, severity, action, status = "本期条件已满足", "ready", "提交付款审批", "可办理"
+        action_items.append({
+            "key": ":".join(str(value or "") for value in key),
+            "title": headline,
+            "detail": f"{item.get('po')} · {item.get('installment_name') or '付款期次'}",
+            "context": "、".join(blockers[1:]),
+            "action": action,
+            "status": status,
+            "planned_date": item.get("planned_date") or "",
+            "route": "/approval/procurement-payment", "po": item.get("po"),
+            "severity": severity,
+        })
+        planned = item.get("planned_date")
+        if planned:
+            try:
+                days = (getdate(nowdate()) - getdate(planned)).days
+                action_items[-1]["overdue"] = days > 0 and status != "可办理"
+                action_items[-1]["due_label"] = f"已逾期 {days} 天" if days > 0 and status != "可办理" else f"截止 {getdate(planned)}"
+                if days > 0 and status != "可办理":
+                    action_items[-1]["severity"] = "urgent"
+            except (TypeError, ValueError):
+                pass
+    action_items.sort(key=lambda row: {"urgent": 0, "attention": 1, "ready": 2}.get(row["severity"], 9))
+    stages = [
+        {"key": "request", "label": "OA申请", "value": len(request_rows), "route": "/approval/request-dashboard"},
+        {"key": "pr", "label": "PR/询价", "value": len(pr_sources), "route": "/approval/request-dashboard"},
+        {"key": "po", "label": "PO/合同", "value": len(po_names), "route": "/approval/request-dashboard"},
+        {"key": "payment", "label": "付款", "value": len(work_items), "route": "/approval/procurement-payment"},
+    ]
+    return {"visible": bool(request_rows or work_items), "can_view_financial": financial_access,
+            "cards": cards, "stages": stages, "action_items": action_items[:10],
+            "amounts": amounts if financial_access else {}, "alerts": action_items[:10] if financial_access else []}
+
+
+@frappe.whitelist()
+def get_procurement_overview():
+    if not frappe.session.user or frappe.session.user == "Guest":
+        frappe.throw(frappe._("请先登录。"))
+    return _procurement_overview()
 
 
 @frappe.whitelist()

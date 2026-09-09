@@ -32,7 +32,7 @@ const ASSET_OTHER = '其他';
 const FALLBACK_ASSET_CATEGORIES = [ASSET_ADMIN, ASSET_IT, ASSET_OTHER];
 const NAV_ITEMS = [
   { key: 'invoices', label: '上传发票', icon: 'upload-cloud' },
-  { key: 'board', label: '费用报销流程', icon: 'trello' },
+  { key: 'board', label: '付款/报销流程', icon: 'trello' },
   { key: 'statistics', label: '费用统计', icon: 'bar-chart-2' },
   { key: 'audit', label: '审批记录', icon: 'clipboard' },
 ];
@@ -67,6 +67,7 @@ const statisticsView = ref(null);
 const approvalView = ref(null);
 const draftSources = ref([]);
 const showManualExpense = ref(false);
+const showInvoiceSupplement = ref(false);
 const manualExpense = reactive({
   project_name: '', expense_account_level_1: '', expense_account_level_2: '',
   issue_date: '', total_amount: '', expense_description: '', description: '',
@@ -93,9 +94,15 @@ const requestForm = reactive({
   subject: '', company: '', department: '', supervisor: '', doc_type: '', urgency: '',
   asset_category: '', payment_type: '支付个人', payment_method: '', bank_name: '',
   payee_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
+  invoice_handling_mode: '', expected_invoice_date: '',
+  payment_source_kind: '', source_request: '',
 });
 
 const options = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_options', method: 'GET', auto: true });
+const expensePaymentSourceLoader = createResource({
+  url: 'rayher_hr_payroll.api.oa_entry.list_expense_payment_sources', method: 'GET',
+  makeParams: () => ({ limit: 500 }), auto: true,
+});
 const requests = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET',
   makeParams: () => ({ view: 'all', request_type: REQUEST_TYPE, limit: 200 }), auto: true,
@@ -118,6 +125,7 @@ const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_pa
 const requestWithdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_request' });
 const paymentWithdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_payment' });
 const draftSourceSaver = createResource({ url: 'rayher_hr_payroll.api.oa_entry.save_draft_expense_sources' });
+const invoiceVerifier = createResource({ url: 'rayher_hr_payroll.api.oa_entry.verify_request_invoices' });
 
 const rows = computed(() => requests.data || []);
 const exactRequest = computed(() => requestDetail.data?.[0] || null);
@@ -130,6 +138,9 @@ const urgencies = computed(() => options.data?.urgencies || []);
 const assetCategories = computed(() => options.data?.asset_categories || FALLBACK_ASSET_CATEGORIES);
 const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
+const invoiceHandlingModes = computed(() => options.data?.invoice_handling_modes || ['已有发票', '暂未取得发票', '无需发票']);
+const expensePaymentSources = computed(() => expensePaymentSourceLoader.data || []);
+const selectedPaymentSource = computed(() => expensePaymentSources.value.find((row) => row.name === requestForm.source_request) || null);
 const expenseAccountTree = computed(() => options.data?.expense_account_tree || []);
 const isDraftDetail = computed(() => selectedRequest.value?.kanban_status === 'draft');
 const canEditExpenseItems = computed(() => Boolean(selectedRequest.value?.can_edit_expense_items));
@@ -190,7 +201,7 @@ function rowsForStatus(status) {
 function sourceLabel(row) {
   if (row.from_invoice_push) return '发票下推';
   if (row.from_consumption) return '历史数据下推';
-  return '无票/手工新建';
+  return '手工新建';
 }
 function uniqueValues(values) {
   return [...new Set(values.map((value) => clean(value)).filter(Boolean))];
@@ -289,11 +300,11 @@ async function saveDraftSources(silent = false) {
       source_lines: JSON.stringify(draftSources.value),
     });
     hydrateDraftSources(result);
-    if (!silent) message.value = '报销草稿费用明细已保存。';
+    if (!silent) message.value = '付款/报销草稿费用明细已保存。';
     await requests.reload();
     return true;
   } catch (error) {
-    errorMessage.value = apiError(error, '报销草稿保存失败');
+    errorMessage.value = apiError(error, '付款/报销草稿保存失败');
     return false;
   } finally {
     saving.value = false;
@@ -318,7 +329,7 @@ async function addManualExpense() {
   const saved = await saveDraftSources(true);
   if (saved) {
     showManualExpense.value = false;
-    message.value = '手工费用已加入报销草稿。';
+    message.value = '手工费用已加入付款/报销草稿。';
   } else {
     draftSources.value = draftSources.value.filter((source) => source !== row);
   }
@@ -339,6 +350,8 @@ function resetForm() {
     subject: '', company: '', department: '', supervisor: '', doc_type: '', urgency: '',
     asset_category: '', payment_type: '', payment_method: '', bank_name: '',
     payee_name: '', branch: '', account_no: '', reason: '', no_invoice_reason: '',
+    invoice_handling_mode: '', expected_invoice_date: '',
+    payment_source_kind: '', source_request: '',
   });
   expenseLines.value = [blankLine()];
   applyDefaults();
@@ -373,15 +386,27 @@ async function saveRequest(submit) {
     || Number(line.total_amount || 0) <= 0
     || !clean(line.expense_description || line.description)
   ));
-  if (!requestForm.department || !requestForm.asset_category || hasIncompleteLine) {
-    errorMessage.value = '请完整填写申请部门、项目名称、费用科目、日期、金额和费用说明。';
+  if (!requestForm.department || !requestForm.asset_category || !requestForm.invoice_handling_mode || hasIncompleteLine) {
+    errorMessage.value = '请完整填写申请部门、发票处理方式、项目名称、费用科目、日期、金额和费用说明。';
+    return;
+  }
+  if (['暂未取得发票', '无需发票'].includes(requestForm.invoice_handling_mode) && !requestForm.source_request) {
+    errorMessage.value = '公司事前付款必须关联一张已审批通过且仍有可付款余额的购买申请。';
+    return;
+  }
+  if (requestForm.invoice_handling_mode === '已有发票') {
+    errorMessage.value = '已有发票请从“上传发票”页面识别后生成申请。';
+    return;
+  }
+  if (!clean(requestForm.no_invoice_reason) || (requestForm.invoice_handling_mode === '暂未取得发票' && !requestForm.expected_invoice_date)) {
+    errorMessage.value = '请填写发票情况说明；暂未取得发票时还需填写预计取得日期。';
     return;
   }
   saving.value = true;
   try {
     const result = await creator.submit({
       request_type: REQUEST_TYPE,
-      subject: requestForm.subject.trim() || valid[0].project_name || valid[0].invoice_category || '无票费用报销',
+      subject: requestForm.subject.trim() || valid[0].project_name || valid[0].invoice_category || '费用付款/报销',
       department: requestForm.department,
       asset_category: requestForm.asset_category,
       amount: total.value,
@@ -402,14 +427,18 @@ async function saveRequest(submit) {
       payee_name: requestForm.payee_name,
       branch: requestForm.branch,
       account_no: requestForm.account_no,
-      no_invoice_reason: '',
+      no_invoice_reason: requestForm.no_invoice_reason,
+      invoice_handling_mode: requestForm.invoice_handling_mode,
+      expected_invoice_date: requestForm.expected_invoice_date || '',
+      payment_source_kind: requestForm.source_request ? '关联购买申请' : '无事前申请',
+      source_request: requestForm.source_request || '',
     });
     showRequestForm.value = false;
     activeView.value = 'board';
     await reload();
     await openRequest(result.name);
   } catch (error) {
-    errorMessage.value = apiError(error, '报销单保存失败');
+    errorMessage.value = apiError(error, '付款/报销单保存失败');
   } finally {
     saving.value = false;
   }
@@ -442,7 +471,7 @@ async function openRequest(name) {
     }
     await loadInvoices(requestedName);
   } catch (error) {
-    errorMessage.value = apiError(error, '报销单详情加载失败');
+    errorMessage.value = apiError(error, '付款/报销单详情加载失败');
     detailRequestName.value = '';
     detailInvoices.value = [];
   }
@@ -484,7 +513,7 @@ async function markPaid(row) {
   }
 }
 async function withdrawRequest(row) {
-  if (!window.confirm('确认撤回该报销申请到草稿吗？审批操作会保留在日志中。')) return;
+  if (!window.confirm('确认撤回该付款/报销申请到草稿吗？审批操作会保留在日志中。')) return;
   try {
     await requestWithdrawer.submit({ name: row.name, note: actionNote.value.trim() || '申请人撤回' });
     actionNote.value = '';
@@ -505,15 +534,38 @@ async function withdrawPayment(row) {
   }
 }
 
+async function invoiceSupplemented(name) {
+  showInvoiceSupplement.value = false;
+  message.value = `发票已补录到 ${name}。`;
+  await reload();
+  await loadInvoices(name);
+}
+
+async function verifyInvoices(row) {
+  saving.value = true;
+  errorMessage.value = '';
+  try {
+    await invoiceVerifier.submit({ name: row.name, note: actionNote.value.trim() });
+    actionNote.value = '';
+    message.value = '发票已由财务确认核验。';
+    await reload();
+    await loadInvoices(row.name);
+  } catch (error) {
+    errorMessage.value = apiError(error, '发票核验失败');
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function withdrawPushedInvoices(row) {
   if (!canWithdrawInvoicePush.value) return;
-  if (!window.confirm('撤回下推会解除这些发票与报销草稿的关联，发票将重新回到上传发票页面，是否继续？')) return;
+  if (!window.confirm('撤回下推会解除这些发票与付款/报销草稿的关联，发票将重新回到上传发票页面，是否继续？')) return;
   saving.value = true;
   errorMessage.value = '';
   try {
     await withdrawInvoicePush(
       detailInvoices.value.map((invoice) => invoice.name),
-      actionNote.value.trim() || '从报销草稿撤回发票下推',
+      actionNote.value.trim() || '从付款/报销草稿撤回发票下推',
     );
     actionNote.value = '';
     message.value = '已撤回下推，发票已重新回到上传发票页面。';
@@ -598,6 +650,14 @@ async function submitAddSign() {
 }
 watch(() => options.data, applyDefaults, { immediate: true });
 watch(selectedRequest, hydrateDraftSources, { immediate: true });
+watch(() => requestForm.invoice_handling_mode, (mode) => {
+  if (mode === '已有发票') {
+    requestForm.payment_source_kind = '无事前申请';
+    requestForm.source_request = '';
+  } else if (['暂未取得发票', '无需发票'].includes(mode)) {
+    requestForm.payment_source_kind = '关联购买申请';
+  }
+});
 </script>
 
 <template>
@@ -605,7 +665,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
     <aside class="w-44 shrink-0 rounded border bg-white p-3 shadow-sm">
       <div class="mb-4 flex items-center gap-2 border-b pb-3">
         <div class="rounded bg-amber-50 p-2 text-amber-700"><FeatherIcon name="briefcase" class="h-4 w-4" /></div>
-        <div><div class="text-sm font-semibold">费用管理</div><div class="text-[11px] text-gray-500">发票与报销</div></div>
+        <div><div class="text-sm font-semibold">费用管理</div><div class="text-[11px] text-gray-500">付款、报销与发票</div></div>
       </div>
       <button v-for="item in NAV_ITEMS" :key="item.key" class="mb-1 flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm" :class="activeView === item.key ? 'bg-blue-50 font-medium text-blue-700' : 'text-gray-600 hover:bg-gray-50'" @click="activeView = item.key">
         <FeatherIcon :name="item.icon" class="h-4 w-4" />{{ item.label }}
@@ -622,7 +682,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
 
       <section v-else-if="activeView === 'board'" class="space-y-4">
         <header class="flex items-center justify-between">
-          <div><h2 class="text-xl font-bold">费用报销流程</h2><p class="mt-1 text-sm text-gray-500">报销审批看板与逐票费用明细</p></div>
+          <div><h2 class="text-xl font-bold">付款/报销流程</h2><p class="mt-1 text-sm text-gray-500">统一审批流程，通过发票取得时间区分业务</p></div>
           <Button variant="subtle" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
         </header>
         <div class="grid gap-3 md:grid-cols-5">
@@ -638,7 +698,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
         </div>
         <div class="flex flex-wrap items-end gap-3 rounded border bg-white p-4 shadow-sm">
           <label class="min-w-[300px] flex-1 text-xs text-gray-500">关键字<input v-model="keyword" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="单据号/申请人/发票号码/项目名称" /></label>
-          <Button variant="solid" @click="openManualRequest"><FeatherIcon name="plus" class="h-4 w-4" />无票新建报销单</Button>
+          <Button variant="solid" @click="openManualRequest"><FeatherIcon name="plus" class="h-4 w-4" />新建付款/报销单</Button>
         </div>
         <div class="grid min-h-[550px] grid-cols-5 gap-3 overflow-x-auto">
           <div v-for="column in STATUS_COLUMNS" :key="column.key" class="min-w-[220px] rounded border bg-white shadow-sm">
@@ -663,7 +723,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
     <div v-if="showRequestForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showRequestForm = false">
       <div role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded bg-white shadow-xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
-          <div><h3 class="font-semibold">无票新建费用报销单</h3><p class="mt-1 text-xs text-gray-500">用于出差津贴等无发票费用，按费用科目表选择一级、二级科目。</p></div>
+          <div><h3 class="font-semibold">新建付款/报销单</h3><p class="mt-1 text-xs text-gray-500">审批流保持一致，发票方式按本次业务实际情况选择。</p></div>
           <button title="关闭" @click="showRequestForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
         </header>
         <div class="flex-1 space-y-5 overflow-y-auto p-5">
@@ -677,6 +737,19 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
               <label class="text-xs text-gray-500">单据类型<select v-model="requestForm.doc_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in docTypes" :key="item">{{ item }}</option></select></label>
               <label class="text-xs text-gray-500">紧急程度<select v-model="requestForm.urgency" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in urgencies" :key="item">{{ item }}</option></select></label>
               <label class="text-xs text-gray-500">资产类型（必选）<select v-model="requestForm.asset_category" data-testid="asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
+              <div class="md:col-span-3">
+                <p class="text-xs font-medium text-gray-600">业务性质与发票状态（必选）</p>
+                <div class="mt-2 grid overflow-hidden rounded-md border border-gray-300 md:grid-cols-3">
+                  <button type="button" class="min-h-16 border-b px-4 py-3 text-left last:border-0 md:border-b-0 md:border-r" :class="requestForm.invoice_handling_mode === '已有发票' ? 'bg-blue-50 text-blue-800' : 'bg-white text-gray-700'" @click="requestForm.invoice_handling_mode = '已有发票'"><span class="block text-sm font-semibold">员工垫付报销</span><span class="mt-1 block text-xs opacity-75">已有发票，从发票识别生成</span></button>
+                  <button type="button" class="min-h-16 border-b px-4 py-3 text-left last:border-0 md:border-b-0 md:border-r" :class="requestForm.invoice_handling_mode === '暂未取得发票' ? 'bg-amber-50 text-amber-800' : 'bg-white text-gray-700'" @click="requestForm.invoice_handling_mode = '暂未取得发票'"><span class="block text-sm font-semibold">事前申请付款</span><span class="mt-1 block text-xs opacity-75">关联购买申请，付款后补票</span></button>
+                  <button type="button" class="min-h-16 px-4 py-3 text-left" :class="requestForm.invoice_handling_mode === '无需发票' ? 'bg-emerald-50 text-emerald-800' : 'bg-white text-gray-700'" @click="requestForm.invoice_handling_mode = '无需发票'"><span class="block text-sm font-semibold">事前申请付款</span><span class="mt-1 block text-xs opacity-75">关联购买申请，依法无需发票</span></button>
+                </div>
+              </div>
+              <label v-if="['暂未取得发票','无需发票'].includes(requestForm.invoice_handling_mode)" class="text-xs text-gray-500 md:col-span-2">来源购买申请（必选）<select v-model="requestForm.source_request" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择已审批通过的购买申请</option><option v-for="item in expensePaymentSources" :key="item.name" :value="item.name">{{ item.name }} · {{ item.subject }} · 可付 {{ money(item.available_amount) }}</option></select></label>
+              <div v-if="selectedPaymentSource" class="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600"><span class="font-medium text-gray-900">{{ selectedPaymentSource.employee_name }}</span><span class="mx-2">{{ selectedPaymentSource.department }}</span><span>批准 {{ money(selectedPaymentSource.approved_amount) }}</span><span class="ml-2">已付 {{ money(selectedPaymentSource.paid_amount) }}</span></div>
+              <label v-if="requestForm.invoice_handling_mode === '暂未取得发票'" class="text-xs text-gray-500">预计取得发票日期<input v-model="requestForm.expected_invoice_date" type="date" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
+              <label v-if="['暂未取得发票','无需发票'].includes(requestForm.invoice_handling_mode)" class="text-xs text-gray-500 md:col-span-3">发票情况说明<textarea v-model="requestForm.no_invoice_reason" rows="2" maxlength="1000" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"></textarea></label>
+              <p v-if="requestForm.invoice_handling_mode === '已有发票'" class="text-xs text-blue-700 md:col-span-3">请关闭本窗口并进入“上传发票”，完成识别确认后生成申请。</p>
             </div>
           </section>
           <section>
@@ -703,7 +776,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
           <section>
             <h4 class="mb-3 text-sm font-semibold">付款信息</h4>
             <div class="grid gap-3 md:grid-cols-3">
-              <label class="text-xs text-gray-500">付款类型<select v-model="requestForm.payment_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentTypes" :key="item">{{ item }}</option></select></label>
+              <label class="text-xs text-gray-500">付款类型<input v-model="requestForm.payment_type" list="request-payment-type-suggestions" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="可自由填写" /><datalist id="request-payment-type-suggestions"><option v-for="item in paymentTypes" :key="item" :value="item" /></datalist></label>
               <label class="text-xs text-gray-500">付款方式<select v-model="requestForm.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in paymentMethods" :key="item">{{ item }}</option></select></label>
               <label class="text-xs text-gray-500">收款人<input v-model="requestForm.payee_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500">开户行<input v-model="requestForm.bank_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
@@ -718,7 +791,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
     </div>
 
     <div v-if="detailRequestName && !selectedRequest && requestDetail.loading" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4">
-      <div class="rounded bg-white px-6 py-5 text-sm text-gray-600 shadow-xl">正在加载报销单详情...</div>
+      <div class="rounded bg-white px-6 py-5 text-sm text-gray-600 shadow-xl">正在加载付款/报销单详情...</div>
     </div>
 
     <div v-if="selectedRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-3 sm:p-4" @click.self="detailRequestName = ''">
@@ -726,7 +799,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
         <header class="sticky top-0 z-20 flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <h3 class="truncate text-lg font-semibold text-gray-900">{{ selectedRequest.name }} - &#x8D39;&#x7528;&#x62A5;&#x9500;&#x8BE6;&#x60C5;</h3>
+              <h3 class="truncate text-lg font-semibold text-gray-900">{{ selectedRequest.name }} - 付款/报销详情</h3>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusMeta(selectedRequest.kanban_status).badge">{{ statusMeta(selectedRequest.kanban_status).label }}</span>
               <span v-if="selectedRequest.action_scope === 'override'" class="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700">&#x4E1A;&#x52A1;&#x7BA1;&#x7406;&#x4EE3;&#x529E;</span>
             </div>
@@ -741,8 +814,8 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
             <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x7533;&#x8BF7;&#x4EBA;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ selectedRequest.employee_name || '-' }}</div></div>
             <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x7533;&#x8BF7;&#x90E8;&#x95E8;</div><div class="mt-1 text-sm font-medium text-gray-900">{{ selectedRequest.department || '-' }}</div></div>
             <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x5F53;&#x524D;&#x8282;&#x70B9;</div><div class="mt-1 truncate text-sm font-medium text-gray-900" :title="selectedRequest.current_step_label">{{ selectedRequest.current_step_label || '-' }}</div></div>
-            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x53D1;&#x7968;&#x6570;&#x91CF;</div><div class="mt-1 text-sm font-semibold text-gray-900">{{ selectedRequest.invoice_count || 0 }} &#x5F20;</div></div>
-            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">&#x62A5;&#x9500;&#x603B;&#x989D;</div><div class="mt-1 text-base font-semibold text-red-600">{{ money(detailGroupTotal || selectedRequest.amount) }}</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">发票状态</div><div class="mt-1 text-sm font-semibold text-gray-900">{{ selectedRequest.invoice_followup_status || selectedRequest.invoice_status || '-' }} · {{ selectedRequest.invoice_count || 0 }} 张</div></div>
+            <div class="bg-white px-5 py-3"><div class="text-xs text-gray-500">付款/报销总额</div><div class="mt-1 text-base font-semibold text-red-600">{{ money(detailGroupTotal || selectedRequest.amount) }}</div></div>
           </section>
 
           <div class="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
@@ -819,6 +892,16 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
               </section>
 
               <div v-if="!detailGroups.length" class="rounded-xl border border-dashed border-gray-300 bg-white px-5 py-12 text-center text-sm text-gray-400">&#x6682;&#x65E0;&#x8D39;&#x7528;&#x660E;&#x7EC6;</div>
+
+              <section v-if="detailInvoices.length" class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <header class="border-b bg-gray-50 px-4 py-3"><h4 class="text-sm font-semibold text-gray-900">关联发票</h4><p class="mt-1 text-xs text-gray-500">包含申请时上传和付款后补录的全部发票。</p></header>
+                <div class="divide-y">
+                  <div v-for="invoice in detailInvoices" :key="invoice.name" class="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="min-w-0"><div class="truncate text-sm font-medium text-gray-900">{{ invoice.original_filename || invoice.name }}</div><div class="mt-1 text-xs text-gray-500">{{ invoice.invoice_category || '-' }} · {{ invoice.invoice_number || '无号码' }} · {{ invoice.recognition_status }}</div></div>
+                    <Button variant="subtle" @click="previewInvoiceRow = invoice"><FeatherIcon name="eye" class="h-4 w-4" />查看发票</Button>
+                  </div>
+                </div>
+              </section>
             </main>
 
             <aside class="min-w-0 space-y-4 xl:sticky xl:top-4">
@@ -834,7 +917,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
                 </dl>
               </section>
 
-              <section v-if="selectedRequest.no_invoice_reason" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"><h4 class="text-sm font-semibold text-gray-900">&#x65E0;&#x7968;&#x539F;&#x56E0;</h4><p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{{ selectedRequest.no_invoice_reason }}</p></section>
+              <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"><h4 class="text-sm font-semibold text-gray-900">发票跟踪</h4><dl class="mt-3 space-y-2 text-sm"><div><dt class="text-xs text-gray-500">处理方式</dt><dd class="mt-1 text-gray-900">{{ selectedRequest.invoice_handling_mode || '-' }}</dd></div><div><dt class="text-xs text-gray-500">跟踪状态</dt><dd class="mt-1 text-gray-900">{{ selectedRequest.invoice_followup_status || '-' }}</dd></div><div v-if="selectedRequest.expected_invoice_date"><dt class="text-xs text-gray-500">预计取得日期</dt><dd class="mt-1 text-gray-900">{{ selectedRequest.expected_invoice_date }}</dd></div><div v-if="selectedRequest.no_invoice_reason"><dt class="text-xs text-gray-500">情况说明</dt><dd class="mt-1 whitespace-pre-wrap text-gray-900">{{ selectedRequest.no_invoice_reason }}</dd></div></dl></section>
 
               <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                 <h4 class="text-sm font-semibold text-gray-900">&#x5BA1;&#x6279;&#x8FDB;&#x5EA6;</h4>
@@ -862,6 +945,8 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
             <Button v-if="selectedRequest.can_withdraw" variant="subtle" @click="withdrawRequest(selectedRequest)">&#x64A4;&#x56DE;&#x7533;&#x8BF7;</Button>
             <Button v-if="selectedRequest.can_withdraw_payment" variant="subtle" @click="withdrawPayment(selectedRequest)">&#x64A4;&#x56DE;&#x4ED8;&#x6B3E;</Button>
             <Button v-if="canWithdrawInvoicePush" variant="subtle" :loading="saving" @click="withdrawPushedInvoices(selectedRequest)">撤回下推</Button>
+            <Button v-if="selectedRequest.can_supplement_invoices" variant="subtle" @click="showInvoiceSupplement = true"><FeatherIcon name="upload-cloud" class="h-4 w-4" />补录发票</Button>
+            <Button v-if="selectedRequest.can_verify_invoices" variant="subtle" :loading="saving" @click="verifyInvoices(selectedRequest)"><FeatherIcon name="check-circle" class="h-4 w-4" />确认已核验</Button>
             <Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" :loading="saving" @click="submitDraft(selectedRequest)">&#x63D0;&#x4EA4;&#x5BA1;&#x6279;</Button>
             <Button v-if="selectedRequest.can_edit_expense_items" variant="subtle" :loading="saving" @click="saveFinanceClassification">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
             <Button v-if="selectedRequest.can_add_sign" variant="subtle" @click="openAddSign"><FeatherIcon name="user-plus" class="h-4 w-4" />&#x52A0;&#x7B7E;</Button>
@@ -873,6 +958,7 @@ watch(selectedRequest, hydrateDraftSources, { immediate: true });
         </footer>
       </div>
     </div>
+    <div v-if="showInvoiceSupplement && selectedRequest" class="fixed inset-0 z-[80] overflow-y-auto bg-white p-4"><div class="mx-auto max-w-[1600px]"><div class="mb-3 flex justify-end"><Button variant="subtle" @click="showInvoiceSupplement = false"><FeatherIcon name="x" class="h-4 w-4" />关闭补录</Button></div><InvoiceUploadWorkbench :options="options.data || {}" :target-request="selectedRequest" @supplemented="invoiceSupplemented" /></div></div>
     <div v-if="showManualExpense" class="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 p-4" @click.self="showManualExpense = false">
       <div role="dialog" aria-modal="true" class="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">

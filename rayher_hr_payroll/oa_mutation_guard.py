@@ -42,6 +42,7 @@ SERVER_OWNED_FIELDS = {
     "invoice_status",
     "expense_lines",
     "business_lines",
+    "direct_purchase_lines",
     "operation_log",
     "business_status",
     "project_owner",
@@ -67,6 +68,7 @@ DRAFT_ONLY_BUSINESS_FIELDS = {
     "payment_stage", "prepayment_percentage", "has_balance_payment",
     "expected_arrival_date", "prepayment_risk_note", "source_request",
     "business_lines",
+    "direct_purchase_lines",
 }
 
 NEW_DOCUMENT_ALLOWED_VALUES = {

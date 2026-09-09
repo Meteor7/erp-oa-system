@@ -1,7 +1,7 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
-import { createResource } from 'frappe-ui';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { FeatherIcon, createResource } from 'frappe-ui';
 import { canSee, currentUser, roleLabel } from './lib/access';
 const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo.png';
 
@@ -11,15 +11,16 @@ const groups = [
     { to: '/approval/leave', step: '01', label: '请假审批' },
     { step: '02', label: '采购/购买申请', children: [
       { to: '/approval/procurement', label: '采购申请' },
+      { to: '/approval/procurement/price-approvals', label: '价格审批' },
       { to: '/approval/direct-purchase', label: '购买申请' },
     ] },
     { to: '/approval/request-dashboard', step: '03', label: '申请看板' },
     { step: '04', label: '付款申请', children: [
       { to: '/approval/procurement-payment', label: '采购付款' },
-      { to: '/approval/reimbursement', label: '报销' },
-      { to: '/approval/corporate-payment', label: '对公付款' },
+      { to: '/approval/reimbursement', label: '付款/报销' },
     ] },
     { to: '/approval/payment-dashboard', step: '05', label: '付款看板' },
+    { to: '/approval/material-progress', step: '06', label: '物料进度看板' },
   ] },
   { label: '人事中心', items: [
     { to: '/personnel', step: '01', label: '员工信息管理' },
@@ -59,6 +60,7 @@ const WIDE_PAGE_PATHS = new Set([
   '/approval/reimbursement',
   '/approval/corporate-payment',
   '/approval/payment-dashboard',
+  '/approval/material-progress',
   '/projects',
   '/timesheet',
   '/expense',
@@ -67,8 +69,10 @@ const WIDE_PAGE_PATHS = new Set([
   '/foreign-rd',
 ]);
 const route = useRoute();
+const router = useRouter();
 const ACCOMMODATION_PATHS = new Set(['/accommodation/master', '/accommodation/monthly']);
 const openNavGroups = reactive(new Set());
+const mobileNavOpen = ref(false);
 function isNavGroupOpen(item) { return openNavGroups.has(item.label); }
 function toggleNavGroup(item) {
   if (openNavGroups.has(item.label)) openNavGroups.delete(item.label);
@@ -76,6 +80,7 @@ function toggleNavGroup(item) {
 }
 watch(() => route.path, (path) => {
   if (ACCOMMODATION_PATHS.has(path)) openNavGroups.add('宿舍信息管理');
+  mobileNavOpen.value = false;
 }, { immediate: true });
 const visibleGroups = computed(() =>
   groups
@@ -85,7 +90,7 @@ const visibleGroups = computed(() =>
     .filter((g) => g.items.length)
 );
 const allowed = computed(() => canSee(route.path));
-const isWidePage = computed(() => WIDE_PAGE_PATHS.has(route.path));
+const isWidePage = computed(() => WIDE_PAGE_PATHS.has(route.path) || route.path.startsWith('/approval/procurement/'));
 
 const showPasswordDialog = ref(false);
 const passwordForm = reactive({
@@ -97,6 +102,61 @@ const passwordError = ref('');
 const passwordSuccess = ref('');
 const passwordUpdater = createResource({
   url: 'frappe.core.doctype.user.user.update_password',
+});
+const notificationLoader = createResource({
+  url: 'rayher_hr_payroll.api.oa_entry.get_my_notifications',
+  method: 'GET',
+  makeParams: () => ({ limit: 40 }),
+  auto: true,
+});
+const notificationMarker = createResource({
+  url: 'rayher_hr_payroll.api.oa_entry.mark_my_notifications_read',
+});
+const notificationsOpen = ref(false);
+const notifications = computed(() => notificationLoader.data?.items || []);
+const unreadNotifications = computed(() => Number(notificationLoader.data?.unread || 0));
+let notificationTimer = null;
+
+function refreshNotifications() {
+  if (!notificationLoader.loading) notificationLoader.reload();
+}
+
+function notificationText(item) {
+  return String(item?.subject || '新消息').replace(/\s*\[[^\]]+\]\s*$/, '');
+}
+
+async function openNotification(item) {
+  notificationsOpen.value = false;
+  if (item?.name && !item.read) {
+    try {
+      await notificationMarker.submit({ names: [item.name] });
+      await notificationLoader.reload();
+    } catch (error) {
+      // Keep navigation usable even when a read receipt is temporarily unavailable.
+    }
+  }
+  if (item?.link) {
+    const target = String(item.link);
+    if (target.startsWith('/planck-semicon/')) router.push(target.replace('/planck-semicon', '') || '/dashboard');
+    else if (target.startsWith('/')) router.push(target);
+  }
+}
+
+async function markAllNotificationsRead() {
+  if (!unreadNotifications.value) return;
+  try {
+    await notificationMarker.submit({ all_notifications: 1 });
+    await notificationLoader.reload();
+  } catch (error) {
+    // Surface the existing loader error state rather than interrupting the shell.
+  }
+}
+
+onMounted(() => {
+  notificationTimer = window.setInterval(refreshNotifications, 30000);
+});
+onBeforeUnmount(() => {
+  if (notificationTimer) window.clearInterval(notificationTimer);
 });
 
 function resetPasswordForm() {
@@ -146,20 +206,20 @@ function logout() {
 }
 </script>
 <template>
-  <div class='flex min-h-screen bg-gray-50 text-gray-900'>
-    <aside class='w-60 bg-gray-900 text-gray-300 flex flex-col'>
-      <div class='px-5 py-5 border-b border-white/10'>
-        <img :src='companyLogo' alt='QIHENG DEMO' class='h-10 w-auto rounded bg-white object-contain mb-3' />
-        <div class='text-white font-semibold'>&#x7814;&#x53d1;&#x6210;&#x672c;&#x7ba1;&#x7406;</div>
-        <div class='text-xs text-gray-500 mt-1'>QIHENG DEMO</div>
+  <div class='flex min-h-screen min-w-0 overflow-x-hidden bg-gray-50 text-gray-900'>
+    <aside class='fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col bg-gray-900 text-gray-300 transition-transform duration-200 md:static md:translate-x-0' :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'">
+      <div class='px-4 py-3 border-b border-white/10'>
+        <img :src='companyLogo' alt='示例企业032有限公司' class='h-8 w-auto rounded bg-white object-contain mb-2' />
+        <div class='text-white font-semibold'>QIHENG DEMO</div>
+        <div class='text-xs text-gray-500 mt-0.5'>研发成本管理 · 示例企业032有限公司</div>
       </div>
-      <nav class='p-3 flex-1 overflow-y-auto'>
-        <div v-for='g in visibleGroups' :key='g.label' class='mb-3'>
-          <div class='px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 font-semibold'>{{ g.label }}</div>
+      <nav class='p-2 flex-1 overflow-y-auto'>
+        <div v-for='g in visibleGroups' :key='g.label' class='mb-2'>
+          <div class='px-2 py-1 text-[10px] uppercase tracking-wider text-gray-500 font-semibold'>{{ g.label }}</div>
           <template v-for='n in g.items' :key='n.to || n.label'>
             <div v-if='n.children'>
               <button type='button'
-                class='flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-300 hover:bg-white/5'
+                class='flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-gray-300 hover:bg-white/5'
                 :aria-expanded='isNavGroupOpen(n)' @click='toggleNavGroup(n)'>
                 <span class='w-5 text-[10px] text-gray-500 text-center'>{{ n.step }}</span>
                 <span class='flex-1'>{{ n.label }}</span>
@@ -167,12 +227,12 @@ function logout() {
               </button>
               <div v-if='isNavGroupOpen(n)'>
                 <router-link v-for='child in n.children' :key='child.to' :to='child.to'
-                  class='ml-7 flex items-center rounded-md px-3 py-2 text-[13px] text-gray-400 hover:bg-white/5 hover:text-gray-200'
+                  class='ml-6 flex items-center rounded-md px-2 py-1.5 text-[13px] text-gray-400 hover:bg-white/5 hover:text-gray-200'
                   active-class='bg-white/10 text-white'>{{ child.label }}</router-link>
               </div>
             </div>
             <router-link v-else :to='n.to'
-              class='flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-white/5'
+              class='flex items-center gap-1.5 px-2 py-1.5 rounded-md text-sm hover:bg-white/5'
               active-class='bg-white/10 text-white'>
               <span class='w-5 text-[10px] text-gray-500 text-center'>{{ n.step }}</span>{{ n.label }}
             </router-link>
@@ -180,17 +240,41 @@ function logout() {
         </div>
       </nav>
     </aside>
-    <main class='flex-1 min-w-0 flex flex-col'>
-      <header class='h-14 bg-white border-b flex items-center px-6 gap-4'>
-        <div class='text-sm text-gray-500 flex-1'>&#x7814;&#x53d1;&#x6210;&#x672c;&#x4e00;&#x4f53;&#x5316; &middot; &#x4eba;&#x4e8b; / &#x5ba1;&#x6279; / &#x5de5;&#x65f6; / &#x8d39;&#x7528; / &#x85aa;&#x916c;</div>
-        <div class='flex items-center gap-3 text-sm'>
+    <button v-if='mobileNavOpen' type='button' class='fixed inset-0 z-30 bg-black/40 md:hidden' aria-label='关闭导航' @click='mobileNavOpen = false'></button>
+    <main class='flex min-w-0 flex-1 flex-col'>
+      <header class='flex min-h-14 items-center gap-3 border-b bg-white px-3 py-2 sm:px-4 md:px-6'>
+        <button type='button' class='inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-700 md:hidden' aria-label='打开导航' @click='mobileNavOpen = true'><FeatherIcon name='menu' class='h-4 w-4' /></button>
+        <div class='hidden flex-1 text-sm text-gray-500 lg:block'>&#x7814;&#x53d1;&#x6210;&#x672c;&#x4e00;&#x4f53;&#x5316; &middot; &#x4eba;&#x4e8b; / &#x5ba1;&#x6279; / &#x5de5;&#x65f6; / &#x8d39;&#x7528; / &#x85aa;&#x916c;</div>
+        <div class='relative ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-3'>
+          <div class='relative'>
+            <button type='button' class='relative inline-flex h-9 w-9 items-center justify-center rounded border border-gray-300 text-gray-700 hover:bg-gray-50' aria-label='消息通知' :aria-expanded='notificationsOpen' @click='notificationsOpen = !notificationsOpen'>
+              <FeatherIcon name='bell' class='h-4 w-4' />
+              <span v-if='unreadNotifications' class='absolute -right-1 -top-1 min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] leading-4 text-white'>{{ unreadNotifications > 99 ? '99+' : unreadNotifications }}</span>
+            </button>
+            <div v-if='notificationsOpen' class='absolute right-0 top-11 z-50 w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl'>
+              <div class='flex items-center justify-between border-b border-gray-200 px-4 py-3'>
+                <span class='font-medium text-gray-900'>消息通知</span>
+                <button type='button' class='text-xs text-gray-500 hover:text-gray-900' :disabled='!unreadNotifications' @click='markAllNotificationsRead'>全部已读</button>
+              </div>
+              <div class='max-h-80 overflow-y-auto'>
+                <button v-for='item in notifications' :key='item.name' type='button' class='flex w-full gap-3 border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50' @click='openNotification(item)'>
+                  <span class='mt-1 h-2 w-2 shrink-0 rounded-full' :class='item.read ? "bg-gray-200" : "bg-red-500"'></span>
+                  <span class='min-w-0 flex-1'>
+                    <span class='block truncate text-sm' :class='item.read ? "text-gray-600" : "font-medium text-gray-900"'>{{ notificationText(item) }}</span>
+                    <span class='mt-1 block text-xs text-gray-400'>{{ item.creation }}</span>
+                  </span>
+                </button>
+                <div v-if='!notifications.length' class='px-4 py-8 text-center text-sm text-gray-500'>暂无消息</div>
+              </div>
+            </div>
+          </div>
           <span class='inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 text-gray-700'>{{ roleLabel() }}</span>
-          <span class='text-gray-600 max-w-[220px] truncate'>{{ currentUser() }}</span>
-          <button type='button' class='rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50' @click='openPasswordDialog'>修改密码</button>
-          <button type='button' class='rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50' @click='logout'>&#x9000;&#x51fa;&#x767b;&#x5f55;</button>
+          <span class='hidden max-w-[220px] truncate text-gray-600 sm:inline'>{{ currentUser() }}</span>
+          <button type='button' class='hidden rounded border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50 sm:inline-flex' @click='openPasswordDialog'>修改密码</button>
+          <button type='button' class='rounded border border-gray-300 px-2 py-1.5 text-gray-700 hover:bg-gray-50 sm:px-3' @click='logout'>&#x9000;&#x51fa;&#x767b;&#x5f55;</button>
         </div>
       </header>
-      <div :class="['p-7 w-full mx-auto flex-1', isWidePage ? 'max-w-[1900px]' : 'max-w-6xl']">
+      <div :class="['w-full min-w-0 flex-1 p-3 sm:p-4 md:p-7', isWidePage ? 'max-w-[1900px]' : 'mx-auto max-w-6xl']">
         <router-view v-if='allowed' />
         <div v-else class='flex flex-col items-center justify-center py-24 text-center'>
           <div class='text-3xl mb-3'>403</div>

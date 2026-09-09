@@ -1,6 +1,6 @@
 import frappe
 
-from rayher_hr_payroll.api._guards import require_rd_access
+from rayher_hr_payroll.api._guards import is_hr_sensitive_hidden, require_rd_access
 from rayher_hr_payroll.department_structure import (
     CANONICAL_DEPARTMENTS,
     DEPARTMENT_GROUP_BY_NAME,
@@ -27,6 +27,11 @@ EMPLOYEE_FIELDS = [
 def list_employees():
     require_rd_access(RD_HR_WRITE)
     fields = list(EMPLOYEE_FIELDS)
+    if is_hr_sensitive_hidden():
+        fields = [field for field in fields if field not in {
+            "default_social_insurance_base", "default_housing_fund_base",
+            "social_insurance_number", "housing_fund_number",
+        }]
     if set(frappe.get_roles()) & {"System Manager", "HR User", "HR Manager"}:
         fields.insert(3, "id_card_number_cn")
     rows = frappe.get_all("Employee", fields=fields, order_by="employee_name")
@@ -203,6 +208,15 @@ def save_employee(
         "social_insurance_number": social_insurance_number, "housing_fund_number": housing_fund_number,
     }
     vals = {key: value for key, value in provided.items() if value is not None}
+    if is_hr_sensitive_hidden():
+        sensitive = {
+            "default_social_insurance_base", "default_housing_fund_base",
+            "social_insurance_number", "housing_fund_number",
+        }
+        if any(vals.get(field) not in (None, "") for field in sensitive):
+            frappe.throw(frappe._("当前测试账号暂不能维护社保和公积金信息。"))
+        for field in sensitive:
+            vals.pop(field, None)
     if "relieving_date" in vals:
         vals["relieving_date"] = vals["relieving_date"] or None
         vals["status"] = "Left" if vals["relieving_date"] else "Active"

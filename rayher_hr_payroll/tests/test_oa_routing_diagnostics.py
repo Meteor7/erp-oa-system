@@ -52,7 +52,7 @@ def test_accountless_excluded_manager_resolves_upward_without_error():
 
     assert report["errors"] == []
     assert report["employees"][0]["decision"] == "skip"
-    assert report["employees"][0]["traversed"] == ["Sabri", "演示员工21"]
+    assert report["employees"][0]["traversed"] == ["演示员工21"]
 
 
 def test_required_account_diagnostics_find_missing_or_disabled_links():
@@ -69,12 +69,5 @@ def test_required_account_diagnostics_find_missing_or_disabled_links():
     assert report["errors"][0]["type"] == "required_account_not_ready"
 
 
-def test_canonical_required_approvers_include_all_six_route_accounts():
-    assert REQUIRED_APPROVERS == {
-        "演示员工13": "person067@staff.example.invalid",
-        "演示员工10": "person047@staff.example.invalid",
-        "演示员工18": "person068@staff.example.invalid",
-        "演示员工16": "person072@staff.example.invalid",
-        "演示员工21": "person046@staff.example.invalid",
-        "演示员工29": "person060@staff.example.invalid",
-    }
+def test_static_required_approvers_only_contains_non_role_it_owner():
+    assert REQUIRED_APPROVERS == {"演示员工18": "person068@staff.example.invalid"}

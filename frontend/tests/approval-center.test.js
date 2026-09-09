@@ -85,3 +85,30 @@ test("existing payment and reimbursement aliases remain on OA approvals", () => 
   assert.match(source, /rejection_targets/);
   assert.match(source, /驳回原因必填/);
 });
+
+test("leave approvals render one detailed pending table", () => {
+  const source = read("../src/pages/OAApprovals.vue");
+  assert.match(source, /请假日期/);
+  assert.match(source, /查看详情/);
+  assert.match(source, /<Card v-if='!isLeaveInnerPage' :title='T\.pendingTitle' class='oa-panel oa-table-panel oa-pending-panel'>/);
+});
+
+test("leave approvals open each request in a dedicated inner page", () => {
+  const source = read("../src/pages/OAApprovals.vue");
+  assert.match(source, /isLeaveInnerPage/);
+  assert.match(source, /name: 'leave-detail'/);
+  assert.match(source, /返回请假审批/);
+  assert.match(source, /新建请假/);
+  assert.match(source, /router.push\(\{ name: 'leave-detail'/);
+  assert.match(source, /请假申请/);
+  assert.match(source, /v-if='isLeaveInnerPage && selectedLeave'/);
+});
+
+test("returned leave drafts can be edited and resubmitted", () => {
+  const source = read("../src/pages/OAApprovals.vue");
+  assert.match(source, /update_leave_draft/);
+  assert.match(source, /hydrateLeaveDraft/);
+  assert.match(source, /leaveDraftName/);
+  assert.match(source, /mine\.data/);
+  assert.match(source, /draftSubmitter\.submit/);
+});

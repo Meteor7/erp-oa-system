@@ -1,7 +1,7 @@
 <script setup>
 import { Button, Card, createResource } from 'frappe-ui';
-import { computed, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import ExpenseWorkbench from '../components/ExpenseWorkbench.vue';
 
 const REQUEST_LEAVE = '\u8bf7\u5047\u7533\u8bf7';
@@ -14,7 +14,7 @@ const PAGE_CONFIG = {
   '/approval/leave': {
     requestType: REQUEST_LEAVE,
     title: '\u8bf7\u5047\u5ba1\u6279',
-    formTitle: '\u53d1\u8d77\u8bf7\u5047\u7533\u8bf7',
+    formTitle: '\u65b0\u5efa\u8bf7\u5047\u7533\u8bf7',
   },
   '/approval/purchase': {
     requestType: REQUEST_EXPENSE_PAYMENT,
@@ -23,13 +23,13 @@ const PAGE_CONFIG = {
   },
   '/approval/reimbursement': {
     requestType: REQUEST_EXPENSE_PAYMENT,
-    title: '报销',
-    formTitle: '报销工作台',
+    title: '付款/报销',
+    formTitle: '付款/报销工作台',
   },
   '/approval/corporate-payment': {
     requestType: REQUEST_EXPENSE_PAYMENT,
-    title: '对公付款',
-    formTitle: '对公付款工作台',
+    title: '付款/报销',
+    formTitle: '付款/报销工作台',
   },
 };
 
@@ -92,9 +92,11 @@ const STATUS_COLUMNS = [
 ];
 
 const route = useRoute();
+const router = useRouter();
 const pageConfig = computed(() => PAGE_CONFIG[route.path] || PAGE_CONFIG['/approval/leave']);
 const currentRequestType = computed(() => pageConfig.value.requestType);
 const isLeave = computed(() => currentRequestType.value === REQUEST_LEAVE);
+const isLeaveInnerPage = computed(() => isLeave.value && Boolean(route.params.name || route.query.request));
 const isPurchase = computed(() => currentRequestType.value === REQUEST_EXPENSE_PAYMENT);
 
 const leaveForm = reactive({
@@ -161,6 +163,10 @@ const rejectTargetByRequest = reactive({});
 const purchaseTab = ref('board');
 const showManualForm = ref(false);
 const selectedRequestName = ref('');
+const selectedLeaveName = ref('');
+const leaveDraftName = ref('');
+const lastAutoHydratedDraft = ref('');
+let leaveRefreshTimer = null;
 const selectedConsumptionName = ref('');
 const pushSelection = ref([]);
 const filters = reactive({ keyword: '', department: '', category: '' });
@@ -186,6 +192,10 @@ const pending = createResource({
   makeParams: () => ({ view: 'pending', request_type: currentRequestType.value }),
   auto: true,
 });
+const leaveDetailLoader = createResource({
+  url: 'rayher_hr_payroll.api.oa_entry.list_requests',
+  method: 'GET',
+});
 const purchaseRequests = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.list_requests',
   method: 'GET',
@@ -199,6 +209,7 @@ const consumptionRows = createResource({
   auto: true,
 });
 const creator = createResource({ url: 'rayher_hr_payroll.api.oa_entry.create_request' });
+const leaveDraftUpdater = createResource({ url: 'rayher_hr_payroll.api.oa_entry.update_leave_draft' });
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
 const draftSubmitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.submit_request' });
 const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_paid' });
@@ -221,6 +232,17 @@ const selectedRequest = computed(() => requestRows.value.find((row) => row.name 
 const consumptionList = computed(() => consumptionRows.data || []);
 const selectedConsumption = computed(() => consumptionList.value.find((row) => row.name === selectedConsumptionName.value) || consumptionList.value[0]);
 const pushableConsumption = computed(() => consumptionList.value.filter((row) => row.status === '\u5f85\u4e0b\u63a8' || row.status === '\u5df2\u4e0a\u4f20\u53d1\u7968'));
+const leaveRows = computed(() => {
+  const rows = [...(pending.data || []), ...(mine.data || [])];
+  return [...new Map(rows.map((row) => [row.name, row])).values()];
+});
+const leavePendingCount = computed(() => (pending.data || []).length);
+const leaveMineCount = computed(() => (mine.data || []).length);
+const selectedLeave = computed(() => {
+  const requested = String(route.params.name || route.query.request || selectedLeaveName.value || '');
+  return leaveRows.value.find((row) => row.name === requested)
+    || (leaveDetailLoader.data?.name === requested ? leaveDetailLoader.data : null);
+});
 
 const filteredRequests = computed(() => requestRows.value.filter((row) => {
   const keyword = filters.keyword.trim().toLowerCase();
@@ -417,6 +439,64 @@ function manualPayload(submit) {
   };
 }
 
+function leaveDays(row) {
+  if (!row?.from_date || !row?.to_date) return '-';
+  const start = new Date(`${row.from_date}T00:00:00`);
+  const end = new Date(`${row.to_date}T00:00:00`);
+  const days = Math.floor((end - start) / 86400000) + 1;
+  return days > 0 ? `${days} 天` : '-';
+}
+
+function formatEventTime(value) {
+  return value ? String(value).replace('T', ' ').slice(0, 19) : '-';
+}
+
+function rejectionEvent(row) {
+  return [...(row?.operation_log || [])].reverse().find((event) => (
+    ['Targeted rejection', '定向驳回'].includes(event?.action)
+  )) || null;
+}
+
+function eventActor(event) {
+  return event?.details?.actor || event?.actor || event?.user || '-';
+}
+
+function selectLeave(row) {
+  if (!row?.name) return;
+  selectedLeaveName.value = row.name;
+  router.push({ name: 'leave-detail', params: { name: row.name } });
+}
+
+async function loadLeaveDetail(name) {
+  const requested = String(name || '').trim();
+  if (!requested || !isLeave.value) return;
+  try {
+    const rows = await leaveDetailLoader.fetch({
+      view: 'all',
+      request_type: REQUEST_LEAVE,
+      name: requested,
+      limit: 1,
+    }) || [];
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (row?.name === requested) leaveDetailLoader.data = row;
+  } catch (error) {
+    if (!selectedLeave.value) errMsg.value = serverMessage(error, T.loadFailed);
+  }
+}
+
+function hydrateLeaveDraft(row) {
+  if (!row || row.kanban_status !== 'draft') return;
+  leaveDraftName.value = row.name;
+  Object.assign(leaveForm, {
+    subject: row.subject || '',
+    department: row.department || leaveForm.department,
+    supervisor: row.supervisor || leaveForm.supervisor,
+    from_date: row.from_date || '',
+    to_date: row.to_date || '',
+    reason: row.reason || '',
+  });
+}
+
 async function submitLeaveRequest() {
   message.value = '';
   errMsg.value = '';
@@ -426,15 +506,22 @@ async function submitLeaveRequest() {
   }
   saving.value = true;
   try {
-    await creator.submit({
-      request_type: REQUEST_LEAVE,
+    const fields = {
       subject: leaveForm.subject.trim(),
       from_date: leaveForm.from_date,
       to_date: leaveForm.to_date,
       reason: leaveForm.reason.trim(),
-    });
+    };
+    if (leaveDraftName.value) {
+      const name = leaveDraftName.value;
+      await leaveDraftUpdater.submit({ name, ...fields });
+      await draftSubmitter.submit({ name });
+    } else {
+      await creator.submit({ request_type: REQUEST_LEAVE, ...fields });
+    }
     message.value = T.saved;
     Object.assign(leaveForm, { subject: '', from_date: '', to_date: '', reason: '' });
+    leaveDraftName.value = '';
     await reloadLists();
   } catch (error) {
     errMsg.value = serverMessage(error, T.saveFailed);
@@ -612,21 +699,73 @@ watch(consumptionList, (rows) => {
 watch(requestRows, (rows) => {
   if (!selectedRequestName.value && rows.length) selectedRequestName.value = rows[0].name;
 });
+watch(leaveRows, (rows) => {
+  const requested = String(route.query.request || '');
+  if (requested && rows.some((row) => row.name === requested)) {
+    selectedLeaveName.value = requested;
+  } else if (!rows.some((row) => row.name === selectedLeaveName.value)) {
+    selectedLeaveName.value = rows[0]?.name || '';
+  }
+  const returnedDraft = (mine.data || []).find((row) => row.kanban_status === 'draft' && rejectionEvent(row));
+  if (returnedDraft && returnedDraft.name !== lastAutoHydratedDraft.value) {
+    lastAutoHydratedDraft.value = returnedDraft.name;
+    selectedLeaveName.value = returnedDraft.name;
+    hydrateLeaveDraft(returnedDraft);
+  }
+}, { immediate: true });
+watch(() => route.query.request, (name) => {
+  if (name) {
+    selectedLeaveName.value = String(name);
+    loadLeaveDetail(name);
+  }
+});
+watch(() => route.params.name, (name) => {
+  if (name) {
+    selectedLeaveName.value = String(name);
+    loadLeaveDetail(name);
+  }
+}, { immediate: true });
+watch(leaveRows, (rows) => {
+  const requested = String(route.params.name || route.query.request || '');
+  if (requested && !rows.some((row) => row.name === requested)) loadLeaveDetail(requested);
+});
+onMounted(() => {
+  leaveRefreshTimer = window.setInterval(() => {
+    if (isLeave.value && !saving.value && document.visibilityState === 'visible') reloadLists();
+  }, 10000);
+});
+onBeforeUnmount(() => {
+  if (leaveRefreshTimer) window.clearInterval(leaveRefreshTimer);
+});
 </script>
 
 <template>
-  <div class='space-y-4'>
-    <div v-if='isLeave' class='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
+  <div class='oa-page space-y-4'>
+    <div v-if='isLeave' class='oa-header flex flex-col gap-3 border-b border-gray-200 pb-4 md:flex-row md:items-end md:justify-between'>
       <div>
-        <h2 class='text-xl font-semibold text-gray-900'>{{ pageConfig.title }}</h2>
-        <p v-if='isPurchase' class='text-sm text-gray-500 mt-1'>{{ pageConfig.formTitle }}</p>
+        <router-link v-if='isLeaveInnerPage' to='/approval/leave' class='mb-2 inline-flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-gray-900'>← 返回请假审批</router-link>
+        <div v-if='isLeaveInnerPage && selectedLeave' class='oa-kicker'>{{ selectedLeave.name }} · {{ selectedLeave.workflow_status }}</div>
+        <h2 class='text-xl font-semibold text-gray-950'>{{ isLeaveInnerPage ? '请假申请' : pageConfig.title }}</h2>
+        <p class='mt-1 text-sm text-gray-500'>{{ isLeaveInnerPage ? (selectedLeave ? `审批详情 · 当前节点：${selectedLeave.current_step_label || '已结束'}` : '正在加载请假单详情…') : '提交申请、查看本人记录与待审批事项' }}</p>
       </div>
-      <Button variant='subtle' @click='reloadLists'>{{ T.refresh }}</Button>
+      <div class='flex items-center gap-2'>
+        <router-link v-if='isLeaveInnerPage' to='/approval/leave' class='oa-primary inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-semibold text-white'>＋ 新建请假</router-link>
+        <Button variant='subtle' @click='reloadLists'>{{ T.refresh }}</Button>
+      </div>
     </div>
 
     <template v-if='isLeave'>
-      <div class='grid grid-cols-1 xl:grid-cols-3 gap-4'>
-        <Card :title='pageConfig.formTitle' class='xl:col-span-2'>
+      <section v-if='!isLeaveInnerPage' class='oa-overview-strip' aria-label='请假审批概览'>
+        <div class='oa-overview-primary'>
+          <div class='oa-overview-label'>我的待办</div>
+          <div class='oa-overview-value'>{{ leavePendingCount }}<span>项</span></div>
+          <div class='oa-overview-caption'>只显示当前账号需要处理的审批</div>
+        </div>
+        <div class='oa-overview-stat'><span>我的申请</span><strong>{{ leaveMineCount }}</strong><small>全部状态</small></div>
+        <div class='oa-overview-stat'><span>当前节点</span><strong>{{ leavePendingCount ? '待处理' : '已清空' }}</strong><small>{{ leavePendingCount ? '请先查看待办详情' : '暂无新的审批任务' }}</small></div>
+      </section>
+      <div v-if='!isLeaveInnerPage' class='oa-list-top grid grid-cols-1 xl:grid-cols-3 gap-4 items-start'>
+        <Card :title='pageConfig.formTitle' class='oa-panel oa-form-panel xl:col-span-2'>
           <div class='grid grid-cols-1 md:grid-cols-2 gap-3'>
             <label class='flex flex-col gap-1 text-sm'>
               <span class='text-xs text-gray-500'>{{ T.subject }}</span>
@@ -653,6 +792,7 @@ watch(requestRows, (rows) => {
               <textarea v-model='leaveForm.reason' rows='3' class='border border-gray-300 rounded px-3 py-2 resize-y'></textarea>
             </label>
           </div>
+          <div v-if='leaveDraftName' class='mt-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800'>正在编辑：{{ leaveDraftName }}</div>
           <div class='mt-3 flex items-center gap-3'>
             <Button variant='solid' :loading='saving' @click='submitLeaveRequest'>{{ T.submit }}</Button>
             <span v-if='message' class='text-sm text-green-600'>{{ message }}</span>
@@ -660,11 +800,11 @@ watch(requestRows, (rows) => {
           </div>
         </Card>
 
-        <Card :title='T.routeTitle'>
+        <Card :title='T.routeTitle' class='oa-panel oa-flow-panel'>
           <div v-if='preview.loading' class='text-sm text-gray-500 py-4'>...</div>
-          <div v-else-if='!routeSteps.length' class='text-sm text-gray-400 py-4'>{{ T.empty }}</div>
+          <div v-else-if='!routeSteps.length' class='oa-empty-flow text-sm text-gray-400 py-4'>填写部门和直属主管后，这里会显示实际审批路径</div>
           <ol v-else class='space-y-2'>
-            <li v-for='step in routeSteps' :key='step.step_index' class='rounded border border-gray-200 px-3 py-2'>
+            <li v-for='step in routeSteps' :key='step.step_index' class='oa-route-step rounded border border-gray-200 px-3 py-2'>
               <div class='flex items-center justify-between gap-2'>
                 <span class='font-medium text-gray-900'>{{ step.step_index }}. {{ step.label }}</span>
                 <span class='text-xs rounded bg-gray-100 px-2 py-1 text-gray-600'>{{ modeLabel(step.mode) }}</span>
@@ -677,6 +817,62 @@ watch(requestRows, (rows) => {
           </div>
         </Card>
       </div>
+
+      <Card v-if='!isLeaveInnerPage' :title='T.mineTitle' class='oa-panel oa-table-panel oa-mine-panel'>
+        <div class='overflow-x-auto'>
+          <table class='oa-table w-full table-fixed text-sm'>
+            <thead class='border-b text-gray-500'>
+              <tr><th class='px-3 py-2 text-left'>{{ T.subject }}</th><th class='px-3 py-2 text-left'>请假日期</th><th class='px-3 py-2 text-left'>{{ T.status }}</th><th class='px-3 py-2 text-left'>最近驳回</th><th class='px-3 py-2 text-right'>{{ T.action }}</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for='row in mine.data || []' :key='row.name' class='border-b last:border-0' :class='row.kanban_status === "draft" && rejectionEvent(row) ? "bg-amber-50" : ""'>
+                <td class='px-3 py-2'><div class='font-medium'>{{ row.subject }}</div><div class='text-xs text-gray-500'>{{ row.name }}</div></td>
+                <td class='px-3 py-2'>{{ row.from_date || '-' }} 至 {{ row.to_date || '-' }}<div class='text-xs text-gray-500'>{{ leaveDays(row) }}</div></td>
+                <td class='px-3 py-2'><span class='oa-status-pill' :class='row.kanban_status'>{{ row.workflow_status }}</span></td>
+                <td class='px-3 py-2 text-xs'><template v-if='rejectionEvent(row)'>{{ eventActor(rejectionEvent(row)) }} · {{ rejectionEvent(row).note }}<div class='text-gray-500'>{{ formatEventTime(rejectionEvent(row).timestamp || rejectionEvent(row).acted_on) }}</div></template><span v-else>-</span></td>
+                <td class='px-3 py-2 text-right'><button class='mr-3 text-gray-700 hover:underline' @click='selectLeave(row)'>查看</button><button v-if='row.kanban_status === "draft"' class='text-blue-700 hover:underline' @click='hydrateLeaveDraft(row)'>编辑</button></td>
+              </tr>
+              <tr v-if='!(mine.data || []).length'><td colspan='5' class='py-6 text-center text-gray-400'>{{ T.empty }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card v-if='!isLeaveInnerPage' :title='T.pendingTitle' class='oa-panel oa-table-panel oa-pending-panel'>
+        <div class='overflow-x-auto'>
+          <table class='oa-table w-full table-fixed text-sm'>
+            <thead class='border-b text-gray-500'><tr><th class='px-3 py-2 text-left'>申请</th><th class='px-3 py-2 text-left'>申请人/部门</th><th class='px-3 py-2 text-left'>请假日期</th><th class='px-3 py-2 text-left'>事由</th><th class='px-3 py-2 text-left'>当前节点</th><th class='px-3 py-2 text-right'>操作</th></tr></thead>
+            <tbody>
+              <tr v-for='row in pending.data || []' :key='row.name' class='border-b last:border-0'>
+                <td class='px-3 py-2'><div class='font-medium'>{{ row.subject }}</div><div class='text-xs text-gray-500'>{{ row.name }}</div></td>
+                <td class='px-3 py-2'>{{ row.employee_name }}<div class='text-xs text-gray-500'>{{ row.department }}</div></td>
+                <td class='px-3 py-2'>{{ row.from_date || '-' }} 至 {{ row.to_date || '-' }}<div class='text-xs text-gray-500'>{{ leaveDays(row) }}</div></td>
+                <td class='oa-reason-cell px-3 py-2 text-gray-700' :title='row.reason || ""'>{{ row.reason || '-' }}</td>
+                <td class='px-3 py-2'><span class='oa-node-pill'>{{ row.current_step_label || '待处理' }}</span></td>
+                <td class='px-3 py-2 text-right'><button class='text-blue-700 hover:underline' @click='selectLeave(row)'>查看详情</button></td>
+              </tr>
+              <tr v-if='!(pending.data || []).length'><td colspan='6' class='py-6 text-center text-gray-400'>{{ T.empty }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <section v-if='isLeaveInnerPage && selectedLeave' class='oa-detail-panel'>
+        <div class='oa-detail-heading flex flex-wrap items-start justify-between gap-3'><div><div class='oa-kicker'>请假申请详情</div><h3 class='mt-1 text-xl font-semibold text-gray-950'>{{ selectedLeave.subject || '未填写主题' }}</h3><p class='mt-1 text-sm text-gray-500'>{{ selectedLeave.employee_name }} · {{ selectedLeave.department }}</p></div><div class='oa-status'>{{ selectedLeave.workflow_status }}</div></div>
+        <div v-if='rejectionEvent(selectedLeave)' class='oa-rejection mt-3 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-900'>最近驳回：{{ eventActor(rejectionEvent(selectedLeave)) }} · {{ formatEventTime(rejectionEvent(selectedLeave).timestamp || rejectionEvent(selectedLeave).acted_on) }} · {{ rejectionEvent(selectedLeave).note }}</div>
+        <dl class='oa-meta-grid mt-5 grid gap-3 text-sm md:grid-cols-3'>
+          <div><dt class='text-gray-500'>申请人</dt><dd>{{ selectedLeave.employee_name }}</dd></div><div><dt class='text-gray-500'>部门</dt><dd>{{ selectedLeave.department }}</dd></div><div><dt class='text-gray-500'>直属主管</dt><dd>{{ selectedLeave.supervisor }}</dd></div>
+          <div><dt class='text-gray-500'>开始日期</dt><dd>{{ selectedLeave.from_date }}</dd></div><div><dt class='text-gray-500'>结束日期</dt><dd>{{ selectedLeave.to_date }}</dd></div><div><dt class='text-gray-500'>请假时长</dt><dd>{{ leaveDays(selectedLeave) }}</dd></div>
+          <div class='md:col-span-3'><dt class='text-gray-500'>请假事由</dt><dd class='whitespace-pre-wrap'>{{ selectedLeave.reason || '-' }}</dd></div>
+        </dl>
+        <div class='oa-detail-section oa-attachments mt-4'><h4 class='text-sm font-medium'>附件</h4><div v-if='selectedLeave.attachments?.length' class='mt-2 flex flex-wrap gap-2'><a v-for='file in selectedLeave.attachments' :key='file.name' :href='file.file_url' target='_blank' rel='noopener' class='text-sm text-blue-700 hover:underline'>{{ file.file_name }}</a></div><p v-else class='mt-1 text-sm text-gray-400'>无附件</p></div>
+        <div class='oa-detail-section oa-timeline mt-4'><h4 class='text-sm font-medium'>审批轨迹与意见</h4><ol class='mt-2 space-y-2'><li v-for='step in selectedLeave.steps || []' :key='step.step_key' class='grid gap-2 border-b border-gray-100 pb-2 text-sm md:grid-cols-[1fr_140px_1fr]'><span>{{ step.step_index }}. {{ step.label }}<span class='ml-2 text-xs text-gray-500'>{{ step.approvers.join(' / ') }}</span></span><span>{{ step.status }}</span><span class='text-gray-600'>{{ step.note || '-' }}<span v-if='step.action_by' class='ml-2 text-xs'>{{ step.action_by }} · {{ formatEventTime(step.acted_on) }}</span></span></li></ol></div>
+        <div v-if='selectedLeave.operation_log?.length' class='oa-detail-section oa-history mt-4'><h4 class='text-sm font-medium'>历史操作</h4><ol class='mt-2 space-y-1 text-sm text-gray-600'><li v-for='(event, index) in [...selectedLeave.operation_log].reverse()' :key='index'>{{ formatEventTime(event.timestamp || event.acted_on) }} · {{ event.action }} · {{ eventActor(event) }}<span v-if='event.note'> · {{ event.note }}</span></li></ol></div>
+        <div v-if='selectedLeave.can_act' class='oa-action-bar mt-5 border-t border-gray-200 bg-slate-50 px-4 py-4'><textarea v-model='actionNote' rows='2' class='w-full rounded border px-3 py-2 text-sm' placeholder='审批意见（可选）'></textarea><div class='mt-2 flex flex-wrap gap-2'><Button variant='solid' @click='act(selectedLeave, "approve")'>通过</Button><select v-model='rejectTargetByRequest[selectedLeave.name]' class='rounded border px-3 py-2 text-sm'><option v-for='target in selectedLeave.rejection_targets || []' :key='target.target' :value='target.target'>驳回至：{{ target.label }}</option></select><Button variant='subtle' @click='act(selectedLeave, "reject")'>驳回</Button></div></div>
+      </section>
+      <section v-else-if='isLeaveInnerPage' class='border-t border-gray-200 bg-white py-10 text-center text-sm text-gray-500'>
+        正在加载请假单详情…
+      </section>
     </template>
 
     <ExpenseWorkbench v-else />
@@ -926,32 +1122,106 @@ watch(requestRows, (rows) => {
       </template>
     </template>
 
-    <template v-if='isLeave'>
-      <Card :title='T.pendingTitle'>
-        <div class='mb-3 flex flex-col md:flex-row gap-2'>
-          <input v-model='actionNote' class='border border-gray-300 rounded px-3 py-2 text-sm flex-1' :placeholder='T.note' />
-        </div>
-        <div class='overflow-x-auto'>
-          <table class='w-full text-sm min-w-[760px]'>
-            <thead class='text-gray-500 border-b'>
-              <tr><th class='text-left px-3 py-2'>{{ T.subject }}</th><th class='text-left px-3 py-2'>{{ T.applicant }}</th><th class='text-left px-3 py-2'>{{ T.current }}</th><th class='text-right px-3 py-2'>{{ T.action }}</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for='row in pending.data || []' :key='row.name' class='border-b last:border-0 hover:bg-gray-50'>
-                <td class='px-3 py-2'>{{ row.subject }}</td>
-                <td class='px-3 py-2'>{{ row.employee_name }}</td>
-                <td class='px-3 py-2'>{{ row.current_step_label }}</td>
-                <td class='px-3 py-2 text-right whitespace-nowrap'>
-                  <button class='text-green-700 hover:underline mr-3' @click='act(row, "approve")'>{{ row.current_step_mode === 'handle' ? T.handle : T.approve }}</button>
-                  <select v-if='row.current_step_mode !== "handle"' v-model='rejectTargetByRequest[row.name]' class='mr-2 rounded border border-gray-300 px-1 py-0.5 text-xs'><option v-for='target in row.rejection_targets || []' :key='target.target' :value='target.target'>{{ target.label }}</option></select>
-                    <button v-if='row.current_step_mode !== "handle"' class='text-red-600 hover:underline' @click='act(row, "reject")'>{{ T.reject }}</button>
-                </td>
-              </tr>
-              <tr v-if='!(pending.data || []).length'><td colspan='4' class='text-center text-gray-400 py-6'>{{ T.empty }}</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </template>
   </div>
 </template>
+
+<style scoped>
+.oa-page {
+  --ink: #172033;
+  --muted: #667085;
+  --line: #e5e9f0;
+  --blue: #2563eb;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1360px;
+  min-height: calc(100vh - 3.5rem);
+  margin: 0 auto;
+  padding: 1.75rem 2.25rem 3.5rem;
+  background: #f6f8fb;
+}
+.oa-overview-strip { order: 1; display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 1rem; }
+.oa-overview-primary { min-height: 116px; border: 1px solid #c7d8f8; border-radius: 14px; background: linear-gradient(135deg,#edf4ff 0%,#f7faff 100%); color: #174ea6; padding: 1.1rem 1.25rem; box-shadow: 0 8px 22px rgba(37,99,235,.10); }
+.oa-overview-label { color: #315b97; font-size: .78rem; font-weight: 700; letter-spacing: .02em; }
+.oa-overview-value { margin-top: .3rem; font-size: 2.15rem; font-weight: 750; line-height: 1; }
+.oa-overview-value span { margin-left: .25rem; color: #5c78a7; font-size: .8rem; font-weight: 600; }
+.oa-overview-caption { margin-top: .6rem; color: #5d7399; font-size: .72rem; }
+.oa-overview-stat { display: flex; min-height: 116px; flex-direction: column; justify-content: center; border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 1.1rem 1.25rem; box-shadow: 0 8px 22px rgba(16,32,56,.055); }
+.oa-overview-stat span { color: #667085; font-size: .76rem; font-weight: 650; }
+.oa-overview-stat strong { margin-top: .35rem; color: #172033; font-size: 1.45rem; }
+.oa-overview-stat small { margin-top: .22rem; color: #98a2b3; font-size: .7rem; }
+.oa-pending-panel { order: 2; }
+.oa-list-top { order: 3; align-items: start; }
+.oa-mine-panel { order: 4; }
+.oa-detail-panel { order: 1; }
+.oa-header { border-color: var(--line); padding: .25rem 0 1.1rem; }
+.oa-header h2 { font-size: 1.65rem; letter-spacing: -.02em; }
+.oa-kicker { color: #64748b; font-size: .7rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.oa-back { color: #64748b; }
+.oa-primary { background: #1f4f99 !important; border: 1px solid #1f4f99 !important; box-shadow: 0 2px 5px rgba(31,79,153,.18); }
+.oa-primary:hover { background: #173d78 !important; }
+.oa-panel, .oa-detail-panel { border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 8px 24px rgba(20,33,61,.065); overflow: hidden; }
+.oa-panel > :first-child { color: #172033; }
+.oa-panel h2 { letter-spacing: -.01em; font-size: 1rem; }
+.oa-list-top .oa-panel { align-self: start !important; }
+.oa-form-panel :deep(.p-5), .oa-flow-panel :deep(.p-5) { padding: 1.25rem 1.35rem; }
+.oa-input { min-height: 40px; border-color: #d9dee8 !important; background: #fff; transition: border-color .15s, box-shadow .15s; }
+.oa-input:focus { border-color: #7aa2ef !important; box-shadow: 0 0 0 3px rgba(37,99,235,.12); outline: none; }
+.oa-flow-panel { min-height: 0 !important; height: fit-content; }
+.oa-route-step { border-color: #e3e8f0 !important; background: #fbfcfe; transition: border-color .15s, background .15s, transform .15s; }
+.oa-route-step:hover { border-color: #b7cdf5 !important; background: #f6f9ff; transform: translateY(-1px); }
+.oa-route-step:first-child { border-left: 3px solid #2563eb !important; }
+.oa-flow-panel :deep(.text-gray-400) { color: #98a2b3; }
+.oa-table-panel { margin-top: .25rem; }
+.oa-pending-panel { border-top: 3px solid #2f6fed; }
+.oa-pending-panel :deep(.p-5) { padding: 1rem 1.2rem; }
+.oa-table-panel :deep(.p-5) { padding: 1rem 1.2rem; }
+.oa-table thead { background: #f8fafc; }
+.oa-table th { color: #667085; font-size: .72rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.oa-table tbody tr:hover { background: #f8fbff; }
+.oa-table-panel table { border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.oa-table-panel th, .oa-table-panel td { overflow-wrap: anywhere; }
+.oa-table-panel th:nth-child(1) { width: 22%; }
+.oa-table-panel th:nth-child(2) { width: 18%; }
+.oa-table-panel th:nth-child(3) { width: 19%; }
+.oa-table-panel th:nth-child(4) { width: 20%; }
+.oa-table-panel th:nth-child(5) { width: 13%; }
+.oa-table-panel th:nth-child(6) { width: 8%; }
+.oa-reason-cell { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.oa-table-panel th { background: #f8fafc; }
+.oa-status-pill, .oa-node-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: .25rem .6rem; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+.oa-status-pill.pending { background: #eaf2ff; color: #1d4ed8; }
+.oa-status-pill.draft { background: #fff7e6; color: #b54708; }
+.oa-status-pill.approved, .oa-status-pill.paid { background: #eaf8f0; color: #087443; }
+.oa-status-pill.rejected { background: #fff0f0; color: #b42318; }
+.oa-node-pill { border: 1px solid #dbe5f5; background: #f5f8fd; color: #315b97; }
+.oa-detail-panel { border-top: 4px solid #2f6fed; padding: 1.5rem 1.75rem 1.75rem; }
+.oa-detail-heading { border-bottom: 1px solid var(--line); padding: .25rem 0 1.25rem; }
+.oa-detail-heading h3 { font-size: 1.35rem; line-height: 1.25; }
+.oa-status { border-radius: 999px; background: #eaf2ff; color: #1d4ed8; padding: .35rem .7rem; font-size: .75rem; font-weight: 700; }
+.oa-meta-grid > div { border: 1px solid #e4e9f1; border-radius: 10px; background: #f8fafc; padding: .85rem .95rem; }
+.oa-meta-grid dt { color: #7a8699; font-size: .72rem; margin-bottom: .2rem; }
+.oa-meta-grid dd { color: #182b49; font-weight: 600; }
+.oa-detail-panel > div.mt-4 { border-top: 1px solid var(--line); padding-top: 1rem; }
+.oa-detail-panel h4 { color: #344054; font-weight: 700; }
+.oa-detail-panel ol li { border-color: #edf0f4 !important; }
+.oa-detail-section { border: 1px solid #e7ebf2; border-radius: 12px; background: #fcfdff; padding: 1rem 1.1rem; }
+.oa-rejection { border-radius: 8px; }
+.oa-timeline { background: #fff; }
+.oa-timeline ol { border-left: 2px solid #dbe5f5; padding-left: 1rem; }
+.oa-timeline ol li { position: relative; }
+.oa-timeline ol li::before { position: absolute; left: -1.42rem; top: .25rem; width: .5rem; height: .5rem; border-radius: 50%; background: #4f7fca; content: ''; }
+.oa-history { background: #f8fafc; }
+.oa-action-bar { border: 1px solid #cbdcf8; border-radius: 12px; background: #f4f8ff !important; padding: 1rem 1.1rem; }
+@media (max-width: 768px) {
+  .oa-page { padding: 1rem .75rem 2rem; }
+  .oa-header h2 { font-size: 1.35rem; }
+  .oa-overview-strip { grid-template-columns: 1fr; }
+  .oa-overview-primary { min-height: 96px; }
+  .oa-overview-stat { min-height: 86px; }
+  .oa-detail-panel { padding: 1rem; }
+  .oa-table-panel th, .oa-table-panel td { padding-left: .55rem !important; padding-right: .55rem !important; }
+  .oa-form-panel :deep(.p-5), .oa-flow-panel :deep(.p-5), .oa-table-panel :deep(.p-5) { padding: .9rem; }
+}
+</style>

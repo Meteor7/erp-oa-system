@@ -40,6 +40,35 @@
     "delivery_change_reason",
     "purchase_method",
     "supplier",
+    "price_revision",
+    "price_tax_included",
+    "price_tax_rate",
+    "price_delivery_terms",
+    "price_warranty_terms",
+    "price_invoice_condition",
+    "price_snapshot",
+    "price_submitted_by",
+    "price_submitted_on",
+    "price_approved_by",
+    "price_approved_on",
+    "contract_status",
+    "contract_version",
+    "contract_supplier_legal_name",
+    "contract_credit_code",
+    "contract_supplier_address",
+    "contract_contact",
+    "contract_bank_name",
+    "contract_bank_account",
+    "contract_entity",
+    "contract_template",
+    "contract_seal_user",
+    "contract_snapshot",
+    "contract_draft_content",
+    "contract_reviewed_by",
+    "contract_reviewed_on",
+    "contract_sealed_by",
+    "contract_sealed_on",
+    "payment_plan",
     "payment_stage",
     "prepayment_percentage",
     "has_balance_payment",
@@ -56,14 +85,22 @@
     "received_quantity",
     "payment_source_kind",
     "source_request",
+    "source_payment_plan_row",
+    "source_payment_plan_installment",
+    "source_purchase_order",
+    "source_po_payment_plan_row",
     "approved_amount_snapshot",
     "source_modified",
+    "pmc_change_version",
     "business_lines",
     "asset_category",
     "source_type",
     "source_summary",
     "invoice_count",
     "invoice_status",
+    "invoice_handling_mode",
+    "invoice_followup_status",
+    "expected_invoice_date",
     "no_invoice_reason",
     "payment_section",
     "payment_type",
@@ -96,7 +133,7 @@
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Workflow Status",
-      "options": "草稿\n待审批\n待办理\n已完成\n已拒绝\n已付款",
+      "options": "草稿\n待审批\n待办理\n已完成\n已拒绝\n已撤回\n已付款",
       "read_only": 1
     },
     {
@@ -194,8 +231,7 @@
       "depends_on": "eval:doc.asset_nature==\"固定资产\"",
       "fieldname": "fixed_asset_category",
       "fieldtype": "Select",
-      "label": "Fixed Asset Category",
-      "options": "\n办公家具、工具及器具\n电子设备、研发专用设备、仪器仪表\n生产设备、生产工具及器具"
+      "label": "Fixed Asset Category"
     },
     {
       "default": "",
@@ -203,7 +239,6 @@
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Business Status",
-      "options": "\n待审批\n合同待登记\n合同交期待确认\n采购执行中\n待付款\n待到货\n预付款逾期\n部分到货\n全部到货\n待验收\n验收通过\n验收不合格\n催办中\n供应商退款中\n退货中\n换货中\n待核销\n已核销\n已完成\n已付款\n已退款\n已关闭",
       "read_only": 1
     },
     {
@@ -383,7 +418,7 @@
       "fieldname": "payment_source_kind",
       "fieldtype": "Select",
       "label": "Payment Source Kind",
-      "options": "\n关联采购申请\n关联购买申请\n无事前申请"
+      "options": "\n关联 PO\n关联采购申请\n关联购买申请\n无事前申请"
     },
     {
       "fieldname": "source_request",
@@ -406,22 +441,34 @@
       "read_only": 1
     },
     {
+      "default": "0",
+      "fieldname": "pmc_change_version",
+      "fieldtype": "Int",
+      "label": "PMC Change Version",
+      "read_only": 1
+    },
+    {
       "fieldname": "business_lines",
       "fieldtype": "Table",
       "label": "Purchase Lines",
       "options": "OA Purchase Request Line"
     },
     {
+      "fieldname": "direct_purchase_lines",
+      "fieldtype": "Table",
+      "label": "Direct Purchase Lines",
+      "options": "OA Direct Purchase Line"
+    },
+    {
       "fieldname": "asset_category",
       "fieldtype": "Select",
-      "label": "Asset Category",
-      "options": "非电子类固定资产（人事/行政）\n电子类固定资产（IT）\n生产设备、生产工具及器具\n其他"
+      "label": "Asset Category"
     },
     {
       "fieldname": "source_type",
       "fieldtype": "Select",
       "label": "Source Type",
-      "options": "手工新建\n消费明细下推\n发票下推",
+      "options": "手工新建\n消费明细下推\n发票下推\nPO付款下推",
       "default": "手工新建",
       "read_only": 1
     },
@@ -446,6 +493,24 @@
       "read_only": 1
     },
     {
+      "fieldname": "invoice_handling_mode",
+      "fieldtype": "Select",
+      "label": "Invoice Handling Mode",
+      "options": "已有发票\n暂未取得发票\n无需发票"
+    },
+    {
+      "fieldname": "invoice_followup_status",
+      "fieldtype": "Select",
+      "label": "Invoice Follow-up Status",
+      "options": "\n待收票\n已收票\n已核验\n无需发票",
+      "read_only": 1
+    },
+    {
+      "fieldname": "expected_invoice_date",
+      "fieldtype": "Date",
+      "label": "Expected Invoice Date"
+    },
+    {
       "fieldname": "no_invoice_reason",
       "fieldtype": "Small Text",
       "label": "No Invoice Reason"
@@ -457,9 +522,8 @@
     },
     {
       "fieldname": "payment_type",
-      "fieldtype": "Select",
-      "label": "Payment Type",
-      "options": "支付个人\n对公支付"
+      "fieldtype": "Data",
+      "label": "Payment Type"
     },
     {
       "fieldname": "payment_method",
@@ -535,6 +599,198 @@
       "label": "Approval Steps",
       "options": "OA Approval Step",
       "read_only": 1
+    },
+    {
+      "fieldname": "price_revision",
+      "fieldtype": "Int",
+      "label": "Price Revision",
+      "read_only": 1
+    },
+    {
+      "fieldname": "price_tax_included",
+      "fieldtype": "Check",
+      "label": "Tax Included"
+    },
+    {
+      "fieldname": "price_tax_rate",
+      "fieldtype": "Percent",
+      "label": "Tax Rate"
+    },
+    {
+      "fieldname": "price_delivery_terms",
+      "fieldtype": "Small Text",
+      "label": "Delivery Terms"
+    },
+    {
+      "fieldname": "price_warranty_terms",
+      "fieldtype": "Small Text",
+      "label": "Warranty Terms"
+    },
+    {
+      "fieldname": "price_invoice_condition",
+      "fieldtype": "Small Text",
+      "label": "Invoice Condition"
+    },
+    {
+      "fieldname": "price_snapshot",
+      "fieldtype": "Long Text",
+      "label": "Approved Price Snapshot",
+      "read_only": 1
+    },
+    {
+      "fieldname": "price_submitted_by",
+      "fieldtype": "Link",
+      "label": "Price Submitted By",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "price_submitted_on",
+      "fieldtype": "Datetime",
+      "label": "Price Submitted On",
+      "read_only": 1
+    },
+    {
+      "fieldname": "price_approved_by",
+      "fieldtype": "Link",
+      "label": "Price Approved By",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "price_approved_on",
+      "fieldtype": "Datetime",
+      "label": "Price Approved On",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_status",
+      "fieldtype": "Select",
+      "label": "Contract Status",
+      "options": "\n待补充信息\n草稿待复核\n待电子用印\n已生效",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_version",
+      "fieldtype": "Int",
+      "label": "Contract Version",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_supplier_legal_name",
+      "fieldtype": "Data",
+      "label": "Supplier Legal Name"
+    },
+    {
+      "fieldname": "contract_credit_code",
+      "fieldtype": "Data",
+      "label": "Unified Credit Code"
+    },
+    {
+      "fieldname": "contract_supplier_address",
+      "fieldtype": "Small Text",
+      "label": "Supplier Address"
+    },
+    {
+      "fieldname": "contract_contact",
+      "fieldtype": "Data",
+      "label": "Contract Contact"
+    },
+    {
+      "fieldname": "contract_bank_name",
+      "fieldtype": "Data",
+      "label": "Contract Bank Name"
+    },
+    {
+      "fieldname": "contract_bank_account",
+      "fieldtype": "Data",
+      "label": "Contract Bank Account"
+    },
+    {
+      "fieldname": "contract_entity",
+      "fieldtype": "Data",
+      "label": "Contract Entity"
+    },
+    {
+      "fieldname": "contract_template",
+      "fieldtype": "Data",
+      "label": "Contract Template"
+    },
+    {
+      "fieldname": "contract_seal_user",
+      "fieldtype": "Link",
+      "label": "Seal User",
+      "options": "User"
+    },
+    {
+      "fieldname": "contract_snapshot",
+      "fieldtype": "Long Text",
+      "label": "Contract Snapshot",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_draft_content",
+      "fieldtype": "Long Text",
+      "label": "Contract Draft Content",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_reviewed_by",
+      "fieldtype": "Link",
+      "label": "Contract Reviewed By",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_reviewed_on",
+      "fieldtype": "Datetime",
+      "label": "Contract Reviewed On",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_sealed_by",
+      "fieldtype": "Link",
+      "label": "Contract Sealed By",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_sealed_on",
+      "fieldtype": "Datetime",
+      "label": "Contract Sealed On",
+      "read_only": 1
+    },
+    {
+      "fieldname": "payment_plan",
+      "fieldtype": "Table",
+      "label": "Procurement Payment Plan",
+      "options": "OA Procurement Payment Plan Row",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_payment_plan_row",
+      "fieldtype": "Data",
+      "label": "Source Payment Plan Row",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_payment_plan_installment",
+      "fieldtype": "Int",
+      "label": "Source Payment Plan Installment",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_purchase_order",
+      "fieldtype": "Link",
+      "options": "OA Purchase Order",
+      "label": "Source Purchase Order",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_po_payment_plan_row",
+      "fieldtype": "Data",
+      "label": "Source PO Payment Plan Row",
+      "read_only": 1
     }
   ],
   "index_web_pages_for_search": 1,
@@ -602,3 +858,4 @@
   "sort_order": "DESC",
   "states": []
 }
+

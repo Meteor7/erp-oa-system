@@ -142,12 +142,12 @@ def test_other_department_ordinary_employee_has_full_sequential_route():
     )
 
     assert labels(steps) == [
-        "财务审核：演示员工13",
+        "出纳审核",
         "直属主管：演示员工132",
         "财务主管：演示员工16",
         "副总经理：演示员工21",
         "总经理：演示员工29",
-        "确认付款：演示员工13",
+        "出纳确认付款",
     ]
     assert modes(steps) == ["approve", "approve", "approve", "approve", "approve", "handle"]
     assert [step["approvers"] for step in steps] == [
@@ -170,12 +170,12 @@ def test_manager_under_philippe_skips_stage_two_and_uses_ren_for_non_electronic_
     )
 
     assert labels(steps) == [
-        "财务审核：演示员工13",
+        "出纳审核",
         "固定资产审批：人事经理",
         "财务主管：演示员工16",
         "副总经理：演示员工21",
         "总经理：演示员工29",
-        "确认付款：演示员工13",
+        "出纳确认付款",
     ]
     assert "直属主管：演示员工21" not in labels(steps)
     assert steps[1]["approvers"] == ["person047@staff.example.invalid"]
@@ -191,11 +191,11 @@ def test_customer_service_is_sales_and_uses_electronic_asset_then_executive_cosi
     )
 
     assert labels(steps) == [
-        "财务审核：演示员工13",
+        "出纳审核",
         "固定资产审批：演示员工18",
         "财务主管：演示员工16",
         "副总经理：演示员工21、总经理：演示员工29",
-        "确认付款：演示员工13",
+        "出纳确认付款",
     ]
     assert modes(steps) == ["approve", "approve", "approve", "all", "handle"]
     assert steps[1]["approvers"] == [IT_APPROVER_USER]
@@ -215,7 +215,7 @@ def test_sales_department_aliases_use_cosign(department):
     assert any(step["mode"] == "all" for step in steps)
 
 
-def test_finance_keeps_supervisor_and_finance_manager_then_only_wang_at_stage_five():
+def test_finance_merges_same_supervisor_and_finance_manager_then_uses_wang():
     steps = build_expense_payment_route(
         department="财务部 - RAY",
         supervisor="演示员工16",
@@ -225,14 +225,13 @@ def test_finance_keeps_supervisor_and_finance_manager_then_only_wang_at_stage_fi
     )
 
     assert labels(steps) == [
-        "财务审核：演示员工13",
+        "出纳审核",
         "直属主管：演示员工16",
-        "财务主管：演示员工16",
         "总经理：演示员工29",
-        "确认付款：演示员工13",
+        "出纳确认付款",
     ]
     assert steps[1]["approvers"] == [FINANCE_MANAGER_USER]
-    assert steps[2]["approvers"] == [FINANCE_MANAGER_USER]
+    assert sum(FINANCE_MANAGER_USER in step["approvers"] for step in steps) == 1
     assert VICE_MANAGER_USER not in {user for step in steps for user in step["approvers"]}
 
 
@@ -280,12 +279,16 @@ def procurement_roles():
     return {
         "pmc": role("pmc", "PMC", "pmc@example.com", "演示员工178"),
         "hr_manager": role("hr_manager", "人事经理", "hr@example.com", "演示员工10"),
-        "finance_auditor": role("finance_auditor", "财务审核", "finance@example.com", "演示员工13"),
+        "finance_auditor": role("finance_auditor", "出纳", "finance@example.com", "演示员工32"),
+        "finance_accountant": role("finance_accountant", "总账会计", "accountant@example.com", "演示员工19"),
         "finance_manager": role("finance_manager", "财务主管", "manager@example.com", "演示员工16"),
         "vice_manager": role("vice_manager", "副总经理", "vice@example.com", "演示员工21"),
         "general_manager": role("general_manager", "总经理", "general@example.com", "演示员工29"),
         "production_asset_owner": role(
             "production_asset_owner", "生产设备负责人", "production@example.com", "演示员工241"
+        ),
+        "procurement_manager": role(
+            "procurement_manager", "采购经办人", "buyer@example.com", "演示员工216"
         ),
     }
 
@@ -299,10 +302,15 @@ def test_procurement_route_is_pmc_supervisor_project_owner_and_production_owner(
         asset_category=PRODUCTION_ASSET,
         roles=procurement_roles(),
     )
-    assert labels(steps) == ["PMC：演示员工178", "直属主管：直属领导", "项目主管：项目主管", "生产设备负责人：演示员工241"]
-    assert [step["approvers"] for step in steps] == [
-        ["pmc@example.com"], ["boss@example.com"], ["owner@example.com"], ["production@example.com"]
+    assert labels(steps) == [
+        "直属主管：直属领导、项目主管：项目主管（会签）",
+        "生产设备负责人：演示员工241", "PMC：演示员工178", "需求终审：副总经理：演示员工21",
     ]
+    assert [step["approvers"] for step in steps] == [
+        ["boss@example.com", "owner@example.com"], ["production@example.com"],
+        ["pmc@example.com"], ["vice@example.com"],
+    ]
+    assert modes(steps) == ["all", "approve", "approve", "approve"]
 
 
 def test_procurement_route_skips_top_supervisor_and_omits_project_for_non_project():
@@ -315,7 +323,9 @@ def test_procurement_route_skips_top_supervisor_and_omits_project_for_non_projec
         asset_category=OTHER_ASSET,
         roles=procurement_roles(),
     )
-    assert labels(steps) == ["PMC：演示员工178"]
+    assert labels(steps) == [
+        "PMC：演示员工178", "需求终审：副总经理：演示员工21",
+    ]
 
 
 def test_procurement_route_keeps_pmc_when_pmc_is_the_applicant():
@@ -329,7 +339,9 @@ def test_procurement_route_keeps_pmc_when_pmc_is_the_applicant():
         asset_category=OTHER_ASSET,
         roles=roles,
     )
-    assert labels(steps) == ["PMC：演示员工178"]
+    assert labels(steps) == [
+        "PMC：演示员工178", "需求终审：副总经理：演示员工21",
+    ]
     assert steps[0]["approvers"] == ["pmc@example.com"]
 
 
@@ -342,7 +354,7 @@ def test_other_purchase_routes_once_when_direct_supervisor_is_top_executive():
         applicant_user="employee@example.com",
         roles=procurement_roles(),
     )
-    assert labels(steps) == ["部门主管上级：演示员工21"]
+    assert labels(steps) == ["副总经理：演示员工21"]
     assert steps[0]["approvers"] == ["vice@example.com"]
 
 
@@ -357,7 +369,9 @@ def test_procurement_route_deduplicates_same_supervisor_and_project_owner():
         asset_category=OTHER_ASSET,
         roles=roles,
     )
-    assert labels(steps) == ["PMC：演示员工178"]
+    assert labels(steps) == [
+        "直属主管：主管", "需求终审：副总经理：演示员工21",
+    ]
 
 
 def test_direct_purchase_jd_and_other_routes_are_distinct():
@@ -372,34 +386,46 @@ def test_direct_purchase_jd_and_other_routes_are_distinct():
         purchase_method="其他购买",
         supervisor="主管",
         supervisor_user="boss@example.com",
-        upper_supervisor="演示员工21",
-        upper_supervisor_user="vice@example.com",
+        upper_supervisor="演示员工29",
+        upper_supervisor_user="general@example.com",
         roles=roles,
     )
     assert labels(jd) == ["京东购买会签：人事经理、演示员工21"]
     assert [step["approvers"] for step in jd] == [["hr@example.com", "vice@example.com"]]
     assert modes(jd) == ["all"]
-    assert labels(other) == ["直属部门主管：主管", "部门主管上级：演示员工21"]
+    assert labels(other) == ["直属部门主管：主管", "副总经理：演示员工21"]
     assert [step["approvers"] for step in other] == [
         ["boss@example.com"], ["vice@example.com"]
     ]
 
 
+def test_other_purchase_rejects_executive_self_submission():
+    with pytest.raises(ApprovalRouteError, match="公司高管本人"):
+        build_direct_purchase_route(
+            purchase_method="其他购买",
+            supervisor="演示员工29",
+            supervisor_user="general@example.com",
+            supervisor_decision="skip",
+            applicant_user="vice@example.com",
+            roles=procurement_roles(),
+        )
+
+
 def test_procurement_payment_is_stage_specific_but_expense_payment_keeps_department_branching():
     roles = procurement_roles()
     prepayment = build_procurement_payment_route(payment_stage="预付款", roles=roles)
-    assert labels(prepayment) == ["财务主管：演示员工16", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert labels(prepayment) == ["演示员工21", "总账会计：演示员工19", "财务主管：演示员工16", "出纳：演示员工32", "总经理付款：演示员工29"]
     assert [step["approvers"] for step in prepayment] == [
-        ["manager@example.com"], ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
+        ["vice@example.com"], ["accountant@example.com"], ["manager@example.com"], ["finance@example.com"], ["general@example.com"]
     ]
-    assert modes(prepayment) == ["approve", "approve", "approve", "handle"]
+    assert modes(prepayment) == ["approve", "approve", "approve", "approve", "handle"]
 
     tail = build_procurement_payment_route(payment_stage="尾款", roles=roles)
-    assert labels(tail) == ["财务主管：演示员工16", "演示员工21", "演示员工29", "财务确认付款：演示员工13"]
+    assert labels(tail) == ["演示员工21", "总账会计：演示员工19", "财务主管：演示员工16", "出纳：演示员工32", "总经理付款：演示员工29"]
     assert [step["approvers"] for step in tail] == [
-        ["manager@example.com"], ["vice@example.com"], ["general@example.com"], ["finance@example.com"]
+        ["vice@example.com"], ["accountant@example.com"], ["manager@example.com"], ["finance@example.com"], ["general@example.com"]
     ]
-    assert modes(tail) == ["approve", "approve", "approve", "handle"]
+    assert modes(tail) == ["approve", "approve", "approve", "approve", "handle"]
 
     buying_payment = build_expense_payment_route(
         department="销售部 - RAY",

@@ -16,7 +16,15 @@ def test_owner_role_profile_bundles_required_roles():
     profiles = {p["role_profile"]: p for p in ROLE_PROFILES}
     assert "总控 Owner" in profiles, "Owner role profile must exist"
     owner_roles = profiles["总控 Owner"]["roles"]
-    for role in ("System Manager", "HR Manager", "Accounts User", "Department Manager"):
+    for role in (
+        "System Manager",
+        "HR Manager",
+        "Accounts User",
+        "Department Manager",
+        "Employee",
+        "All Project Access",
+        "Rayher Business Executive",
+    ):
         assert role in owner_roles
 
 

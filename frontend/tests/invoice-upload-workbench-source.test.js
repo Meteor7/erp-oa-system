@@ -15,6 +15,7 @@ test('invoice upload workspace exposes record-driven reversible APIs', () => {
   assert.match(lib, /push_invoices_to_request/);
   assert.match(lib, /withdraw_invoice_push/);
   assert.match(lib, /include_pushed/);
+  assert.match(lib, /export function attachInvoiceBatch/);
 });
 
 test('invoice upload workspace provides batch review selection detail push and preview', () => {
@@ -25,7 +26,7 @@ test('invoice upload workspace provides batch review selection detail push and p
   for (const label of ['发票类别', '项目名称', '开票日期', '发票号码', '税前金额', '税额', '合计金额', '费用说明', '补充附件']) {
     assert.ok(source.includes(label), label);
   }
-  for (const action of ['确认内容', '撤回确认', '下推到费用报销流程', '查看发票']) {
+  for (const action of ['确认内容', '撤回确认', '生成付款/报销草稿', '查看发票']) {
     assert.ok(source.includes(action), action);
   }
   assert.ok(expense.includes('撤回下推'));
@@ -48,7 +49,8 @@ test('invoice push form uses readonly current applicant and canonical payment la
   assert.doesNotMatch(source, /v-model="pushForm\.supervisor"/);
   assert.doesNotMatch(source, />部门主管</);
   assert.ok(source.includes('付款类型'));
-  assert.match(source, /payment_type:\s*['"]支付个人['"]/);
+  assert.match(source, /payment_type:\s*['"]['"]/);
+  assert.match(source, /list="payment-type-suggestions"/);
   assert.ok(source.includes('支付方式'));
   const payee = source.indexOf('收款人');
   const method = source.indexOf('支付方式');
@@ -60,7 +62,7 @@ test('invoice push form uses readonly current applicant and canonical payment la
 
 test('expense workbench uses four first-class pages and exact seven-column details', () => {
   assert.ok(expense.includes('上传发票'));
-  assert.ok(expense.includes('费用报销流程'));
+  assert.ok(expense.includes('付款/报销流程'));
   assert.ok(expense.includes('费用统计'));
   assert.ok(expense.includes('审批记录'));
   assert.match(expense, /ExpenseStatistics/);
@@ -78,6 +80,20 @@ test('expense workbench uses four first-class pages and exact seven-column detai
   assert.match(expense, /withdraw_payment/);
 });
 
+
+test('deferred invoices can be supplemented and finance-verified without changing payment fields', () => {
+  const source = readFileSync(componentUrl, 'utf8');
+  assert.match(source, /targetRequest/);
+  assert.match(source, /attachInvoiceBatch/);
+  assert.match(source, /supplemented/);
+  assert.match(expense, /invoice_handling_mode/);
+  assert.match(expense, /expected_invoice_date/);
+  assert.match(expense, /verify_request_invoices/);
+  assert.match(expense, /补录发票/);
+  assert.match(expense, /确认已核验/);
+  assert.match(expense, /关联发票/);
+  assert.match(expense, /付款后补录/);
+});
 
 test('invoice upload workspace uses a responsive list and focused review panel', () => {
   const source = readFileSync(componentUrl, 'utf8');

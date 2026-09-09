@@ -15,10 +15,10 @@ function asRoles(roles) {
 test("employees can edit their own timesheet without management-page access", () => {
   asRoles(["Employee"]);
   assert.equal(canSee("/entry"), true);
-  assert.equal(firstVisiblePath(), "/entry");
+  assert.equal(firstVisiblePath(), "/dashboard");
   assert.equal(canSee("/approval/leave"), true);
   assert.equal(canSee("/approval/purchase"), true);
-  assert.equal(canSee("/dashboard"), false);
+  assert.equal(canSee("/dashboard"), true);
   assert.equal(canSee("/accommodation"), false);
   assert.equal(canSee("/expense"), false);
   assert.equal(canEditTimesheetEntry(), true);
@@ -27,7 +27,8 @@ test("employees can edit their own timesheet without management-page access", ()
 test("department supervisors can use timesheet entry and approval pages without HR access", () => {
   asRoles(["Employee", "Department Manager"]);
   assert.equal(canSee("/entry"), true);
-  assert.equal(firstVisiblePath(), "/entry");
+  assert.equal(firstVisiblePath(), "/dashboard");
+  assert.equal(canSee("/dashboard"), true);
   assert.equal(canSee("/approval/leave"), true);
   assert.equal(canSee("/approval/purchase"), true);
   assert.equal(canSee("/personnel"), false);
@@ -140,4 +141,41 @@ test("closed approval center drafts stay hidden until explicit server flags", ()
   assert.equal(canSee("/approval/procurement"), true);
   assert.equal(canSee("/approval/direct-purchase"), true);
   assert.equal(canSee("/approval/procurement-payment"), true);
+});
+
+test("procurement downstream pages are restricted by business role", () => {
+  globalThis.window = { roles: ["Employee"], oa_access: { procurement_application: true } };
+  assert.equal(canSee("/approval/procurement/OA-2026-00469/price-approval"), false);
+  assert.equal(canSee("/approval/procurement/OA-2026-00469/contract"), false);
+  globalThis.window.user = "person033@staff.example.invalid";
+  assert.equal(canSee("/approval/procurement/OA-2026-00469/price-approval"), true);
+  assert.equal(canSee("/approval/procurement/OA-2026-00469/contract"), true);
+  globalThis.window = { roles: ["Accounts User"], oa_access: { procurement_application: true } };
+  assert.equal(canSee("/approval/procurement/po"), true);
+  assert.equal(canSee("/approval/procurement/price-approvals"), true);
+  globalThis.window.oa_access.procurement_application = false;
+  assert.equal(canSee("/approval/procurement/OA-2026-00469/price-approval"), false);
+});
+
+test("procurement new page inherits procurement access", () => {
+  globalThis.window = { roles: ["Employee"], oa_access: { procurement_application: true } };
+  assert.equal(canSee("/approval/procurement/new"), true);
+  globalThis.window.oa_access.procurement_application = false;
+  assert.equal(canSee("/approval/procurement/new"), false);
+});
+
+test("direct purchase new page inherits direct purchase access", () => {
+  globalThis.window = { roles: ["Employee"], oa_access: { direct_purchase_application: true } };
+  assert.equal(canSee("/approval/direct-purchase/new"), true);
+  globalThis.window.oa_access.direct_purchase_application = false;
+  assert.equal(canSee("/approval/direct-purchase/new"), false);
+});
+
+test("unauthenticated users cannot see protected business routes", () => {
+  globalThis.window = { roles: [], oa_access: {} };
+  assert.equal(canSee("/dashboard"), false);
+  assert.equal(canSee("/approval/procurement"), false);
+  assert.equal(canSee("/approval/procurement-payment"), false);
+  assert.equal(canSee("/personnel"), false);
+  assert.equal(firstVisiblePath(), "/dashboard");
 });

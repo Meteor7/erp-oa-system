@@ -91,6 +91,20 @@ def test_designation_role_resolves_unique_active_employee_snapshot():
     }
 
 
+def test_hr_manager_uses_ordered_designation_fallback():
+    store = MemoryStore()
+    current = employee("EMP-HR-OLD", "演示员工10", "old@example.com", "人事行政经理")
+    successor = employee("EMP-HR-NEW", "演示员工38", "new@example.com", "人事经理")
+    store.by_designation["人事行政经理"] = [current]
+    store.by_designation["人事经理"] = [successor]
+    store.enabled_users.update({"old@example.com", "new@example.com"})
+
+    assert resolve_role("hr_manager", store=store)["employee"] == "EMP-HR-OLD"
+
+    store.by_designation["人事行政经理"] = []
+    assert resolve_role("hr_manager", store=store)["employee"] == "EMP-HR-NEW"
+
+
 def test_pmc_requires_explicit_role_assignment_and_preserves_role_label():
     store = MemoryStore()
     store.assignments["pmc"] = {
@@ -182,6 +196,28 @@ def test_bootstrap_procurement_manager_creates_account_binds_employee_and_roles(
     ]
 
 
+def test_bootstrap_pmc_repairs_existing_account_roles_and_permissions():
+    store = MemoryStore()
+    store.employees["HR-EMP-90017"] = {
+        "name": "HR-EMP-90017", "employee_name": "演示员工178", "status": "Active",
+        "user_id": "person076@staff.example.invalid",
+    }
+    store.users["person076@staff.example.invalid"] = {
+        "name": "person076@staff.example.invalid", "enabled": 1,
+    }
+
+    result = bootstrap_pmc(store=store)
+
+    assert result["user"] == "person076@staff.example.invalid"
+    assert store.created_users == []
+    assert store.ensured_roles == [
+        ("person076@staff.example.invalid", ["Employee", "Purchase User"])
+    ]
+    assert store.ensured_permissions == [
+        ("HR-EMP-90017", "person076@staff.example.invalid")
+    ]
+
+
 def test_bootstrap_refuses_wrong_or_inactive_employee():
     store = MemoryStore()
     store.employees["HR-EMP-90017"] = {
@@ -201,7 +237,7 @@ def test_role_assignment_doctype_has_unique_role_and_user_links():
     assert fields["user"]["options"] == "User"
     assert fields["employee"]["options"] == "Employee"
     assert set(ROLE_SPECS) == {
-        "pmc", "hr_manager", "finance_auditor", "finance_manager",
+        "pmc", "hr_manager", "finance_auditor", "finance_accountant", "finance_manager",
         "vice_manager", "general_manager", "production_asset_owner",
         "procurement_manager",
     }

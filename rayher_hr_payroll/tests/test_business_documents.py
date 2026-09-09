@@ -18,6 +18,7 @@ class MemoryStore:
         self.writable = True
         self.locks = []
         self.user = "owner@example.com"
+        self.parent = SimpleNamespace(name="OA-1", owner="request-owner@example.com", request_type="采购申请", workflow_status="草稿", business_status="", price_submitted_on=None)
 
     def add_file(self, name, filename, content, private=True, attached_to_doctype=None):
         file_doc = SimpleNamespace(
@@ -37,7 +38,8 @@ class MemoryStore:
         allowed = self.readable if ptype == "read" else self.writable
         if not allowed:
             raise documents.BusinessDocumentError("无权访问父审批单")
-        return SimpleNamespace(name=request, owner="request-owner@example.com")
+        self.parent.name = request
+        return self.parent
 
     def lock_versions(self, request, document_type):
         self.locks.append((request, document_type))
@@ -67,6 +69,21 @@ class MemoryStore:
     def list_documents(self, request):
         return [row for row in self.rows if row["request"] == request]
 
+    def get_document(self, name):
+        row = next(row for row in self.rows if row["name"] == name)
+        return SimpleNamespace(**row)
+
+    def delete_document(self, document):
+        self.rows = [row for row in self.rows if row["name"] != document.name]
+
+    def void_document(self, document, reason):
+        row = next(row for row in self.rows if row["name"] == document.name)
+        row.update({"status": "已作废", "void_reason": reason, "voided_by": self.user, "voided_on": self.now()})
+        return SimpleNamespace(**row)
+
+    def is_administrator(self):
+        return False
+
     def actor(self):
         return self.user
 
@@ -77,7 +94,7 @@ class MemoryStore:
 def test_allowed_document_types_match_approved_archive_scope():
     assert documents.DOCUMENT_TYPES == (
         "需求申请", "报价单", "价格审批表", "PR", "PO", "合同", "付款计划",
-        "发票", "验收资料", "送货单", "收料单", "入库单", "付款回单", "退款回单", "采购完成报告",
+        "发票", "验收资料", "送货单", "收料单", "入库单", "付款回单", "退款回单", "采购完成报告", "其他补充资料",
     )
 
 
@@ -118,6 +135,30 @@ def test_upload_appends_version_and_reparents_private_file():
     assert first_file.attached_to_name == first.name
     assert first_file.owner == "Administrator"
     assert store.locks == [("OA-1", "合同"), ("OA-1", "合同")]
+
+
+def test_wrong_upload_can_be_deleted_before_price_submission():
+    store = MemoryStore()
+    store.add_file("FILE-1", "wrong.pdf", b"%PDF-1.7\nwrong")
+    row = documents.attach("OA-1", "价格审批表", "FILE-1", store=store)
+    result = documents.remove(row.name, store=store)
+    assert result == {"name": row.name, "action": "deleted"}
+    assert store.rows == []
+
+
+def test_document_is_voided_with_reason_after_approval_starts():
+    store = MemoryStore()
+    store.add_file("FILE-1", "approved.pdf", b"%PDF-1.7\napproved")
+    row = documents.attach("OA-1", "价格审批表", "FILE-1", store=store)
+    store.parent.workflow_status = "已完成"
+    store.parent.business_status = "价格已批准/待补充合同信息"
+    store.parent.price_submitted_on = "2026-08-25 12:00:00"
+    with pytest.raises(documents.BusinessDocumentError, match="作废原因"):
+        documents.remove(row.name, store=store)
+    result = documents.remove(row.name, "上传文件错误", store=store)
+    assert result["action"] == "voided"
+    assert store.rows[0]["status"] == "已作废"
+    assert store.rows[0]["void_reason"] == "上传文件错误"
 
 
 def test_file_must_be_private_unattached_supported_and_magic_must_match():

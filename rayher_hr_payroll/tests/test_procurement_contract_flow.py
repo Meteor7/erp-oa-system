@@ -199,7 +199,7 @@ def test_late_confirmation_deduplicates_same_pmc_and_project_owner_account(monke
     assert [row.label for row in doc.steps[3:]] == ["合同交期确认-PMC：演示员工178"]
 
 
-def test_completed_base_procurement_moves_to_contract_registration(oa_entry):
+def test_completed_base_procurement_moves_to_pr_and_price_inquiry(oa_entry):
     doc = procurement()
     doc.workflow_status = "待审批"
     doc.business_status = "待审批"
@@ -207,5 +207,4 @@ def test_completed_base_procurement_moves_to_contract_registration(oa_entry):
     current = doc.steps[-1]
     oa_entry._advance_after_step(doc, current)
     assert doc.workflow_status == "已完成"
-    assert doc.business_status == "合同待登记"
-
+    assert doc.business_status == "需求已批准/待询价"

@@ -1,0 +1,13 @@
+{
+  "doctype":"DocType","name":"OA Procurement Request","module":"Rayher HR Payroll","autoname":"format:PR-{YYYY}-{#####}","engine":"InnoDB","track_changes":1,
+  "field_order":["status","requested_by","source_projects","source_count","total_quantity","lines"],
+  "fields":[
+    {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Draft\n待采购\n部分转PO\n已转PO\n已关闭\n已取消","default":"待采购","in_list_view":1},
+    {"fieldname":"requested_by","fieldtype":"Link","options":"User","label":"Created By","read_only":1},
+    {"fieldname":"source_projects","fieldtype":"Small Text","label":"Projects","read_only":1},
+    {"fieldname":"source_count","fieldtype":"Int","label":"Source OA Count","read_only":1},
+    {"fieldname":"total_quantity","fieldtype":"Float","label":"Total Quantity","read_only":1},
+    {"fieldname":"lines","fieldtype":"Table","options":"OA Procurement Request Line","label":"Material Lines"}
+  ],
+  "permissions":[{"role":"System Manager","read":1,"write":1,"create":1,"delete":0,"report":1,"export":1},{"role":"Purchase User","read":1,"write":1,"create":1,"delete":0,"report":1,"export":1}],"sort_field":"modified","sort_order":"DESC"
+}

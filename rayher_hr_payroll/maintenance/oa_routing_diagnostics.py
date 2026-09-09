@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import frappe
 
+from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
     OrganizationResolutionError,
@@ -11,14 +12,12 @@ from rayher_hr_payroll.oa_organization import (
 )
 
 
-REQUIRED_APPROVERS = {
-    "演示员工13": "person067@staff.example.invalid",
-    "演示员工10": "person047@staff.example.invalid",
-    "演示员工18": "person068@staff.example.invalid",
-    "演示员工16": "person072@staff.example.invalid",
-    "演示员工21": "person046@staff.example.invalid",
-    "演示员工29": "person060@staff.example.invalid",
-}
+REQUIRED_APPROVERS = {"演示员工18": "person068@staff.example.invalid"}
+REQUIRED_ROLE_KEYS = (
+    "pmc", "hr_manager", "finance_auditor", "finance_manager",
+    "vice_manager", "general_manager", "production_asset_owner",
+    "procurement_manager",
+)
 
 
 def _clean(value):
@@ -147,11 +146,27 @@ def run(dry_run=True):
         fields=["name", "employee_name", "department"],
         order_by="department asc, employee_name asc",
     )
+    required_approvers = dict(REQUIRED_APPROVERS)
+    role_errors = []
+    for role_key in REQUIRED_ROLE_KEYS:
+        try:
+            role = resolve_role(role_key)
+        except ApprovalRoleResolutionError as exc:
+            role_errors.append({
+                "type": "required_role_not_ready",
+                "role_key": role_key,
+                "message": str(exc),
+            })
+            continue
+        required_approvers[role["employee_name"]] = role["user"]
     report = build_diagnostics(
         employees,
         _enabled_user_for_employee,
         _account_state,
+        required_approvers=required_approvers,
     )
+    report["errors"].extend(role_errors)
+    report["error_count"] = len(report["errors"])
     report["dry_run"] = bool(dry_run)
     report["mutated"] = False
     return report

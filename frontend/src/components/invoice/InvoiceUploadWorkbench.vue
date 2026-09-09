@@ -12,6 +12,7 @@ import {
   invoiceFieldWarnings,
   invoiceSelectionReason,
   fetchInvoiceSupplementalAttachmentPreview,
+  attachInvoiceBatch,
   pushInvoices,
   resolveDuplicate,
   retryInvoice,
@@ -29,8 +30,9 @@ const ASSET_CATEGORIES = ['非电子类固定资产（人事/行政）', '电子
 
 const props = defineProps({
   options: { type: Object, default: () => ({}) },
+  targetRequest: { type: Object, default: null },
 });
-const emit = defineEmits(['request-created']);
+const emit = defineEmits(['request-created', 'supplemented']);
 
 const rows = ref([]);
 const selectedName = ref('');
@@ -52,7 +54,7 @@ const pushForm = reactive({
   asset_category: '',
   doc_type: '',
   urgency: '',
-  payment_type: '支付个人',
+  payment_type: '',
   payment_method: '',
   bank_name: '',
   payee_name: '',
@@ -367,9 +369,35 @@ function applyPushDefaults() {
   pushForm.payee_name ||= applicant.value.employee_name || '';
 }
 
+async function supplementTargetRequest() {
+  const selected = rows.value.filter((row) => checkedNames.value.includes(row.name));
+  const batches = [...new Set(selected.map((row) => row.batch).filter(Boolean))];
+  if (batches.length !== 1) {
+    errorMessage.value = '一次只能补录同一上传批次的发票。';
+    return;
+  }
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    await attachInvoiceBatch(batches[0], props.targetRequest.name);
+    checkedNames.value = [];
+    message.value = `发票已补录到 ${props.targetRequest.name}，当前状态为已收票。`;
+    emit('supplemented', props.targetRequest.name);
+    await reload(false);
+  } catch (error) {
+    errorMessage.value = cleanError(error, '补录发票失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
 function openPush() {
   if (!checkedNames.value.length) {
     errorMessage.value = '请先勾选已确认且未下推的发票。';
+    return;
+  }
+  if (props.targetRequest) {
+    supplementTargetRequest();
     return;
   }
   applyPushDefaults();
@@ -388,7 +416,7 @@ async function submitPush() {
     showPush.value = false;
     checkedNames.value = [];
     pushForm.asset_category = '';
-    message.value = `已生成费用报销草稿 ${request.name}。`;
+    message.value = `已生成付款/报销草稿 ${request.name}。`;
     emit('request-created', request.name);
     await reload(false);
   } catch (error) {
@@ -409,8 +437,8 @@ onBeforeUnmount(() => {
   <div class="space-y-5 pb-6">
     <header class="sticky top-0 z-10 -mx-1 flex flex-col gap-4 border-b border-gray-200 bg-white/95 px-1 py-3 backdrop-blur md:flex-row md:items-center md:justify-between">
       <div class="min-w-0">
-        <h2 class="text-xl font-bold tracking-tight text-gray-900">上传发票</h2>
-        <p class="mt-1 text-sm leading-5 text-gray-500">批量上传后由本地 OCR 识别，核对七项内容并填写费用说明、补充附件，再下推到费用报销流程。</p>
+        <h2 class="text-xl font-bold tracking-tight text-gray-900">{{ props.targetRequest ? `补录发票 - ${props.targetRequest.name}` : '上传发票' }}</h2>
+        <p class="mt-1 text-sm leading-5 text-gray-500">{{ props.targetRequest ? '上传、核对并确认发票后，将同一批次补录到当前付款/报销单。' : '批量上传后由本地 OCR 识别，核对内容并生成付款/报销草稿。' }}</p>
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-2">
         <div v-if="checkedNames.length" class="mr-1 text-right text-xs text-gray-500">
@@ -423,7 +451,7 @@ onBeforeUnmount(() => {
           <input class="hidden" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple :disabled="busy" @change="uploadFiles" />
         </label>
         <Button variant="subtle" :loading="loading" @click="reload"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</Button>
-        <Button variant="solid" :disabled="!checkedNames.length" @click="openPush">下推到费用报销流程（{{ checkedNames.length }}）</Button>
+        <Button variant="solid" :disabled="!checkedNames.length || busy" @click="openPush">{{ props.targetRequest ? `补录到当前单据（${checkedNames.length}）` : `生成付款/报销草稿（${checkedNames.length}）` }}</Button>
       </div>
     </header>
 
@@ -561,22 +589,22 @@ onBeforeUnmount(() => {
       </aside>
     </section>
 
-    <div v-if="showPush" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showPush = false">
+    <div v-if="showPush && !props.targetRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showPush = false">
       <div role="dialog" aria-modal="true" class="w-full max-w-4xl overflow-hidden rounded bg-white shadow-xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
           <div>
-            <h3 class="font-semibold">下推到费用报销流程</h3>
-            <p class="mt-1 text-xs text-gray-500">已选 {{ checkedNames.length }} 张发票，将生成一张报销草稿和 {{ checkedNames.length }} 行费用明细，合计 {{ money(selectedTotal) }}。</p>
+            <h3 class="font-semibold">下推到付款/报销流程</h3>
+            <p class="mt-1 text-xs text-gray-500">已选 {{ checkedNames.length }} 张发票，将生成一张付款/报销草稿和 {{ checkedNames.length }} 行费用明细，合计 {{ money(selectedTotal) }}。</p>
           </div>
           <button title="关闭" @click="showPush = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
         </header>
         <div class="grid max-h-[65vh] gap-3 overflow-y-auto p-5 md:grid-cols-3">
-          <label class="text-xs text-gray-500 md:col-span-2">主题<input v-model="pushForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="发票报销" /></label>
+          <label class="text-xs text-gray-500 md:col-span-2">主题<input v-model="pushForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="付款/报销" /></label>
           <label class="text-xs text-gray-500">公司<select v-model="pushForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.companies || []" :key="item">{{ item }}</option></select></label>
           <label class="text-xs text-gray-500">申请部门<select v-model="pushForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.departments || []" :key="item">{{ item }}</option></select></label>
           <label class="text-xs text-gray-500">资产类型（必选）<select v-model="pushForm.asset_category" data-testid="ocr-asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
           <label class="text-xs text-gray-500">申请人<input :value="applicant.employee_name || applicant.user" readonly class="mt-1 w-full rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600" /></label>
-          <label class="text-xs text-gray-500">付款类型<select v-model="pushForm.payment_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.payment_types || []" :key="item">{{ item }}</option></select></label>
+          <label class="text-xs text-gray-500">付款类型<input v-model="pushForm.payment_type" list="payment-type-suggestions" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="可自由填写" /><datalist id="payment-type-suggestions"><option v-for="item in props.options?.payment_types || []" :key="item" :value="item" /></datalist></label>
           <label class="text-xs text-gray-500">支付方式<select v-model="pushForm.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.payment_methods || []" :key="item">{{ item }}</option></select></label>
           <label class="text-xs text-gray-500">收款人<input v-model="pushForm.payee_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
           <label class="text-xs text-gray-500">开户行<input v-model="pushForm.bank_name" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
@@ -586,7 +614,7 @@ onBeforeUnmount(() => {
         </div>
         <footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3">
           <Button variant="subtle" @click="showPush = false">取消</Button>
-          <Button variant="solid" :loading="busy" @click="submitPush">生成报销草稿</Button>
+          <Button variant="solid" :loading="busy" @click="submitPush">生成付款/报销草稿</Button>
         </footer>
       </div>
     </div>

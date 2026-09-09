@@ -6,8 +6,18 @@
   "editable_grid": 1,
   "engine": "InnoDB",
   "field_order": [
+    "material_code",
+    "material_serial",
+    "category_code",
+    "category_path",
     "item_name",
     "specification",
+    "product_desc",
+    "brand",
+    "product_name",
+    "product_desc_en",
+    "brand_en",
+    "material_attr",
     "quantity",
     "unit",
     "unit_price",
@@ -15,6 +25,30 @@
     "remarks"
   ],
   "fields": [
+    {
+      "fieldname": "material_code",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "物料编号"
+    },
+    {
+      "fieldname": "material_serial",
+      "fieldtype": "Data",
+      "read_only": true,
+      "label": "物料流水号",
+      "in_list_view": true
+    },
+    {
+      "fieldname": "category_code",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "物料编号层级"
+    },
+    {
+      "fieldname": "category_path",
+      "fieldtype": "Small Text",
+      "label": "Category Path"
+    },
     {
       "fieldname": "item_name",
       "fieldtype": "Data",
@@ -27,6 +61,37 @@
       "fieldtype": "Data",
       "in_list_view": 1,
       "label": "Specification"
+    },
+    {
+      "fieldname": "product_desc",
+      "fieldtype": "Small Text",
+      "label": "Product Description"
+    },
+    {
+      "fieldname": "brand",
+      "fieldtype": "Data",
+      "label": "Brand"
+    },
+    {
+      "fieldname": "product_name",
+      "fieldtype": "Data",
+      "label": "Product Name"
+    },
+    {
+      "fieldname": "product_desc_en",
+      "fieldtype": "Small Text",
+      "label": "Product Description (EN)"
+    },
+    {
+      "fieldname": "brand_en",
+      "fieldtype": "Data",
+      "label": "Brand (EN)"
+    },
+    {
+      "fieldname": "material_attr",
+      "fieldtype": "Data",
+      "label": "Material Attribute",
+      "default": "外购"
     },
     {
       "fieldname": "quantity",
@@ -48,8 +113,7 @@
       "fieldtype": "Currency",
       "in_list_view": 1,
       "label": "Unit Price",
-      "precision": "2",
-      "reqd": 1
+      "precision": "2"
     },
     {
       "fieldname": "amount",

@@ -12,9 +12,14 @@ const TIME_MANAGE = ['System Manager', 'HR User', 'HR Manager', 'Department Mana
 const TIME_ENTRY = [...TIME_MANAGE, 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
+const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
+
+// Temporary test-account restriction. Remove the account from this set to restore
+// the sensitive HR pages and fields without changing role assignments.
+const HR_SENSITIVE_HIDDEN_USERS = new Set(['person046@staff.example.invalid']);
 
 const PAGE_ROLES = {
+  '/dashboard': APPROVAL,
   '/expense': FINANCE,
   '/allocation': FINANCE,
   '/allocation-dashboard': FINANCE,
@@ -39,6 +44,7 @@ const PAGE_ROLES = {
   '/approval/reimbursement': APPROVAL,
   '/approval/corporate-payment': APPROVAL,
   '/approval/payment-dashboard': APPROVAL,
+  '/approval/material-progress': [],
   '/approval/purchase': APPROVAL,
   '/timesheet': TIME_VIEW,
 };
@@ -52,9 +58,64 @@ function myRoles() {
   return (typeof window !== 'undefined' && Array.isArray(window.roles)) ? window.roles : [];
 }
 
+const PROCUREMENT_PRICE_USERS = new Set([
+  'person076@staff.example.invalid',
+  'person033@staff.example.invalid',
+  'person046@staff.example.invalid',
+  'admin@staff.example.invalid',
+  'administrator',
+]);
+const PRODUCTION_RECEIPT_USERS = new Set(['person074@staff.example.invalid']);
+const PROCUREMENT_PO_ROLES = [...FINANCE, 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'];
+
+function currentLogin() {
+  return String((typeof window !== 'undefined' && window.user) || '').toLowerCase();
+}
+
+export function isHrSensitiveHidden() {
+  return HR_SENSITIVE_HIDDEN_USERS.has(currentLogin());
+}
+
+export function canSeeProcurementPrice() {
+  return PROCUREMENT_PRICE_USERS.has(currentLogin())
+    || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'].includes(role));
+}
+
+export function canSeeProcurementPO() {
+  return canSeeProcurementPrice() || PRODUCTION_RECEIPT_USERS.has(currentLogin())
+    || myRoles().some((role) => PROCUREMENT_PO_ROLES.includes(role));
+}
+
+export function canEditProcurementPrice() {
+  return PROCUREMENT_PRICE_USERS.has(currentLogin())
+    || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager'].includes(role));
+}
+
+function accessPath(path) {
+  if (path === '/approval/procurement/new' || /^\/approval\/procurement\/[^/]+\/pmc-edit$/.test(path)) return '/approval/procurement';
+  if (path === '/approval/direct-purchase/new') return '/approval/direct-purchase';
+  return path;
+}
+
+const MATERIAL_PROGRESS_USERS = new Set(['person076@staff.example.invalid', 'person033@staff.example.invalid', 'person046@staff.example.invalid']);
+
+function canSeeMaterialProgress() {
+  const user = String((typeof window !== 'undefined' && (window.user || window.full_name)) || '').toLowerCase();
+  return myRoles().includes('System Manager') || MATERIAL_PROGRESS_USERS.has(user);
+}
+
 export function canSee(path) {
-  if (!hasEnabledFeature(path)) return false;
-  const need = PAGE_ROLES[path] || MANAGE;
+  if (isHrSensitiveHidden() && (path === '/social-insurance' || path === '/housing-fund')) return false;
+  if (path === '/approval/procurement/price-approvals' || /^\/approval\/procurement\/[^/]+\/price-approval$/.test(path)) {
+    return hasEnabledFeature('/approval/procurement') && (canSeeProcurementPrice() || canSeeProcurementPO());
+  }
+  if (path === '/approval/procurement/po' || /^\/approval\/procurement\/[^/]+\/contract$/.test(path)) {
+    return hasEnabledFeature('/approval/procurement') && canSeeProcurementPO();
+  }
+  const normalizedPath = accessPath(path);
+  if (!hasEnabledFeature(normalizedPath)) return false;
+  if (normalizedPath === '/approval/material-progress') return canSeeMaterialProgress();
+  const need = PAGE_ROLES[normalizedPath] || MANAGE;
   return myRoles().some((role) => need.includes(role));
 }
 

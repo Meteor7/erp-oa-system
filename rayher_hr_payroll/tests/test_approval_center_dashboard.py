@@ -83,6 +83,9 @@ class MemoryStore:
     def default_purchaser_user(self):
         return self.default_purchaser
 
+    def payment_plan_row_in_use(self, row_name, current_name=None):
+        return False
+
 
 def valid_payload():
     return {
@@ -99,6 +102,10 @@ def valid_payload():
 
 def procurement_payload(**overrides):
     value = valid_payload()
+    value["business_lines"] = [
+        {**line, "category_code": "1.ELC.3", "specification": line.get("specification") or "标准规格", "brand": line.get("brand") or "测试品牌"}
+        for line in value["business_lines"]
+    ]
     value.update({
         "procurement_scope": "项目采购",
         "expected_delivery_date": "2026-09-10",
@@ -113,6 +120,7 @@ def payment_payload(**overrides):
     value = valid_payload()
     value.update({
         "source_request": "SRC-1",
+        "source_payment_plan_row": "PLAN-1",
         "supplier": "SUP-1",
         "payment_stage": "预付款",
         "prepayment_percentage": 30,
@@ -142,7 +150,9 @@ def test_payment_source_options_return_only_completed_available_procurements():
         {
             "name": "PROC-1", "request_type": "采购申请", "subject": "可付款",
             "workflow_status": "已完成", "approved_amount": 100,
-            "purchaser_user": "buyer@example.com",
+            "purchaser_user": "buyer@example.com", "contract_status": "已生效",
+            "supplier": "SUP-1", "inspection_status": "未验收", "arrival_status": "未到货",
+            "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 100, "amount": 100, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供"}],
         },
         {
             "name": "PROC-2", "request_type": "采购申请", "subject": "无余额",
@@ -161,6 +171,26 @@ def test_payment_source_options_return_only_completed_available_procurements():
     assert [row["name"] for row in result] == ["PROC-1"]
     assert result[0]["purchaser_user"] == "buyer@example.com"
     assert result[0]["available_amount"] == Decimal("100")
+    assert result[0]["payment_plan_row"] == "PLAN-1"
+
+
+def test_approval_center_identity_climbs_past_accountless_excel_supervisor(monkeypatch):
+    monkeypatch.setattr(
+        approval_center,
+        "_enabled_employee_user",
+        lambda employee_name: (
+            "demo_executive@example.com" if employee_name == "演示员工21" else ""
+        ),
+    )
+
+    result = approval_center._resolved_supervisor("演示员工109", "HR-EMP-MANAGER")
+
+    assert result == {
+        "supervisor": "演示员工21",
+        "supervisor_user": "demo_executive@example.com",
+        "supervisor_decision": "skip",
+        "supervisor_path": ["演示员工155", "演示员工21"],
+    }
 
 
 def test_frappe_payment_source_query_is_scoped_to_purchaser_or_finance(monkeypatch):
@@ -195,8 +225,9 @@ def test_draft_recalculates_lines_and_keeps_all_workflow_fields_closed():
     assert result.steps == []
     assert result.approved_amount is None
     assert result.currency == "CNY"
-    assert result.amount == Decimal("39.70")
-    assert result.business_lines[0]["amount"] == Decimal("24.70")
+    assert result.amount == Decimal("0.00")
+    assert result.business_lines[0]["unit_price"] == Decimal("0.00")
+    assert result.business_lines[0]["amount"] == Decimal("0.00")
     assert result.ordered_quantity == Decimal("5.0000")
     assert result.company == "QIHENG DEMO"
 
@@ -260,6 +291,30 @@ def test_non_admin_and_server_owned_payload_fields_fail_closed():
             approval_center.save_draft(approval_center.REQUEST_PROCUREMENT, payload, store=MemoryStore())
 
 
+def test_line_validation_ignores_known_frontend_state_but_rejects_unknown_fields():
+    payload = valid_payload()
+    payload["business_lines"][0].update({
+        "material_serial": "client-value-must-not-be-persisted",
+        "category_parts": ["1", "ELC", "3"],
+        "category_query": "1.ELC.3",
+        "category_open": True,
+        "category_picker_parent": "1.ELC",
+        "category_picker_path": ["1", "1.ELC"],
+        "material_query": "芯片",
+        "material_open": True,
+        "category_name": "电子物料",
+        "amount": 999,
+    })
+    lines, total = approval_center._lines(payload["business_lines"])
+    assert "material_serial" not in lines[0]
+    assert lines[0]["amount"] == Decimal("24.70")
+    assert total == Decimal("39.70")
+
+    payload["business_lines"][0]["unexpected_field"] = "forged"
+    with pytest.raises(approval_center.ApprovalCenterError, match="未知字段.*unexpected_field"):
+        approval_center._lines(payload["business_lines"])
+
+
 def test_line_validation_is_bounded_and_fail_closed():
     bad = valid_payload()
     bad["business_lines"][0]["quantity"] = 0
@@ -295,11 +350,15 @@ def test_procurement_payment_source_must_be_completed_procurement_and_is_snapsho
     store.sources["SRC-1"] = {
         "name": "SRC-1", "request_type": approval_center.REQUEST_PROCUREMENT,
         "workflow_status": "待审批", "currency": "CNY", "approved_amount": 100,
-        "modified": "2026-08-06 11:00:00",
-        "business_lines": [{"quantity": 2}, {"quantity": 3}],
+        "modified": "2026-08-06 11:00:00", "contract_status": "已生效", "supplier": "SUP-1",
+        "business_lines": [
+            {"item_name": "A", "quantity": 2, "unit": "个", "unit_price": 20},
+            {"item_name": "B", "quantity": 3, "unit": "个", "unit_price": 20},
+        ],
+        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 100, "amount": 100, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供"}],
     }
     payload = payment_payload()
-    with pytest.raises(approval_center.ApprovalCenterError, match="已完成"):
+    with pytest.raises(approval_center.ApprovalCenterError, match="已生效"):
         approval_center.save_draft(approval_center.REQUEST_PROCUREMENT_PAYMENT, payload, store=store)
     store.sources["SRC-1"]["workflow_status"] = "已完成"
     store.payment_initiator_allowed = False
@@ -417,8 +476,9 @@ def test_tail_payment_draft_inherits_source_fulfillment_snapshot():
     store.sources["SRC-1"] = {
         "name": "SRC-1", "request_type": approval_center.REQUEST_PROCUREMENT,
         "workflow_status": "已完成", "currency": "CNY", "approved_amount": 100,
-        "modified": "2026-08-16 10:00:00",
-        "business_lines": [{"quantity": 5}],
+        "modified": "2026-08-16 10:00:00", "contract_status": "已生效", "supplier": "SUP-1",
+        "business_lines": [{"item_name": "A", "quantity": 5, "unit": "个", "unit_price": 20}],
+        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "尾款", "percentage": 100, "amount": 100, "trigger_condition": "验收通过", "invoice_requirement": "付款后提供"}],
         "received_quantity": 5, "arrival_status": "全部到货",
         "arrival_date": "2026-08-16", "inspection_status": "验收通过",
         "inspection_failure_reason": "", "exception_direction": "",
@@ -451,12 +511,16 @@ def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
     assert direct.purchase_method == "京东购买"
     assert direct.project == "PRJ-1"
     assert direct.project_owner == "owner@example.com"
+    assert direct.business_lines == []
+    assert direct.direct_purchase_lines[0]["item_name"] == "芯片"
 
     store = MemoryStore()
     store.sources["SRC-1"] = {
         "name": "SRC-1", "request_type": approval_center.REQUEST_PROCUREMENT,
         "workflow_status": "已完成", "currency": "CNY", "approved_amount": 100,
-        "modified": "2026-08-15 10:00:00",
+        "modified": "2026-08-15 10:00:00", "contract_status": "已生效", "supplier": "SUP-1",
+        "business_lines": [{"item_name": "A", "quantity": 1, "unit": "个", "unit_price": 100}],
+        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 30, "amount": 100, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供"}],
     }
     payment = approval_center.save_draft(
         approval_center.REQUEST_PROCUREMENT_PAYMENT, payment_payload(), store=store
@@ -464,6 +528,31 @@ def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
     assert payment.supplier == "SUP-1"
     assert payment.payment_stage == "预付款"
     assert payment.prepayment_percentage == 30
+
+
+def test_direct_purchase_does_not_require_procurement_material_fields():
+    store = MemoryStore()
+    result = approval_center.save_draft(
+        approval_center.REQUEST_DIRECT_PURCHASE,
+        {
+            **valid_payload(),
+            "business_lines": [{
+                "item_name": "办公用品",
+                "quantity": 2,
+                "unit": "盒",
+                "unit_price": 0,
+                "category_code": "",
+                "brand": "",
+            }],
+            "purchase_method": "京东购买",
+            "expected_delivery_date": "2026-09-10",
+        },
+        store=store,
+    )
+    assert result.business_lines == []
+    assert result.direct_purchase_lines[0]["item_name"] == "办公用品"
+    assert "brand" not in result.direct_purchase_lines[0]
+
 
 def test_payment_dashboard_has_fixed_asset_categories_and_real_prepayment_risk_drilldowns():
     store = MemoryStore()

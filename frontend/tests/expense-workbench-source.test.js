@@ -83,3 +83,13 @@ test('final handle action is explicitly confirmation of payment', () => {
   assert.ok(workbench.includes('确认付款'));
   assert.doesNotMatch(workbench, /办理完成/);
 });
+
+test('payment and reimbursement share one workflow but keep their business evidence distinct', () => {
+  for (const label of ['员工垫付报销', '事前申请付款', '已有发票', '暂未取得发票', '无需发票']) {
+    assert.ok(workbench.includes(label), `missing payment mode: ${label}`);
+  }
+  assert.match(workbench, /list_expense_payment_sources/);
+  assert.match(workbench, /来源购买申请（必选）/);
+  assert.match(workbench, /source_request: requestForm\.source_request/);
+  assert.match(workbench, /公司事前付款必须关联一张已审批通过/);
+});

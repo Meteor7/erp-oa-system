@@ -1,4 +1,7 @@
-from rayher_hr_payroll.rayher_hr_payroll.report.pending_my_approval import pending_my_approval as rpt
+try:
+    from rayher_hr_payroll.report.pending_my_approval import pending_my_approval as rpt
+except ModuleNotFoundError:
+    from rayher_hr_payroll.rayher_hr_payroll.report.pending_my_approval import pending_my_approval as rpt
 
 
 def test_columns_cover_type_applicant_status_and_hidden_doctype():

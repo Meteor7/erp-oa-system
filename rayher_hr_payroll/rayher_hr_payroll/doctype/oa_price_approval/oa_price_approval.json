@@ -1,0 +1,86 @@
+{
+  "doctype": "DocType",
+  "name": "OA Price Approval",
+  "module": "Rayher HR Payroll",
+  "autoname": "format:PA-{YYYY}-{#####}",
+  "engine": "InnoDB",
+  "track_changes": 1,
+  "field_order": [
+    "status",
+    "created_by",
+    "source_prs",
+    "summary",
+    "total_amount",
+    "lines",
+    "steps"
+  ],
+  "fields": [
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Status",
+      "options": "草稿\n待审批\n已通过\n已拒绝\n已转PO",
+      "default": "草稿",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "created_by",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Created By",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_prs",
+      "fieldtype": "Small Text",
+      "label": "Source PRs",
+      "read_only": 1
+    },
+    {
+      "fieldname": "total_amount",
+      "fieldtype": "Currency",
+      "label": "Selected Total",
+      "read_only": 1
+    },
+    {
+      "fieldname": "lines",
+      "fieldtype": "Table",
+      "options": "OA Price Approval Line",
+      "label": "Price Lines"
+    },
+    {
+      "fieldname": "steps",
+      "fieldtype": "Table",
+      "options": "OA Approval Step",
+      "label": "Approval Trail",
+      "read_only": 1
+    },
+    {
+      "fieldname": "summary",
+      "fieldtype": "Small Text",
+      "label": "采购比价总结"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Purchase User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "report": 1,
+      "export": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC"
+}

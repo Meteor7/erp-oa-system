@@ -1,9 +1,10 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 const route = useRoute();
+const router = useRouter();
 const kind = computed(() => route.path === '/approval/payment-dashboard' ? 'payment' : 'request');
 const title = computed(() => kind.value === 'payment' ? '付款看板' : '申请看板');
 const selectedNames = ref([]);
@@ -62,6 +63,8 @@ const riskCards = computed(() => {
 });
 
 const filteredRows = computed(() => {
+  const linkedRequest = String(route.query.source_request || route.query.request || '');
+  if (linkedRequest) return (data.value.rows || []).filter((row) => row.name === linkedRequest || (row.linked_requests || []).includes(linkedRequest));
   if (!selectedNames.value.length) return data.value.rows || [];
   const names = new Set(selectedNames.value);
   return (data.value.rows || []).filter((row) => names.has(row.name));
@@ -75,6 +78,21 @@ function selectDrilldown(card) {
 function showAll() {
   selectedNames.value = [];
   selectedLabel.value = '全部单据';
+  router.replace({ path: route.path });
+}
+
+function openRelatedPayments(row) {
+  router.push({ path: '/approval/payment-dashboard', query: { source_request: row.name } });
+}
+
+function openSourceRequest(row) {
+  const name = (row.linked_requests || [])[0];
+  if (name) router.push({ path: '/approval/request-dashboard', query: { request: name } });
+}
+
+function openDocument(row) {
+  const path = kind.value === 'payment' ? '/approval/procurement-payment' : '/approval/procurement';
+  router.push({ path, query: { request: row.name } });
 }
 
 const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
@@ -92,7 +110,7 @@ const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
     <section class="rounded-lg border bg-white p-6 shadow-sm">
       <h1 class="text-xl font-semibold">{{ title }}</h1>
       <p class="mt-1 text-sm text-gray-500">只展示当前登录账号在服务端权限范围内可见的单据。</p>
-      <div class="mt-5 grid gap-3 md:grid-cols-5">
+      <div v-if="data.can_view_financial" class="mt-5 grid gap-3 md:grid-cols-5">
         <div v-for="card in moneyCards" :key="card[0]" class="rounded border bg-gray-50 p-4">
           <div class="text-sm text-gray-500">{{ card[1] }}</div>
           <div class="mt-1 text-xl font-semibold">{{ money(data.summary[card[0]]) }}</div>
@@ -157,19 +175,36 @@ const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
               <th class="p-2">主题</th>
               <th class="p-2">审批状态</th>
               <th v-if="kind === 'payment'" class="p-2">业务状态</th>
+              <th class="p-2">采购链路</th>
+              <th class="p-2">PO执行</th>
               <th class="p-2">资产分类</th>
-              <th v-for="card in moneyCards" :key="card[0]" class="p-2 text-right">{{ card[1] }}</th>
+              <template v-if="data.can_view_financial"><th v-for="card in moneyCards" :key="card[0]" class="p-2 text-right">{{ card[1] }}</th></template>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in filteredRows" :key="row.name" class="border-b">
-              <td class="p-2">{{ row.name }}</td>
+              <td class="p-2"><button type="button" class="font-medium text-blue-700 hover:underline" @click="openDocument(row)">{{ row.name }}</button></td>
               <td class="p-2">{{ row.request_type }}</td>
               <td class="p-2">{{ row.subject }}</td>
               <td class="p-2">{{ row.workflow_status }}</td>
               <td v-if="kind === 'payment'" class="p-2">{{ row.business_status || '-' }}</td>
+              <td class="p-2 text-xs leading-5 text-gray-600">
+                <template v-if="kind === 'request'">
+                  <div>PR {{ row.linked_prs?.length || 0 }}<template v-if="data.can_view_financial"> · 价格审批 {{ row.linked_price_approvals?.length || 0 }}</template></div>
+                  <template v-if="data.can_view_financial"><button v-if="row.linked_payments?.length" type="button" class="text-blue-700 hover:underline" @click="openRelatedPayments(row)">关联付款 {{ row.linked_payments.length }} 笔</button><span v-else>暂未生成付款</span></template>
+                </template>
+                <template v-else>
+                  <div>{{ row.source_purchase_order || '未关联PO' }} · {{ row.supplier || '-' }}</div>
+                  <button v-if="row.linked_requests?.length" type="button" class="text-blue-700 hover:underline" @click="openSourceRequest(row)">来源申请 {{ row.linked_requests.length }} 张</button>
+                </template>
+              </td>
+              <td class="p-2 text-xs leading-5 text-gray-600">
+                <div v-if="kind === 'request'">PO {{ row.linked_pos?.length || 0 }} · {{ row.po_statuses?.join('、') || '未下单' }}</div>
+                <div v-else>{{ row.po_status || '-' }} · PO总额 {{ money(row.po_total_amount) }}</div>
+                <div v-if="data.can_view_financial">已付 {{ money(row.po_paid_amount) }} · 未付 {{ money(row.po_unpaid_amount) }}</div>
+              </td>
               <td class="p-2">{{ row.asset_classification || '历史未分类' }}</td>
-              <td v-for="card in moneyCards" :key="card[0]" class="p-2 text-right">{{ money(row[card[0]]) }}</td>
+              <template v-if="data.can_view_financial"><td v-for="card in moneyCards" :key="card[0]" class="p-2 text-right">{{ money(row[card[0]]) }}</td></template>
             </tr>
           </tbody>
         </table>

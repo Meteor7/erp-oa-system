@@ -368,6 +368,41 @@ def test_attach_batch_uses_request_batch_record_lock_order_and_preserves_line_li
     assert batch in saves and request in saves and all(record in saves for record in records.values())
 
 
+def test_paid_deferred_request_accepts_confirmed_supplement_batch(monkeypatch):
+    batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
+    request.workflow_status = oa_entry.STATUS_PAID
+    request.invoice_handling_mode = oa_entry.INVOICE_MODE_PENDING
+    request.invoice_followup_status = oa_entry.INVOICE_FOLLOWUP_PENDING
+    request.operation_log = "[]"
+    monkeypatch.setattr(service.invoice_permissions, "can_edit_request", lambda *_args, **_kwargs: True)
+
+    result = service.attach_batch_to_request(batch.name, request)
+
+    assert result is request
+    assert request.invoice_followup_status == oa_entry.INVOICE_FOLLOWUP_RECEIVED
+    assert json.loads(request.operation_log)[-1]["action"] == "补录发票"
+    assert batch.request == request.name
+    assert {record.request for record in records.values()} == {request.name}
+    assert lock_order[:2] == [("request", request.name), ("batch", batch.name)]
+    assert request in saves
+
+
+def test_paid_deferred_request_rejects_unconfirmed_supplement_batch(monkeypatch):
+    batch, request, records, _lock_order, saves = _attach_environment(monkeypatch)
+    request.workflow_status = oa_entry.STATUS_PAID
+    request.invoice_handling_mode = oa_entry.INVOICE_MODE_PENDING
+    request.invoice_followup_status = oa_entry.INVOICE_FOLLOWUP_PENDING
+    request.operation_log = "[]"
+    records["INV-2"].recognition_status = "待确认"
+    monkeypatch.setattr(service.invoice_permissions, "can_edit_request", lambda *_args, **_kwargs: True)
+
+    with pytest.raises(ValidationError, match="未确认"):
+        service.attach_batch_to_request(batch.name, request)
+
+    assert not batch.request and not any(record.request for record in records.values())
+    assert saves == []
+
+
 def test_attach_batch_rejects_cross_user_without_mutation(monkeypatch):
     batch, request, records, _locks, saves = _attach_environment(
         monkeypatch, batch_owner="mallory@example.com"
@@ -605,7 +640,7 @@ def test_direct_create_submission_validates_before_workflow_transition(monkeypat
     monkeypatch.setattr(
         service,
         "request_invoice_summary",
-        lambda _doc: {"invoice_count": 0, "invoice_status": "无发票", "invoice_search_text": ""},
+        lambda _doc: {"invoice_count": 1, "invoice_status": "已确认", "invoice_search_text": ""},
     )
     with pytest.raises(ValidationError, match="未确认"):
         oa_entry.create_request(
@@ -613,11 +648,98 @@ def test_direct_create_submission_validates_before_workflow_transition(monkeypat
             submit=1,
             expense_lines=[{"category": "办公费", "amount": 1, "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "有原因也不能绕过状态"}],
             no_invoice_reason="有原因也不能绕过状态",
+            invoice_handling_mode=oa_entry.INVOICE_MODE_AVAILABLE,
         )
     doc = environment.pending["REQ-NEW"]
     assert observed[-1] == (True, oa_entry.STATUS_DRAFT)
     assert doc.workflow_status == oa_entry.STATUS_DRAFT
     assert environment.commits == 0
+
+
+def test_invoice_handling_modes_enforce_timing_specific_requirements(monkeypatch):
+    summary = {"invoice_count": 0, "invoice_status": "无发票"}
+    monkeypatch.setattr(service, "request_invoice_summary", lambda *_args, **_kwargs: summary)
+    pending = _request(reason="等待供应商开票")
+    pending.invoice_handling_mode = oa_entry.INVOICE_MODE_PENDING
+    pending.expected_invoice_date = "2026-09-30"
+    oa_entry._validate_invoice_handling_submission(pending)
+    assert pending.invoice_followup_status == oa_entry.INVOICE_FOLLOWUP_PENDING
+    no_invoice = _request(reason="制度规定无需发票")
+    no_invoice.invoice_handling_mode = oa_entry.INVOICE_MODE_NOT_REQUIRED
+    oa_entry._validate_invoice_handling_submission(no_invoice)
+    assert no_invoice.invoice_followup_status == oa_entry.INVOICE_FOLLOWUP_NOT_REQUIRED
+
+
+def test_manual_no_invoice_payment_requires_an_approved_purchase_source(monkeypatch):
+    monkeypatch.setattr(service, "request_invoice_summary", lambda *_args, **_kwargs: {"invoice_count": 0, "invoice_status": "无发票"})
+    request = _request(reason="供应商付款后开票")
+    request.source_type = oa_entry.SOURCE_MANUAL
+    request.invoice_handling_mode = oa_entry.INVOICE_MODE_PENDING
+    request.expected_invoice_date = "2026-09-30"
+    with pytest.raises(ValidationError, match="必须关联已批准的购买申请"):
+        oa_entry._validate_invoice_handling_submission(request)
+
+
+def test_invoice_required_procurement_plan_is_checked_at_final_payment(monkeypatch):
+    payment = types.SimpleNamespace(
+        name="PAY-2", request_type=oa_entry.REQUEST_PROCUREMENT_PAYMENT,
+        source_request="PROC-1", source_payment_plan_row="PLAN-2",
+    )
+    source = types.SimpleNamespace(
+        payment_plan=[types.SimpleNamespace(name="PLAN-2", invoice_requirement="付款前提供")]
+    )
+    monkeypatch.setattr(oa_entry.frappe, "get_doc", lambda *_args, **_kwargs: source, raising=False)
+    monkeypatch.setattr(oa_entry, "_request_business_document_types", lambda *_args: set())
+    with pytest.raises(ValidationError, match="上传发票后再确认付款"):
+        oa_entry._validate_procurement_payment_release(payment)
+    monkeypatch.setattr(oa_entry, "_request_business_document_types", lambda *_args: {"发票"})
+    oa_entry._validate_procurement_payment_release(payment)
+
+
+def test_available_invoice_mode_requires_an_effective_invoice(monkeypatch):
+    monkeypatch.setattr(service, "request_invoice_summary", lambda *_args, **_kwargs: {"invoice_count": 0, "invoice_status": "无发票"})
+    request = _request(reason="")
+    request.invoice_handling_mode = oa_entry.INVOICE_MODE_AVAILABLE
+    with pytest.raises(ValidationError, match="必须上传并确认发票"):
+        oa_entry._validate_invoice_handling_submission(request)
+
+
+def test_update_leave_draft_persists_owner_edits(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(
+        environment,
+        {
+            "doctype": service.REQUEST_DOCTYPE,
+            "name": "LEAVE-1",
+            "owner": "alice@example.com",
+            "employee": "EMP-1",
+            "request_type": oa_entry.REQUEST_LEAVE,
+            "workflow_status": oa_entry.STATUS_DRAFT,
+            "subject": "Old leave",
+            "from_date": "2026-08-21",
+            "to_date": "2026-08-21",
+            "reason": "Old reason",
+            "steps": [],
+        },
+    )
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *_args, **_kwargs: None)
+
+    result = oa_entry.update_leave_draft(
+        doc.name,
+        "Updated leave",
+        "2026-08-22",
+        "2026-08-23",
+        "Updated reason",
+    )
+
+    assert result["name"] == doc.name
+    assert doc.subject == "Updated leave"
+    assert doc.from_date == "2026-08-22"
+    assert doc.to_date == "2026-08-23"
+    assert doc.reason == "Updated reason"
+    assert environment.current_reads == [(service.REQUEST_DOCTYPE, doc.name)]
 
 
 def test_submit_request_uses_request_lock_current_read_and_server_validation(monkeypatch):
@@ -637,6 +759,7 @@ def test_submit_request_uses_request_lock_current_read_and_server_validation(mon
             "expense_lines": [Row(line_key="11111111-1111-4111-8111-111111111111", source_invoice=None, project_name="项目甲", expense_item="办公费", no_invoice_reason="纸质票据遗失", total_amount=1, amount=1, description="测试费用", invoice_difference_reason="")],
             "steps": [],
             "no_invoice_reason": "纸质票据遗失",
+            "invoice_handling_mode": oa_entry.INVOICE_MODE_NOT_REQUIRED,
         },
     )
     environment.committed[doc.name] = doc
@@ -652,15 +775,13 @@ def test_submit_request_uses_request_lock_current_read_and_server_validation(mon
     monkeypatch.setattr(service, "_request_permission", lambda current_doc, ptype, current=False: None)
     monkeypatch.setattr(
         service,
-        "validate_request_invoices",
-        lambda current_doc, submitting: validations.append(
-            (current_doc.name, submitting, current_doc.workflow_status)
-        ),
+        "request_invoice_summary",
+        lambda current_doc: {"invoice_count": 0, "invoice_status": "无发票"},
     )
     result = oa_entry.submit_request("REQ-1")
     assert locks == [("request", "REQ-1")]
     assert environment.current_reads == [(service.REQUEST_DOCTYPE, "REQ-1")]
-    assert validations[-1] == ("REQ-1", True, oa_entry.STATUS_DRAFT)
+    assert doc.invoice_followup_status == oa_entry.INVOICE_FOLLOWUP_NOT_REQUIRED
     assert doc.workflow_status == oa_entry.STATUS_PENDING
     assert result["status"] == oa_entry.STATUS_PENDING
     assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
@@ -796,6 +917,7 @@ def test_create_continues_with_current_request_returned_by_attach(monkeypatch, r
 
     monkeypatch.setattr(service, "attach_batch_to_request", attach)
     monkeypatch.setattr(service, "validate_request_invoices", validate)
+    monkeypatch.setattr(service, "request_invoice_summary", lambda *_args, **_kwargs: {"invoice_count": 1, "invoice_status": "已确认"})
 
     result = oa_entry.create_request(
         oa_entry.REQUEST_EXPENSE_PAYMENT,
@@ -803,6 +925,7 @@ def test_create_continues_with_current_request_returned_by_attach(monkeypatch, r
         submit=requested_submit,
         expense_lines=[{"category": "office", "amount": "100.00", "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "测试无票"}],
         invoice_batch="BATCH-1",
+        invoice_handling_mode=oa_entry.INVOICE_MODE_AVAILABLE,
     )
 
     assert environment.pending[result["name"]] is attached[0]
@@ -818,7 +941,7 @@ def test_create_continues_with_current_request_returned_by_attach(monkeypatch, r
 def test_attach_batch_rejects_request_that_is_no_longer_draft_under_lock(monkeypatch):
     batch, request, records, lock_order, saves = _attach_environment(monkeypatch)
     request.workflow_status = "审批中"
-    with pytest.raises(ValidationError, match="只有草稿"):
+    with pytest.raises(ValidationError, match="状态或权限不允许"):
         service.attach_batch_to_request(batch.name, {"name": request.name})
     assert lock_order[0] == ("request", request.name)
     assert not batch.request and not any(record.request for record in records.values())
@@ -1607,6 +1730,24 @@ def test_get_options_exposes_current_applicant_and_canonical_payment_types(monke
     }
 
 
+def test_summary_exposes_procurement_payment_source_for_draft_hydration(monkeypatch):
+    doc = _report_request("PAY-DRAFT")
+    doc.request_type = oa_entry.REQUEST_PROCUREMENT_PAYMENT
+    doc.source_request = "PROC-SOURCE"
+    monkeypatch.setattr(
+        service,
+        "request_invoice_summary",
+        lambda _doc: {
+            "invoice_count": 0, "invoice_status": "none", "invoice_search_text": "",
+            "invoice_categories": [], "invoice_project_names": [], "invoice_numbers": [],
+        },
+    )
+
+    result = oa_entry._summarize_doc(doc)
+
+    assert result["source_request"] == "PROC-SOURCE"
+
+
 def test_legacy_personal_payment_type_is_displayed_canonically(monkeypatch):
     doc = _report_request("REQ-LEGACY")
     doc.payment_type = "付款申请"
@@ -1660,6 +1801,28 @@ def _install_report_requests(monkeypatch, docs):
             "supervisor": "",
         },
     )
+
+
+def test_list_requests_includes_completed_procurement_for_purchaser(monkeypatch):
+    doc = _report_request(
+        "PROC-BUYER", owner="bob@example.com", employee="EMP-2", employee_name="Bob"
+    )
+    doc.request_type = oa_entry.REQUEST_PROCUREMENT
+    doc.purchaser_user = "alice@example.com"
+    doc.workflow_status = oa_entry.STATUS_COMPLETED
+    docs = {doc.name: doc}
+    _install_report_requests(monkeypatch, docs)
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Employee"])
+    monkeypatch.setattr(
+        oa_entry, "_summarize_doc",
+        lambda item, authorized_expense_lines=None: {"name": item.name},
+    )
+
+    result = oa_entry.list_requests(
+        view="all", limit=100, request_type=oa_entry.REQUEST_PROCUREMENT
+    )
+
+    assert result == [{"name": "PROC-BUYER"}]
 
 
 def test_list_requests_supports_exact_name_without_bypassing_visibility(monkeypatch):
@@ -2266,6 +2429,24 @@ def test_request_capabilities_are_server_authoritative_for_finance(monkeypatch):
     }
 
 
+
+def test_procurement_assignee_can_both_approve_and_reject(monkeypatch):
+    step = Row(label="PMC：演示员工178", mode="approve")
+    doc = Row(
+        request_type=oa_entry.REQUEST_PROCUREMENT,
+        workflow_status=oa_entry.STATUS_PENDING,
+    )
+    monkeypatch.setattr(oa_entry, "_current_step", lambda _doc: step)
+    monkeypatch.setattr(oa_entry, "_can_act_on_current_step", lambda _doc, user=None: True)
+    monkeypatch.setattr(oa_entry, "_is_oa_override_user", lambda user=None: False)
+
+    capabilities = oa_entry._request_capabilities(doc, "person076@staff.example.invalid")
+
+    assert capabilities["can_approve"] is True
+    assert capabilities["can_reject"] is True
+    assert capabilities["action_scope"] == "assigned"
+
+
 def test_new_route_steps_receive_stable_identity_and_origin():
     environment = RequestEnvironment()
     doc = RequestDocument(environment, {"steps": []})
@@ -2605,7 +2786,7 @@ def test_serialize_route_steps_resolves_dynamic_supervisor(monkeypatch):
     assert rows[0]["approvers"] == ["person054@staff.example.invalid"]
 
 
-def test_business_executive_system_manager_and_framework_administrator_are_oa_override_users(monkeypatch):
+def test_only_explicit_administrator_accounts_are_oa_override_users(monkeypatch):
     monkeypatch.setattr(
         frappe_stub,
         "get_roles",
@@ -2616,7 +2797,7 @@ def test_business_executive_system_manager_and_framework_administrator_are_oa_ov
     )
 
     assert oa_entry._is_oa_override_user("admin@staff.example.invalid") is True
-    assert oa_entry._is_oa_override_user("executive@example.com") is True
+    assert oa_entry._is_oa_override_user("executive@example.com") is False
     assert oa_entry._is_oa_override_user("Administrator") is True
     assert oa_entry._is_oa_override_user("ordinary@example.com") is False
 
@@ -2844,72 +3025,58 @@ def test_preview_route_passes_resolved_supervisor_user_into_route_builder(monkey
 
 
 
-def test_leave_employee_context_uses_direct_reports_to_without_climbing(monkeypatch):
-    employee_rows = [
-        {
-            "name": "HR-EMP-STAFF",
-            "employee_name": "演示员工109",
-            "department": "应用部 - SHGL",
-            "reports_to": "HR-EMP-MANAGER",
-        }
-    ]
-
-    class LeaveDB:
-        def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
-            if doctype == "Employee" and filters == "HR-EMP-MANAGER":
-                return Row(
-                    employee_name="演示员工155",
-                    status="Active",
-                    user_id="xiong@example.com",
-                )
-            if doctype == "User" and filters == {
-                "name": "xiong@example.com",
-                "enabled": 1,
-            }:
-                return "xiong@example.com"
-            return None
-
+def test_leave_employee_context_uses_excel_direct_supervisor_with_account(monkeypatch):
     monkeypatch.setattr(
         frappe_stub,
         "get_all",
-        lambda doctype, **_kwargs: employee_rows if doctype == "Employee" else [],
+        lambda doctype, **_kwargs: [{
+            "name": "HR-EMP-STAFF",
+            "employee_name": "演示员工150",
+            "department": "研发软件部 - RAY",
+            "reports_to": "HR-EMP-MANAGER",
+        }] if doctype == "Employee" else [],
         raising=False,
     )
-    monkeypatch.setattr(frappe_stub, "db", LeaveDB(), raising=False)
+    monkeypatch.setattr(
+        oa_entry,
+        "_enabled_employee_user",
+        lambda employee_name: "jun@example.com" if employee_name == "演示员工132" else "",
+    )
 
     context = oa_entry._leave_employee_context("staff@example.com")
 
-    assert context["supervisor"] == "演示员工155"
-    assert context["supervisor_user"] == "xiong@example.com"
+    assert context["supervisor"] == "演示员工132"
+    assert context["supervisor_user"] == "jun@example.com"
     assert context["supervisor_decision"] == "approve"
+    assert context["supervisor_path"] == ["演示员工132"]
 
 
-def test_leave_employee_context_rejects_direct_supervisor_without_account(monkeypatch):
-    employee_rows = [
-        {
-            "name": "HR-EMP-STAFF",
-            "employee_name": "演示员工109",
-            "department": "应用部 - SHGL",
-            "reports_to": "HR-EMP-MANAGER",
-        }
-    ]
-
-    class LeaveDB:
-        def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
-            if doctype == "Employee":
-                return Row(employee_name="演示员工155", status="Active", user_id="")
-            return None
-
+def test_leave_employee_context_climbs_past_accountless_direct_supervisor(monkeypatch):
     monkeypatch.setattr(
         frappe_stub,
         "get_all",
-        lambda doctype, **_kwargs: employee_rows if doctype == "Employee" else [],
+        lambda doctype, **_kwargs: [{
+            "name": "HR-EMP-STAFF",
+            "employee_name": "演示员工109",
+            "department": "客服部 - SHGL",
+            "reports_to": "HR-EMP-MANAGER",
+        }] if doctype == "Employee" else [],
         raising=False,
     )
-    monkeypatch.setattr(frappe_stub, "db", LeaveDB(), raising=False)
+    monkeypatch.setattr(
+        oa_entry,
+        "_enabled_employee_user",
+        lambda employee_name: (
+            "demo_executive@example.com" if employee_name == "演示员工21" else ""
+        ),
+    )
 
-    with pytest.raises(oa_entry.ApprovalRouteError, match="演示员工155.*可用账号"):
-        oa_entry._leave_employee_context("staff@example.com")
+    context = oa_entry._leave_employee_context("staff@example.com")
+
+    assert context["supervisor"] == "演示员工21"
+    assert context["supervisor_user"] == "demo_executive@example.com"
+    assert context["supervisor_decision"] == "skip"
+    assert context["supervisor_path"] == ["演示员工155", "演示员工21"]
 
 
 def test_leave_employee_context_rejects_duplicate_active_employee_links(monkeypatch):
@@ -3189,7 +3356,14 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
     assert result["workflow_status"] == oa_entry.STATUS_PENDING
     assert result["business_status"] == "待审批"
     assert result["current_step_label"] == "PMC：演示员工178"
-    assert [row.label for row in doc.steps] == ["PMC：演示员工178", "直属主管：直属领导", "项目主管：项目主管"]
+    assert [row.label for row in doc.steps] == [
+        "PMC：演示员工178",
+        "直属主管：直属领导",
+        "项目主管：项目主管",
+        "需求终审：副总经理：演示员工21",
+        "采购询价/录入价格",
+        "价格审批：副总经理：演示员工21",
+    ]
     assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
     assert assignment_syncs == [("PROC-1", "PMC：演示员工178")]
 
@@ -3386,3 +3560,41 @@ def test_procurement_payment_final_handle_posts_ledger_and_enters_arrival_lifecy
     assert doc.workflow_status == oa_entry.STATUS_PAID
     assert doc.business_status == "待到货"
     assert doc.prepayment_writeoff_status == "待核销"
+
+def test_my_approval_summary_limits_executives_but_keeps_admin_global_queue(monkeypatch):
+    step = Row(step_index=1, label="PMC：演示员工178", approvers='["person076@staff.example.invalid"]')
+    doc = Row(name="OA-OTHER", request_type=oa_entry.REQUEST_PROCUREMENT, workflow_status=oa_entry.STATUS_PENDING, current_step_index=1, steps=[step])
+    monkeypatch.setattr(frappe_stub, "get_all", lambda *_args, **_kwargs: [{"name": doc.name}], raising=False)
+    monkeypatch.setattr(oa_entry, "_load_request", lambda _name: doc)
+    monkeypatch.setattr(oa_entry, "_can_act_on_current_step", lambda _doc, user=None: True)
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: [])
+
+    frappe_stub.session.user = "executive@example.com"
+    frappe_stub.get_roles = lambda user=None: [oa_entry.BUSINESS_EXECUTIVE_ROLE]
+    assert oa_entry.get_my_approval_summary()["total"] == 0
+
+    frappe_stub.session.user = "Administrator"
+    frappe_stub.get_roles = lambda user=None: ["System Manager"]
+    assert oa_entry.get_my_approval_summary()["total"] == 1
+
+
+def test_procurement_quote_snapshot_is_json_serializable():
+    doc = types.SimpleNamespace(
+        supplier="供应商",
+        amount=Decimal("250.00"),
+        business_lines=[Row(
+            item_name="耗材", specification="TEST", quantity=Decimal("2.0000"),
+            unit="个", unit_price=Decimal("125.00"), amount=Decimal("250.00"), remarks="",
+        )],
+    )
+
+    snapshot = oa_entry._quote_snapshot(doc)
+
+    assert json.loads(json.dumps(snapshot, ensure_ascii=False))["business_lines"][0] == {
+        "item_name": "耗材", "specification": "TEST", "quantity": 2.0, "unit": "个",
+        "unit_price": 125.0, "amount": 250.0, "remarks": "",
+    }
+
+def test_rejection_notification_stamp_uses_actual_operation_time():
+    assert oa_entry._event_stamp({"acted_on": "2026-08-24 17:29:37.281533"}) == "2026-08-24 17:29:37.281533"
+    assert oa_entry._event_stamp({"timestamp": "new", "acted_on": "old"}) == "new"

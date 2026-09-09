@@ -9,6 +9,11 @@ test('router registers project management page', () => {
   assert.match(source, /\.\/pages\/Projects\.vue/);
 });
 
+test('router registers the leave detail page', () => {
+  assert.match(source, /path:\s*['"]\/approval\/leave\/:name/);
+  assert.match(source, /name:\s*['"]leave-detail['"]/);
+});
+
 test('router registers split approval pages', () => {
   assert.match(source, /path:\s*['\"]\/approval\/leave['\"]/);
   assert.match(source, /path:\s*['\"]\/approval\/purchase['\"]/);
@@ -37,4 +42,10 @@ test('router registers allocation dashboard page after the allocation table', ()
 test('router registers the independent foreign R&D timesheet report', () => {
   assert.match(source, /path:\s*['"]\/foreign-rd-timesheet['"]/);
   assert.match(source, /\.\/pages\/ForeignRDTimesheet\.vue/);
+});
+test('router registers procurement price and contract inner pages', () => {
+  assert.match(source, /\/approval\/procurement\/:name\/price-approval/);
+  assert.match(source, /\/approval\/procurement\/:name\/contract/);
+  assert.match(source, /procurement-price-approval/);
+  assert.match(source, /procurement-contract/);
 });

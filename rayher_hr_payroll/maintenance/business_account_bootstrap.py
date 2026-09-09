@@ -54,6 +54,20 @@ ACCOUNT_SPECS = (
         "roles": ("Employee", "HR User", "Department Manager"),
     },
     {
+        "user_id": "person021@staff.example.invalid",
+        "full_name": "演示人员H26bfa0",
+        "employee": "HR-EMP-90010",
+        "employee_name": "演示人员H26bfa0",
+        "roles": ("Employee", "HR User", "Department Manager"),
+    },
+    {
+        "user_id": "person055@staff.example.invalid",
+        "full_name": "演示人员H79b96c",
+        "employee": "HR-EMP-90020",
+        "employee_name": "演示人员H79b96c",
+        "roles": ("Employee", "Accounts User"),
+    },
+    {
         "user_id": "person068@staff.example.invalid",
         "full_name": "演示人员H75c4e2",
         "employee": "HR-EMP-90012",
@@ -148,11 +162,42 @@ def build_account_plan(specs, *, existing_users, employees, roles_by_user, emplo
     return result
 
 
-def plan_business_accounts():
+def active_employee_account_specs(employees):
+    specs = []
+    for source in employees or []:
+        row = dict(source)
+        employee = str(row.get("name") or "").strip()
+        employee_name = str(row.get("employee_name") or "").strip()
+        user_id = str(row.get("user_id") or "").strip().lower()
+        if not employee or not employee_name or user_id:
+            continue
+        specs.append({
+            "user_id": employee.lower() + "@staff.example.invalid",
+            "full_name": employee_name,
+            "employee": employee,
+            "employee_name": employee_name,
+            "roles": ("Employee",),
+        })
+    return specs
+
+
+def plan_all_active_employee_accounts():
+    employees = frappe.get_all(
+        "Employee",
+        filters={"status": "Active"},
+        fields=["name", "employee_name", "user_id"],
+        order_by="name asc",
+        limit_page_length=0,
+    )
+    return plan_business_accounts(active_employee_account_specs(employees))
+
+
+def plan_business_accounts(specs=None):
+    specs = tuple(ACCOUNT_SPECS if specs is None else specs)
     user_ids = list(
         dict.fromkeys(
             user_id
-            for row in ACCOUNT_SPECS
+            for row in specs
             for user_id in (row["user_id"], row.get("legacy_user_id"))
             if user_id
         )
@@ -161,7 +206,7 @@ def plan_business_accounts():
         frappe.get_all("User", filters={"name": ["in", user_ids]}, pluck="name")
     )
     employees = {}
-    for spec in ACCOUNT_SPECS:
+    for spec in specs:
         employee_id = spec.get("employee")
         if not employee_id:
             continue
@@ -182,7 +227,7 @@ def plan_business_accounts():
         for user_id in user_ids
     }
     return build_account_plan(
-        ACCOUNT_SPECS,
+        specs,
         existing_users=existing_users,
         employees=employees,
         roles_by_user=roles_by_user,
@@ -205,8 +250,7 @@ def _create_user(item):
     return temporary_password
 
 
-def ensure_business_accounts(dry_run=True):
-    plan = plan_business_accounts()
+def _apply_account_plan(plan, *, dry_run=True):
     result = {
         "dry_run": bool(dry_run),
         "count": len(plan),
@@ -254,3 +298,22 @@ def ensure_business_accounts(dry_run=True):
         frappe.db.rollback()
         raise
     return result
+
+
+def ensure_current_approval_accounts(dry_run=True):
+    user_ids = {
+        "person021@staff.example.invalid",
+        "person055@staff.example.invalid",
+    }
+    specs = [row for row in ACCOUNT_SPECS if row["user_id"] in user_ids]
+    return _apply_account_plan(plan_business_accounts(specs), dry_run=dry_run)
+
+
+def ensure_business_accounts(dry_run=True):
+    return _apply_account_plan(plan_business_accounts(), dry_run=dry_run)
+
+
+def ensure_all_active_employee_accounts(dry_run=True):
+    return _apply_account_plan(
+        plan_all_active_employee_accounts(), dry_run=dry_run
+    )

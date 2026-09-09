@@ -31,6 +31,12 @@ from rayher_hr_payroll.oa_role_resolver import (
     ApprovalRoleResolutionError,
     resolve_role,
 )
+from rayher_hr_payroll.procurement_contract import (
+    ProcurementContractError,
+    contract_snapshot,
+    price_approval_snapshot,
+    render_contract_draft,
+)
 from rayher_hr_payroll.procurement_workflow import (
     ProcurementWorkflowError,
     contract_copy_recipients,
@@ -40,7 +46,11 @@ from rayher_hr_payroll.procurement_workflow import (
     validate_procurement_submission,
 )
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
-from rayher_hr_payroll.oa_assignments import sync_current_assignments
+from rayher_hr_payroll.oa_assignments import (
+    notify_rejected_applicant,
+    notify_request_applicant,
+    sync_current_assignments,
+)
 from rayher_hr_payroll.oa_organization import (
     DIRECT_SUPERVISOR_BY_EMPLOYEE,
     EXCLUDED_MANAGERS,
@@ -67,9 +77,28 @@ STATUS_HANDLED = "\u5df2\u529e\u7406"
 STATUS_COMPLETED = "\u5df2\u5b8c\u6210"
 STATUS_REJECTED = "\u5df2\u62d2\u7edd"
 STATUS_PAID = "\u5df2\u4ed8\u6b3e"
+STATUS_WITHDRAWN = "\u5df2\u64a4\u56de"
 ACTIVE_STATUSES = {STATUS_PENDING, STATUS_WAIT_HANDLE}
 PRIVILEGED_ROLES = {"System Manager", "HR Manager", "HR User", "Accounts User"}
 FINANCE_ROLES = {"System Manager", "Accounts User"}
+# HR roles can manage HR data, but do not receive an unrestricted purchasing
+# register. Purchasing visibility remains ownership/assignment scoped unless the
+# account is an explicit purchasing, finance, or system administrator.
+HR_SCOPED_ROLES = {"HR Manager", "HR User"}
+PROCUREMENT_REQUEST_TYPES = {
+    REQUEST_PROCUREMENT,
+    REQUEST_DIRECT_PURCHASE,
+    REQUEST_PROCUREMENT_PAYMENT,
+}
+PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "Rayher Business Executive"}
+PROCUREMENT_PRICE_USERS = {
+    "person076@staff.example.invalid",
+    "person033@staff.example.invalid",
+    "person046@staff.example.invalid",
+    "admin@staff.example.invalid",
+    "administrator",
+}
+PROCUREMENT_PO_ROLES = PROCUREMENT_GLOBAL_ROLES | {"Accounts User", "Finance User"}
 
 SOURCE_MANUAL = "\u624b\u5de5\u65b0\u5efa"
 SOURCE_PUSH = "\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8"
@@ -101,7 +130,7 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
         elif asset_category == PRODUCTION_ASSET:
             keys.append("production_asset_owner")
     elif request_type == REQUEST_PROCUREMENT:
-        keys = ["pmc"]
+        keys = ["pmc", "vice_manager", "procurement_manager"]
         if asset_category == PRODUCTION_ASSET:
             keys.append("production_asset_owner")
     elif request_type == REQUEST_DIRECT_PURCHASE:
@@ -111,7 +140,7 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
             else ["vice_manager", "general_manager"]
         )
     elif request_type == REQUEST_PROCUREMENT_PAYMENT:
-        keys = ["finance_auditor", "finance_manager", "vice_manager", "general_manager"]
+        keys = ["vice_manager", "finance_accountant", "finance_manager", "finance_auditor", "general_manager"]
     else:
         keys = []
     try:
@@ -125,8 +154,8 @@ def _active_request_business_documents(request_name):
         return []
     rows = frappe.get_all(
         "OA Business Document",
-        filters={"request": request_name},
-        fields=["name", "document_type", "supersedes", "version_no"],
+        filters={"request": request_name, "status": ["!=", "已作废"]},
+        fields=["name", "document_type", "supersedes", "version_no", "status"],
         order_by="version_no asc, creation asc",
         limit_page_length=0,
     )
@@ -212,7 +241,15 @@ PAYMENT_PERSONAL = "支付个人"
 PAYMENT_PERSONAL_LEGACY = "付款申请"
 PAYMENT_TYPES = [PAYMENT_PERSONAL, "对公支付"]
 PAYMENT_METHODS = ["\u94f6\u884c\u8f6c\u8d26", "\u73b0\u91d1\u652f\u4ed8"]
-COMPANIES = ["\u67d0\u67d0\u5149\u534a\u5bfc\u4f53\u79d1\u6280\u6709\u9650\u516c\u53f8", "\u793a\u4f8b\u4f01\u4e1a025\u4e0a\u6d77\u6709\u9650\u516c\u53f8"]
+INVOICE_MODE_AVAILABLE = "已有发票"
+INVOICE_MODE_PENDING = "暂未取得发票"
+INVOICE_MODE_NOT_REQUIRED = "无需发票"
+INVOICE_HANDLING_MODES = [INVOICE_MODE_AVAILABLE, INVOICE_MODE_PENDING, INVOICE_MODE_NOT_REQUIRED]
+INVOICE_FOLLOWUP_PENDING = "待收票"
+INVOICE_FOLLOWUP_RECEIVED = "已收票"
+INVOICE_FOLLOWUP_VERIFIED = "已核验"
+INVOICE_FOLLOWUP_NOT_REQUIRED = "无需发票"
+COMPANIES = ["示例企业032有限公司"]
 DEPARTMENT_EXECUTIVE_OFFICE = "\u603b\u7ecf\u529e"
 DEPARTMENT_EXECUTIVE_OFFICE_LEGACY = "\u603b\u7ecf\u7406\u5ba4"
 
@@ -227,8 +264,13 @@ def _display_payment_type(value):
 
 
 def _canonical_payment_type(value):
-    value = _display_payment_type(value)
-    return value if value in PAYMENT_TYPES else PAYMENT_TYPES[0]
+    # Payment type is descriptive metadata, not a workflow discriminator.
+    return _bounded_optional_text(_display_payment_type(value), "付款类型", 140) or PAYMENT_TYPES[0]
+
+
+def _invoice_mode(value):
+    value = _clean(value)
+    return value if value in INVOICE_HANDLING_MODES else ""
 
 
 def _display_department(value):
@@ -329,7 +371,9 @@ def _append_request_event(doc, action, from_status, to_status, note="", details=
     if details:
         event["details"] = details
     events.append(event)
-    doc.operation_log = json.dumps(events[-OPERATION_LOG_LIMIT:], ensure_ascii=False)
+    # Approval step snapshots can contain datetime values; normalize them while
+    # persisting the audit log so a valid withdrawal cannot fail on serialization.
+    doc.operation_log = json.dumps(events[-OPERATION_LOG_LIMIT:], ensure_ascii=False, default=str)
     return event
 
 
@@ -464,7 +508,7 @@ def _can_submit_procurement_for_others(user=None):
         return False
     try:
         return candidate == _clean(resolve_role("pmc").get("user")).lower()
-    except (ApprovalRoleResolutionError, RuntimeError):
+    except (ApprovalRoleResolutionError, RuntimeError, ImportError):
         return False
 
 
@@ -626,55 +670,29 @@ def _leave_employee_context(user=None):
         )
         return context
 
-    supervisor_name = ""
-    reports_to = _clean(row.get("reports_to"))
-    if reports_to:
-        supervisor = frappe.db.get_value(
-            "Employee",
-            reports_to,
-            ["employee_name", "status", "user_id"],
-            as_dict=True,
+    try:
+        resolution = resolve_stage_two_supervisor(
+            employee_name, _enabled_employee_user
         )
-        if not supervisor or _clean(supervisor.get("status")) != "Active":
-            raise ApprovalRouteError("当前员工配置的直属上级不存在或已离职")
-        supervisor_name = _clean(supervisor.get("employee_name") or reports_to)
-        supervisor_user = _clean(supervisor.get("user_id")).lower()
-    else:
-        supervisor_name = _clean(DIRECT_SUPERVISOR_BY_EMPLOYEE.get(employee_name))
-        if not supervisor_name:
-            raise ApprovalRouteError("当前员工未配置直属上级，不能提交请假申请")
-        if supervisor_name in EXCLUDED_MANAGERS or supervisor_name == "BOARD":
-            try:
-                resolution = resolve_stage_two_supervisor(
-                    employee_name, _enabled_employee_user
-                )
-            except OrganizationResolutionError as exc:
-                raise ApprovalRouteError(str(exc)) from exc
-            supervisor_name = _clean(resolution.supervisor_name)
-        supervisor_user = _clean(_enabled_employee_user(supervisor_name)).lower()
+    except OrganizationResolutionError as exc:
+        raise ApprovalRouteError(str(exc)) from exc
 
+    supervisor_name = _clean(resolution.supervisor_name)
+    supervisor_user = _clean(resolution.user_id).lower()
     if not supervisor_name:
         raise ApprovalRouteError("当前员工未配置直属上级，不能提交请假申请")
-    enabled_user = (
-        frappe.db.get_value(
-            "User", {"name": supervisor_user, "enabled": 1}, "name"
-        )
-        if supervisor_user
-        else None
-    )
-    if not enabled_user:
+    if not supervisor_user:
         raise ApprovalRouteError(f"直属上级 {supervisor_name} 没有关联可用账号")
-    supervisor_user = str(enabled_user).strip().lower()
-    if supervisor_user == user:
+    if resolution.decision != "skip" and supervisor_user == user:
         raise ApprovalRouteError("申请人不能成为自己的直属上级审批人")
 
     context.update(
         {
             "supervisor": supervisor_name,
             "supervisor_user": supervisor_user,
-            "supervisor_decision": "approve",
-            "supervisor_path": [supervisor_name],
-            "supervisor_reason": "direct_employee_reports_to",
+            "supervisor_decision": resolution.decision,
+            "supervisor_path": list(resolution.traversed),
+            "supervisor_reason": resolution.reason,
         }
     )
     return context
@@ -760,17 +778,32 @@ def _require_leave_accounts(steps, copied_to):
 
 def _notify_copied_users(doc):
     request_type = getattr(doc, "request_type", None)
-    if request_type not in {REQUEST_LEAVE, REQUEST_PROCUREMENT}:
+    if request_type not in {REQUEST_LEAVE, REQUEST_PROCUREMENT, REQUEST_PROCUREMENT_PAYMENT}:
         return
-    subject_prefix = "请假申请抄送" if request_type == REQUEST_LEAVE else "采购合同交期抄送"
+    subject_prefix = (
+        "请假申请抄送"
+        if request_type == REQUEST_LEAVE
+        else "采购合同交期抄送"
+        if request_type == REQUEST_PROCUREMENT
+        else "采购付款结果汇总"
+    )
     content = (
         "请假申请 {0} 已提交，现抄送给你查阅。".format(doc.name)
         if request_type == REQUEST_LEAVE
         else "采购申请 {0} 的合同交期已确认，现抄送给你查阅。".format(doc.name)
+        if request_type != REQUEST_PROCUREMENT_PAYMENT
+        else "采购付款 {0} 已完成出纳办理，现汇总给你查阅。".format(doc.name)
     )
     for row in _parse_json(getattr(doc, "copied_to", None), default=[]) or []:
         user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
         if not user:
+            continue
+        key = f"oa-copy:{doc.name}:{subject_prefix}"
+        if frappe.db.exists(
+            "Notification Log",
+            {"for_user": user, "document_type": "OA Approval Request", "document_name": doc.name,
+             "subject": ["like", f"%[{key}]%"]},
+        ):
             continue
         frappe.get_doc(
             {
@@ -779,8 +812,9 @@ def _notify_copied_users(doc):
                 "type": "Alert",
                 "document_type": "OA Approval Request",
                 "document_name": doc.name,
-                "subject": subject_prefix + "：" + str(doc.name),
+                "subject": subject_prefix + "：" + str(doc.name) + f" [{key}]",
                 "email_content": content,
+                "link": _request_link(doc),
             }
         ).insert(ignore_permissions=True)
 
@@ -862,6 +896,29 @@ def _serialize_expense_line(row):
         "expense_description": expense_description,
         "attachment_count": getattr(row, "attachment_count", 0),
         "invoice_status": getattr(row, "invoice_status", None),
+    }
+
+
+def _serialize_business_line(row):
+    """Expose purchase-line fields so rejected procurement drafts can be edited again."""
+    return {
+        "material_code": _source_value(row, "material_code") or "",
+        "material_serial": _source_value(row, "material_serial") or "",
+        "category_code": _source_value(row, "category_code") or "",
+        "category_path": _source_value(row, "category_path") or "",
+        "item_name": _source_value(row, "item_name") or "",
+        "specification": _source_value(row, "specification") or "",
+        "product_desc": _source_value(row, "product_desc") or "",
+        "brand": _source_value(row, "brand") or "",
+        "product_name": _source_value(row, "product_name") or "",
+        "product_desc_en": _source_value(row, "product_desc_en") or "",
+        "brand_en": _source_value(row, "brand_en") or "",
+        "material_attr": _source_value(row, "material_attr") or "外购",
+        "quantity": _source_value(row, "quantity") or 0,
+        "unit": _source_value(row, "unit") or "",
+        "unit_price": _source_value(row, "unit_price") or 0,
+        "amount": _source_value(row, "amount") or 0,
+        "remarks": _source_value(row, "remarks") or "",
     }
 
 
@@ -983,12 +1040,10 @@ def _actor_names(user=None):
 
 def _is_oa_override_user(user=None):
     user = _clean(user or frappe.session.user)
-    roles = set(frappe.get_roles(user))
-    return bool(
-        user == "Administrator"
-        or "System Manager" in roles
-        or BUSINESS_EXECUTIVE_ROLE in roles
-    )
+    # Only explicit administrator accounts may bypass the assigned OA node.
+    # Business executive and finance roles still receive their own routed
+    # assignments, but must not approve someone else's step.
+    return user in {"Administrator", "admin@staff.example.invalid"}
 def _matched_approvers(step, user=None):
     actors = _actor_names(user)
     return [name for name in _parse_json_list(step.approvers) if name in actors]
@@ -1028,6 +1083,26 @@ def _request_capabilities(doc, user=None):
         "classification_ready": classification_ready,
         "is_override_actor": is_override,
         "action_scope": "override" if is_override else ("assigned" if can_act else ""),
+    }
+
+
+def _procurement_document_visibility(doc, user=None):
+    """Expose downstream procurement links only to their business owners."""
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
+        return {"can_view_procurement_price": False, "can_view_procurement_po": False}
+    candidate = _clean(user or frappe.session.user).lower()
+    roles = set(frappe.get_roles(candidate) or [])
+    price_user = candidate in PROCUREMENT_PRICE_USERS or bool(roles & PROCUREMENT_GLOBAL_ROLES)
+    po_user = price_user or bool(roles & PROCUREMENT_PO_ROLES)
+    price_numbers = _clean(getattr(doc, "price_approval_numbers", None))
+    po_numbers = _clean(getattr(doc, "po_numbers", None))
+    chain = _procurement_chain_summary(doc)
+    has_price = bool(price_numbers or chain.get("price_approval_numbers"))
+    has_po = bool(po_numbers or chain.get("po_numbers"))
+    demand_approved = _clean(getattr(doc, "business_status", None)).startswith("需求已批准") or getattr(doc, "workflow_status", None) in {STATUS_COMPLETED, "已通过", "已审批", "已结束"}
+    return {
+        "can_view_procurement_price": bool(price_user and (has_price or demand_approved)),
+        "can_view_procurement_po": bool(po_user and has_po),
     }
 
 
@@ -1072,6 +1147,252 @@ def _with_expense_attachments(doc, lines):
     return result
 
 
+def _request_attachments(doc):
+    if getattr(doc, "request_type", None) != REQUEST_LEAVE:
+        return []
+    return frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": "OA Approval Request",
+            "attached_to_name": doc.name,
+        },
+        fields=["name", "file_name", "file_url", "is_private", "creation"],
+        order_by="creation asc",
+        limit_page_length=100,
+    )
+
+
+def _procurement_has_payment_activity(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
+        return False
+    return bool(frappe.db.exists(
+        "OA Approval Request",
+        {
+            "request_type": REQUEST_PROCUREMENT_PAYMENT,
+            "source_request": doc.name,
+            "workflow_status": ["not in", [STATUS_DRAFT, STATUS_REJECTED]],
+        },
+    ))
+
+
+def _can_submit_procurement_quote(doc, step=None, user=None):
+    # Procurement quoting is handled by PR/Price Approval documents. The OA
+    # request is only the demand-approval source and must never reopen the
+    # legacy in-OA quotation form.
+    return False
+
+
+def _procurement_actor(doc):
+    user = _clean(getattr(frappe.session, "user", None)).lower()
+    return (
+        user == _clean(getattr(doc, "purchaser_user", None)).lower()
+        or "System Manager" in set(frappe.get_roles(user))
+    )
+
+
+def _can_edit_procurement_contract(doc):
+    return (
+        getattr(doc, "request_type", None) == REQUEST_PROCUREMENT
+        and getattr(doc, "workflow_status", None) == STATUS_COMPLETED
+        and _clean(getattr(doc, "business_status", None)) == "价格已批准/待补充合同信息"
+        and _procurement_actor(doc)
+    )
+
+
+def _can_review_procurement_contract(doc):
+    return (
+        getattr(doc, "request_type", None) == REQUEST_PROCUREMENT
+        and _clean(getattr(doc, "business_status", None)) == "合同草稿待复核"
+        and _procurement_actor(doc)
+    )
+
+
+def _can_seal_procurement_contract(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
+        return False
+    if _clean(getattr(doc, "business_status", None)) != "待电子用印":
+        return False
+    user = _clean(getattr(frappe.session, "user", None)).lower()
+    return user == _clean(getattr(doc, "contract_seal_user", None)).lower() or "System Manager" in set(
+        frappe.get_roles(user)
+    )
+
+
+def _find_payment_plan_row(doc, row_name):
+    target = _clean(row_name)
+    for row in (getattr(doc, "payment_plan", []) or []):
+        if _clean(getattr(row, "name", None)) == target:
+            return row
+    return None
+
+
+def _sync_payment_plan_row(payment_doc, status):
+    if getattr(payment_doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        return None
+    po_name = _clean(getattr(payment_doc, "source_purchase_order", None))
+    po_row_name = _clean(getattr(payment_doc, "source_po_payment_plan_row", None))
+    if po_name and po_row_name:
+        po = frappe.get_doc("OA Purchase Order", po_name)
+        row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
+        if not row:
+            frappe.throw(frappe._("来源 PO 付款计划期次不存在。"))
+        if status in {"已下推", "已付款"}:
+            row.payment_request = payment_doc.name
+            row.pushed_by = _clean(frappe.session.user)
+            row.pushed_on = now_datetime()
+            row.approval_status = "已通过" if status == "已付款" else "审批中"
+            if status == "已付款":
+                row.paid_amount = getattr(payment_doc, "amount", None) or 0
+        elif status == "待下推":
+            row.payment_request = ""
+            row.pushed_by = ""
+            row.pushed_on = None
+            row.paid_amount = 0
+            row.approval_status = "未发起"
+        row.status = status
+        if status == "已付款":
+            po.paid_amount = sum(float(item.paid_amount or 0) for item in po.payment_plan)
+            po.payment_status = "已付款" if po.paid_amount >= float(po.total_amount or 0) else "部分付款"
+            po.status = "付款中"
+            for line in po.lines:
+                line.payment_status = po.payment_status
+        _save_document(po)
+        return po
+    source_name = _clean(getattr(payment_doc, "source_request", None))
+    row_name = _clean(getattr(payment_doc, "source_payment_plan_row", None))
+    if not source_name or not row_name:
+        return None
+    source = frappe.get_doc("OA Approval Request", source_name)
+    row = _find_payment_plan_row(source, row_name)
+    if not row:
+        frappe.throw(frappe._("来源付款计划期次不存在。"))
+    row.status = status
+    if status == "已下推":
+        row.payment_request = payment_doc.name
+        row.pushed_by = _clean(frappe.session.user)
+        row.pushed_on = now_datetime()
+        row.approval_status = "审批中"
+    elif status == "已付款":
+        row.payment_request = payment_doc.name
+        row.paid_amount = getattr(payment_doc, "amount", None) or 0
+        row.approval_status = "已通过"
+    elif status == "待下推":
+        row.payment_request = ""
+        row.pushed_by = ""
+        row.pushed_on = None
+        row.paid_amount = 0
+    _save_document(source)
+    return source
+
+
+def _procurement_chain_summary(doc):
+    empty = {
+        "stage": "demand" if not (_clean(getattr(doc, "business_status", None)).startswith("需求已批准") or getattr(doc, "workflow_status", None) == STATUS_COMPLETED) else "await_pr",
+        "label": "需求审批中" if not (_clean(getattr(doc, "business_status", None)).startswith("需求已批准") or getattr(doc, "workflow_status", None) == STATUS_COMPLETED) else "等待 PMC 提 PR",
+        "summary": "需求审批完成后由 PMC 从物料进度看板生成 PR。",
+        "pr_numbers": [], "price_approval_numbers": [], "po_numbers": [],
+        "pending_pr_lines": 0, "pending_price_lines": 0,
+        "draft_price_lines": 0, "approval_lines": 0, "po_lines": 0,
+    }
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
+        return empty
+    approved_business = _clean(getattr(doc, "business_status", None)).startswith("需求已批准")
+    if getattr(doc, "workflow_status", None) not in {STATUS_COMPLETED, "已通过", "已审批", "已结束"} and not approved_business:
+        return empty
+    try:
+        source_lines = list(getattr(doc, "business_lines", []) or [])
+        requested = {row.name: Decimal(str(getattr(row, "quantity", 0) or 0)) for row in source_lines}
+        pr_lines = frappe.get_all(
+            "OA Procurement Request Line", filters={"source_request": doc.name},
+            fields=["parent", "source_line", "quantity", "remaining_quantity"], limit_page_length=0,
+        )
+        active_price_approvals = frappe.get_all(
+            "OA Price Approval", filters={"status": ["not in", ["已取消"]]},
+            pluck="name", limit_page_length=0,
+        )
+        price_lines = frappe.get_all(
+            "OA Price Approval Line",
+            filters={"source_request": doc.name, "parent": ["in", active_price_approvals or ["__none__"]]},
+            fields=["parent", "source_line", "quantity"], limit_page_length=0,
+        )
+        po_lines = frappe.get_all(
+            "OA Purchase Order Line", filters={"source_request": doc.name},
+            fields=["parent", "source_line", "quantity"], limit_page_length=0,
+        )
+        pr_names = sorted({row.parent for row in pr_lines if row.parent})
+        price_names = sorted({row.parent for row in price_lines if row.parent})
+        po_names = sorted({row.parent for row in po_lines if row.parent})
+        price_status = {
+            row.name: _clean(row.status) for row in frappe.get_all(
+                "OA Price Approval", filters={"name": ["in", price_names]},
+                fields=["name", "status"], limit_page_length=0,
+            )
+        } if price_names else {}
+        po_status = {
+            row.name: _clean(row.status) for row in frappe.get_all(
+                "OA Purchase Order", filters={"name": ["in", po_names]},
+                fields=["name", "status"], limit_page_length=0,
+            )
+        } if po_names else {}
+
+        pr_quantity = {}
+        pending_price_sources = set()
+        for row in pr_lines:
+            source_line = _clean(row.source_line)
+            pr_quantity[source_line] = pr_quantity.get(source_line, Decimal("0")) + Decimal(str(row.quantity or 0))
+            if Decimal(str(row.remaining_quantity or 0)) > 0:
+                pending_price_sources.add(source_line)
+        pending_pr_sources = {
+            name for name, quantity in requested.items()
+            if quantity - pr_quantity.get(name, Decimal("0")) > 0
+        }
+        draft_sources = {
+            _clean(row.source_line) for row in price_lines if price_status.get(row.parent) == "草稿"
+        }
+        approval_sources = {
+            _clean(row.source_line) for row in price_lines if price_status.get(row.parent) == "待审批"
+        }
+        po_sources = {_clean(row.source_line) for row in po_lines}
+        active_po = {name for name, value in po_status.items() if value != "已关闭"}
+
+        if pending_price_sources or draft_sources:
+            stage, label = "quote", "采购询价/录价"
+        elif pending_pr_sources:
+            stage, label = "await_pr", "等待 PMC 提 PR"
+        elif approval_sources:
+            stage, label = "price", "价格审批中"
+        elif active_po:
+            stage, label = "po", "PO 执行中"
+        elif po_names and all(value == "已关闭" for value in po_status.values()):
+            stage, label = "closed", "采购已关闭"
+        elif price_names:
+            stage, label = "po", "价格审批已通过 / 待 PO"
+        else:
+            stage, label = empty["stage"], empty["label"]
+
+        parts = []
+        if pending_pr_sources:
+            parts.append(f"待 PMC 提 PR {len(pending_pr_sources)} 项")
+        actionable_price = pending_price_sources | draft_sources
+        if actionable_price:
+            parts.append(f"待采购询价/录价 {len(actionable_price)} 项")
+        if approval_sources:
+            parts.append(f"待演示员工37选择并审批 {len(approval_sources)} 项")
+        if po_sources:
+            parts.append(f"已进入 PO {len(po_sources)} 项")
+        return {
+            "stage": stage, "label": label,
+            "summary": "；".join(parts) or "当前没有可处理的采购链路明细。",
+            "pr_numbers": pr_names, "price_approval_numbers": price_names, "po_numbers": po_names,
+            "pending_pr_lines": len(pending_pr_sources),
+            "pending_price_lines": len(pending_price_sources),
+            "draft_price_lines": len(draft_sources),
+            "approval_lines": len(approval_sources), "po_lines": len(po_sources),
+        }
+    except Exception:
+        return empty
+
+
 def _summarize_doc(doc, authorized_expense_lines=None):
     step = _current_step(doc)
     invoice_summary = invoice_service.request_invoice_summary(doc)
@@ -1083,7 +1404,21 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         )
     )
     capabilities = _request_capabilities(doc)
+    document_visibility = _procurement_document_visibility(doc)
     workflow_metadata = _workflow_metadata(doc)
+    chain_summary = _procurement_chain_summary(doc)
+    po_fulfillment_records = []
+    source_po = _clean(getattr(doc, "source_purchase_order", None))
+    if getattr(doc, "request_type", None) == REQUEST_PROCUREMENT_PAYMENT and source_po:
+        try:
+            po_fulfillment_records = frappe.get_all(
+                "OA PO Fulfillment Record", filters={"purchase_order": source_po},
+                fields=["name", "record_type", "record_date", "recorded_by", "details_json",
+                        "evidence_file", "original_filename", "note", "creation"],
+                order_by="creation desc", limit_page_length=500,
+            )
+        except Exception:
+            po_fulfillment_records = []
     return {
         "name": doc.name,
         "request_type": doc.request_type,
@@ -1114,6 +1449,12 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "paid_on": getattr(doc, "paid_on", None),
         "reason": doc.reason,
         "business_status": getattr(doc, "business_status", None) or "",
+        "procurement_chain": chain_summary,
+        # Keep the user-facing asset decision separate from the legacy
+        # accounting routing field below. Procurement only needs the broad
+        # fixed/non-fixed decision; direct purchase may also have a category.
+        "asset_nature": getattr(doc, "asset_nature", None) or "",
+        "fixed_asset_category": getattr(doc, "fixed_asset_category", None) or "",
         "contract_delivery_date": getattr(doc, "contract_delivery_date", None) or "",
         "pending_contract_delivery_date": getattr(doc, "pending_contract_delivery_date", None) or "",
         "delivery_change_reason": getattr(doc, "delivery_change_reason", None) or "",
@@ -1137,33 +1478,145 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "non_project_department": getattr(doc, "non_project_department", None),
         "purchase_method": getattr(doc, "purchase_method", None),
         "supplier": getattr(doc, "supplier", None),
+        "payment_source_kind": getattr(doc, "payment_source_kind", None) or "",
+        "source_request": getattr(doc, "source_request", None),
+        "source_payment_plan_row": getattr(doc, "source_payment_plan_row", None) or "",
+        "source_payment_plan_installment": getattr(doc, "source_payment_plan_installment", None) or 0,
+        "source_purchase_order": getattr(doc, "source_purchase_order", None) or "",
+        "source_po_payment_plan_row": getattr(doc, "source_po_payment_plan_row", None) or "",
+        "po_fulfillment_records": po_fulfillment_records,
+        "price_revision": getattr(doc, "price_revision", None) or 0,
+        "price_tax_included": getattr(doc, "price_tax_included", None) or 0,
+        "price_tax_rate": getattr(doc, "price_tax_rate", None) or 0,
+        "price_delivery_terms": getattr(doc, "price_delivery_terms", None) or "",
+        "price_warranty_terms": getattr(doc, "price_warranty_terms", None) or "",
+        "price_invoice_condition": getattr(doc, "price_invoice_condition", None) or "",
+        "price_snapshot": _parse_json(getattr(doc, "price_snapshot", None), default={}),
+        "price_submitted_by": getattr(doc, "price_submitted_by", None) or "",
+        "price_submitted_on": getattr(doc, "price_submitted_on", None) or "",
+        "price_approved_by": getattr(doc, "price_approved_by", None) or "",
+        "price_approved_on": getattr(doc, "price_approved_on", None) or "",
+        "contract_status": getattr(doc, "contract_status", None) or "",
+        "contract_version": getattr(doc, "contract_version", None) or 0,
+        "contract_supplier_legal_name": getattr(doc, "contract_supplier_legal_name", None) or "",
+        "contract_credit_code": getattr(doc, "contract_credit_code", None) or "",
+        "contract_supplier_address": getattr(doc, "contract_supplier_address", None) or "",
+        "contract_contact": getattr(doc, "contract_contact", None) or "",
+        "contract_bank_name": getattr(doc, "contract_bank_name", None) or "",
+        "contract_bank_account": getattr(doc, "contract_bank_account", None) or "",
+        "contract_entity": getattr(doc, "contract_entity", None) or "",
+        "contract_template": getattr(doc, "contract_template", None) or "",
+        "contract_seal_user": getattr(doc, "contract_seal_user", None) or "",
+        "contract_draft_content": getattr(doc, "contract_draft_content", None) or "",
+        "contract_reviewed_by": getattr(doc, "contract_reviewed_by", None) or "",
+        "contract_reviewed_on": getattr(doc, "contract_reviewed_on", None) or "",
+        "contract_sealed_by": getattr(doc, "contract_sealed_by", None) or "",
+        "contract_sealed_on": getattr(doc, "contract_sealed_on", None) or "",
+        "payment_plan": [
+            {
+                "name": getattr(row, "name", None) or "",
+                "installment_no": int(getattr(row, "installment_no", 0) or 0),
+                "installment_name": getattr(row, "installment_name", None) or "",
+                "payment_stage": getattr(row, "payment_stage", None) or "",
+                "percentage": float(getattr(row, "percentage", 0) or 0),
+                "amount": float(getattr(row, "amount", 0) or 0),
+                "planned_date": getattr(row, "planned_date", None) or "",
+                "trigger_condition": getattr(row, "trigger_condition", None) or "",
+                "invoice_requirement": getattr(row, "invoice_requirement", None) or "",
+                "status": getattr(row, "status", None) or "",
+                "payment_request": getattr(row, "payment_request", None) or "",
+                "paid_amount": float(getattr(row, "paid_amount", 0) or 0),
+            }
+            for row in (getattr(doc, "payment_plan", []) or [])
+        ],
+        "can_edit_procurement_contract": _can_edit_procurement_contract(doc),
+        "can_review_procurement_contract": _can_review_procurement_contract(doc),
+        "can_seal_procurement_contract": _can_seal_procurement_contract(doc),
         "payment_stage": getattr(doc, "payment_stage", None),
         "prepayment_percentage": getattr(doc, "prepayment_percentage", None) or 0,
         "has_balance_payment": getattr(doc, "has_balance_payment", None) or 0,
         "expected_arrival_date": getattr(doc, "expected_arrival_date", None),
         "prepayment_risk_note": getattr(doc, "prepayment_risk_note", None),
         "workflow_status": doc.workflow_status,
+        "workflow_status_label": (
+            STATUS_WITHDRAWN
+            if doc.request_type == REQUEST_PROCUREMENT
+            and doc.workflow_status == STATUS_DRAFT
+            and _clean(getattr(doc, "business_status", None)) == STATUS_WITHDRAWN
+            else doc.workflow_status
+        ),
         "kanban_status": _kanban_status(doc.workflow_status),
         "current_step_index": doc.current_step_index,
         "current_step_label": doc.current_step_label,
         "current_step_mode": step.mode if step else "",
         "can_act": capabilities["can_approve"] or capabilities["can_reject"],
         **capabilities,
+        **document_visibility,
         **workflow_metadata,
         "can_mark_paid": doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_COMPLETED and _is_finance_user(),
-        "can_withdraw": doc.workflow_status not in {STATUS_DRAFT, STATUS_PAID} and invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user),
+        "can_supplement_invoices": (
+            doc.request_type == REQUEST_EXPENSE_PAYMENT
+            and _invoice_mode(getattr(doc, "invoice_handling_mode", None)) == INVOICE_MODE_PENDING
+            and getattr(doc, "invoice_followup_status", None) in {INVOICE_FOLLOWUP_PENDING, INVOICE_FOLLOWUP_RECEIVED}
+            and doc.workflow_status not in {STATUS_DRAFT, STATUS_REJECTED}
+            and (invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user) or _is_finance_user())
+        ),
+        "can_verify_invoices": (
+            doc.request_type == REQUEST_EXPENSE_PAYMENT
+            and getattr(doc, "invoice_followup_status", None) == INVOICE_FOLLOWUP_RECEIVED
+            and _is_finance_user()
+        ),
+        "can_withdraw": (
+            (
+                doc.request_type == REQUEST_PROCUREMENT
+                and doc.workflow_status in ACTIVE_STATUSES
+            )
+            or (
+                doc.request_type != REQUEST_PROCUREMENT
+                and doc.workflow_status not in {STATUS_DRAFT, STATUS_PAID}
+            )
+        ) and invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user),
         "can_withdraw_payment": doc.workflow_status == STATUS_PAID and _is_finance_user(),
         "invoice_count": invoice_summary["invoice_count"],
         "invoice_status": invoice_summary["invoice_status"],
+        "invoice_handling_mode": _invoice_mode(getattr(doc, "invoice_handling_mode", None)),
+        "invoice_followup_status": getattr(doc, "invoice_followup_status", None) or "",
+        "expected_invoice_date": getattr(doc, "expected_invoice_date", None) or "",
         "invoice_search_text": invoice_summary.get("invoice_search_text", ""),
         "invoice_categories": invoice_summary.get("invoice_categories", []),
         "invoice_project_names": invoice_summary.get("invoice_project_names", []),
         "invoice_numbers": invoice_summary.get("invoice_numbers", []),
         "no_invoice_reason": getattr(doc, "no_invoice_reason", None) or "",
         "operation_log": _operation_events(doc),
+        "attachments": _request_attachments(doc),
+        "can_submit_procurement_quote": _can_submit_procurement_quote(doc, step),
+        "can_modify_procurement_request": bool(
+            doc.request_type == REQUEST_PROCUREMENT
+            and doc.workflow_status in ACTIVE_STATUSES
+            and step
+            and _clean(getattr(step, "label", "")).startswith("PMC")
+            and _is_pmc_user()
+        ),
         "expense_lines": expense_lines,
+        "business_lines": [
+            _serialize_business_line(row)
+            for row in (
+                # New direct-purchase requests use their dedicated child table.
+                # Fall back to the legacy shared table so historical requests
+                # remain readable after the schema split.
+                ((getattr(doc, "direct_purchase_lines", []) or [])
+                 or (getattr(doc, "business_lines", []) or []))
+                if doc.request_type == REQUEST_DIRECT_PURCHASE
+                else (getattr(doc, "business_lines", []) or [])
+            )
+        ],
+        "direct_purchase_lines": [
+            _serialize_business_line(row)
+            for row in (getattr(doc, "direct_purchase_lines", []) or [])
+        ],
         "project_groups": _group_expense_sources(expense_lines),
         "steps": [_serialize_doc_step(row) for row in doc.steps],
+        "pmc_change_version": getattr(doc, "pmc_change_version", None) or 0,
         "creation": doc.creation,
         "modified": doc.modified,
     }
@@ -1216,8 +1669,15 @@ def _advance_after_step(doc, step):
         doc.current_step_label = ""
         if doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}:
             doc.approved_amount = getattr(doc, "amount", None) or 0
-        if doc.request_type == REQUEST_PROCUREMENT and _clean(getattr(doc, "business_status", None)) == "待审批":
-            doc.business_status = "合同待登记"
+        if doc.request_type == REQUEST_PROCUREMENT:
+            if _clean(getattr(step, "label", None)).startswith("价格审批："):
+                # Legacy requests that still contain the old downstream OA steps.
+                doc.business_status = "价格已批准/待补充合同信息"
+                doc.contract_status = "待补充信息"
+                doc.price_approved_by = _clean(getattr(step, "action_by", None))
+                doc.price_approved_on = getattr(step, "acted_on", None)
+            else:
+                doc.business_status = "需求已批准/待询价"
         elif doc.request_type == REQUEST_DIRECT_PURCHASE and _clean(getattr(doc, "business_status", None)) == "待审批":
             doc.business_status = "待付款"
         elif doc.request_type == REQUEST_LEAVE:
@@ -1226,6 +1686,11 @@ def _advance_after_step(doc, step):
     doc.workflow_status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
     if doc.request_type == REQUEST_EXPENSE_PAYMENT and next_step.mode == "handle":
         doc.business_status = "待付款"
+    elif doc.request_type == REQUEST_PROCUREMENT:
+        if _clean(getattr(next_step, "label", None)) == "采购询价/录入价格":
+            doc.business_status = "需求已批准/待询价"
+        elif _clean(getattr(next_step, "label", None)).startswith("价格审批："):
+            doc.business_status = "待价格审批"
     doc.current_step_index = next_step.step_index
     doc.current_step_label = next_step.label
     next_step.status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
@@ -1401,6 +1866,10 @@ def _build_request_doc(
     source_type=None,
     source_summary=None,
     no_invoice_reason=None,
+    invoice_handling_mode=None,
+    expected_invoice_date=None,
+    payment_source_kind=None,
+    source_request=None,
 ):
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
@@ -1419,6 +1888,7 @@ def _build_request_doc(
         if request_type == REQUEST_EXPENSE_PAYMENT
         else {"asset_nature": "", "fixed_asset_category": ""}
     )
+    source_doc = frappe.get_doc("OA Approval Request", source_request) if source_request else None
     doc = frappe.get_doc(
         {
             "doctype": "OA Approval Request",
@@ -1451,6 +1921,13 @@ def _build_request_doc(
             "invoice_count": 0,
             "invoice_status": "无发票",
             "no_invoice_reason": no_invoice_reason or "",
+            "invoice_handling_mode": _invoice_mode(invoice_handling_mode),
+            "invoice_followup_status": "",
+            "expected_invoice_date": expected_invoice_date or None,
+            "payment_source_kind": payment_source_kind or ("无事前申请" if not source_request else ""),
+            "source_request": source_request or None,
+            "approved_amount_snapshot": getattr(source_doc, "approved_amount", None) if source_doc else None,
+            "source_modified": getattr(source_doc, "modified", None) if source_doc else None,
             "reason": reason or "",
             "operation_log": "[]",
             "current_step_index": 1 if submit else 0,
@@ -1460,7 +1937,7 @@ def _build_request_doc(
     _append_steps(doc, steps)
     _set_expense_lines(doc, lines)
     _insert_document(doc)
-    if submit:
+    if submit and doc.request_type != REQUEST_PROCUREMENT_PAYMENT:
         _notify_copied_users(doc)
     return doc
 
@@ -1498,6 +1975,124 @@ def _expense_dashboard_classification(asset_category):
     }
 
 
+def _validate_invoice_handling_submission(doc):
+    summary = invoice_service.request_invoice_summary(doc)
+    mode = _invoice_mode(getattr(doc, "invoice_handling_mode", None))
+    if not mode:
+        frappe.throw(frappe._("请选择发票处理方式。"))
+    source_name = _clean(getattr(doc, "source_request", None))
+    source_kind = _clean(getattr(doc, "payment_source_kind", None))
+    requires_purchase_source = (
+        mode in {INVOICE_MODE_PENDING, INVOICE_MODE_NOT_REQUIRED}
+        and _clean(getattr(doc, "source_type", None)) == SOURCE_MANUAL
+    )
+    if requires_purchase_source and not source_name:
+        frappe.throw(frappe._("暂未取得发票或无需发票的付款必须关联已批准的购买申请。"))
+    if source_name:
+        source = frappe.get_doc("OA Approval Request", source_name)
+        if source.request_type != REQUEST_DIRECT_PURCHASE:
+            frappe.throw(frappe._("付款/报销入口只能关联购买申请；正式采购请使用采购付款流程。"))
+        if source.workflow_status != STATUS_COMPLETED:
+            frappe.throw(frappe._("付款来源申请尚未审批完成。"))
+        balance = _run_approval_amount_operation(approval_amount_ledger.source_balance, source)
+        if _money(getattr(doc, "amount", None)) > balance["available_amount"]:
+            frappe.throw(frappe._("本次付款金额超过来源购买申请的可付款余额。"))
+        doc.payment_source_kind = source_kind or "关联购买申请"
+        doc.approved_amount_snapshot = getattr(source, "approved_amount", None)
+        doc.source_modified = getattr(source, "modified", None)
+    elif mode == INVOICE_MODE_AVAILABLE:
+        doc.payment_source_kind = "无事前申请"
+    invoice_count = int(summary.get("invoice_count") or 0)
+    reason = _clean(getattr(doc, "no_invoice_reason", None))
+    if mode == INVOICE_MODE_AVAILABLE:
+        if not invoice_count:
+            frappe.throw(frappe._("选择已有发票时必须上传并确认发票。"))
+        summary = invoice_service.validate_request_invoices(doc, submitting=True)
+        doc.invoice_followup_status = INVOICE_FOLLOWUP_RECEIVED
+        doc.expected_invoice_date = None
+    elif mode == INVOICE_MODE_PENDING:
+        if invoice_count:
+            frappe.throw(frappe._("已上传发票时请选择已有发票。"))
+        if not reason:
+            frappe.throw(frappe._("暂未取得发票时必须填写原因。"))
+        expected = _report_date(getattr(doc, "expected_invoice_date", None), "预计取得发票日期")
+        if not expected:
+            frappe.throw(frappe._("暂未取得发票时必须填写预计取得发票日期。"))
+        doc.expected_invoice_date = expected
+        doc.invoice_followup_status = INVOICE_FOLLOWUP_PENDING
+    else:
+        if invoice_count:
+            frappe.throw(frappe._("已上传发票时不能选择无需发票。"))
+        if not reason:
+            frappe.throw(frappe._("无需发票时必须填写原因。"))
+        doc.expected_invoice_date = None
+        doc.invoice_followup_status = INVOICE_FOLLOWUP_NOT_REQUIRED
+    doc.invoice_count = summary.get("invoice_count", 0)
+    doc.invoice_status = summary.get("invoice_status", "")
+    return summary
+
+
+def _validate_procurement_plan_payment(doc):
+    po_name = _clean(getattr(doc, "source_purchase_order", None))
+    po_row_name = _clean(getattr(doc, "source_po_payment_plan_row", None))
+    if po_name and po_row_name:
+        po = frappe.get_doc("OA Purchase Order", po_name)
+        if getattr(po, "contract_status", None) != "已生效":
+            frappe.throw(frappe._("来源采购合同尚未生效。"))
+        row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
+        if not row:
+            frappe.throw(frappe._("来源 PO 付款计划期次不存在。"))
+        if _clean(getattr(row, "status", None)) not in {"待审批", "审批中"}:
+            frappe.throw(frappe._("来源 PO 付款计划期次已下推或已付款。"))
+        if _money(getattr(row, "amount", None)) != _money(getattr(doc, "amount", None)):
+            frappe.throw(frappe._("采购付款金额必须与 PO 付款计划期次一致。"))
+        if _clean(getattr(row, "payment_stage", None)) != _clean(getattr(doc, "payment_stage", None)):
+            frappe.throw(frappe._("采购付款阶段必须与 PO 付款计划期次一致。"))
+        return _clean(getattr(row, "payment_stage", None))
+    source = frappe.get_doc("OA Approval Request", _clean(getattr(doc, "source_request", None)))
+    if getattr(source, "contract_status", None) != "已生效":
+        frappe.throw(frappe._("来源采购合同尚未生效。"))
+    row = _find_payment_plan_row(source, getattr(doc, "source_payment_plan_row", None))
+    if not row:
+        frappe.throw(frappe._("来源付款计划期次不存在。"))
+    if _clean(getattr(row, "status", None)) != "待下推":
+        frappe.throw(frappe._("来源付款计划期次已下推或已付款。"))
+    if _money(getattr(row, "amount", None)) != _money(getattr(doc, "amount", None)):
+        frappe.throw(frappe._("采购付款金额必须与付款计划期次一致。"))
+    if _clean(getattr(row, "payment_stage", None)) != _clean(getattr(doc, "payment_stage", None)):
+        frappe.throw(frappe._("采购付款阶段必须与付款计划期次一致。"))
+    trigger = _clean(getattr(row, "trigger_condition", None))
+    if "验收" in trigger and _clean(getattr(source, "inspection_status", None)) != "验收通过":
+        frappe.throw(frappe._("该付款计划要求验收通过后才能提交付款。"))
+    if _clean(getattr(doc, "payment_stage", None)) == "预付款" and _money(
+        getattr(doc, "prepayment_percentage", None)
+    ) == Decimal("100") and not _clean(getattr(doc, "prepayment_risk_note", None)):
+        frappe.throw(frappe._("100%预付款必须填写风险说明。"))
+    return _clean(getattr(row, "payment_stage", None))
+
+
+def _validate_procurement_payment_release(doc):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
+        return
+    po_name = _clean(getattr(doc, "source_purchase_order", None))
+    po_row_name = _clean(getattr(doc, "source_po_payment_plan_row", None))
+    if po_name and po_row_name:
+        po = frappe.get_doc("OA Purchase Order", po_name)
+        row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
+        if row and _clean(getattr(row, "invoice_requirement", None)) == "付款前提供" and "发票" not in _request_business_document_types(doc.name):
+            frappe.throw(frappe._("该 PO 付款计划要求付款前提供发票，请上传发票后再确认付款。"))
+        return
+    source_name = _clean(getattr(doc, "source_request", None))
+    row_name = _clean(getattr(doc, "source_payment_plan_row", None))
+    if not source_name or not row_name:
+        return
+    source = frappe.get_doc("OA Approval Request", source_name)
+    row = _find_payment_plan_row(source, row_name)
+    if row and _clean(getattr(row, "invoice_requirement", None)) == "付款前提供":
+        if "发票" not in _request_business_document_types(doc.name):
+            frappe.throw(frappe._("该付款计划要求付款前提供发票，请上传发票后再确认付款。"))
+
+
 def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
@@ -1511,11 +2106,12 @@ def _submit_draft(doc):
         for fieldname, value in _expense_dashboard_classification(doc.asset_category).items():
             setattr(doc, fieldname, value)
         _validate_expense_project_groups(doc)
-        summary = invoice_service.validate_request_invoices(doc, submitting=True)
-        if isinstance(summary, dict):
-            doc.invoice_count = summary.get("invoice_count", 0)
-            doc.invoice_status = summary.get("invoice_status", "")
+        _validate_invoice_handling_submission(doc)
     elif doc.request_type == REQUEST_PROCUREMENT:
+        for line in list(getattr(doc, "business_lines", []) or []):
+            if not _clean(getattr(line, "material_serial", None)):
+                suffix = frappe.model.naming.make_autoname("MAT-.#####").split("-")[-1]
+                line.material_serial = f"MAT-{date.today().year}-{suffix}"
         try:
             validate_procurement_submission(doc)
         except ProcurementWorkflowError as exc:
@@ -1524,12 +2120,15 @@ def _submit_draft(doc):
         balance = approval_amount_ledger.source_balance(doc.source_request)
         doc.source_paid_amount = balance["paid_amount"]
         doc.source_available_amount = balance["available_amount"]
-        try:
-            doc.payment_stage = validate_payment_submission(
-                doc, evidence=_request_business_document_types(doc.name)
-            )
-        except ProcurementWorkflowError as exc:
-            frappe.throw(str(exc))
+        if _clean(getattr(doc, "source_payment_plan_row", None)):
+            doc.payment_stage = _validate_procurement_plan_payment(doc)
+        else:
+            try:
+                doc.payment_stage = validate_payment_submission(
+                    doc, evidence=_request_business_document_types(doc.name)
+                )
+            except ProcurementWorkflowError as exc:
+                frappe.throw(str(exc))
         if doc.payment_stage == "预付款":
             doc.has_balance_payment = 1 if Decimal(str(doc.prepayment_percentage or 0)) < 100 else 0
         else:
@@ -1577,6 +2176,29 @@ def _update_consumption_invoice_state(doc):
         doc.status = CD_WAIT_UPLOAD
 
 
+def _is_procurement_global_reader(user=None, request_type=None):
+    candidate = _clean(user or frappe.session.user)
+    roles = set(frappe.get_roles(candidate) or [])
+    if candidate in {"Administrator", "admin@staff.example.invalid"} or roles & PROCUREMENT_GLOBAL_ROLES:
+        return True
+    # Finance has global visibility for payment requests only. It does not
+    # receive the procurement-demand register merely by having Accounts User.
+    return request_type == REQUEST_PROCUREMENT_PAYMENT and "Accounts User" in roles
+
+
+def _procurement_row_is_related(doc, user, context):
+    employee = context.get("employee") if context else None
+    return bool(
+        getattr(doc, "employee", None) == employee
+        or getattr(doc, "owner", None) == user
+        or (
+            getattr(doc, "request_type", None) in PROCUREMENT_REQUEST_TYPES
+            and getattr(doc, "purchaser_user", None) == user
+        )
+        or _can_act_on_current_step(doc, user)
+    )
+
+
 def _consumption_filters(view="mine", status=None):
     roles = set(frappe.get_roles(frappe.session.user))
     ctx = _employee_context()
@@ -1604,6 +2226,7 @@ def get_options():
         "urgencies": URGENCY,
         "payment_types": PAYMENT_TYPES,
         "payment_methods": PAYMENT_METHODS,
+        "invoice_handling_modes": INVOICE_HANDLING_MODES,
         "companies": COMPANIES,
         "context": context,
         "current_applicant": {
@@ -1613,7 +2236,12 @@ def get_options():
         },
         "can_manage_expense": bool(roles & FINANCE_ROLES),
         "can_see_all": bool(roles & PRIVILEGED_ROLES),
+        "procurement_global_access": {
+            request_type: _is_procurement_global_reader(frappe.session.user, request_type)
+            for request_type in PROCUREMENT_REQUEST_TYPES
+        },
         "can_submit_procurement_for_others": _can_submit_procurement_for_others(),
+        "can_manage_procurement_catalog": _is_pmc_user(),
     }
 
 
@@ -1654,8 +2282,7 @@ def preview_route(
         )
         copied_to = (
             leave_copy_recipients(ctx.get("applicant_user"), roles=roles)
-            if request_type == REQUEST_LEAVE
-            else []
+            if request_type == REQUEST_LEAVE else []
         )
         if request_type == REQUEST_LEAVE:
             _require_leave_accounts(steps, copied_to)
@@ -1692,11 +2319,18 @@ def create_request(
     account_no=None,
     invoice_batch=None,
     no_invoice_reason=None,
+    invoice_handling_mode=None,
+    expected_invoice_date=None,
+    payment_source_kind=None,
+    source_request=None,
 ):
+    if request_type == REQUEST_PROCUREMENT_PAYMENT:
+        frappe.throw(frappe._("采购付款必须由 PO 付款计划下推生成，不能单独新建。"))
     require_request_type_access(request_type)
     requested_submit = _to_bool(submit)
     batch_name = _bounded_optional_text(invoice_batch, "发票批次", 140)
     no_invoice_reason = _bounded_optional_text(no_invoice_reason, "无票原因", 1000)
+    invoice_handling_mode = _invoice_mode(invoice_handling_mode) or (INVOICE_MODE_AVAILABLE if batch_name else "")
     doc = _build_request_doc(
         request_type=request_type,
         subject=subject,
@@ -1719,6 +2353,10 @@ def create_request(
         branch=branch,
         account_no=account_no,
         no_invoice_reason=no_invoice_reason,
+        invoice_handling_mode=invoice_handling_mode,
+        expected_invoice_date=expected_invoice_date,
+        payment_source_kind=_bounded_optional_text(payment_source_kind, "付款来源类型", 40),
+        source_request=_bounded_optional_text(source_request, "来源申请", 140),
     )
     if batch_name:
         doc = invoice_service.attach_batch_to_request(batch_name, doc)
@@ -1728,10 +2366,36 @@ def create_request(
         doc.invoice_status = draft_summary.get("invoice_status", "")
     if requested_submit:
         _submit_draft(doc)
+        _reserve_expense_payment(doc)
     _save_document(doc)
     if requested_submit:
         _sync_assignments_after_save(doc)
     return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_leave_draft(name, subject, from_date, to_date, reason=None):
+    request_name = _bounded_optional_text(name, "Request", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        invoice_service._request_permission(doc, "edit", current=True)
+        if doc.request_type != REQUEST_LEAVE or doc.workflow_status != STATUS_DRAFT:
+            frappe.throw(frappe._("\u53ea\u6709\u8bf7\u5047\u8349\u7a3f\u53ef\u4ee5\u4fee\u6539\u3002"))
+        clean_subject = _bounded_optional_text(subject, "\u4e3b\u9898", 140)
+        clean_reason = _bounded_optional_text(reason, "\u4e8b\u7531", 1000)
+        start_date = _report_date(from_date, "\u5f00\u59cb\u65e5\u671f")
+        end_date = _report_date(to_date, "\u7ed3\u675f\u65e5\u671f")
+        if not clean_subject or not start_date or not end_date:
+            frappe.throw(frappe._("\u8bf7\u5047\u4e3b\u9898\u3001\u5f00\u59cb\u65e5\u671f\u548c\u7ed3\u675f\u65e5\u671f\u4e0d\u80fd\u4e3a\u7a7a\u3002"))
+        if start_date > end_date:
+            frappe.throw(frappe._("\u5f00\u59cb\u65e5\u671f\u4e0d\u80fd\u665a\u4e8e\u7ed3\u675f\u65e5\u671f\u3002"))
+        doc.subject = clean_subject
+        doc.from_date = start_date
+        doc.to_date = end_date
+        doc.reason = clean_reason
+        _save_document(doc)
+        return _summarize_doc(doc)
 
 
 def _draft_source_rows(source_lines):
@@ -2059,38 +2723,96 @@ def _run_approval_amount_operation(operation, *args, **kwargs):
 def _reserve_procurement_payment(doc):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
         return None
+    if _clean(getattr(doc, "source_purchase_order", None)):
+        return _sync_payment_plan_row(doc, "已下推")
     revision = _procurement_payment_revision(doc)
-    return _run_approval_amount_operation(
+    result = _run_approval_amount_operation(
         approval_amount_ledger.reserve,
         _clean(getattr(doc, "source_request", None)),
         doc.name,
         "submit:{0}:{1}".format(doc.name, revision),
         note="采购付款提交占用",
     )
+    _sync_payment_plan_row(doc, "已下推")
+    return result
 
 
 def _release_procurement_payment_reservation(doc, note=""):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
         return None
+    if _clean(getattr(doc, "source_purchase_order", None)):
+        return _sync_payment_plan_row(doc, "待下推")
     revision = _procurement_payment_revision(doc)
-    return _run_approval_amount_operation(
+    result = _run_approval_amount_operation(
         approval_amount_ledger.release_all_reserved,
         _clean(getattr(doc, "source_request", None)),
         doc.name,
         "release:{0}:{1}".format(doc.name, revision),
         note=note or "采购付款退回释放占用",
     )
+    _sync_payment_plan_row(doc, "待下推")
+    return result
 
 
 def _mark_procurement_payment_paid(doc):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
         return None
-    return _run_approval_amount_operation(
+    if _clean(getattr(doc, "source_purchase_order", None)):
+        return _sync_payment_plan_row(doc, "已付款")
+    result = _run_approval_amount_operation(
         approval_amount_ledger.mark_paid,
         _clean(getattr(doc, "source_request", None)),
         doc.name,
         "pay:{0}".format(doc.name),
         note="采购付款确认付款",
+    )
+    _sync_payment_plan_row(doc, "已付款")
+    return result
+
+
+def _reserve_expense_payment(doc):
+    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
+        return None
+    revision = _procurement_payment_revision(doc)
+    return _run_approval_amount_operation(
+        approval_amount_ledger.reserve,
+        _clean(doc.source_request), doc.name,
+        "expense-submit:{0}:{1}".format(doc.name, revision),
+        note="购买申请付款提交占用",
+    )
+
+
+def _release_expense_payment_reservation(doc, note=""):
+    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
+        return None
+    revision = _procurement_payment_revision(doc)
+    return _run_approval_amount_operation(
+        approval_amount_ledger.release_all_reserved,
+        _clean(doc.source_request), doc.name,
+        "expense-release:{0}:{1}".format(doc.name, revision),
+        note=note or "购买申请付款退回释放占用",
+    )
+
+
+def _mark_expense_payment_paid(doc):
+    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
+        return None
+    return _run_approval_amount_operation(
+        approval_amount_ledger.mark_paid,
+        _clean(doc.source_request), doc.name,
+        "expense-pay:{0}".format(doc.name),
+        note="购买申请付款确认付款",
+    )
+
+
+def _reverse_expense_payment_paid(doc, note=""):
+    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
+        return None
+    return _run_approval_amount_operation(
+        approval_amount_ledger.reverse,
+        _clean(doc.source_request), doc.name, _money(doc.amount),
+        "expense-reverse:{0}".format(doc.name),
+        note=note or "撤回购买申请付款",
     )
 
 
@@ -2125,9 +2847,11 @@ def submit_request(name, no_invoice_reason=None):
             doc.no_invoice_reason = supplied_reason
         _submit_draft(doc)
         _reserve_procurement_payment(doc)
+        _reserve_expense_payment(doc)
         _save_document(doc)
         _sync_assignments_after_save(doc)
-        _notify_copied_users(doc)
+        if doc.request_type != REQUEST_PROCUREMENT_PAYMENT:
+            _notify_copied_users(doc)
         return _summarize_doc(doc)
 
 
@@ -2158,6 +2882,92 @@ def _contract_copy_snapshot(doc):
         "supervisor": _step_snapshot(doc, "直属主管", "直属上级"),
         "project_owner": {"label": "项目主管", "user": _clean(getattr(doc, "project_owner", None))},
     }
+
+
+def _is_pmc_user(user=None):
+    """Return true only for the dynamically assigned PMC account.
+
+    System administrators can inspect the queue, but they must not inherit
+    PMC-only material editing or catalog-maintenance capabilities.
+    """
+    candidate = _clean(user or frappe.session.user).lower()
+    try:
+        return bool(candidate) and candidate == _clean(resolve_role("pmc").get("user")).lower()
+    except (ApprovalRoleResolutionError, RuntimeError, ImportError):
+        return False
+
+
+def _notify_procurement_modification(doc, recipients):
+    for row in recipients or []:
+        user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
+        if not user or user == _clean(frappe.session.user).lower():
+            continue
+        frappe.get_doc({
+            "doctype": "Notification Log",
+            "for_user": user,
+            "type": "Alert",
+            "document_type": "OA Approval Request",
+            "document_name": doc.name,
+            "subject": "采购申请已由 PMC 修改：" + str(doc.name),
+            "email_content": "采购申请 {0} 已由 PMC 修改，请按修改后的版本查阅。".format(doc.name),
+        }).insert(ignore_permissions=True)
+
+
+@frappe.whitelist(methods=["POST"])
+def modify_procurement_request(name, business_lines=None, expected_delivery_date=None, reason=None, subject=None):
+    """Allow PMC to enrich an active procurement request without resetting upstream approvals."""
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    if not _is_pmc_user():
+        frappe.throw(frappe._("只有 PMC 可以修改审批中的采购申请。"))
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        if doc.request_type != REQUEST_PROCUREMENT:
+            frappe.throw(frappe._("只有采购申请可以由 PMC 修改。"))
+        step = _current_step(doc)
+        if doc.workflow_status not in ACTIVE_STATUSES or not step or not _clean(getattr(step, "label", "")).startswith("PMC"):
+            frappe.throw(frappe._("采购申请只有流转到 PMC 节点后才能修改。"))
+        before = {
+            "business_lines": [_serialize_business_line(row) for row in list(getattr(doc, "business_lines", []) or [])],
+            "expected_delivery_date": _clean(getattr(doc, "expected_delivery_date", None)),
+            "subject": _clean(getattr(doc, "subject", None)),
+            "reason": _clean(getattr(doc, "reason", None)),
+        }
+        supplied_lines = _parse_json(business_lines, None) if isinstance(business_lines, str) else business_lines
+        if supplied_lines is not None:
+            if not isinstance(supplied_lines, list) or not supplied_lines or len(supplied_lines) > 100:
+                frappe.throw(frappe._("采购明细格式无效。"))
+            doc.set("business_lines", [
+                {key: row.get(key) for key in (
+                    "material_code", "material_serial", "category_code", "category_path", "item_name", "specification",
+                    "product_desc", "brand", "product_name", "product_desc_en", "brand_en", "material_attr",
+                    "quantity", "unit", "unit_price", "remarks",
+                ) if key in row}
+                for row in supplied_lines if isinstance(row, dict)
+            ])
+        if expected_delivery_date is not None:
+            doc.expected_delivery_date = expected_delivery_date
+        if reason is not None:
+            doc.reason = _bounded_optional_text(reason, "申请说明", 1000)
+        if subject is not None:
+            doc.subject = _bounded_optional_text(subject, "主题", 140)
+        after = {
+            "business_lines": [_serialize_business_line(row) for row in list(getattr(doc, "business_lines", []) or [])],
+            "expected_delivery_date": _clean(getattr(doc, "expected_delivery_date", None)),
+            "subject": _clean(getattr(doc, "subject", None)),
+            "reason": _clean(getattr(doc, "reason", None)),
+        }
+        changed = {key: {"before": before[key], "after": after[key]} for key in before if before[key] != after[key]}
+        if not changed:
+            frappe.throw(frappe._("没有检测到采购申请修改。"))
+        recipients = contract_copy_recipients(_contract_copy_snapshot(doc))
+        recipients = [row for row in recipients if row.get("label") in {"申请人", "直属上级", "项目主管"}]
+        doc.copied_to = _json_list(recipients)
+        doc.pmc_change_version = int(getattr(doc, "pmc_change_version", 0) or 0) + 1
+        _append_request_event(doc, "PMC修改采购申请", doc.workflow_status, doc.workflow_status, details={"changes": changed, "recipients": recipients})
+        _save_document(doc)
+        _sync_assignments_after_save(doc)
+        _notify_procurement_modification(doc, recipients)
+        return _summarize_doc(doc)
 
 
 def _require_contract_registration_access(doc):
@@ -2349,7 +3159,31 @@ def _apply_procurement_lifecycle_transition(doc, action, payload, event_action, 
     details.update({key: _audit_detail_value(value) for key, value in (payload or {}).items() if value not in (None, "")})
     _append_request_event(doc, event_action, old_status, getattr(doc, "business_status", None), note, details)
     _save_document(doc)
-    _sync_procurement_fulfillment_to_source(doc)
+    source = _sync_procurement_fulfillment_to_source(doc)
+    if source:
+        created_payment_requests = _auto_push_procurement_payment_plans(source)
+        if created_payment_requests:
+            source = _load_request(source.name, current=True)
+            _append_request_event(
+                source,
+                "验收后付款计划自动下推",
+                _clean(getattr(source, "business_status", None)),
+                _clean(getattr(source, "business_status", None)),
+                details={"payment_requests": created_payment_requests},
+            )
+            _save_document(source)
+    elif getattr(doc, "request_type", None) == REQUEST_PROCUREMENT:
+        created_payment_requests = _auto_push_procurement_payment_plans(doc)
+        if created_payment_requests:
+            doc = _load_request(doc.name, current=True)
+            _append_request_event(
+                doc,
+                "验收后付款计划自动下推",
+                _clean(getattr(doc, "business_status", None)),
+                _clean(getattr(doc, "business_status", None)),
+                details={"payment_requests": created_payment_requests},
+            )
+            _save_document(doc)
     _sync_assignments_after_save(doc)
     return _summarize_doc(doc)
 
@@ -2481,6 +3315,94 @@ def close_procurement(name, reason=None):
 
 
 @frappe.whitelist()
+def get_my_approval_summary():
+    if _clean(frappe.session.user) in {"", "Guest"}:
+        frappe.throw(frappe._("请先登录。"))
+    routes = {
+        REQUEST_LEAVE: {"key": "leave", "label": "请假", "route": "/approval/leave"},
+        REQUEST_PROCUREMENT: {"key": "procurement", "label": "采购", "route": "/approval/procurement"},
+        REQUEST_DIRECT_PURCHASE: {"key": "direct_purchase", "label": "购买", "route": "/approval/direct-purchase"},
+        REQUEST_PROCUREMENT_PAYMENT: {"key": "procurement_payment", "label": "采购付款", "route": "/approval/procurement-payment"},
+        REQUEST_EXPENSE_PAYMENT: {"key": "expense_payment", "label": "付款/报销", "route": "/approval/reimbursement"},
+    }
+    categories = {
+        value["key"]: {**value, "count": 0, "requests": []}
+        for value in routes.values()
+    }
+    names = frappe.get_all(
+        "OA Approval Request",
+        filters={"workflow_status": ["in", list(ACTIVE_STATUSES)]},
+        fields=["name"],
+        order_by="modified desc",
+        limit_page_length=500,
+    )
+    summary_user = _clean(frappe.session.user)
+    global_queue = summary_user == "Administrator" or "System Manager" in set(frappe.get_roles(summary_user))
+    for row in names:
+        doc = _load_request(_result_name(row))
+        if global_queue:
+            visible = _can_act_on_current_step(doc, summary_user)
+        else:
+            step = _current_step(doc)
+            visible = bool(step and _matched_approvers(step, summary_user))
+        if not visible:
+            continue
+        item = routes.get(getattr(doc, "request_type", None))
+        if not item:
+            continue
+        bucket = categories[item["key"]]
+        bucket["requests"].append(doc.name)
+        bucket["count"] += 1
+    return {
+        "total": sum(item["count"] for item in categories.values()),
+        "categories": list(categories.values()),
+    }
+
+
+@frappe.whitelist()
+def get_my_notifications(limit=30, unread_only=0):
+    """Return the signed-in user's actionable station messages for the app inbox."""
+    user = _clean(frappe.session.user)
+    if not user or user == "Guest":
+        frappe.throw(frappe._("请先登录。"))
+    try:
+        limit = max(1, min(int(limit or 30), 100))
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("通知数量格式无效。"))
+    filters = {"for_user": user}
+    if _to_bool(unread_only):
+        filters["read"] = 0
+    rows = frappe.get_all(
+        "Notification Log",
+        filters=filters,
+        fields=["name", "subject", "email_content", "creation", "read", "link", "document_type", "document_name", "type"],
+        order_by="creation desc",
+        limit_page_length=limit,
+    )
+    unread = frappe.db.count("Notification Log", filters={"for_user": user, "read": 0})
+    return {"unread": int(unread or 0), "items": rows}
+
+
+@frappe.whitelist(methods=["POST"])
+def mark_my_notifications_read(names=None, all_notifications=0):
+    """Mark only the current user's notification rows as read."""
+    user = _clean(frappe.session.user)
+    if not user or user == "Guest":
+        frappe.throw(frappe._("请先登录。"))
+    if _to_bool(all_notifications):
+        rows = frappe.get_all("Notification Log", filters={"for_user": user, "read": 0}, fields=["name"], limit_page_length=500)
+    else:
+        parsed = _parse_json(names, default=names) if isinstance(names, str) else names
+        if not isinstance(parsed, (list, tuple, set)):
+            parsed = [parsed] if parsed else []
+        wanted = {_clean(value) for value in parsed if _clean(value)}
+        rows = frappe.get_all("Notification Log", filters={"for_user": user, "name": ["in", list(wanted)]}, fields=["name"], limit_page_length=500) if wanted else []
+    for row in rows:
+        frappe.db.set_value("Notification Log", row.name, "read", 1, update_modified=False)
+    return {"marked": len(rows)}
+
+
+@frappe.whitelist()
 def list_requests(view="mine", limit=50, request_type=None, name=None):
     allowed_types = visible_request_types(REQUEST_TYPES)
     if request_type:
@@ -2498,10 +3420,25 @@ def list_requests(view="mine", limit=50, request_type=None, name=None):
         frappe.throw(frappe._("查询数量格式无效。"))
     exact_name = _report_text(name, "申请单号") if name is not None else ""
     filters = {}
+    include_assigned = False
+    procurement_view = request_type in PROCUREMENT_REQUEST_TYPES
+    restricted_hr = bool(roles & HR_SCOPED_ROLES) and not _is_procurement_global_reader()
+    global_for_requested_type = _is_procurement_global_reader(
+        frappe.session.user, request_type
+    ) if procurement_view else False
     if view == "pending":
         filters["workflow_status"] = ["in", list(ACTIVE_STATUSES)]
-    elif view == "all" and roles & PRIVILEGED_ROLES:
+    elif view == "all" and request_type in PROCUREMENT_REQUEST_TYPES and not global_for_requested_type:
         filters = {}
+        include_assigned = True
+    elif view == "all" and roles & PRIVILEGED_ROLES and not restricted_hr:
+        filters = {}
+        # Mixed views still need per-document filtering for finance: payment
+        # requests are global, procurement demands remain scoped.
+        include_assigned = bool("Accounts User" in roles and not roles & HR_SCOPED_ROLES)
+    elif view == "all":
+        filters = {}
+        include_assigned = True
     else:
         filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
     filters["request_type"] = request_type if request_type else ["in", allowed_types]
@@ -2515,6 +3452,22 @@ def list_requests(view="mine", limit=50, request_type=None, name=None):
         limit_page_length=limit,
     )
     docs = [_load_request(_result_name(row)) for row in names]
+    if include_assigned:
+        user = frappe.session.user
+        restricted_hr = bool(roles & HR_SCOPED_ROLES) and not _is_procurement_global_reader(user)
+        privileged_non_procurement = bool(roles & PRIVILEGED_ROLES) and not restricted_hr
+        docs = [
+            doc for doc in docs
+            if (
+                getattr(doc, "request_type", None) in PROCUREMENT_REQUEST_TYPES
+                and _is_procurement_global_reader(user, getattr(doc, "request_type", None))
+            )
+            or (
+                getattr(doc, "request_type", None) not in PROCUREMENT_REQUEST_TYPES
+                and privileged_non_procurement
+            )
+            or _procurement_row_is_related(doc, user, ctx)
+        ]
     if view == "pending":
         docs = [doc for doc in docs if _can_act_on_current_step(doc)]
     return [_summarize_doc(doc) for doc in docs]
@@ -3011,6 +3964,7 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
         source_type=SOURCE_PUSH,
         source_summary="\u3001".join(doc.name for doc in docs),
         no_invoice_reason="由旧消费明细附件下推",
+        invoice_handling_mode=INVOICE_MODE_NOT_REQUIRED,
     )
     if _to_bool(submit):
         _submit_draft(doc)
@@ -3021,6 +3975,30 @@ def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
         cd.linked_request = doc.name
         cd.save(ignore_permissions=True)
     return _summarize_doc(doc)
+
+
+def _event_stamp(event):
+    event = event if isinstance(event, dict) else {}
+    return _clean(event.get("timestamp") or event.get("acted_on"))
+
+
+def _validate_procurement_material_codes(doc, step):
+    """PMC may approve only after every purchase line has a formal material code."""
+    if doc.request_type != REQUEST_PROCUREMENT:
+        return
+    if not _clean(getattr(step, "label", None)).startswith("PMC"):
+        return
+    missing = [
+        str(index)
+        for index, row in enumerate(getattr(doc, "business_lines", []) or [], start=1)
+        if not _clean(getattr(row, "material_code", None))
+    ]
+    if missing:
+        frappe.throw(
+            frappe._(
+                "第{0}项物料编号尚未补全，PMC不能通过；请先绑定正式物料编号后再提交。"
+            ).format("、".join(missing))
+        )
 
 
 @frappe.whitelist(methods=["POST"])
@@ -3038,6 +4016,12 @@ def action_request(name, action="approve", note=None, reject_target=None):
             frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
         acting_as_override = bool(is_override and not matched)
         actor = _clean(frappe.session.user)
+        if (
+            doc.request_type == REQUEST_PROCUREMENT
+            and _clean(getattr(step, "label", None)) == "采购询价/录入价格"
+            and action == "approve"
+        ):
+            frappe.throw(frappe._("请填写供应商、报价明细并通过询价表单提交价格。"))
         if action == "reject":
             authorized_expense_lines = _with_expense_attachments(
                 doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
@@ -3045,11 +4029,23 @@ def action_request(name, action="approve", note=None, reject_target=None):
             _reject_to_target(doc, step, reject_target, actor, note)
             if doc.request_type == REQUEST_PROCUREMENT_PAYMENT and doc.workflow_status == STATUS_DRAFT:
                 _release_procurement_payment_reservation(doc, note)
+            if doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_DRAFT:
+                _release_expense_payment_reservation(doc, note)
             _save_document(doc)
             _sync_assignments_after_save(doc)
+            if _clean(reject_target) == "applicant":
+                events = _operation_events(doc)
+                stamp = _event_stamp(events[-1] if events else None)
+                notify_rejected_applicant(
+                    doc,
+                    actor,
+                    note,
+                    event_key=f"oa-rejection:{doc.name}:{stamp}",
+                )
             return _summarize_doc(doc, authorized_expense_lines)
         if action != "approve":
             frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684\u5904\u7406\u52a8\u4f5c\u3002"))
+        _validate_procurement_material_codes(doc, step)
         _validate_finance_classification(doc, step)
         authorized_expense_lines = _with_expense_attachments(
             doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
@@ -3071,6 +4067,8 @@ def action_request(name, action="approve", note=None, reject_target=None):
             return _summarize_doc(doc, authorized_expense_lines)
         done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
         from_status = doc.workflow_status
+        if step.mode == "handle" and doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
+            _validate_procurement_payment_release(doc)
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
         contract_delivery_confirmed = _finalize_contract_delivery_if_complete(doc, step)
@@ -3079,6 +4077,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
                 _mark_procurement_payment_paid(doc)
                 _set_procurement_payment_paid_state(doc)
             else:
+                _mark_expense_payment_paid(doc)
                 doc.business_status = "已付款"
             doc.workflow_status = STATUS_PAID
             doc.paid_by = actor
@@ -3086,9 +4085,354 @@ def action_request(name, action="approve", note=None, reject_target=None):
             _append_request_event(doc, "确认付款", from_status, STATUS_PAID, note)
         _save_document(doc)
         _sync_assignments_after_save(doc)
-        if contract_delivery_confirmed:
+        if doc.workflow_status in {STATUS_COMPLETED, STATUS_PAID}:
+            notify_request_applicant(
+                doc,
+                "已完成" if doc.workflow_status == STATUS_COMPLETED else "已付款",
+                actor=actor,
+                note=note,
+                event_key=f"oa-result:{doc.name}:{doc.workflow_status}:{_event_stamp(_operation_events(doc)[-1] if _operation_events(doc) else None)}",
+            )
+        if contract_delivery_confirmed or (
+            step.mode == "handle" and doc.request_type == REQUEST_PROCUREMENT_PAYMENT
+        ):
             _notify_copied_users(doc)
         return _summarize_doc(doc, authorized_expense_lines)
+
+
+def _quote_snapshot(doc):
+    lines = []
+    for row in (getattr(doc, "business_lines", []) or []):
+        item = _serialize_business_line(row)
+        for field in ("quantity", "unit_price", "amount"):
+            item[field] = float(item[field] or 0)
+        lines.append(item)
+    return {
+        "supplier": _clean(getattr(doc, "supplier", None)),
+        "amount": float(_money(getattr(doc, "amount", None) or 0)),
+        "business_lines": lines,
+        "price_revision": int(getattr(doc, "price_revision", 0) or 0),
+    }
+
+
+@frappe.whitelist(methods=["POST"])
+def submit_procurement_quote(
+    name,
+    supplier,
+    business_lines,
+    payment_plan,
+    tax_included=1,
+    tax_rate=0,
+    delivery_terms=None,
+    warranty_terms=None,
+    invoice_condition=None,
+    change_reason=None,
+):
+    frappe.throw(frappe._("采购报价已改为从 PR 表格进入价格审批工作台，请勿在 OA 内录价。"))
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        if doc.request_type != REQUEST_PROCUREMENT:
+            frappe.throw(frappe._("只有采购申请可以提交价格审批表。"))
+        if not _can_submit_procurement_quote(doc):
+            frappe.throw(frappe._("当前账号或状态不能提交采购价格审批表。"))
+        supplier_name = _bounded_optional_text(supplier, "供应商", 140)
+        from rayher_hr_payroll.approval_center import ApprovalCenterError, _lines
+        try:
+            parsed = _parse_json(business_lines, None)
+            lines, total = _lines(parsed)
+            revision_no = int(getattr(doc, "price_revision", 0) or 0) + 1
+            snapshot, plan_rows = price_approval_snapshot(
+                supplier=supplier_name,
+                total_amount=total,
+                business_lines=[
+                    {key: (float(value) if isinstance(value, Decimal) else value) for key, value in row.items()}
+                    for row in lines
+                ],
+                tax_included=tax_included,
+                tax_rate=tax_rate,
+                delivery_terms=delivery_terms,
+                warranty_terms=warranty_terms,
+                invoice_condition=invoice_condition,
+                payment_plan=payment_plan,
+                revision=revision_no,
+            )
+        except (ApprovalCenterError, ProcurementContractError) as exc:
+            frappe.throw(str(exc))
+        old_snapshot = _quote_snapshot(doc)
+        revision = doc.workflow_status == STATUS_COMPLETED
+        reason = _bounded_optional_text(change_reason, "价格修改原因", 1000)
+        if revision and not reason:
+            frappe.throw(frappe._("修改已批准的商业条件时必须填写修改原因。"))
+        doc.supplier = supplier_name
+        doc.set("business_lines", lines)
+        doc.set("payment_plan", plan_rows)
+        doc.amount = total
+        doc.approved_amount = None
+        doc.price_revision = revision_no
+        doc.price_tax_included = snapshot["tax_included"]
+        doc.price_tax_rate = snapshot["tax_rate"]
+        doc.price_delivery_terms = snapshot["delivery_terms"]
+        doc.price_warranty_terms = snapshot["warranty_terms"]
+        doc.price_invoice_condition = snapshot["invoice_condition"]
+        doc.price_snapshot = json.dumps(snapshot, ensure_ascii=False)
+        doc.price_submitted_by = _clean(frappe.session.user)
+        doc.price_submitted_on = now_datetime()
+        doc.price_approved_by = ""
+        doc.price_approved_on = None
+        doc.contract_status = ""
+        doc.contract_snapshot = ""
+        doc.contract_draft_content = ""
+        doc.contract_reviewed_by = ""
+        doc.contract_reviewed_on = None
+        doc.contract_sealed_by = ""
+        doc.contract_sealed_on = None
+        actor = _clean(frappe.session.user)
+        if revision:
+            vice = resolve_role("vice_manager")
+            next_index = max([int(row.step_index or 0) for row in doc.steps] or [0]) + 1
+            doc.append("steps", {
+                "step_index": next_index,
+                "step_key": str(uuid4()),
+                "origin": "base",
+                "label": "价格审批：副总经理：" + _clean(vice.get("employee_name")),
+                "mode": "approve",
+                "approvers": _json_list([vice["user"]]),
+                "status": STATUS_PENDING,
+                "approved_by": _json_list([]),
+            })
+            doc.workflow_status = STATUS_PENDING
+            doc.current_step_index = next_index
+            doc.current_step_label = doc.steps[-1].label
+        else:
+            step = _current_step(doc)
+            _set_step_action(step, STATUS_HANDLED, actor, reason)
+            _advance_after_step(doc, step)
+        doc.business_status = "待价格审批"
+        _append_request_event(
+            doc,
+            "变更价格审批表" if revision else "提交价格审批表",
+            _clean(getattr(doc, "business_status", None)) if revision else "需求已批准/待询价",
+            "待价格审批",
+            reason,
+            {"before": old_snapshot, "after": snapshot},
+        )
+        _save_document(doc)
+        _sync_assignments_after_save(doc)
+        return _summarize_doc(doc)
+
+
+def _require_procurement_contract_actor(doc, capability, message):
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT or not capability(doc):
+        frappe.throw(frappe._(message))
+
+
+@frappe.whitelist(methods=["POST"])
+def save_procurement_contract_information(
+    name,
+    supplier_legal_name,
+    credit_code,
+    supplier_address,
+    contract_contact,
+    contract_bank_name,
+    contract_bank_account,
+    contract_entity,
+    contract_template,
+    seal_user,
+    contract_delivery_date,
+):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_contract_actor(doc, _can_edit_procurement_contract, "只有采购经办人可在价格批准后补充合同信息。")
+        values = {
+            "supplier_legal_name": supplier_legal_name,
+            "credit_code": credit_code,
+            "supplier_address": supplier_address,
+            "contract_contact": contract_contact,
+            "contract_bank_name": contract_bank_name,
+            "contract_bank_account": contract_bank_account,
+            "contract_entity": contract_entity,
+            "contract_template": contract_template,
+            "seal_user": seal_user,
+            "contract_delivery_date": contract_delivery_date,
+        }
+        user_name = _bounded_optional_text(seal_user, "用印账号", 140)
+        if not frappe.db.exists("User", {"name": user_name, "enabled": 1}):
+            frappe.throw(frappe._("用印账号不存在或未启用。"))
+        try:
+            version = int(getattr(doc, "contract_version", 0) or 0) + 1
+            snapshot = contract_snapshot(values, getattr(doc, "price_snapshot", None), version)
+            draft = render_contract_draft(snapshot)
+        except ProcurementContractError as exc:
+            frappe.throw(str(exc))
+        old_status = _clean(getattr(doc, "business_status", None))
+        doc.contract_version = version
+        doc.contract_supplier_legal_name = snapshot["supplier_legal_name"]
+        doc.contract_credit_code = snapshot["credit_code"]
+        doc.contract_supplier_address = snapshot["supplier_address"]
+        doc.contract_contact = snapshot["contract_contact"]
+        doc.contract_bank_name = snapshot["contract_bank_name"]
+        doc.contract_bank_account = snapshot["contract_bank_account"]
+        doc.contract_entity = snapshot["contract_entity"]
+        doc.contract_template = snapshot["contract_template"]
+        doc.contract_seal_user = snapshot["seal_user"]
+        doc.contract_delivery_date = snapshot["contract_delivery_date"]
+        doc.contract_snapshot = json.dumps(snapshot, ensure_ascii=False)
+        doc.contract_draft_content = draft
+        doc.contract_status = "草稿待复核"
+        doc.business_status = "合同草稿待复核"
+        _append_request_event(doc, "生成电子合同草稿", old_status, doc.business_status, details={"contract_version": version, "price_fingerprint": snapshot["price_fingerprint"]})
+        _save_document(doc)
+        return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def review_procurement_contract(name, note=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_contract_actor(doc, _can_review_procurement_contract, "只有采购经办人可复核电子合同草稿。")
+        old_status = doc.business_status
+        doc.contract_status = "待电子用印"
+        doc.business_status = "待电子用印"
+        doc.contract_reviewed_by = _clean(frappe.session.user)
+        doc.contract_reviewed_on = now_datetime()
+        _append_request_event(doc, "复核电子合同", old_status, doc.business_status, _bounded_optional_text(note, "复核备注", 500))
+        _save_document(doc)
+        return _summarize_doc(doc)
+
+
+def _payment_plan_trigger_ready(source, row):
+    """Return whether a plan row can be turned into an approval request now."""
+    trigger = _clean(getattr(row, "trigger_condition", None))
+    if "验收" in trigger and _clean(getattr(source, "inspection_status", None)) != "验收通过":
+        return False
+    if "到货" in trigger and _clean(getattr(source, "arrival_status", None)) not in {"全部到货", "关闭未交数量"}:
+        return False
+    return True
+
+
+def _auto_push_procurement_payment_plans(source):
+    """Create and submit eligible payment requests from a sealed contract's plan rows."""
+    if getattr(source, "request_type", None) != REQUEST_PROCUREMENT or getattr(source, "contract_status", None) != "已生效":
+        return []
+    # New contracts are paid from the PO directly. Keep this legacy path only
+    # for procurement requests that predate PO-owned payment plans.
+    if frappe.db.exists("OA Purchase Order Line", {"source_request": source.name}):
+        return []
+    from rayher_hr_payroll.approval_center import ApprovalCenterError, save_draft
+
+    created = []
+    source_lines = [
+        {
+            key: getattr(line, key, None) or ""
+            for key in ("item_name", "specification", "quantity", "unit", "unit_price", "remarks")
+        }
+        for line in (getattr(source, "business_lines", []) or [])
+    ]
+    for row in (getattr(source, "payment_plan", []) or []):
+        if _clean(getattr(row, "status", None)) != "待下推" or not _payment_plan_trigger_ready(source, row):
+            continue
+        row_name = _clean(getattr(row, "name", None))
+        if not row_name or frappe.db.exists(
+            "OA Approval Request",
+            {"request_type": REQUEST_PROCUREMENT_PAYMENT, "source_payment_plan_row": row_name, "workflow_status": ["not in", [STATUS_REJECTED]]},
+        ):
+            continue
+        payload = {
+            "subject": f"{_clean(getattr(source, 'name', None))} · {_clean(getattr(row, 'installment_name', None))}",
+            "reason": "由已生效采购合同付款计划自动下推",
+            "asset_nature": "非固定资产",
+            "fixed_asset_category": "",
+            "source_request": source.name,
+            "source_payment_plan_row": row_name,
+            "business_lines": source_lines,
+            "supplier": _clean(getattr(source, "supplier", None)),
+            "payment_stage": _clean(getattr(row, "payment_stage", None)),
+            "prepayment_percentage": float(getattr(row, "percentage", 0) or 0) if _clean(getattr(row, "payment_stage", None)) == "预付款" else 0,
+            "expected_arrival_date": _clean(getattr(row, "planned_date", None)),
+            "prepayment_risk_note": "合同付款计划已审批" if float(getattr(row, "percentage", 0) or 0) == 100 else "",
+        }
+        try:
+            payment_doc = save_draft(REQUEST_PROCUREMENT_PAYMENT, payload)
+            _submit_draft(payment_doc)
+            _reserve_procurement_payment(payment_doc)
+            _save_document(payment_doc)
+            _sync_assignments_after_save(payment_doc)
+            created.append(payment_doc.name)
+        except ApprovalCenterError:
+            raise
+    return created
+
+
+@frappe.whitelist(methods=["POST"])
+def seal_procurement_contract(name, note=None):
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        require_request_type_access(doc.request_type)
+        _require_procurement_contract_actor(doc, _can_seal_procurement_contract, "当前账号不是该合同配置的用印账号。")
+        if not _clean(getattr(doc, "contract_draft_content", None)):
+            frappe.throw(frappe._("电子合同草稿不存在。"))
+        old_status = doc.business_status
+        for row in (getattr(doc, "payment_plan", []) or []):
+            row.status = "待下推"
+            row.payment_request = ""
+            row.pushed_by = ""
+            row.pushed_on = None
+            row.paid_amount = 0
+        doc.contract_status = "已生效"
+        doc.business_status = "付款计划已生成"
+        doc.contract_sealed_by = _clean(frappe.session.user)
+        doc.contract_sealed_on = now_datetime()
+        _append_request_event(doc, "电子用印并生成付款计划", old_status, doc.business_status, _bounded_optional_text(note, "用印备注", 500), {"payment_plan_count": len(getattr(doc, "payment_plan", []) or [])})
+        _save_document(doc)
+        created_payment_requests = _auto_push_procurement_payment_plans(doc)
+        if created_payment_requests:
+            # The payment request reserves its source row in a fresh document
+            # instance; reload before appending the audit event so that save
+            # does not restore stale "待下推" row values.
+            doc = _load_request(request_name, current=True)
+            _append_request_event(
+                doc,
+                "付款计划自动下推",
+                "付款计划已生成",
+                "付款计划已生成",
+                details={"payment_requests": created_payment_requests},
+            )
+            _save_document(doc)
+        else:
+            created_payment_requests = []
+        return _summarize_doc(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def verify_request_invoices(name, note=None):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
+    _require_finance_user()
+    request_name = _bounded_optional_text(name, "申请单号", 140)
+    with invoice_service._transaction_lock("request", request_name):
+        doc = _load_request(request_name, current=True)
+        if doc.request_type != REQUEST_EXPENSE_PAYMENT:
+            frappe.throw(frappe._("只有费用付款/报销单可以核验发票。"))
+        if getattr(doc, "invoice_followup_status", None) != INVOICE_FOLLOWUP_RECEIVED:
+            frappe.throw(frappe._("只有已收票状态可以确认核验。"))
+        summary = invoice_service.request_invoice_summary(doc, current=True)
+        if not int(summary.get("invoice_count") or 0):
+            frappe.throw(frappe._("当前单据没有可核验发票。"))
+        records = invoice_service._request_invoice_records(doc.name, current=True)
+        blockers = invoice_service.submission_blockers(records, "")
+        if blockers:
+            frappe.throw(frappe._("；".join(blockers)))
+        old_status = doc.invoice_followup_status
+        doc.invoice_followup_status = INVOICE_FOLLOWUP_VERIFIED
+        _append_request_event(doc, "核验发票", old_status, INVOICE_FOLLOWUP_VERIFIED, note)
+        _save_document(doc)
+        return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -3103,6 +4447,7 @@ def mark_paid(name, note=None):
         if doc.workflow_status != STATUS_COMPLETED:
             frappe.throw(frappe._("\u53ea\u6709\u5ba1\u6279\u5df2\u901a\u8fc7\u7684\u5355\u636e\u53ef\u6807\u8bb0\u4ed8\u6b3e\u3002"))
         old_status = doc.workflow_status
+        _mark_expense_payment_paid(doc)
         doc.workflow_status = STATUS_PAID
         doc.business_status = "已付款"
         doc.paid_by = sorted(_actor_names())[0]
@@ -3204,6 +4549,7 @@ def push_invoices_to_request(invoice_names, payment_info=None):
             source_type=SOURCE_INVOICE_PUSH,
             source_summary="、".join(record.name for record in records),
             no_invoice_reason="",
+            invoice_handling_mode=INVOICE_MODE_AVAILABLE,
         )
         lines = {str(row.source_invoice): row for row in doc.expense_lines}
         for record in records:
@@ -3227,10 +4573,20 @@ def withdraw_request(name, note=None):
         invoice_service._request_permission(doc, "edit", current=True)
         if doc.workflow_status == STATUS_PAID:
             frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
+        if doc.request_type == REQUEST_PROCUREMENT:
+            if doc.workflow_status not in ACTIVE_STATUSES:
+                frappe.throw(frappe._("采购申请仅可在需求审批期间撤回；进入询价、价格审批或采购执行后不可撤回。"))
+            _reset_request_to_draft(doc, note)
+            doc.business_status = STATUS_WITHDRAWN
+            _release_procurement_payment_reservation(doc, note)
+            _save_document(doc)
+            _sync_assignments_after_save(doc)
+            return _summarize_doc(doc)
         if doc.workflow_status == STATUS_DRAFT:
             return _summarize_doc(doc)
         _reset_request_to_draft(doc, note)
         _release_procurement_payment_reservation(doc, note)
+        _release_expense_payment_reservation(doc, note)
         _save_document(doc)
         _sync_assignments_after_save(doc)
         return _summarize_doc(doc)
@@ -3246,6 +4602,7 @@ def withdraw_payment(name, note=None):
         if doc.request_type != REQUEST_EXPENSE_PAYMENT or doc.workflow_status != STATUS_PAID:
             frappe.throw(frappe._("只有已付款报销单可以撤回付款。"))
         old_status = doc.workflow_status
+        _reverse_expense_payment_paid(doc, note)
         doc.workflow_status = STATUS_COMPLETED
         doc.business_status = "待付款"
         doc.paid_by = ""
@@ -3592,6 +4949,10 @@ def save_approval_center_draft(request_type, payload, name=None):
     from rayher_hr_payroll.approval_center import ApprovalCenterError, save_draft
 
     try:
+        if request_type == REQUEST_PROCUREMENT_PAYMENT:
+            values = _parse_json(payload, {}) or {}
+            if not values.get("source_purchase_order") or not values.get("source_po_payment_plan_row"):
+                frappe.throw(frappe._("采购付款必须由 PO 付款计划下推生成，不能单独新建。"))
         return _approval_center_result(save_draft(request_type, payload, name=name))
     except ApprovalCenterError as exc:
         frappe.throw(str(exc))
@@ -3669,11 +5030,100 @@ def list_procurement_payment_sources(limit=500):
 
 
 @frappe.whitelist()
+def list_expense_payment_sources(limit=500):
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
+    try:
+        limit = max(1, min(int(limit or 500), 500))
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("购买申请来源数量格式无效。"))
+    user = _clean(frappe.session.user)
+    roles = set(frappe.get_roles(user) or [])
+    filters = {"request_type": REQUEST_DIRECT_PURCHASE, "workflow_status": STATUS_COMPLETED}
+    names = frappe.get_all(
+        "OA Approval Request", filters=filters, pluck="name",
+        order_by="modified desc", limit_page_length=limit,
+    )
+    result = []
+    for name in names:
+        source = _load_request(name)
+        if user not in {"Administrator", "admin@staff.example.invalid"} and not roles & {"System Manager", "Accounts User"}:
+            if user not in {_clean(source.owner), _clean(getattr(source, "purchaser_user", None))}:
+                employee_user = _clean(frappe.db.get_value("Employee", source.employee, "user_id")) if source.employee else ""
+                if user != employee_user:
+                    continue
+        try:
+            balance = approval_amount_ledger.source_balance(source)
+        except approval_amount_ledger.ApprovalAmountError:
+            continue
+        if balance["available_amount"] <= 0:
+            continue
+        result.append({
+            "name": source.name,
+            "subject": source.subject,
+            "employee_name": source.employee_name,
+            "department": _display_department(source.department),
+            "approved_amount": float(balance["approved_amount"]),
+            "paid_amount": float(balance["paid_amount"]),
+            "available_amount": float(balance["available_amount"]),
+        })
+    return result
+
+
+@frappe.whitelist()
 def get_approval_center_dashboard(kind, limit=200):
     from rayher_hr_payroll.approval_center import ApprovalCenterError, dashboard
 
     try:
-        return dashboard(kind, limit=limit)
+        result = dashboard(kind, limit=limit)
+        rows = result.get("rows") or []
+        user = _clean(frappe.session.user).lower()
+        roles = set(frappe.get_roles(user) or [])
+        can_view_financial = user in {
+            "person033@staff.example.invalid", "person046@staff.example.invalid",
+            "person060@staff.example.invalid", "admin@staff.example.invalid", "administrator",
+        } or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
+        result["can_view_financial"] = can_view_financial
+        if kind == "request":
+            request_names = [row["name"] for row in rows if row.get("request_type") == REQUEST_PROCUREMENT]
+            pr_lines = frappe.get_all("OA Procurement Request Line", filters={"source_request": ["in", request_names]}, fields=["parent", "source_request"], limit_page_length=0) if request_names else []
+            price_lines = frappe.get_all("OA Price Approval Line", filters={"source_request": ["in", request_names]}, fields=["parent", "source_request"], limit_page_length=0) if request_names else []
+            po_lines = frappe.get_all("OA Purchase Order Line", filters={"source_request": ["in", request_names]}, fields=["parent", "source_request", "amount"], limit_page_length=0) if request_names else []
+            po_names = sorted({item.parent for item in po_lines})
+            pos = {item.name: item for item in frappe.get_all("OA Purchase Order", filters={"name": ["in", po_names]}, fields=["name", "status", "supplier", "total_amount", "paid_amount", "payment_status"], limit_page_length=0)} if po_names else {}
+            payments = frappe.get_list("OA Approval Request", filters={"request_type": REQUEST_PROCUREMENT_PAYMENT, "source_purchase_order": ["in", po_names]}, fields=["name", "source_purchase_order"], limit_page_length=500) if po_names and can_view_financial else []
+            for row in rows:
+                name = row["name"]
+                related_lines = [item for item in po_lines if item.source_request == name]
+                related_pos = sorted({item.parent for item in related_lines})
+                allocated = sum(float(item.amount or 0) for item in related_lines)
+                paid = sum((float(pos[po].paid_amount or 0) * sum(float(item.amount or 0) for item in related_lines if item.parent == po) / float(pos[po].total_amount or 1)) for po in related_pos if po in pos)
+                row.update({
+                    "linked_prs": sorted({item.parent for item in pr_lines if item.source_request == name}),
+                    "linked_price_approvals": sorted({item.parent for item in price_lines if item.source_request == name}) if can_view_financial else [],
+                    "linked_pos": related_pos,
+                    "linked_payments": sorted({item.name for item in payments if item.source_purchase_order in related_pos}),
+                    "po_amount": allocated if can_view_financial else 0,
+                    "po_paid_amount": paid if can_view_financial else 0,
+                    "po_unpaid_amount": max(allocated - paid, 0) if can_view_financial else 0,
+                    "po_statuses": sorted({pos[po].status for po in related_pos if po in pos}),
+                })
+        elif kind == "payment":
+            po_names = sorted({row.get("source_purchase_order") for row in rows if row.get("source_purchase_order")})
+            po_lines = frappe.get_all("OA Purchase Order Line", filters={"parent": ["in", po_names]}, fields=["parent", "source_request", "source_pr"], limit_page_length=0) if po_names else []
+            pos = {item.name: item for item in frappe.get_all("OA Purchase Order", filters={"name": ["in", po_names]}, fields=["name", "status", "supplier", "total_amount", "paid_amount", "payment_status"], limit_page_length=0)} if po_names else {}
+            for row in rows:
+                po_name = row.get("source_purchase_order")
+                po = pos.get(po_name)
+                related = [item for item in po_lines if item.parent == po_name]
+                row.update({
+                    "linked_requests": sorted({item.source_request for item in related if item.source_request}),
+                    "linked_prs": sorted({item.source_pr for item in related if item.source_pr}),
+                    "po_status": po.status if po else "", "supplier": po.supplier if po else row.get("supplier", ""),
+                    "po_total_amount": float(po.total_amount or 0) if po else 0,
+                    "po_paid_amount": float(po.paid_amount or 0) if po else 0,
+                    "po_unpaid_amount": max(float(po.total_amount or 0) - float(po.paid_amount or 0), 0) if po else 0,
+                })
+        return result
     except ApprovalCenterError as exc:
         frappe.throw(str(exc))
 
@@ -3684,6 +5134,16 @@ def attach_approval_business_document(request, document_type, file_ref):
 
     try:
         return _approval_center_result(attach(request, document_type, file_ref))
+    except BusinessDocumentError as exc:
+        frappe.throw(str(exc))
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_approval_business_document(name, reason=None):
+    from rayher_hr_payroll.business_documents import BusinessDocumentError, remove
+
+    try:
+        return remove(name, reason)
     except BusinessDocumentError as exc:
         frappe.throw(str(exc))
 

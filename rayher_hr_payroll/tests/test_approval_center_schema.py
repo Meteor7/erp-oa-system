@@ -36,6 +36,7 @@ def test_request_amount_source_and_line_contracts():
     assert line["quantity"]["fieldtype"] == "Float"
     assert line["unit_price"]["fieldtype"] == "Currency"
     assert line["amount"]["read_only"] == 1
+    assert line["product_desc"].get("reqd", 0) == 0
 
 
 def test_ledger_is_immutable_and_idempotent_by_schema():

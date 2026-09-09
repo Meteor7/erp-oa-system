@@ -3,14 +3,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
-    build_allocation_matrix,
-    build_foreign_allocation_matrix_lines,
-    enrich_allocation_lines_with_snapshot_accounts,
-)
-from rayher_hr_payroll.rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
-    build_timesheet_exception_rows,
-)
+try:
+    from rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
+        build_allocation_matrix,
+        build_foreign_allocation_matrix_lines,
+        enrich_allocation_lines_with_snapshot_accounts,
+    )
+    from rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
+        build_timesheet_exception_rows,
+    )
+    _REPORT_PACKAGE = "rayher_hr_payroll.report"
+except ModuleNotFoundError:
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
+        build_allocation_matrix,
+        build_foreign_allocation_matrix_lines,
+        enrich_allocation_lines_with_snapshot_accounts,
+    )
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_timesheet_exceptions.rd_timesheet_exceptions import (
+        build_timesheet_exception_rows,
+    )
+    _REPORT_PACKAGE = "rayher_hr_payroll.rayher_hr_payroll.report"
 
 
 def test_build_allocation_matrix_pivots_projects_to_columns():

@@ -1,0 +1,34 @@
+{
+  "autoname": "field:material_code",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": ["material_code", "category_code", "category_path", "material_name", "specification", "product_desc", "brand", "product_name", "product_desc_en", "brand_en", "material_attr", "unit", "is_active", "source", "external_id"],
+  "fields": [
+    {"fieldname":"material_code","fieldtype":"Data","label":"Material Code","reqd":1,"unique":1},
+    {"fieldname":"category_code","fieldtype":"Link","label":"Category","options":"OA Procurement Category","reqd":1},
+    {"fieldname":"category_path","fieldtype":"Small Text","label":"Category Path"},
+    {"fieldname":"material_name","fieldtype":"Data","label":"Material Name","reqd":1},
+    {"fieldname":"specification","fieldtype":"Small Text","label":"Specification"},
+    {"fieldname":"product_desc","fieldtype":"Small Text","label":"Product Description"},
+    {"fieldname":"brand","fieldtype":"Data","label":"Brand"},
+    {"fieldname":"product_name","fieldtype":"Data","label":"Product Name"},
+    {"fieldname":"product_desc_en","fieldtype":"Small Text","label":"Product Description (EN)"},
+    {"fieldname":"brand_en","fieldtype":"Data","label":"Brand (EN)"},
+    {"default":"外购","fieldname":"material_attr","fieldtype":"Data","label":"Material Attribute"},
+    {"fieldname":"unit","fieldtype":"Data","label":"Unit","reqd":1},
+    {"default":"1","fieldname":"is_active","fieldtype":"Check","label":"Active"},
+    {"default":"本地维护","fieldname":"source","fieldtype":"Data","label":"Source"},
+    {"fieldname":"external_id","fieldtype":"Data","label":"External ID"}
+  ],
+  "index_web_pages_for_search": 0,
+  "module": "Rayher HR Payroll",
+  "name": "OA Procurement Material",
+  "permissions": [
+    {"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1},
+    {"role":"Employee","read":1},
+    {"role":"Purchase User","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}
+  ],
+  "sort_field": "material_code",
+  "sort_order": "ASC",
+  "track_changes": 1
+}

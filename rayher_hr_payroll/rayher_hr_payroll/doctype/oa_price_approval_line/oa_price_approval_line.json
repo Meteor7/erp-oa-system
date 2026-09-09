@@ -1,0 +1,174 @@
+{
+  "doctype": "DocType",
+  "name": "OA Price Approval Line",
+  "module": "Rayher HR Payroll",
+  "istable": 1,
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "source_pr",
+    "source_pr_line",
+    "source_request",
+    "source_line",
+    "material_serial",
+    "project",
+    "item_name",
+    "specification",
+    "quantity",
+    "unit",
+    "recommended_supplier",
+    "selected_supplier",
+    "selected_unit_price",
+    "selected_total",
+    "selected_delivery_date",
+    "payment_method",
+    "material_code",
+    "product_desc",
+    "expected_delivery_date",
+    "selected_quote",
+    "selected_currency",
+    "selected_tax_rate",
+    "selected_contract_entity"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_pr",
+      "fieldtype": "Link",
+      "options": "OA Procurement Request",
+      "label": "Source PR",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_pr_line",
+      "fieldtype": "Data",
+      "label": "Source PR Line",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_request",
+      "fieldtype": "Link",
+      "options": "OA Approval Request",
+      "label": "Source OA",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_line",
+      "fieldtype": "Data",
+      "label": "Source OA Line",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "material_serial",
+      "fieldtype": "Data",
+      "label": "Material Serial",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "project",
+      "fieldtype": "Data",
+      "label": "Project",
+      "read_only": 1
+    },
+    {
+      "fieldname": "item_name",
+      "fieldtype": "Data",
+      "label": "Item Name",
+      "read_only": 1
+    },
+    {
+      "fieldname": "specification",
+      "fieldtype": "Data",
+      "label": "Specification",
+      "read_only": 1
+    },
+    {
+      "fieldname": "quantity",
+      "fieldtype": "Float",
+      "label": "Quantity",
+      "read_only": 1
+    },
+    {
+      "fieldname": "unit",
+      "fieldtype": "Data",
+      "label": "Unit",
+      "read_only": 1
+    },
+    {
+      "fieldname": "recommended_supplier",
+      "fieldtype": "Data",
+      "label": "Recommended Supplier"
+    },
+    {
+      "fieldname": "selected_supplier",
+      "fieldtype": "Data",
+      "label": "Selected Supplier"
+    },
+    {
+      "fieldname": "selected_unit_price",
+      "fieldtype": "Currency",
+      "label": "Selected Unit Price"
+    },
+    {
+      "fieldname": "selected_total",
+      "fieldtype": "Currency",
+      "label": "Selected Total"
+    },
+    {
+      "fieldname": "selected_delivery_date",
+      "fieldtype": "Date",
+      "label": "Selected Delivery"
+    },
+    {
+      "fieldname": "payment_method",
+      "fieldtype": "Data",
+      "label": "Payment Method"
+    },
+    {
+      "fieldname": "material_code",
+      "fieldtype": "Data",
+      "label": "物料编号",
+      "read_only": 1
+    },
+    {
+      "fieldname": "product_desc",
+      "fieldtype": "Small Text",
+      "label": "Description",
+      "read_only": 1
+    },
+    {
+      "fieldname": "expected_delivery_date",
+      "fieldtype": "Date",
+      "label": "OA Expected Delivery",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_quote",
+      "fieldtype": "Data",
+      "label": "Selected Quote",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_currency",
+      "fieldtype": "Data",
+      "label": "Selected Currency",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_tax_rate",
+      "fieldtype": "Float",
+      "label": "Selected Tax Rate",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_contract_entity",
+      "fieldtype": "Data",
+      "label": "Selected Contract Entity",
+      "read_only": 1
+    }
+  ]
+}

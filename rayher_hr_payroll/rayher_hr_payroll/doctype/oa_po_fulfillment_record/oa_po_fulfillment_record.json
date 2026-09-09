@@ -1,0 +1,27 @@
+{
+  "doctype": "DocType",
+  "name": "OA PO Fulfillment Record",
+  "module": "Rayher HR Payroll",
+  "autoname": "format:POFUL-{YYYY}-{#####}",
+  "engine": "InnoDB",
+  "track_changes": 1,
+  "field_order": ["purchase_order", "record_type", "record_date", "recorded_by", "details_json", "evidence_file", "original_filename", "file_sha256", "note"],
+  "fields": [
+    {"fieldname":"purchase_order","fieldtype":"Link","options":"OA Purchase Order","label":"Purchase Order","reqd":1,"read_only":1,"in_list_view":1},
+    {"fieldname":"record_type","fieldtype":"Select","options":"到货\n验收","label":"Record Type","reqd":1,"read_only":1,"in_list_view":1},
+    {"fieldname":"record_date","fieldtype":"Date","label":"Record Date","reqd":1,"read_only":1},
+    {"fieldname":"recorded_by","fieldtype":"Link","options":"User","label":"Recorded By","reqd":1,"read_only":1},
+    {"fieldname":"details_json","fieldtype":"Long Text","label":"Material Details","reqd":1,"read_only":1},
+    {"fieldname":"evidence_file","fieldtype":"Attach","label":"Evidence File","reqd":1,"read_only":1},
+    {"fieldname":"original_filename","fieldtype":"Data","label":"Original Filename","reqd":1,"read_only":1},
+    {"fieldname":"file_sha256","fieldtype":"Data","label":"SHA-256","reqd":1,"read_only":1},
+    {"fieldname":"note","fieldtype":"Small Text","label":"Note","read_only":1}
+  ],
+  "permissions": [
+    {"role":"System Manager","read":1,"write":0,"create":0,"delete":0,"report":1,"export":1},
+    {"role":"Purchase User","read":1,"write":0,"create":0,"delete":0,"report":1,"export":1},
+    {"role":"Accounts User","read":1,"write":0,"create":0,"delete":0,"report":1,"export":1}
+  ],
+  "sort_field": "creation",
+  "sort_order": "DESC"
+}

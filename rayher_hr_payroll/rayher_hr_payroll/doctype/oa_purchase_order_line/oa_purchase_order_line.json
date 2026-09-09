@@ -1,0 +1,154 @@
+{
+  "doctype": "DocType",
+  "name": "OA Purchase Order Line",
+  "module": "Rayher HR Payroll",
+  "istable": 1,
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "source_price_approval",
+    "source_price_line",
+    "source_pr",
+    "source_pr_line",
+    "source_request",
+    "source_line",
+    "material_serial",
+    "material_code",
+    "project",
+    "item_name",
+    "specification",
+    "quantity",
+    "unit",
+    "unit_price",
+    "amount",
+    "expected_delivery_date",
+    "contract_delivery_date",
+    "received_quantity",
+    "inspection_status",
+    "payment_status"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_price_approval",
+      "fieldtype": "Link",
+      "options": "OA Price Approval",
+      "label": "Source Price Approval",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_price_line",
+      "fieldtype": "Data",
+      "label": "Source Price Line",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_pr",
+      "fieldtype": "Link",
+      "options": "OA Procurement Request",
+      "label": "Source PR",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_pr_line",
+      "fieldtype": "Data",
+      "label": "Source PR Line",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_request",
+      "fieldtype": "Link",
+      "options": "OA Approval Request",
+      "label": "Source OA",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_line",
+      "fieldtype": "Data",
+      "label": "Source OA Line",
+      "read_only": 1
+    },
+    {
+      "fieldname": "material_serial",
+      "fieldtype": "Data",
+      "label": "Material Serial",
+      "read_only": 1
+    },
+    {
+      "fieldname": "material_code",
+      "fieldtype": "Data",
+      "label": "物料编号",
+      "read_only": 1
+    },
+    {
+      "fieldname": "project",
+      "fieldtype": "Data",
+      "label": "Project",
+      "read_only": 1
+    },
+    {
+      "fieldname": "item_name",
+      "fieldtype": "Data",
+      "label": "Item Name",
+      "read_only": 1
+    },
+    {
+      "fieldname": "specification",
+      "fieldtype": "Data",
+      "label": "Specification",
+      "read_only": 1
+    },
+    {
+      "fieldname": "quantity",
+      "fieldtype": "Float",
+      "label": "Quantity",
+      "read_only": 1
+    },
+    {
+      "fieldname": "unit",
+      "fieldtype": "Data",
+      "label": "Unit",
+      "read_only": 1
+    },
+    {
+      "fieldname": "unit_price",
+      "fieldtype": "Currency",
+      "label": "Unit Price",
+      "read_only": 1
+    },
+    {
+      "fieldname": "amount",
+      "fieldtype": "Currency",
+      "label": "Amount",
+      "read_only": 1
+    },
+    {
+      "fieldname": "expected_delivery_date",
+      "fieldtype": "Date",
+      "label": "OA Expected Delivery",
+      "read_only": 1
+    },
+    {
+      "fieldname": "contract_delivery_date",
+      "fieldtype": "Date",
+      "label": "Contract Delivery Date"
+    },
+    {
+      "fieldname": "received_quantity",
+      "fieldtype": "Float",
+      "label": "Received Quantity",
+      "default": 0
+    },
+    {
+      "fieldname": "inspection_status",
+      "fieldtype": "Data",
+      "label": "Inspection Status",
+      "default": "未验收"
+    },
+    {
+      "fieldname": "payment_status",
+      "fieldtype": "Data",
+      "label": "Payment Status",
+      "default": "待付款"
+    }
+  ]
+}

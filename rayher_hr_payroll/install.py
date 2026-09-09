@@ -5,6 +5,7 @@ from rayher_hr_payroll.rd_expense_accounts import DEFAULT_PATHS, ensure_paths
 from rayher_hr_payroll.access_control import ensure_access_control
 from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workflow_masters
 from rayher_hr_payroll.oa_role_resolver import bootstrap_pmc, bootstrap_procurement_manager
+from rayher_hr_payroll.organization_master_data import sync_organization_master_data
 from rayher_hr_payroll.api.timesheet_entry import ensure_rd_activity_types
 from rayher_hr_payroll.api.project_entry import (
     backfill_project_owner_accounts,
@@ -111,6 +112,7 @@ def ensure_default_rayher_app():
 def after_install():
     ensure_default_rayher_app()
     create_custom_fields(CUSTOM_FIELDS, update=True)
+    sync_organization_master_data()
     backfill_timesheet_detail_project_codes()
     backfill_rd_project_keys()
     ensure_access_control()  # create roles/profile FIRST so grants below can target them

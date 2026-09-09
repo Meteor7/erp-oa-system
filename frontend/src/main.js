@@ -1,11 +1,15 @@
 import { createApp } from "vue";
-import { FrappeUI, setConfig, frappeRequest } from "frappe-ui";
+import { FrappeUI, setConfig } from "frappe-ui";
 import App from "./App.vue";
 import router from "./router";
+import { enforceCanonicalLocalHost, guardedFrappeRequest, installSessionGuard } from "./lib/sessionGuard";
 import "./index.css";
 
-setConfig("resourceFetcher", frappeRequest);
-const app = createApp(App);
-app.use(router);
-app.use(FrappeUI);
-app.mount("#app");
+if (!enforceCanonicalLocalHost()) {
+  setConfig("resourceFetcher", guardedFrappeRequest);
+  installSessionGuard();
+  const app = createApp(App);
+  app.use(router);
+  app.use(FrappeUI);
+  app.mount("#app");
+}

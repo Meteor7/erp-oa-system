@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch } from "vue";
 import { Card, Button, Badge, createResource } from "frappe-ui";
 import { displayCompany, displayDepartment } from "../lib/displayBrand.js";
 import { extractFrappeError } from "../lib/frappeError.js";
+import { isHrSensitiveHidden } from "../lib/access.js";
 
 const RD_TYPES=["全时研发","非全时研发","研发辅助","非研发"];
 const ARCH=["待完善","待确认","已归档"];
@@ -81,6 +82,7 @@ watch(()=>form.company,()=>{
 });
 watch(pageCount,count=>{if(currentPage.value>count)currentPage.value=count});
 const canDelete=typeof window!=="undefined"&&Array.isArray(window.roles)&&window.roles.some(r=>["System Manager","HR Manager"].includes(r));
+const showHrSensitive=!isHrSensitiveHidden();
 const archTheme=s=>s==="已归档"?"green":s==="待确认"?"orange":"gray";
 const genderLabel=v=>v==="Female"?"女":v==="Male"?"男":v||"-";
 const money=v=>Number(v||0).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -101,7 +103,7 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 
 <template>
 <div class="space-y-4">
-<Card title="员工信息管理" subtitle="维护员工基本资料、劳动合同、教育、银行及社保公积金信息">
+<Card title="员工信息管理" subtitle="维护员工基本资料、劳动合同、教育及银行信息">
 <template #actions><Button variant="solid" @click="newEmp">+ 新增员工</Button></template>
 <div v-if="editing" class="mb-4 space-y-5 rounded-lg bg-gray-50 p-4">
 <section><h3 class="section-title">基本信息</h3><div class="form-grid">
@@ -155,7 +157,7 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 <label class="label">工资卡银行账号<input v-model="form.bank_ac_no" class="field"/></label>
 </div></section>
 
-<section><h3 class="section-title">社保公积金</h3><div class="form-grid">
+<section v-if="showHrSensitive"><h3 class="section-title">社保公积金</h3><div class="form-grid">
 <label class="label">社保电脑号<input v-model="form.social_insurance_number" class="field"/></label>
 <label class="label">公积金账号<input v-model="form.housing_fund_number" class="field"/></label>
 <label class="label">社保基数<input v-model="form.default_social_insurance_base" type="number" min="0" step="0.01" class="field text-right"/></label>
@@ -189,14 +191,14 @@ async function del(name){try{await remover.submit({name});await rows.reload();if
 <div v-if="rows.loading" class="py-4 text-sm text-gray-500">加载中...</div>
 <div v-else class="table-scroll"><table class="employee-table w-full min-w-[3400px] text-sm">
 <thead><tr>
-<th class="cell">序号</th><th class="cell">员工号</th><th class="cell">所属单位</th><th class="cell">姓名</th><th class="cell">部门</th><th class="cell">职位</th><th class="cell">户口信息</th><th class="cell">系统判断</th><th class="cell text-right">社保基数</th><th class="cell text-right">公积金基数</th><th class="cell">英文名</th><th class="cell">出生日期</th><th class="cell">性别</th><th class="cell">入职时间</th><th class="cell">离职时间</th><th class="cell">汇报对象</th><th class="cell">合同类型</th><th class="cell text-right">工资</th><th class="cell">薪资月数</th><th class="cell">最高学历</th><th class="cell">学位</th><th class="cell">毕业学校</th><th class="cell">联系电话</th><th class="cell">开户行及支行</th><th class="cell">银行卡号</th><th class="cell">社保电脑号</th><th class="cell">公积金账号</th><th class="cell">费用科目</th><th class="cell">归档</th><th class="cell text-right">操作</th>
+<th class="cell">序号</th><th class="cell">员工号</th><th class="cell">所属单位</th><th class="cell">姓名</th><th class="cell">部门</th><th class="cell">职位</th><th class="cell">户口信息</th><th class="cell">系统判断</th><th v-if="showHrSensitive" class="cell text-right">社保基数</th><th v-if="showHrSensitive" class="cell text-right">公积金基数</th><th class="cell">英文名</th><th class="cell">出生日期</th><th class="cell">性别</th><th class="cell">入职时间</th><th class="cell">离职时间</th><th class="cell">汇报对象</th><th class="cell">合同类型</th><th class="cell text-right">工资</th><th class="cell">薪资月数</th><th class="cell">最高学历</th><th class="cell">学位</th><th class="cell">毕业学校</th><th class="cell">联系电话</th><th class="cell">开户行及支行</th><th class="cell">银行卡号</th><th v-if="showHrSensitive" class="cell">社保电脑号</th><th v-if="showHrSensitive" class="cell">公积金账号</th><th class="cell">费用科目</th><th class="cell">归档</th><th class="cell text-right">操作</th>
 </tr></thead>
 <tbody><tr v-for="(e,index) in pagedRows" :key="e.name" class="border-b hover:bg-gray-50">
 <td class="cell">{{(currentPage-1)*PAGE_SIZE+index+1}}</td><td class="cell">{{e.employee_number||'-'}}</td><td class="cell">{{displayCompany(e.company)}}</td><td class="cell font-medium">{{e.employee_name}}</td><td class="cell">{{displayDepartment(e.department)||'-'}}</td><td class="cell">{{e.designation||'-'}}</td>
 <td class="cell"><Badge :theme="e.household_registration?'gray':'orange'">{{e.household_registration||'未维护'}}</Badge></td><td class="cell"><Badge :theme="e.household_classification==='待完善'?'orange':'green'">{{e.household_classification||'待完善'}}</Badge></td>
-<td class="cell text-right"><span v-if="Number(e.default_social_insurance_base||0)>0">{{money(e.default_social_insurance_base)}}</span><Badge v-else theme="orange">未维护</Badge></td><td class="cell text-right"><span v-if="Number(e.default_housing_fund_base||0)>0">{{money(e.default_housing_fund_base)}}</span><Badge v-else theme="orange">未维护</Badge></td>
-<td class="cell">{{e.english_name||'-'}}</td><td class="cell">{{e.date_of_birth||'-'}}</td><td class="cell">{{genderLabel(e.gender)}}</td><td class="cell">{{e.date_of_joining||'-'}}</td><td class="cell">{{e.relieving_date||'-'}}</td><td class="cell">{{supervisorName(e.reports_to)}}</td><td class="cell">{{e.employment_type||'-'}}</td><td class="cell text-right">{{money(e.default_monthly_salary)}}</td><td class="cell">{{e.salary_months?e.salary_months+'薪':'-'}}</td><td class="cell">{{e.education_level_cn||'-'}}</td><td class="cell">{{e.degree_cn||'-'}}</td><td class="cell">{{e.graduation_school||'-'}}</td><td class="cell">{{e.cell_number||'-'}}</td><td class="cell">{{e.bank_name||'-'}}</td><td class="cell">{{e.bank_ac_no||'-'}}</td><td class="cell">{{e.social_insurance_number||'-'}}</td><td class="cell">{{e.housing_fund_number||'-'}}</td><td class="cell">{{e.expense_account_category||'-'}}</td><td class="cell"><Badge :theme="archTheme(e.archive_status)">{{e.archive_status||'-'}}</Badge></td><td class="cell text-right"><button class="mr-2 text-xs text-blue-600" @click="edit(e)">编辑</button><button v-if="canDelete" class="text-xs text-red-600" @click="del(e.name)">删除</button></td>
-</tr><tr v-if="!pagedRows.length"><td colspan="30" class="py-10 text-center text-gray-400">没有符合条件的员工</td></tr></tbody></table></div>
+<td v-if="showHrSensitive" class="cell text-right"><span v-if="Number(e.default_social_insurance_base||0)>0">{{money(e.default_social_insurance_base)}}</span><Badge v-else theme="orange">未维护</Badge></td><td v-if="showHrSensitive" class="cell text-right"><span v-if="Number(e.default_housing_fund_base||0)>0">{{money(e.default_housing_fund_base)}}</span><Badge v-else theme="orange">未维护</Badge></td>
+<td class="cell">{{e.english_name||'-'}}</td><td class="cell">{{e.date_of_birth||'-'}}</td><td class="cell">{{genderLabel(e.gender)}}</td><td class="cell">{{e.date_of_joining||'-'}}</td><td class="cell">{{e.relieving_date||'-'}}</td><td class="cell">{{supervisorName(e.reports_to)}}</td><td class="cell">{{e.employment_type||'-'}}</td><td class="cell text-right">{{money(e.default_monthly_salary)}}</td><td class="cell">{{e.salary_months?e.salary_months+'薪':'-'}}</td><td class="cell">{{e.education_level_cn||'-'}}</td><td class="cell">{{e.degree_cn||'-'}}</td><td class="cell">{{e.graduation_school||'-'}}</td><td class="cell">{{e.cell_number||'-'}}</td><td class="cell">{{e.bank_name||'-'}}</td><td class="cell">{{e.bank_ac_no||'-'}}</td><td v-if="showHrSensitive" class="cell">{{e.social_insurance_number||'-'}}</td><td v-if="showHrSensitive" class="cell">{{e.housing_fund_number||'-'}}</td><td class="cell">{{e.expense_account_category||'-'}}</td><td class="cell"><Badge :theme="archTheme(e.archive_status)">{{e.archive_status||'-'}}</Badge></td><td class="cell text-right"><button class="mr-2 text-xs text-blue-600" @click="edit(e)">编辑</button><button v-if="canDelete" class="text-xs text-red-600" @click="del(e.name)">删除</button></td>
+</tr><tr v-if="!pagedRows.length"><td :colspan="showHrSensitive ? 30 : 26" class="py-10 text-center text-gray-400">没有符合条件的员工</td></tr></tbody></table></div>
 <div class="mt-3 flex items-center justify-between text-sm text-gray-500"><span>共 {{filteredRows.length}} 人，第 {{currentPage}} / {{pageCount}} 页</span><div class="flex gap-2"><Button size="sm" :disabled="currentPage<=1" @click="currentPage--">上一页</Button><Button size="sm" :disabled="currentPage>=pageCount" @click="currentPage++">下一页</Button></div></div>
 
 </Card></div>

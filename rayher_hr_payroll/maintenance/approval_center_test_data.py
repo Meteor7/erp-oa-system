@@ -1,3 +1,10 @@
+"""Approval-center-only test data.
+
+This module intentionally does not create procurement-chain records. Use
+``maintenance.procurement_test_data.seed`` for formal OA -> PR -> price
+approval acceptance data.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -83,6 +90,7 @@ def example_prerequisites():
             "pmc": {"user": "pmc@example.com", "employee_name": "演示员工178"},
             "hr_manager": {"user": "hr@example.com", "employee_name": "人事经理"},
             "finance_auditor": {"user": "finance@example.com", "employee_name": "财务审核"},
+            "finance_accountant": {"user": "accountant@example.com", "employee_name": "总账会计"},
             "finance_manager": {"user": "manager@example.com", "employee_name": "财务主管"},
             "vice_manager": {"user": "vice@example.com", "employee_name": "演示员工21"},
             "general_manager": {"user": "general@example.com", "employee_name": "演示员工29"},
@@ -105,7 +113,8 @@ def _validate_prerequisites(values):
         missing.append("供应商")
     roles = (values or {}).get("roles") or {}
     for key, label in (
-        ("pmc", "PMC"), ("hr_manager", "人事经理"), ("finance_auditor", "财务确认付款"),
+        ("pmc", "PMC"), ("hr_manager", "人事经理"), ("finance_auditor", "出纳确认付款"),
+        ("finance_accountant", "总账会计"),
         ("finance_manager", "财务主管"), ("vice_manager", "演示员工21"), ("general_manager", "演示员工29"),
         ("production_asset_owner", "生产设备负责人"),
     ):
@@ -137,9 +146,9 @@ def _memory_steps(scenario, prerequisites):
         rows = [("直属上级审批", applicant["supervisor_user"])]
     else:
         rows = [
-            ("财务主管审核", roles["finance_manager"]["user"]),
             ("演示员工21", roles["vice_manager"]["user"]),
-            ("演示员工29", roles["general_manager"]["user"]),
+            ("总账会计审核", roles["finance_accountant"]["user"]),
+            ("财务主管审核", roles["finance_manager"]["user"]),
             ("财务确认付款", roles["finance_auditor"]["user"]),
         ]
     return [{"label": label, "approvers": [user]} for label, user in rows]
@@ -385,6 +394,10 @@ class FrappeSeedStore:
         return payload
 
     def seed_batch(self, batch_id, scenarios, prerequisites):
+        if any(row.get("request_type") == REQUEST_PROCUREMENT for row in scenarios):
+            raise ApprovalCenterTestDataError(
+                "审批中心隔离种子不能创建采购链数据，请使用 procurement_test_data.seed"
+            )
         from rayher_hr_payroll.approval_center import save_draft
         from rayher_hr_payroll.api.oa_entry import (
             record_arrival,

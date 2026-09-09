@@ -1,0 +1,2 @@
+import{x as r}from"./index-ClMUkYCw.js";function a(){const e=new Date;return`${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,"0")}`}const t=r(a()),o=r("month"),c=[{value:"month",label:"月度"},{value:"year",label:"年度"}];function l(e){o.value=e==="year"?"year":"month"}function u(e=t.value){return String(e||a()).slice(0,4)}function s(e=t.value,n=o.value){return n==="year"?`${u(e)}年`:e}export{c as P,o as a,s as b,t as p,l as s};
+//# sourceMappingURL=period-DLTDPFmi.js.map

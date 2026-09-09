@@ -1,7 +1,16 @@
-from datetime import date
+from datetime import date, datetime
 
 import frappe
-from frappe.utils import getdate
+
+try:
+    from frappe.utils import getdate
+except (ImportError, AttributeError):
+    # Unit tests may install a minimal frappe stub. Keep this pure classifier
+    # usable without requiring the full frappe.utils package.
+    def getdate(value):
+        if isinstance(value, date):
+            return value
+        return datetime.fromisoformat(str(value)).date()
 
 
 def _stage(doc, ym):

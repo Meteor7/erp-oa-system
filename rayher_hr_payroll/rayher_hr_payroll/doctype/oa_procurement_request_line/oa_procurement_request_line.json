@@ -1,0 +1,22 @@
+{
+  "doctype":"DocType","name":"OA Procurement Request Line","module":"Rayher HR Payroll","istable":1,"editable_grid":1,"engine":"InnoDB",
+  "field_order":["source_request","source_line","material_serial","project","material_code","category_code","item_name","specification","product_desc","brand","quantity","unit","source_requested_quantity","po_quantity","remaining_quantity","expected_delivery_date"],
+  "fields":[
+    {"fieldname":"source_request","fieldtype":"Link","options":"OA Approval Request","label":"Source OA","reqd":1,"read_only":1},
+    {"fieldname":"source_line","fieldtype":"Data","label":"Source OA Line","reqd":1,"read_only":1},
+    {"fieldname":"material_serial","fieldtype":"Data","label":"Material Serial","reqd":1,"read_only":1},
+    {"fieldname":"project","fieldtype":"Data","label":"Project","read_only":1},
+    {"fieldname":"material_code","fieldtype":"Data","label":"Material Code","read_only":1},
+    {"fieldname":"category_code","fieldtype":"Data","label":"物料编号层级","read_only":1},
+    {"fieldname":"item_name","fieldtype":"Data","label":"Item Name","read_only":1},
+    {"fieldname":"specification","fieldtype":"Data","label":"Specification","read_only":1},
+    {"fieldname":"product_desc","fieldtype":"Small Text","label":"Description","read_only":1},
+    {"fieldname":"brand","fieldtype":"Data","label":"Brand","read_only":1},
+    {"fieldname":"quantity","fieldtype":"Float","label":"PR Quantity","reqd":1},
+    {"fieldname":"unit","fieldtype":"Data","label":"Unit","read_only":1},
+    {"fieldname":"source_requested_quantity","fieldtype":"Float","label":"OA Quantity","read_only":1},
+    {"fieldname":"po_quantity","fieldtype":"Float","label":"PO Quantity","read_only":1},
+    {"fieldname":"remaining_quantity","fieldtype":"Float","label":"Remaining Quantity","read_only":1},
+    {"fieldname":"expected_delivery_date","fieldtype":"Date","label":"OA Expected Delivery","read_only":1}
+  ]
+}

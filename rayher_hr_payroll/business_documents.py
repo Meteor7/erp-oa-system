@@ -35,6 +35,7 @@ DOCUMENT_TYPES = (
     "付款回单",
     "退款回单",
     "采购完成报告",
+    "其他补充资料",
 )
 MAX_FILE_SIZE = 20 * 1024 * 1024
 MAGIC_BY_EXTENSION = {
@@ -218,10 +219,27 @@ class FrappeBusinessDocumentStore:
             fields=[
                 "name", "request", "document_type", "version_no", "file",
                 "file_sha256", "original_filename", "uploaded_by", "uploaded_on",
-                "supersedes",
+                "supersedes", "status", "void_reason", "voided_by", "voided_on",
             ],
             order_by="document_type asc, version_no desc, name desc",
         )
+
+    def get_document(self, name):
+        return frappe.get_doc("OA Business Document", _name(name))
+
+    def delete_document(self, document):
+        frappe.delete_doc("OA Business Document", _name(document), ignore_permissions=True)
+
+    def void_document(self, document, reason):
+        document.status = "已作废"
+        document.void_reason = reason
+        document.voided_by = self.actor()
+        document.voided_on = self.now()
+        document.save(ignore_permissions=True)
+        return document
+
+    def is_administrator(self):
+        return "System Manager" in set(frappe.get_roles(self.actor()) or [])
 
     def actor(self):
         return frappe.session.user
@@ -255,9 +273,36 @@ def attach(request, document_type, file_ref, *, store=None):
         "uploaded_by": store.actor(),
         "uploaded_on": store.now(),
         "supersedes": _name(previous) or None,
+        "status": "有效",
     })
     store.link_file(file_doc, result, "Administrator")
     return result
+
+
+def remove(name, reason=None, *, store=None):
+    store = _store(store)
+    document = store.get_document(name)
+    parent = store.require_request(_get(document, "request"), "write")
+    actor = _name(store.actor())
+    if actor != _name(_get(document, "uploaded_by")) and not store.is_administrator():
+        raise BusinessDocumentError("只有上传人或系统管理员可以移除资料")
+    early_statuses = {"", "需求已批准/待询价"}
+    can_delete = (
+        _get(parent, "workflow_status") == "草稿"
+        or (
+            _get(parent, "request_type") == "采购申请"
+            and _get(parent, "business_status") in early_statuses
+            and not _get(parent, "price_submitted_on")
+        )
+    )
+    if can_delete:
+        store.delete_document(document)
+        return {"name": _name(document), "action": "deleted"}
+    reason = str(reason or "").strip()
+    if not reason:
+        raise BusinessDocumentError("审批开始后的资料只能作废，必须填写作废原因")
+    result = store.void_document(document, reason)
+    return {"name": _name(result), "action": "voided", "status": "已作废"}
 
 
 def list_documents(request, *, store=None):

@@ -58,10 +58,10 @@ def test_seed_is_idempotent_and_records_generated_steps_and_current_approvers():
     assert set(jd["steps"][0]["approvers"]) == {"hr@example.com", "vice@example.com"}
 
     prepayment = next(row for row in first["records"] if row["scenario_key"] == "full_prepayment_overdue")
-    assert prepayment["step_labels"] == ["财务主管审核", "演示员工21", "演示员工29", "财务确认付款"]
+    assert prepayment["step_labels"] == ["演示员工21", "总账会计审核", "财务主管审核", "财务确认付款"]
 
     tail = next(row for row in first["records"] if row["scenario_key"] == "tail_payment_pending")
-    assert tail["step_labels"] == ["财务主管审核", "演示员工21", "演示员工29", "财务确认付款"]
+    assert tail["step_labels"] == ["演示员工21", "总账会计审核", "财务主管审核", "财务确认付款"]
 
 
 def test_catalog_covers_server_derived_payment_stages_without_manual_full_payment():

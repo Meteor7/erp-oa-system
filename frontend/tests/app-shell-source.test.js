@@ -18,7 +18,8 @@ test('app shell exposes approval children and project management in the nav', ()
   assert.ok(source.includes("to: '/approval/direct-purchase'"));
   assert.ok(source.includes("to: '/approval/procurement-payment'"));
   assert.ok(source.includes("to: '/approval/reimbursement'"));
-  assert.ok(source.includes("to: '/approval/corporate-payment'"));
+  assert.ok(source.includes("label: '付款/报销'"));
+  assert.ok(!source.includes("to: '/approval/corporate-payment'"));
   assert.ok(source.includes("label: '请假审批'"));
   assert.ok(source.includes("label: '申请看板'"));
   assert.ok(source.includes("label: '付款看板'"));

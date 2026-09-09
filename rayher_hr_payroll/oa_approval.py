@@ -7,8 +7,10 @@ from rayher_hr_payroll.oa_document_types import (
 
 REQUEST_EXPENSE_PAYMENT = "费用付款申请"
 
-FINANCE_AUDITOR_NAME = "演示员工13"
-FINANCE_AUDITOR_USER = "person067@staff.example.invalid"
+FINANCE_AUDITOR_NAME = "演示员工32"
+FINANCE_AUDITOR_USER = "person055@staff.example.invalid"
+FINANCE_ACCOUNTANT_NAME = "演示员工19"
+FINANCE_ACCOUNTANT_USER = "person065@staff.example.invalid"
 ADMIN_APPROVER_NAME = "人事经理"
 ADMIN_APPROVER_USER = "person047@staff.example.invalid"
 IT_APPROVER_NAME = "演示员工18"
@@ -23,14 +25,16 @@ VICE_MANAGER_NAME = "演示员工21"
 VICE_MANAGER_USER = "person046@staff.example.invalid"
 GENERAL_MANAGER_NAME = "演示员工29"
 GENERAL_MANAGER_USER = "person060@staff.example.invalid"
+PROCUREMENT_MANAGER_NAME = "演示员工216"
+PROCUREMENT_MANAGER_USER = "person033@staff.example.invalid"
 
-FINANCE_AUDIT_LABEL = "财务审核：" + FINANCE_AUDITOR_NAME
+FINANCE_AUDIT_LABEL = "出纳审核"
 SUPERVISOR_LABEL_PREFIX = "直属主管："
 ASSET_APPROVAL_LABEL_PREFIX = "固定资产审批："
 FINANCE_MANAGER_LABEL = "财务主管：" + FINANCE_MANAGER_NAME
 VICE_MANAGER_LABEL = "副总经理：" + VICE_MANAGER_NAME
 GENERAL_MANAGER_LABEL = "总经理：" + GENERAL_MANAGER_NAME
-FINANCE_HANDLE_LABEL = "确认付款：" + FINANCE_AUDITOR_NAME
+FINANCE_HANDLE_LABEL = "出纳确认付款"
 CASHIER_LABEL = FINANCE_HANDLE_LABEL
 
 FINANCE_DEPARTMENT = "财务部"
@@ -69,11 +73,13 @@ def _fallback_roles():
     return {
         "pmc": {"role_label": "PMC", "user": PMC_APPROVER_USER, "employee_name": PMC_APPROVER_NAME},
         "hr_manager": {"role_label": "人事经理", "user": ADMIN_APPROVER_USER, "employee_name": "演示员工10"},
-        "finance_auditor": {"role_label": "财务审核", "user": FINANCE_AUDITOR_USER, "employee_name": FINANCE_AUDITOR_NAME},
+        "finance_auditor": {"role_label": "出纳", "user": FINANCE_AUDITOR_USER, "employee_name": FINANCE_AUDITOR_NAME},
+        "finance_accountant": {"role_label": "总账会计", "user": FINANCE_ACCOUNTANT_USER, "employee_name": FINANCE_ACCOUNTANT_NAME},
         "finance_manager": {"role_label": "财务主管", "user": FINANCE_MANAGER_USER, "employee_name": FINANCE_MANAGER_NAME},
         "vice_manager": {"role_label": "副总经理", "user": VICE_MANAGER_USER, "employee_name": VICE_MANAGER_NAME},
         "general_manager": {"role_label": "总经理", "user": GENERAL_MANAGER_USER, "employee_name": GENERAL_MANAGER_NAME},
         "production_asset_owner": {"role_label": "生产设备负责人", "user": PRODUCTION_APPROVER_USER, "employee_name": PRODUCTION_APPROVER_NAME},
+        "procurement_manager": {"role_label": "采购经办人", "user": PROCUREMENT_MANAGER_USER, "employee_name": PROCUREMENT_MANAGER_NAME},
     }
 
 
@@ -150,15 +156,28 @@ def leave_copy_recipients(applicant_user=None, roles=None):
     return recipients
 
 
+def _append_unique_group(steps, label, approvers, *, mode="approve", applicant_user=None):
+    applicant = _clean(applicant_user).lower()
+    existing = {
+        _clean(value).lower()
+        for step in steps
+        for value in step["approvers"]
+        if _clean(value)
+    }
+    users = []
+    for approver in approvers:
+        user_id = _clean(approver).lower()
+        if not user_id:
+            raise ApprovalRouteError(f"{label}没有关联可用账号")
+        if user_id == applicant or user_id in existing or user_id in users:
+            continue
+        users.append(user_id)
+    if users:
+        steps.append(_step(label, mode=mode, approvers=users))
+
+
 def _append_unique_approval(steps, label, approver, *, mode="approve", applicant_user=None):
-    user_id = _clean(approver).lower()
-    if not user_id:
-        raise ApprovalRouteError(f"{label}没有关联可用账号")
-    if user_id == _clean(applicant_user).lower():
-        return
-    if any(user_id in {_clean(value).lower() for value in step["approvers"]} for step in steps):
-        return
-    steps.append(_step(label, mode=mode, approvers=[user_id]))
+    _append_unique_group(steps, label, [approver], mode=mode, applicant_user=applicant_user)
 
 
 def _top_supervisor(name, user, roles=None):
@@ -246,33 +265,39 @@ def build_expense_payment_route(
     finance_manager = snapshots["finance_manager"]
     vice = snapshots["vice_manager"]
     general = snapshots["general_manager"]
-    steps = [_step(_role_label(finance, with_name=True), approvers=[_role_user(finance, "财务审核")])]
+    steps = [_step("出纳审核", approvers=[_role_user(finance, "出纳")])]
     steps.extend(_stage_two_steps(supervisor, supervisor_user, supervisor_decision, roles))
 
     if asset == ADMIN_ASSET:
         hr = snapshots["hr_manager"]
-        steps.append(_step(ASSET_APPROVAL_LABEL_PREFIX + "人事经理", approvers=[_role_user(hr, "人事经理")]))
+        _append_unique_approval(steps, ASSET_APPROVAL_LABEL_PREFIX + "人事经理", _role_user(hr, "人事经理"))
     elif asset == IT_ASSET:
-        steps.append(_step(ASSET_APPROVAL_LABEL_PREFIX + IT_APPROVER_NAME, approvers=[IT_APPROVER_USER]))
+        _append_unique_approval(steps, ASSET_APPROVAL_LABEL_PREFIX + IT_APPROVER_NAME, IT_APPROVER_USER)
     elif asset == PRODUCTION_ASSET:
         production = snapshots["production_asset_owner"]
-        steps.append(_step(_role_label(production, with_name=True), approvers=[_role_user(production, "生产设备负责人")]))
+        _append_unique_approval(steps, _role_label(production, with_name=True), _role_user(production, "生产设备负责人"))
 
-    steps.append(_step(_role_label(finance_manager, with_name=True), approvers=[_role_user(finance_manager, "财务主管")]))
+    _append_unique_approval(steps, _role_label(finance_manager, with_name=True), _role_user(finance_manager, "财务主管"))
     if dept == "finance":
-        steps.append(_step(_role_label(general, with_name=True), approvers=[_role_user(general, "总经理")]))
+        _append_unique_approval(steps, _role_label(general, with_name=True), _role_user(general, "总经理"))
     elif dept == "sales":
-        steps.append(_step(
-            _role_label(vice, with_name=True) + "、" + _role_label(general, with_name=True),
-            mode="all",
-            approvers=[_role_user(vice, "副总经理"), _role_user(general, "总经理")],
-        ))
+        managers = [
+            (_role_label(vice, with_name=True), _role_user(vice, "副总经理")),
+            (_role_label(general, with_name=True), _role_user(general, "总经理")),
+        ]
+        existing = {_clean(value).lower() for step in steps for value in step["approvers"]}
+        remaining = [(label, user) for label, user in managers if user not in existing]
+        if remaining:
+            _append_unique_group(
+                steps,
+                "、".join(label for label, _user in remaining),
+                [user for _label, user in remaining],
+                mode="all" if len(remaining) > 1 else "approve",
+            )
     else:
-        steps.extend([
-            _step(_role_label(vice, with_name=True), approvers=[_role_user(vice, "副总经理")]),
-            _step(_role_label(general, with_name=True), approvers=[_role_user(general, "总经理")]),
-        ])
-    steps.append(_handle("确认付款：" + _clean(finance.get("employee_name")), approvers=[_role_user(finance, "财务审核")]))
+        _append_unique_approval(steps, _role_label(vice, with_name=True), _role_user(vice, "副总经理"))
+        _append_unique_approval(steps, _role_label(general, with_name=True), _role_user(general, "总经理"))
+    steps.append(_handle("出纳确认付款", approvers=[_role_user(finance, "出纳")]))
     return steps
 
 
@@ -280,32 +305,60 @@ def build_procurement_route(
     *, supervisor, supervisor_user, project_owner=None, project_owner_name=None,
     asset_category=OTHER_ASSET, supervisor_decision=None, applicant_user=None, roles=None,
 ):
+    """Build procurement approvals with upstream cosign before PMC.
+
+    The executive demand-final and downstream execution steps remain unchanged; only
+    the ordering of supervisor/project-owner/PMC is changed.
+    """
     snapshots = _roles(roles)
     steps = []
-    pmc = snapshots["pmc"]
-    _append_unique_approval(
-        steps, _role_label(pmc, with_name=True), _role_user(pmc, "PMC")
-    )
     decision = _clean(supervisor_decision)
+    if decision not in {"", "approve", "skip"}:
+        raise ApprovalRouteError(f"不支持的直属主管决策：{decision}")
+
+    # Build the upstream approval pair by account. A person who is both the
+    # direct supervisor and project owner must appear once, not as a duplicate
+    # self-cosign node.
+    parallel = []
     if decision != "skip" and not (not decision and _top_supervisor(supervisor, supervisor_user, roles)):
-        if decision not in {"", "approve"}:
-            raise ApprovalRouteError(f"不支持的直属主管决策：{decision}")
         if not _clean(supervisor):
             raise ApprovalRouteError("采购申请缺少直属上级")
-        _append_unique_approval(
-            steps, SUPERVISOR_LABEL_PREFIX + _clean(supervisor), supervisor_user, applicant_user=applicant_user
-        )
+        parallel.append((SUPERVISOR_LABEL_PREFIX + _clean(supervisor), _clean(supervisor_user).lower()))
     if _clean(project_owner):
-        _append_unique_approval(
-            steps, "项目主管：" + (_clean(project_owner_name) or _clean(project_owner)), project_owner,
-            applicant_user=applicant_user,
-        )
+        parallel.append(("项目主管：" + (_clean(project_owner_name) or _clean(project_owner)), _clean(project_owner).lower()))
+    deduped_parallel = []
+    seen_parallel_users = set()
+    for label, user in parallel:
+        if not user or user in seen_parallel_users:
+            continue
+        seen_parallel_users.add(user)
+        deduped_parallel.append((label, user))
+    if deduped_parallel:
+        if len(deduped_parallel) == 1:
+            _append_unique_approval(steps, deduped_parallel[0][0], deduped_parallel[0][1], applicant_user=applicant_user)
+        else:
+            _append_unique_group(
+                steps, "、".join(label for label, _user in deduped_parallel) + "（会签）",
+                [user for _label, user in deduped_parallel], mode="all", applicant_user=applicant_user,
+            )
     if normalize_asset_category(asset_category) == PRODUCTION_ASSET:
         production = snapshots["production_asset_owner"]
         _append_unique_approval(
             steps, _role_label(production, with_name=True), _role_user(production, "生产设备负责人"),
             applicant_user=applicant_user,
         )
+    pmc = snapshots["pmc"]
+    _append_unique_approval(
+        steps, _role_label(pmc, with_name=True), _role_user(pmc, "PMC"),
+    )
+    vice = snapshots["vice_manager"]
+    vice_user = _role_user(vice, "副总经理")
+    _append_unique_approval(
+        steps, "需求终审：" + _role_label(vice, with_name=True), vice_user,
+        applicant_user=applicant_user,
+    )
+    # Demand approval ends at Qingbo final approval. PR, quoting, and price approval
+    # are separate execution documents and must not become OA approval steps.
     return steps
 
 
@@ -351,18 +404,15 @@ def build_direct_purchase_route(
                 applicant_user=applicant_user,
             )
 
-        executive_name = _clean(upper_supervisor)
-        executive_user = _clean(upper_supervisor_user).lower()
-        if not executive_name and _top_supervisor(name, user_id, snapshots):
-            executive_name, executive_user = name, user_id
-        if not executive_name or not executive_user:
-            raise ApprovalRouteError("其他购买缺少部门主管的上级审批人")
-        if not _top_supervisor(executive_name, executive_user, snapshots):
-            raise ApprovalRouteError("其他购买的部门主管上级必须是演示员工21或演示员工29")
+        vice = snapshots["vice_manager"]
+        vice_name = _clean(vice.get("employee_name")) or _clean(vice.get("role_label")) or "演示员工21"
+        vice_user = _role_user(vice, "副总经理")
+        if _top_supervisor("", applicant_user, snapshots):
+            raise ApprovalRouteError("公司高管本人不适用员工其他购买审批流程")
         _append_unique_approval(
             steps,
-            "部门主管上级：" + executive_name,
-            executive_user,
+            "副总经理：" + vice_name,
+            vice_user,
             applicant_user=applicant_user,
         )
         if not steps:
@@ -376,19 +426,34 @@ def build_procurement_payment_route(*, payment_stage, roles=None):
     if stage not in {"预付款", "到货款", "尾款", "到货后全额付款"}:
         raise ApprovalRouteError(f"采购付款阶段无效：{stage}")
     snapshots = _roles(roles)
-    finance = snapshots["finance_auditor"]
-    finance_manager = snapshots["finance_manager"]
     vice = snapshots["vice_manager"]
+    accountant = snapshots["finance_accountant"]
+    finance_manager = snapshots["finance_manager"]
+    finance = snapshots["finance_auditor"]
     general = snapshots["general_manager"]
-    finance_user = _role_user(finance, "财务确认付款")
+    finance_user = _role_user(finance, "出纳")
+    general_user = _role_user(general, "总经理")
     return [
+        _step(
+            _role_label(vice, name_only=True),
+            approvers=[_role_user(vice, "副总经理")],
+        ),
+        _step(
+            _role_label(accountant, with_name=True),
+            approvers=[_role_user(accountant, "总账会计")],
+        ),
         _step(
             _role_label(finance_manager, with_name=True),
             approvers=[_role_user(finance_manager, "财务主管")],
         ),
-        _step(_role_label(vice, name_only=True), approvers=[_role_user(vice, "副总经理")]),
-        _step(_role_label(general, name_only=True), approvers=[_role_user(general, "总经理")]),
-        _handle("财务确认付款：" + _clean(finance.get("employee_name")), approvers=[finance_user]),
+        _step(
+            _role_label(finance, with_name=True),
+            approvers=[finance_user],
+        ),
+        _handle(
+            "总经理付款：" + _role_label(general, name_only=True),
+            approvers=[general_user],
+        ),
     ]
 
 

@@ -136,3 +136,71 @@ def test_ambiguous_employee_link_cannot_write_even_when_owner_matches(access):
         "steps": [],
     }
     assert module.oa_request_has_permission(doc, "write", "alice@example.com") is False
+
+
+def test_hr_manager_does_not_get_unrestricted_procurement_read_scope(access, monkeypatch):
+    module, frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    frappe.session.user = "hr@example.com"
+    frappe.get_roles = lambda user=None: ["HR Manager"]
+    query = module.oa_request_query("hr@example.com")
+    assert query != "1=1"
+    assert "owner = 'hr@example.com'" in query
+    unrelated = {
+        "request_type": module.REQUEST_PROCUREMENT,
+        "owner": "bob@example.com",
+        "employee": "EMP-B",
+        "purchaser_user": "buyer@example.com",
+        "workflow_status": "已完成",
+        "steps": [],
+    }
+    assert module.oa_request_has_permission(unrelated, "read", "hr@example.com") is False
+
+
+def test_hr_manager_can_read_related_procurement_request(access, monkeypatch):
+    module, frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    frappe.session.user = "hr@example.com"
+    frappe.get_roles = lambda user=None: ["HR Manager"]
+    frappe.get_all = lambda *args, **kwargs: [{"name": "EMP-HR", "employee_name": "HR"}]
+    own = {
+        "request_type": module.REQUEST_PROCUREMENT,
+        "owner": "hr@example.com",
+        "employee": "EMP-HR",
+        "purchaser_user": "buyer@example.com",
+        "workflow_status": "已完成",
+        "steps": [],
+    }
+    assert module.oa_request_has_permission(own, "read", "hr@example.com") is None
+
+
+
+def test_hr_manager_does_not_get_unrestricted_expense_or_payment_read_scope(access, monkeypatch):
+    module, frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    frappe.session.user = "hr@example.com"
+    frappe.get_roles = lambda user=None: ["HR Manager"]
+    unrelated = {
+        "request_type": module.REQUEST_EXPENSE_PAYMENT,
+        "owner": "bob@example.com",
+        "employee": "EMP-B",
+        "workflow_status": "已完成",
+        "steps": [],
+    }
+    assert module.oa_request_has_permission(unrelated, "read", "hr@example.com") is False
+
+
+
+def test_finance_can_read_payment_requests_globally_but_not_procurement_demands(access, monkeypatch):
+    module, frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    frappe.session.user = "finance@example.com"
+    frappe.get_roles = lambda user=None: ["Accounts User"]
+    demand = {
+        "request_type": module.REQUEST_PROCUREMENT,
+        "owner": "bob@example.com", "employee": "EMP-B", "purchaser_user": "buyer@example.com",
+        "workflow_status": "已完成", "steps": [],
+    }
+    payment = {**demand, "request_type": module.REQUEST_PROCUREMENT_PAYMENT}
+    assert module.oa_request_has_permission(demand, "read", "finance@example.com") is False
+    assert module.oa_request_has_permission(payment, "read", "finance@example.com") is None

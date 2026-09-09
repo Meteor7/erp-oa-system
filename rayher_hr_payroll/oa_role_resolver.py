@@ -3,8 +3,13 @@ from __future__ import annotations
 
 ROLE_SPECS = {
     "pmc": {"label": "PMC", "designation": None, "assignment_required": True},
-    "hr_manager": {"label": "人事经理", "designation": "人事行政经理"},
-    "finance_auditor": {"label": "财务审核", "designation": "出纳"},
+    "hr_manager": {
+        "label": "人事经理",
+        "designation": "人事行政经理",
+        "designations": ("人事行政经理", "人事经理"),
+    },
+    "finance_auditor": {"label": "出纳", "designation": "出纳"},
+    "finance_accountant": {"label": "总账会计", "designation": "总账会计"},
     "finance_manager": {"label": "财务主管", "designation": "财务主管"},
     "vice_manager": {"label": "副总经理", "designation": "副总经理"},
     "general_manager": {"label": "总经理", "designation": "总经理"},
@@ -169,7 +174,11 @@ def resolve_role(role_key, *, store=None):
             raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到有效配置")
         result = _snapshot(role_key, spec, row)
     else:
-        rows = list(store.employees_for_designation(spec["designation"]) or [])
+        rows = []
+        for designation in spec.get("designations") or (spec["designation"],):
+            rows = list(store.employees_for_designation(designation) or [])
+            if rows:
+                break
         if not rows:
             raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到在职人员")
         eligible = [
@@ -216,6 +225,12 @@ def bootstrap_pmc(*, store=None):
         })
     if not existing_employee_user:
         store.bind_employee_user(PMC_EMPLOYEE, PMC_USER)
+    ensure_roles = getattr(store, "ensure_user_roles", None)
+    if callable(ensure_roles):
+        ensure_roles(PMC_USER, ["Employee", "Purchase User"])
+    ensure_permissions = getattr(store, "ensure_employee_permissions", None)
+    if callable(ensure_permissions):
+        ensure_permissions(PMC_EMPLOYEE, PMC_USER)
     existing_assignment = store.get_assignment("pmc")
     if not existing_assignment or _text(_get(existing_assignment, "user")).lower() != PMC_USER:
         store.upsert_assignment("pmc", "PMC", PMC_EMPLOYEE, PMC_USER)

@@ -28,6 +28,10 @@ PRIVILEGED_READ_ROLES = {
     "Accounts User",
     "Rayher Business Executive",
 }
+HR_SCOPED_ROLES = {"HR Manager", "HR User"}
+PROCUREMENT_REQUEST_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT}
+PROCUREMENT_APPLICATION_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}
+PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "Rayher Business Executive"}
 DRAFT_STATUS = "草稿"
 READ_PTYPES = {None, "read", "select", "report", "export", "print", "email"}
 
@@ -85,9 +89,11 @@ def _sql_type_scope(allowed_types):
 
 
 def _sql_row_scope(user, roles, identity, actors):
-    if user == "Administrator" or roles & PRIVILEGED_READ_ROLES:
-        return "1=1"
     table = "`tabOA Approval Request`"
+    management_reader = user == "Administrator" or bool(roles & PROCUREMENT_GLOBAL_ROLES)
+    finance_reader = "Accounts User" in roles and not management_reader
+    if management_reader:
+        return "1=1"
     clauses = [f"{table}.owner = {frappe.db.escape(user)}"]
     if identity and identity.get("employee"):
         clauses.append(
@@ -110,7 +116,11 @@ def _sql_row_scope(user, roles, identity, actors):
             "AND JSON_VALID(step.approvers) "
             "AND (" + " OR ".join(actor_checks) + "))"
         )
-    return "(" + " OR ".join(clauses) + ")"
+    scoped = "(" + " OR ".join(clauses) + ")"
+    if finance_reader:
+        values = ", ".join(frappe.db.escape(value) for value in sorted(PROCUREMENT_APPLICATION_TYPES))
+        return f"({table}.request_type not in ({values}) OR ({table}.request_type in ({values}) AND {scoped}))"
+    return scoped
 
 
 def oa_request_query(user=None):
@@ -172,11 +182,17 @@ def _is_applicant(doc, user, identity):
 
 
 def _can_read(doc, user, roles, identity):
-    if user == "Administrator" or roles & PRIVILEGED_READ_ROLES:
+    management_reader = user == "Administrator" or bool(roles & PROCUREMENT_GLOBAL_ROLES)
+    finance_reader = "Accounts User" in roles and not management_reader
+    request_type = _get(doc, "request_type")
+    if management_reader:
+        return True
+    # Accounts User is global for payment requests, not procurement demands.
+    if finance_reader and request_type not in PROCUREMENT_APPLICATION_TYPES:
         return True
     if _is_owner(doc, user, identity):
         return True
-    if _get(doc, "request_type") == REQUEST_PROCUREMENT and _get(doc, "purchaser_user") == user:
+    if _get(doc, "purchaser_user") == user:
         return True
     return _is_current_approver(doc, _actor_names(user, identity))
 
