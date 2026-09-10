@@ -143,6 +143,9 @@ def _require_po_view():
 
 
 def _can_purchase():
+    # PMC remains read-only here even when a legacy Purchase User role is assigned.
+    if _user() == PMC_APPROVER_USER.lower():
+        return False
     return _user() in PURCHASE_USERS or bool(_roles() & PRICE_ENTRY_ROLES) or "System Manager" in _roles()
 
 

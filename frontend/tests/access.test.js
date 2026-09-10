@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canAdministerProjects,
+  canEditProcurementPrice,
+  canSeeProcurementPrice,
   canEditTimesheetEntry,
   canSee,
   firstVisiblePath,
@@ -178,4 +180,18 @@ test("unauthenticated users cannot see protected business routes", () => {
   assert.equal(canSee("/approval/procurement-payment"), false);
   assert.equal(canSee("/personnel"), false);
   assert.equal(firstVisiblePath(), "/dashboard");
+});
+
+
+test('price entry separates PMC and approver visibility from purchasing authority', () => {
+  window = { user: 'person076@staff.example.invalid', roles: ['Employee', 'Purchase User'] };
+  assert.equal(canSeeProcurementPrice(), true);
+  assert.equal(canEditProcurementPrice(), false);
+  window = { user: 'person033@staff.example.invalid', roles: ['Employee', 'Purchase User'] };
+  assert.equal(canEditProcurementPrice(), true);
+  window = { user: 'person046@staff.example.invalid', roles: ['Rayher Business Executive'] };
+  assert.equal(canSeeProcurementPrice(), true);
+  assert.equal(canEditProcurementPrice(), false);
+  window = { user: 'admin@staff.example.invalid', roles: ['System Manager'] };
+  assert.equal(canEditProcurementPrice(), true);
 });

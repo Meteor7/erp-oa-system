@@ -511,7 +511,7 @@ async function closeCurrentPo() {
               <option value="exhausted">已无可选物料</option>
             </select>
             <label class="search-box"><FeatherIcon name="search" class="h-4 w-4" /><input v-model="prSearch" placeholder="搜索 PR、OA、项目或物料" /></label>
-            <button type="button" class="primary-button" :disabled="!selectedPrCount" @click="makeApproval">
+            <button type="button" class="primary-button" :disabled="!selectedPrCount" v-if="canEditPrice" @click="makeApproval">
               <FeatherIcon name="file-plus" class="h-4 w-4" />生成价格审批单 <span v-if="selectedPrCount">{{ selectedPrCount }}</span>
             </button>
           </div>
@@ -573,10 +573,10 @@ async function closeCurrentPo() {
             </div>
             <div class="document-total"><small>{{ (activeApproval.lines || []).some((line) => line.selected_supplier) ? '成交总额' : '已选报价总额' }}</small><strong>{{ money(activeApproval.total_amount) }}</strong></div>
             <div class="document-actions">
-              <button v-if="activeApproval.status === '草稿'" type="button" class="primary-button" @click="submitCurrent"><FeatherIcon name="send" class="h-4 w-4" />提交价格审批</button>
-              <button v-if="activeApproval.status === '草稿'" type="button" class="secondary-button" @click="cancelCurrent"><FeatherIcon name="x-circle" class="h-4 w-4" />取消价格审批</button>
-              <button v-if="activeApproval.status === '待审批'" type="button" class="secondary-button" @click="withdrawCurrent"><FeatherIcon name="corner-up-left" class="h-4 w-4" />撤回修改</button>
-              <button v-if="activeApproval.status === '待审批' && supplierComparisons().some((group) => group.is_selected)" type="button" class="approve-button" @click="approveCurrent"><FeatherIcon name="check-circle" class="h-4 w-4" />演示员工37审批通过</button>
+              <button v-if="canEditPrice && activeApproval.status === '草稿'" type="button" class="primary-button" @click="submitCurrent"><FeatherIcon name="send" class="h-4 w-4" />提交价格审批</button>
+              <button v-if="canEditPrice && activeApproval.status === '草稿'" type="button" class="secondary-button" @click="cancelCurrent"><FeatherIcon name="x-circle" class="h-4 w-4" />取消价格审批</button>
+              <button v-if="canEditPrice && activeApproval.status === '待审批'" type="button" class="secondary-button" @click="withdrawCurrent"><FeatherIcon name="corner-up-left" class="h-4 w-4" />撤回修改</button>
+              <button v-if="activeApproval.can_select_quote && activeApproval.status === '待审批' && supplierComparisons().some((group) => group.is_selected)" type="button" class="approve-button" @click="approveCurrent"><FeatherIcon name="check-circle" class="h-4 w-4" />演示员工37审批通过</button>
             </div>
           </header>
 
@@ -767,7 +767,7 @@ async function closeCurrentPo() {
 
           <section class="review-summary bottom-section">
             <div class="summary-title"><strong>采购比价总结</strong><span>推荐供应商、价格、交期、付款方式及选择依据</span></div>
-            <div v-if="activeApproval.status === '草稿'" class="summary-editor">
+            <div v-if="canEditPrice && activeApproval.status === '草稿'" class="summary-editor">
               <textarea v-model="summaryDraft" rows="3" maxlength="2000" placeholder="填写综合比较结论和推荐理由"></textarea>
               <button type="button" class="secondary-button" @click="saveSummary()"><FeatherIcon name="save" class="h-4 w-4" />保存总结</button>
             </div>

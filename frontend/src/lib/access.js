@@ -87,7 +87,8 @@ export function canSeeProcurementPO() {
 }
 
 export function canEditProcurementPrice() {
-  return PROCUREMENT_PRICE_USERS.has(currentLogin())
+  if (currentLogin() === 'person076@staff.example.invalid') return false;
+  return ['person033@staff.example.invalid', 'admin@staff.example.invalid', 'administrator'].includes(currentLogin())
     || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager'].includes(role));
 }
 
