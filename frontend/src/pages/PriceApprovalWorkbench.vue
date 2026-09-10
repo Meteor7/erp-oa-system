@@ -31,7 +31,7 @@ const paymentDraft = ref({ amount: '', reference: '' });
 const paymentPlanDraft = ref('');
 const contractDraft = ref({ seal_user: 'admin@staff.example.invalid', supplier_legal_name: '', contract_delivery_date: '' });
 const summaryDraft = ref('');
-const quoteScrollLeft = ref(0);
+
 
 const api = 'rayher_hr_payroll.api.procurement_chain.';
 const prLoader = createResource({ url: api + 'list_prs', method: 'GET' });
@@ -143,11 +143,7 @@ function syncSupplierSlots(approval = activeApproval.value) {
   supplierSlots.value = groups.map((group, index) => supplierSlotFromGroup(group, index));
   while (supplierSlots.value.length < 3) addBlankSupplierSlot();
 }
-function handleQuoteScroll(event) { quoteScrollLeft.value = event.currentTarget.scrollLeft; }
-function supplierFooterStyle(index) {
-  const offset = Math.max(0, Math.min(quoteScrollLeft.value - (index * 335), 335));
-  return { left: `${offset}px`, width: `max(0px, calc(100% - ${offset}px))` };
-}
+
 function materialCategory(line) {
   const parts = String(line?.material_code || '').split('.');
   return parts.length > 1 ? parts.slice(0, -1).join('.') : '-';
@@ -595,9 +591,9 @@ async function closeCurrentPo() {
               <span class="supplier-count">{{ supplierCount() }} 家已填写供应商</span>
             </div>
 
-            <div class="quote-matrix-frame" @scroll="handleQuoteScroll">
+            <div class="quote-matrix-frame">
               <div class="quote-matrix-scroll">
-                <table class="quote-matrix">
+                <table class="quote-matrix" :style="{ width: `${397 + supplierSlots.length * 360}px` }">
                   <colgroup>
                     <col class="col-index" />
                     <col class="col-serial" />
@@ -666,7 +662,7 @@ async function closeCurrentPo() {
                     <tr>
                       <th colspan="5">付款方式</th>
                       <td v-for="(slot, index) in supplierSlots" :key="slot.slotKey + ':payment'" colspan="3">
-                        <div class="supplier-footer-content" :style="supplierFooterStyle(index)">
+                        <div class="supplier-footer-content">
                           <input v-if="canEditPrice && activeApproval.status === '草稿'" v-model="slot.payment_method" class="supplier-inline full-input" placeholder="填写付款方式" />
                           <span v-else>{{ slot.payment_method || '-' }}</span>
                         </div>
@@ -675,16 +671,16 @@ async function closeCurrentPo() {
                     <tr class="supplier-plan-row">
                       <th colspan="5">付款计划</th>
                       <td v-for="(slot, index) in supplierSlots" :key="slot.slotKey + ':plan'" colspan="3">
-                        <div class="supplier-footer-content supplier-plan" :style="supplierFooterStyle(index)">
+                        <div class="supplier-footer-content supplier-plan">
                           <template v-if="canEditPrice && activeApproval.status === '草稿'">
                             <div v-for="(plan, planIndex) in slot.payment_plan" :key="planIndex" class="plan-line">
-                              <input v-model="plan.installment_name" class="supplier-inline" placeholder="期次" />
-                              <select v-model="plan.payment_stage" class="supplier-inline"><option>预付款</option><option>到货款</option><option>尾款</option><option>到货后全额付款</option></select>
-                              <input v-model.number="plan.percentage" class="supplier-inline number-input" type="number" min="0.01" max="100" step="0.01" placeholder="比例%" />
-                              <input v-model.number="plan.amount" class="supplier-inline number-input" type="number" min="0.01" step="0.01" placeholder="金额" />
-                              <input v-model="plan.planned_date" class="supplier-inline" type="date" />
-                              <input v-model="plan.trigger_condition" class="supplier-inline" placeholder="触发条件" />
-                              <select v-model="plan.invoice_requirement" class="supplier-inline"><option>付款前提供</option><option>付款后提供</option><option>无需发票</option></select>
+                              <label class="plan-field"><span>期次</span><input v-model="plan.installment_name" class="supplier-inline" placeholder="期次" /></label>
+                              <label class="plan-field"><span>付款阶段</span><select v-model="plan.payment_stage" class="supplier-inline"><option>预付款</option><option>到货款</option><option>尾款</option><option>到货后全额付款</option></select></label>
+                              <label class="plan-field"><span>比例（%）</span><input v-model.number="plan.percentage" class="supplier-inline number-input" type="number" min="0.01" max="100" step="0.01" placeholder="比例%" /></label>
+                              <label class="plan-field"><span>金额</span><input v-model.number="plan.amount" class="supplier-inline number-input" type="number" min="0.01" step="0.01" placeholder="金额" /></label>
+                              <label class="plan-field"><span>计划付款日期</span><input v-model="plan.planned_date" class="supplier-inline" type="date" /></label>
+                              <label class="plan-field"><span>触发条件</span><input v-model="plan.trigger_condition" class="supplier-inline" placeholder="触发条件" /></label>
+                              <label class="plan-field"><span>发票要求</span><select v-model="plan.invoice_requirement" class="supplier-inline"><option>付款前提供</option><option>付款后提供</option><option>无需发票</option></select></label>
                               <button type="button" class="plan-remove" title="删除期次" :disabled="slot.payment_plan.length === 1" @click="removeSupplierPlanRow(slot, planIndex)"><FeatherIcon name="trash-2" class="h-3 w-3" /></button>
                             </div>
                             <div class="plan-actions"><button type="button" @click="addSupplierPlanRow(slot)"><FeatherIcon name="plus" class="h-3 w-3" />增加期次</button><button type="button" @click="syncSupplierPlanAmount(slot)">按报价总额</button></div>
@@ -696,7 +692,7 @@ async function closeCurrentPo() {
                     <tr>
                       <th colspan="5">币种 / 税率 / 合同主体</th>
                       <td v-for="(slot, index) in supplierSlots" :key="slot.slotKey + ':terms'" colspan="3">
-                        <div class="supplier-footer-content" :style="supplierFooterStyle(index)">
+                        <div class="supplier-footer-content">
                           <div v-if="canEditPrice && activeApproval.status === '草稿'" class="supplier-terms-inline">
                             <select v-model="slot.currency" class="supplier-inline"><option>CNY</option><option>USD</option><option>EUR</option><option>JPY</option></select>
                             <input v-model.number="slot.tax_rate" class="supplier-inline tax-input" type="number" min="0" max="100" step="0.01" placeholder="税率" />
@@ -709,7 +705,7 @@ async function closeCurrentPo() {
                     <tr>
                       <th colspan="5">报价说明</th>
                       <td v-for="(slot, index) in supplierSlots" :key="slot.slotKey + ':note'" colspan="3">
-                        <div class="supplier-footer-content" :style="supplierFooterStyle(index)">
+                        <div class="supplier-footer-content">
                           <input v-if="canEditPrice && activeApproval.status === '草稿'" v-model="slot.note" class="supplier-inline full-input" placeholder="交付能力、质量、商务说明" />
                           <span v-else>{{ slot.note || '-' }}</span>
                         </div>
@@ -718,7 +714,7 @@ async function closeCurrentPo() {
                     <tr class="supplier-actions-row">
                       <th colspan="5">供应商方案</th>
                       <td v-for="(slot, index) in supplierSlots" :key="slot.slotKey + ':actions'" colspan="3">
-                        <div class="supplier-footer-content" :style="supplierFooterStyle(index)">
+                        <div class="supplier-footer-content">
                           <div class="supplier-summary-actions">
                             <label v-if="canEditPrice && activeApproval.status === '草稿' && slot.supplier" class="recommend-toggle-inline"><input v-model="slot.is_recommended" type="checkbox" />采购推荐</label>
                             <span v-if="slot.is_selected" class="chosen-label">演示员工37已选</span>
@@ -1125,15 +1121,15 @@ async function closeCurrentPo() {
 .package-empty { padding: 28px; border-bottom: 1px solid #d7dfe0; }
 .quote-matrix-frame { max-height: min(68vh, 720px); overflow: auto; border-bottom: 1px solid #d7dfe0; background: #fff; }
 .quote-matrix-scroll { display: flex; width: max-content; min-width: 100%; align-items: stretch; }
-.quote-matrix { width: max-content; min-width: max(0px, calc(100% - 42px)); border-collapse: separate; border-spacing: 0; table-layout: fixed; color: #304347; font-size: 10px; }
+.quote-matrix { flex: none; border-collapse: separate; border-spacing: 0; table-layout: fixed; color: #304347; font-size: 10px; }
 .quote-matrix .col-index { width: 29px; }
 .quote-matrix .col-serial { width: 100px; }
 .quote-matrix .col-code { width: 108px; }
 .quote-matrix .col-name { width: 106px; }
 .quote-matrix .col-quantity { width: 54px; }
-.quote-matrix .col-unit-price { width: 82px; }
-.quote-matrix .col-total-price { width: 96px; }
-.quote-matrix .col-delivery { width: 129px; }
+.quote-matrix .col-unit-price { width: 92px; }
+.quote-matrix .col-total-price { width: 104px; }
+.quote-matrix .col-delivery { width: 164px; }
 .quote-matrix th, .quote-matrix td { height: 38px; padding: 5px 5px; border-right: 1px solid #dce3e4; border-bottom: 1px solid #dce3e4; text-align: left; vertical-align: middle; line-height: 1.35; }
 .quote-matrix thead th { position: sticky; z-index: 6; background: #edf2f2; color: #45585b; font-weight: 700; }
 .quote-matrix .supplier-heading-row th { top: 0; height: 42px; }
@@ -1143,7 +1139,7 @@ async function closeCurrentPo() {
 .quote-matrix .supplier-group-heading.chosen { background: #dff3ec; box-shadow: inset 0 3px #17806f; }
 .supplier-heading-content { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .supplier-heading-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.supplier-inline { min-width: 0; width: 100%; border: 1px solid #b9c7c9; background: #fff; padding: 4px 5px; color: #263238; font-size: 10px; }
+.supplier-inline { box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid #b9c7c9; background: #fff; padding: 4px 5px; color: #263238; font-size: 10px; }
 .supplier-name-input { flex: 1; min-width: 90px; font-weight: 700; }
 .number-input { text-align: right; }
 .date-input { min-width: 0; width: 100%; }
@@ -1178,10 +1174,11 @@ async function closeCurrentPo() {
 .supplier-footer-content { position: relative; min-width: 0; overflow: hidden; }
 .supplier-footer-content > .supplier-inline { box-sizing: border-box; }
 .supplier-plan-row td { vertical-align: top; }
-.supplier-plan { min-width: 325px; padding: 2px 0; }
-.plan-line { display: grid; grid-template-columns: 72px 104px 62px 82px 112px 140px 104px 28px; gap: 4px; margin-bottom: 5px; }
+.supplier-plan { padding: 2px 0; }
+.plan-line { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; margin-bottom: 8px; border: 1px solid #dce3e4; border-radius: 4px; }
+.plan-field { display: grid; gap: 4px; min-width: 0; color: #53686b; font-size: 10px; }
 .plan-line .supplier-inline { min-width: 0; height: 28px; padding: 2px 5px; border: 1px solid #bdc9ca; border-radius: 3px; background: white; font-size: 9px; }
-.plan-remove { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #dab9b6; border-radius: 3px; background: white; color: #9f3d36; }
+.plan-remove { align-self: end; justify-self: end; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #dab9b6; border-radius: 3px; background: white; color: #9f3d36; }
 .plan-remove:disabled { opacity: .35; }
 .plan-actions { display: flex; gap: 6px; }
 .plan-actions button { height: 26px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid #adbbbd; border-radius: 3px; background: white; color: #3e5659; font-size: 9px; }
