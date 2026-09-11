@@ -59,7 +59,7 @@ def import_rows(material_rows, *, category_rows=None, source="PMC material-share
             "brand_en": _text(row.get("brand_en")),
             "material_attr": _text(row.get("material_attr")) or "外购",
             "unit": _text(row.get("unit") or row.get("unit_group")) or "个",
-            "is_active": 0 if _text(row.get("material_status")) in {"停用", "已停用"} else 1,
+            "is_active": 0 if _text(row.get("material_status")) in {"停用", "已停用", "禁用", "已禁用"} else 1,
             "source": source,
             "external_id": str(row.get("id") or ""),
         })
