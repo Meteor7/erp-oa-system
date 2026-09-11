@@ -111,19 +111,10 @@ if ($dockerSha -ne $localSha) {
     $changed = @(Invoke-GitLocal -GitArgs @("diff", "--name-only", $dockerSha, $localSha))
 }
 
+# The bundles under rayher_hr_payroll/public/frontend/ are tracked in Git and the committed
+# copies lag behind the source, so the git reset below always reverts the container to a stale
+# build. Rebuild every time unless explicitly skipped.
 $needBuild = -not $SkipBuild
-if (-not $SkipBuild -and $changed.Count -gt 0) {
-    $needBuild = $false
-    foreach ($path in $changed) {
-        if ($path -match "^(frontend/|rayher_hr_payroll/www/|rayher_hr_payroll/public/frontend/)") {
-            $needBuild = $true
-            break
-        }
-    }
-}
-elseif (-not $SkipBuild -and $dockerSha -eq $localSha) {
-    $needBuild = $false
-}
 
 $suggestMigrate = $false
 foreach ($path in $changed) {
