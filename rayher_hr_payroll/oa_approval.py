@@ -341,12 +341,6 @@ def build_procurement_route(
                 steps, "、".join(label for label, _user in deduped_parallel) + "（会签）",
                 [user for _label, user in deduped_parallel], mode="all", applicant_user=applicant_user,
             )
-    if normalize_asset_category(asset_category) == PRODUCTION_ASSET:
-        production = snapshots["production_asset_owner"]
-        _append_unique_approval(
-            steps, _role_label(production, with_name=True), _role_user(production, "生产设备负责人"),
-            applicant_user=applicant_user,
-        )
     pmc = snapshots["pmc"]
     _append_unique_approval(
         steps, _role_label(pmc, with_name=True), _role_user(pmc, "PMC"),

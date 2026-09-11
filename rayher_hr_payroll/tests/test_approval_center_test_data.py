@@ -51,8 +51,7 @@ def test_seed_is_idempotent_and_records_generated_steps_and_current_approvers():
     assert all(row["steps"] for row in first["records"])
     assert all(row["current_approvers"] for row in first["records"])
     procurement = next(row for row in first["records"] if row["scenario_key"] == "project_production_asset")
-    assert procurement["step_labels"][:3] == ["PMC审批", "直属上级审批", "项目主管审批"]
-    assert procurement["step_labels"][-1] == "生产设备负责人审批"
+    assert procurement["step_labels"] == ["PMC审批", "直属上级审批", "项目主管审批"]
     jd = next(row for row in first["records"] if row["scenario_key"] == "jd_office_asset")
     assert jd["step_labels"] == ["京东购买会签：人事经理、演示员工21"]
     assert set(jd["steps"][0]["approvers"]) == {"hr@example.com", "vice@example.com"}

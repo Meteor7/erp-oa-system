@@ -131,8 +131,6 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
             keys.append("production_asset_owner")
     elif request_type == REQUEST_PROCUREMENT:
         keys = ["pmc", "vice_manager", "procurement_manager"]
-        if asset_category == PRODUCTION_ASSET:
-            keys.append("production_asset_owner")
     elif request_type == REQUEST_DIRECT_PURCHASE:
         keys = (
             ["hr_manager", "vice_manager"]

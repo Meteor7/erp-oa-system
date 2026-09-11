@@ -293,7 +293,7 @@ def procurement_roles():
     }
 
 
-def test_procurement_route_is_pmc_supervisor_project_owner_and_production_owner():
+def test_procurement_route_excludes_production_owner_for_production_asset():
     steps = build_procurement_route(
         supervisor="直属领导",
         supervisor_user="boss@example.com",
@@ -304,13 +304,13 @@ def test_procurement_route_is_pmc_supervisor_project_owner_and_production_owner(
     )
     assert labels(steps) == [
         "直属主管：直属领导、项目主管：项目主管（会签）",
-        "生产设备负责人：演示员工241", "PMC：演示员工178", "需求终审：副总经理：演示员工21",
+        "PMC：演示员工178", "需求终审：副总经理：演示员工21",
     ]
     assert [step["approvers"] for step in steps] == [
-        ["boss@example.com", "owner@example.com"], ["production@example.com"],
+        ["boss@example.com", "owner@example.com"],
         ["pmc@example.com"], ["vice@example.com"],
     ]
-    assert modes(steps) == ["all", "approve", "approve", "approve"]
+    assert modes(steps) == ["all", "approve", "approve"]
 
 
 def test_procurement_route_skips_top_supervisor_and_omits_project_for_non_project():

@@ -134,8 +134,6 @@ def _memory_steps(scenario, prerequisites):
         ]
         if scenario["scenario_key"].startswith("project_"):
             rows.append(("项目主管审批", prerequisites["project"]["project_owner"]))
-        if scenario["fixed_asset_category"] == FIXED_PRODUCTION:
-            rows.append(("生产设备负责人审批", roles["production_asset_owner"]["user"]))
     elif scenario["request_type"] == REQUEST_DIRECT_PURCHASE:
         if scenario["scenario_key"].startswith("jd_"):
             return [{
