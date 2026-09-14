@@ -147,9 +147,8 @@ def normalize_account_shares(rows, new_users):
     for original in rows:
         row = dict(original)
         if row.get("share_doctype") == "User" and row.get("user") == row.get("share_name"):
-            # User.save refreshes its own profile share timestamp. All existing
-            # permission values, row identities and business shares remain checked.
-            row.pop("modified", None)
+            # Only expected self-shares for newly created accounts are additional.
+            # Existing profile shares are preserved byte-for-byte by the save hook.
             if row["user"] in new_users:
                 expected = {"read": 1, "write": 1, "share": 1, "submit": 0, "everyone": 0}
                 if any(row.get(k) != value for k, value in expected.items()):
@@ -309,11 +308,19 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
     _write_private(report_path, report)
     credentials = []
     commit = frappe.db.commit
+    from frappe.core.doctype.user.user import User
+    original_self_share = User.share_with_self
+    def preserve_self_share(user):
+        if frappe.db.exists("DocShare", {"share_doctype": "User",
+                "share_name": user.name, "user": user.name}):
+            return
+        return original_self_share(user)
     original_user = frappe.session.user
     try:
         # Frappe User.after_rename clears sessions through a helper that commits.
         # Defer ALL such commits until every preservation assertion has passed.
-        with patch.object(frappe.db, "commit", lambda *a, **k: None):
+        with patch.object(frappe.db, "commit", lambda *a, **k: None), \
+                patch.object(User, "share_with_self", preserve_self_share):
             temp_names = {}
             for old, target in employee_map.items():
                 temp = "IDENTITY-TMP-" + transaction_id + "-" + old

@@ -111,7 +111,7 @@ def test_self_share_audit_only_allows_expected_profile_metadata(module):
                 "share_name": "old@x", "modified": "yesterday", "read": 1,
                 "write": 1, "share": 1, "submit": 0, "everyone": 0}
     refreshed = dict(existing, modified="today")
-    assert module.normalize_account_shares([existing], set()) == module.normalize_account_shares([refreshed], set())
+    assert module.normalize_account_shares([existing], set()) != module.normalize_account_shares([refreshed], set())
     changed = dict(refreshed, write=0)
     assert module.normalize_account_shares([existing], set()) != module.normalize_account_shares([changed], set())
     new = dict(existing, name="share2", user="new@x", share_name="new@x")
