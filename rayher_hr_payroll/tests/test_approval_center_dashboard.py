@@ -175,6 +175,9 @@ def test_payment_source_options_return_only_completed_available_procurements():
 
 
 def test_approval_center_identity_climbs_past_accountless_excel_supervisor(monkeypatch):
+    from rayher_hr_payroll import oa_organization
+    monkeypatch.setattr(oa_organization, "current_supervisors", lambda: {"演示员工109": "演示员工155", "演示员工155": "演示员工21"})
+    monkeypatch.setattr(oa_organization, "executive_names", lambda: {"演示员工21", "演示员工29"})
     monkeypatch.setattr(
         approval_center,
         "_enabled_employee_user",
