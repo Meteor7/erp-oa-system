@@ -149,7 +149,8 @@ test("procurement downstream pages are restricted by business role", () => {
   globalThis.window = { roles: ["Employee"], oa_access: { procurement_application: true } };
   assert.equal(canSee("/approval/procurement/OA-2026-00469/price-approval"), false);
   assert.equal(canSee("/approval/procurement/OA-2026-00469/contract"), false);
-  globalThis.window.user = "person033@staff.example.invalid";
+  globalThis.window.user = "new-purchaser@example.com";
+  globalThis.window.position_access = { procurement_manager: true };
   assert.equal(canSee("/approval/procurement/OA-2026-00469/price-approval"), true);
   assert.equal(canSee("/approval/procurement/OA-2026-00469/contract"), true);
   globalThis.window = { roles: ["Accounts User"], oa_access: { procurement_application: true } };
@@ -184,7 +185,7 @@ test("unauthenticated users cannot see protected business routes", () => {
 
 
 test('price entry separates PMC and approver visibility from purchasing authority', () => {
-  window = { user: 'person076@staff.example.invalid', roles: ['Employee', 'Purchase User'] };
+  window = { user: 'new-pmc@example.com', position_access: { pmc: true }, roles: ['Employee', 'Purchase User'] };
   assert.equal(canSeeProcurementPrice(), true);
   assert.equal(canEditProcurementPrice(), false);
   window = { user: 'person033@staff.example.invalid', roles: ['Employee', 'Purchase User'] };
@@ -194,4 +195,11 @@ test('price entry separates PMC and approver visibility from purchasing authorit
   assert.equal(canEditProcurementPrice(), false);
   window = { user: 'admin@staff.example.invalid', roles: ['System Manager'] };
   assert.equal(canEditProcurementPrice(), true);
+});
+
+test('personal login names alone grant no procurement position', () => {
+  window = { user: 'person033@staff.example.invalid', roles: ['Employee'] };
+  assert.equal(canSeeProcurementPrice(), false);
+  window.position_access = { procurement_manager: true };
+  assert.equal(canSeeProcurementPrice(), true);
 });

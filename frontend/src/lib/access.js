@@ -58,15 +58,12 @@ function myRoles() {
   return (typeof window !== 'undefined' && Array.isArray(window.roles)) ? window.roles : [];
 }
 
-const PROCUREMENT_PRICE_USERS = new Set([
-  'person076@staff.example.invalid',
-  'person033@staff.example.invalid',
-  'person046@staff.example.invalid', 'person030@staff.example.invalid',
-  'admin@staff.example.invalid',
-  'administrator',
-]);
-const PRODUCTION_RECEIPT_USERS = new Set(['person074@staff.example.invalid']);
 const PROCUREMENT_PO_ROLES = [...FINANCE, 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'];
+
+function holdsPosition(...keys) {
+  const positions = (typeof window !== 'undefined' && window.position_access) || {};
+  return keys.some(key => positions[key] === true);
+}
 
 function currentLogin() {
   return String((typeof window !== 'undefined' && window.user) || '').toLowerCase();
@@ -77,18 +74,18 @@ export function isHrSensitiveHidden() {
 }
 
 export function canSeeProcurementPrice() {
-  return PROCUREMENT_PRICE_USERS.has(currentLogin())
+  return holdsPosition('pmc', 'procurement_manager', 'vice_manager')
     || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'].includes(role));
 }
 
 export function canSeeProcurementPO() {
-  return canSeeProcurementPrice() || PRODUCTION_RECEIPT_USERS.has(currentLogin())
+  return canSeeProcurementPrice() || holdsPosition('production_asset_owner')
     || myRoles().some((role) => PROCUREMENT_PO_ROLES.includes(role));
 }
 
 export function canEditProcurementPrice() {
-  if (currentLogin() === 'person076@staff.example.invalid') return false;
-  return ['person033@staff.example.invalid', 'admin@staff.example.invalid', 'administrator'].includes(currentLogin())
+  if (holdsPosition('pmc')) return false;
+  return holdsPosition('procurement_manager')
     || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager'].includes(role));
 }
 
@@ -98,11 +95,10 @@ function accessPath(path) {
   return path;
 }
 
-const MATERIAL_PROGRESS_USERS = new Set(['person076@staff.example.invalid', 'person033@staff.example.invalid', 'person046@staff.example.invalid', 'person030@staff.example.invalid']);
 
 function canSeeMaterialProgress() {
   const user = String((typeof window !== 'undefined' && (window.user || window.full_name)) || '').toLowerCase();
-  return myRoles().includes('System Manager') || MATERIAL_PROGRESS_USERS.has(user);
+  return myRoles().includes('System Manager') || holdsPosition('pmc', 'procurement_manager', 'vice_manager');
 }
 
 export function canSee(path) {

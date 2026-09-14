@@ -4,10 +4,10 @@ import json
 from datetime import date
 
 import frappe
-from rayher_hr_payroll.identity_accounts import account_user
+from rayher_hr_payroll.position_access import position_user, position_users
 from frappe.utils import get_datetime, getdate, now_datetime
 
-from rayher_hr_payroll.oa_approval import PMC_APPROVER_USER, REQUEST_PROCUREMENT, PROCUREMENT_MANAGER_USER
+from rayher_hr_payroll.oa_approval import REQUEST_PROCUREMENT
 from rayher_hr_payroll.oa_role_resolver import resolve_role
 
 BOARD_ROUTE = "/planck-semicon/approval/material-progress"
@@ -25,7 +25,6 @@ EDITABLE_FIELDS = {
     "po_closed": "PO 是否关闭",
     "remarks": "备注",
 }
-BOARD_USERS = {PMC_APPROVER_USER.lower(), PROCUREMENT_MANAGER_USER.lower(), "person046@staff.example.invalid", "person030@staff.example.invalid"}
 
 
 def _new_material_serial():
@@ -38,9 +37,9 @@ def _clean(value):
 
 def _board_user(user=None):
     user = _clean(user or frappe.session.user).lower()
-    if user in BOARD_USERS or "System Manager" in set(frappe.get_roles(user)):
+    if user in position_users("pmc", "procurement_manager", "vice_manager") or "System Manager" in set(frappe.get_roles(user)):
         return user
-    frappe.throw("只有 PMC、采购和演示员工37可以访问物料进度看板。")
+    frappe.throw("只有 PMC、采购和副总经理可以访问物料进度看板。")
 
 
 def _is_procurement(doc):
@@ -502,16 +501,10 @@ def list_material_progress(search="", requester="", status="", limit=500, offset
 def _recipient_users(source):
     users = []
     requester = _requester_user(source)
-    for user in (requester, getattr(source, "purchaser_user", None), getattr(source, "project_owner", None), PMC_APPROVER_USER, PROCUREMENT_MANAGER_USER, account_user("person046@staff.example.invalid")):
+    for user in (requester, getattr(source, "purchaser_user", None), getattr(source, "project_owner", None), position_user("pmc"), position_user("procurement_manager"), position_user("vice_manager")):
         value = _clean(user).lower()
         if value and value not in users:
             users.append(value)
-    try:
-        pmc = _clean(resolve_role("pmc").get("user")).lower()
-        if pmc and pmc not in users:
-            users.append(pmc)
-    except Exception:
-        pass
     return users
 
 

@@ -145,86 +145,27 @@ def test_unknown_role_key_is_rejected():
         resolve_role("unknown", store=MemoryStore())
 
 
-def test_bootstrap_pmc_creates_account_binds_employee_and_is_idempotent():
+@pytest.mark.parametrize("bootstrap", [bootstrap_pmc, bootstrap_procurement_manager])
+def test_bootstrap_without_config_does_not_recreate_predecessor(bootstrap):
     store = MemoryStore()
-    store.employees["HR-EMP-90017"] = {
-        "name": "HR-EMP-90017", "employee_name": "演示员工178", "status": "Active", "user_id": "",
-    }
-    first = bootstrap_pmc(store=store)
-    assert first["user"] == "person076@staff.example.invalid"
-    assert store.created_users == [{
-        "email": "person076@staff.example.invalid",
-        "first_name": "演示员工178",
-        "enabled": 1,
-        "send_welcome_email": 0,
-        "roles": ["Employee"],
-    }]
-    assert store.bindings == [("HR-EMP-90017", "person076@staff.example.invalid")]
-    assert store.saved_assignments[-1]["role_key"] == "pmc"
-
-    second = bootstrap_pmc(store=store)
-    assert second == first
-    assert len(store.created_users) == 1
-    assert len(store.bindings) == 1
-
-
-def test_bootstrap_procurement_manager_creates_account_binds_employee_and_roles():
-    store = MemoryStore()
-    row = {
-        "name": "HR-EMP-90018", "employee_name": "演示员工216", "status": "Active",
-        "user_id": "", "designation": "采购经理",
-    }
-    store.employees["HR-EMP-90018"] = row
-    store.by_designation["采购经理"] = [row]
-
-    result = bootstrap_procurement_manager(store=store)
-
-    assert result["user"] == "person033@staff.example.invalid"
-    assert store.created_users == [{
-        "email": "person033@staff.example.invalid",
-        "first_name": "演示员工216",
-        "enabled": 1,
-        "send_welcome_email": 0,
-        "roles": ["Employee", "Purchase User"],
-    }]
-    assert store.bindings == [("HR-EMP-90018", "person033@staff.example.invalid")]
-    assert store.ensured_roles == [
-        ("person033@staff.example.invalid", ["Employee", "Purchase User"])
-    ]
-    assert store.ensured_permissions == [
-        ("HR-EMP-90018", "person033@staff.example.invalid")
-    ]
-
-
-def test_bootstrap_pmc_repairs_existing_account_roles_and_permissions():
-    store = MemoryStore()
-    store.employees["HR-EMP-90017"] = {
-        "name": "HR-EMP-90017", "employee_name": "演示员工178", "status": "Active",
-        "user_id": "person076@staff.example.invalid",
-    }
-    store.users["person076@staff.example.invalid"] = {
-        "name": "person076@staff.example.invalid", "enabled": 1,
-    }
-
-    result = bootstrap_pmc(store=store)
-
-    assert result["user"] == "person076@staff.example.invalid"
+    with pytest.raises(ApprovalRoleResolutionError):
+        bootstrap(store=store)
     assert store.created_users == []
-    assert store.ensured_roles == [
-        ("person076@staff.example.invalid", ["Employee", "Purchase User"])
-    ]
-    assert store.ensured_permissions == [
-        ("HR-EMP-90017", "person076@staff.example.invalid")
-    ]
+    assert store.bindings == []
 
 
-def test_bootstrap_refuses_wrong_or_inactive_employee():
+def test_bootstrap_pmc_keeps_the_configured_successor():
     store = MemoryStore()
-    store.employees["HR-EMP-90017"] = {
-        "name": "HR-EMP-90017", "employee_name": "其他人", "status": "Active", "user_id": "",
+    store.assignments["pmc"] = {
+        "role_key": "pmc", "role_label": "PMC", "employee": "NEW-PMC",
+        "employee_name": "接任人", "user": "successor@example.com", "enabled": 1,
     }
-    with pytest.raises(ApprovalRoleResolutionError, match="演示员工178"):
-        bootstrap_pmc(store=store)
+    store.enabled_users.add("successor@example.com")
+    result = bootstrap_pmc(store=store)
+    assert result["user"] == "successor@example.com"
+    assert store.created_users == []
+    assert store.saved_assignments == []
+    assert store.ensured_permissions == [("NEW-PMC", "successor@example.com")]
 
 
 def test_role_assignment_doctype_has_unique_role_and_user_links():
@@ -239,7 +180,7 @@ def test_role_assignment_doctype_has_unique_role_and_user_links():
     assert set(ROLE_SPECS) == {
         "pmc", "hr_manager", "finance_auditor", "finance_accountant", "finance_manager",
         "vice_manager", "general_manager", "production_asset_owner",
-        "procurement_manager",
+        "procurement_manager", "it_asset_owner",
     }
 
 def test_hr_assignment_overrides_designation_until_employee_profile_is_available():

@@ -1,3 +1,4 @@
+from rayher_hr_payroll.position_access import current_supervisors, executive_names
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
@@ -57,7 +58,7 @@ def _clean(value):
 
 def direct_supervisor_name(employee_name, mapping=None):
     employee = _clean(employee_name)
-    supervisors = mapping or DIRECT_SUPERVISOR_BY_EMPLOYEE
+    supervisors = current_supervisors() if mapping is None else mapping
     if employee not in supervisors:
         raise OrganizationResolutionError(f"员工 {employee or '<空>'} 未配置部门主管")
     return _clean(supervisors[employee])
@@ -70,10 +71,10 @@ def resolve_top_executive(
     mapping: Mapping[str, str] | None = None,
 ) -> ExecutiveResolution:
     employee = _clean(employee_name)
-    supervisors = mapping or DIRECT_SUPERVISOR_BY_EMPLOYEE
+    supervisors = current_supervisors() if mapping is None else mapping
     if not employee:
         raise OrganizationResolutionError("员工姓名不能为空")
-    if employee in TOP_EXECUTIVES:
+    if employee in executive_names():
         user_id = _clean(resolve_user(employee))
         if not user_id:
             raise OrganizationResolutionError(f"高管 {employee} 没有关联可用账号")
@@ -85,19 +86,19 @@ def resolve_top_executive(
     while current:
         if current not in supervisors:
             raise OrganizationResolutionError(
-                f"员工 {employee} 的主管链未连接到演示员工37或演示员工28"
+                f"员工 {employee} 的主管链未连接到副总经理或总经理"
             )
         current = _clean(supervisors[current])
         if not current or current == "BOARD":
             raise OrganizationResolutionError(
-                f"员工 {employee} 的主管链未连接到演示员工37或演示员工28"
+                f"员工 {employee} 的主管链未连接到副总经理或总经理"
             )
         if current in visited:
             chain = " -> ".join([*traversed, current])
             raise OrganizationResolutionError(f"组织主管配置存在循环：{chain}")
         visited.add(current)
         traversed.append(current)
-        if current in TOP_EXECUTIVES:
+        if current in executive_names():
             user_id = _clean(resolve_user(current))
             if not user_id:
                 raise OrganizationResolutionError(f"高管 {current} 没有关联可用账号")
@@ -113,10 +114,10 @@ def resolve_stage_two_supervisor(
     mapping: Mapping[str, str] | None = None,
 ) -> SupervisorResolution:
     employee = _clean(employee_name)
-    supervisors = mapping or DIRECT_SUPERVISOR_BY_EMPLOYEE
+    supervisors = current_supervisors() if mapping is None else mapping
     if not employee:
         raise OrganizationResolutionError("员工姓名不能为空")
-    if employee in TOP_EXECUTIVES:
+    if employee in executive_names():
         return SupervisorResolution(
             decision="skip",
             supervisor_name=employee,
@@ -134,7 +135,7 @@ def resolve_stage_two_supervisor(
         visited.add(current)
         traversed.append(current)
 
-        if current in TOP_EXECUTIVES:
+        if current in executive_names():
             return SupervisorResolution(
                 decision="skip",
                 supervisor_name=current,

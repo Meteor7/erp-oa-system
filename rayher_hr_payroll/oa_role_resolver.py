@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 ROLE_SPECS = {
+    "it_asset_owner": {"label": "IT负责人", "designation": "网络工程师"},
     "pmc": {"label": "PMC", "designation": None, "assignment_required": True},
     "hr_manager": {
         "label": "人事经理",
@@ -206,91 +207,22 @@ def resolve_role(role_key, *, store=None):
     return result
 
 
-def bootstrap_pmc(*, store=None):
+def _bootstrap_position(role_key, store=None):
     store = _store(store)
-    employee = store.get_employee(PMC_EMPLOYEE)
-    if not employee:
-        raise ApprovalRoleResolutionError(f"PMC员工{PMC_EMPLOYEE}不存在")
-    if _text(_get(employee, "employee_name")) != PMC_EMPLOYEE_NAME:
-        raise ApprovalRoleResolutionError(f"PMC员工{PMC_EMPLOYEE}必须是演示员工178")
-    if _text(_get(employee, "status")) != "Active":
-        raise ApprovalRoleResolutionError("PMC员工演示员工178不是在职状态")
-    existing_employee_user = _text(_get(employee, "user_id")).lower()
-    if existing_employee_user and existing_employee_user != PMC_USER:
-        raise ApprovalRoleResolutionError(f"演示员工178已绑定其他账号：{existing_employee_user}")
-    user = store.get_user(PMC_USER)
-    if user and not int(_get(user, "enabled") or 0):
-        raise ApprovalRoleResolutionError("演示员工178账号已存在但未启用")
-    if not user:
-        store.create_user({
-            "email": PMC_USER,
-            "first_name": PMC_EMPLOYEE_NAME,
-            "enabled": 1,
-            "send_welcome_email": 0,
-            "roles": ["Employee"],
-        })
-    if not existing_employee_user:
-        store.bind_employee_user(PMC_EMPLOYEE, PMC_USER)
-    ensure_roles = getattr(store, "ensure_user_roles", None)
-    if callable(ensure_roles):
-        ensure_roles(PMC_USER, ["Employee", "Purchase User"])
-    ensure_permissions = getattr(store, "ensure_employee_permissions", None)
-    if callable(ensure_permissions):
-        ensure_permissions(PMC_EMPLOYEE, PMC_USER)
-    existing_assignment = store.get_assignment("pmc")
-    if not existing_assignment or _text(_get(existing_assignment, "user")).lower() != PMC_USER:
-        store.upsert_assignment("pmc", "PMC", PMC_EMPLOYEE, PMC_USER)
-    return {
-        "role_key": "pmc",
-        "role_label": "PMC",
-        "user": PMC_USER,
-        "employee": PMC_EMPLOYEE,
-        "employee_name": PMC_EMPLOYEE_NAME,
-    }
-
-
-def bootstrap_procurement_manager(*, store=None):
-    """Ensure the active procurement manager has an operational account.
-
-    Existing enabled account links are resolved by designation, so personnel
-    changes do not require code changes. The named fallback provisions the
-    current incumbent only when the designation has no usable account yet.
-    """
-    store = _store(store)
-    try:
-        resolved = resolve_role("procurement_manager", store=store)
-    except ApprovalRoleResolutionError as resolution_error:
-        employee = store.get_employee(PROCUREMENT_MANAGER_EMPLOYEE)
-        if (
-            not employee
-            or _text(_get(employee, "employee_name")) != PROCUREMENT_MANAGER_NAME
-            or _text(_get(employee, "status")) != "Active"
-        ):
-            raise resolution_error
-        existing_employee_user = _text(_get(employee, "user_id")).lower()
-        if existing_employee_user and existing_employee_user != PROCUREMENT_MANAGER_USER:
-            raise ApprovalRoleResolutionError(
-                f"演示员工216已绑定其他账号：{existing_employee_user}"
-            )
-        user = store.get_user(PROCUREMENT_MANAGER_USER)
-        if user and not int(_get(user, "enabled") or 0):
-            raise ApprovalRoleResolutionError("演示员工216账号已存在但未启用")
-        if not user:
-            store.create_user({
-                "email": PROCUREMENT_MANAGER_USER,
-                "first_name": PROCUREMENT_MANAGER_NAME,
-                "enabled": 1,
-                "send_welcome_email": 0,
-                "roles": ["Employee", "Purchase User"],
-            })
-        if not existing_employee_user:
-            store.bind_employee_user(PROCUREMENT_MANAGER_EMPLOYEE, PROCUREMENT_MANAGER_USER)
-        resolved = resolve_role("procurement_manager", store=store)
-
+    resolved = resolve_role(role_key, store=store)
     ensure_roles = getattr(store, "ensure_user_roles", None)
     if callable(ensure_roles):
         ensure_roles(resolved["user"], ["Employee", "Purchase User"])
     ensure_permissions = getattr(store, "ensure_employee_permissions", None)
-    if callable(ensure_permissions):
+    if callable(ensure_permissions) and resolved["employee"]:
         ensure_permissions(resolved["employee"], resolved["user"])
     return resolved
+
+
+def bootstrap_pmc(*, store=None):
+    """Ensure permissions for the configured holder; never reinstate a predecessor."""
+    return _bootstrap_position("pmc", store)
+
+
+def bootstrap_procurement_manager(*, store=None):
+    return _bootstrap_position("procurement_manager", store)

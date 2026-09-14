@@ -9,21 +9,15 @@ from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 import frappe
-from rayher_hr_payroll.identity_accounts import account_user
+from rayher_hr_payroll.position_access import position_user, position_users
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.api.material_progress import _ensure_all_rows
-from rayher_hr_payroll.oa_approval import PMC_APPROVER_USER, PROCUREMENT_MANAGER_USER, PRODUCTION_APPROVER_USER
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 
-QINGBO_USER = "person046@staff.example.invalid"
-PMC_USERS = {PMC_APPROVER_USER.lower(), "admin@staff.example.invalid", "administrator"}
-PURCHASE_USERS = {PROCUREMENT_MANAGER_USER.lower(), "admin@staff.example.invalid", "administrator"}
-PRODUCTION_RECEIPT_USERS = {PRODUCTION_APPROVER_USER.lower(), "admin@staff.example.invalid", "administrator"}
 PO_PAYMENT_PUSH_SOURCE = "PO付款下推"
 PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "Rayher Business Executive"}
 PRICE_ENTRY_ROLES = {"Purchase User", "Purchase Manager"}
-CHAIN_USERS = PMC_USERS | PURCHASE_USERS | {QINGBO_USER, "person030@staff.example.invalid"}
 
 
 def _text(value):
@@ -133,21 +127,21 @@ def _roles():
 
 
 def _require_view():
-    if _user() not in CHAIN_USERS and not (_roles() & PRICE_VIEW_ROLES) and "System Manager" not in _roles():
-        frappe.throw("只有 PMC、采购、演示员工37或系统管理员可以查看采购链路。")
+    if _user() not in position_users("pmc", "procurement_manager", "vice_manager") and not (_roles() & PRICE_VIEW_ROLES) and "System Manager" not in _roles():
+        frappe.throw("只有 PMC、采购、副总经理或系统管理员可以查看采购链路。")
 
 
 def _require_po_view():
-    if _user() in CHAIN_USERS | PRODUCTION_RECEIPT_USERS or "System Manager" in _roles() or _roles() & ({"Accounts User", "Finance User"} | PRICE_VIEW_ROLES):
+    if _user() in position_users("pmc", "procurement_manager", "vice_manager") | position_users("production_asset_owner") or "System Manager" in _roles() or _roles() & ({"Accounts User", "Finance User"} | PRICE_VIEW_ROLES):
         return
-    frappe.throw("只有 PMC、采购、演示员工37、生产主管或财务人员可以查看 PO。")
+    frappe.throw("只有 PMC、采购、副总经理、生产主管或财务人员可以查看 PO。")
 
 
 def _can_purchase():
     # PMC remains read-only here even when a legacy Purchase User role is assigned.
-    if _user() == PMC_APPROVER_USER.lower():
+    if _user() == position_user("pmc"):
         return False
-    return _user() in PURCHASE_USERS or bool(_roles() & PRICE_ENTRY_ROLES) or "System Manager" in _roles()
+    return _user() in position_users("procurement_manager") or bool(_roles() & PRICE_ENTRY_ROLES) or "System Manager" in _roles()
 
 
 def _require_purchase():
@@ -156,28 +150,28 @@ def _require_purchase():
 
 
 def _can_record_receipt():
-    return _user() in PRODUCTION_RECEIPT_USERS or "System Manager" in _roles()
+    return _user() in position_users("production_asset_owner") or "System Manager" in _roles()
 
 
 def _require_production_receipt():
     if not _can_record_receipt():
-        frappe.throw("只有生产主管演示员工241或系统管理员可以登记到货资料。")
+        frappe.throw("只有生产主管或系统管理员可以登记到货资料。")
 
 
 def _require_po_payment_actor():
     roles = _roles()
-    if _user() not in PURCHASE_USERS and not (roles & {"Accounts User", "Finance User", "Purchase Manager"}) and "System Manager" not in roles:
+    if _user() not in position_users("procurement_manager") and not (roles & {"Accounts User", "Finance User", "Purchase Manager"}) and "System Manager" not in roles:
         frappe.throw("只有采购或财务人员可以处理 PO 付款。")
 
 
 def _require_pmc():
-    if _user() not in PMC_USERS and "System Manager" not in _roles():
+    if _user() not in position_users("pmc") and "System Manager" not in _roles():
         frappe.throw("只有 PMC 或系统管理员可以提报 PR。")
 
 
 def _require_purchase_or_qingbo():
-    if _user() not in PURCHASE_USERS | {account_user(QINGBO_USER)} and "System Manager" not in _roles():
-        frappe.throw("只有采购、演示员工37或系统管理员可以生成 PO。")
+    if _user() not in position_users("procurement_manager") | {position_user("vice_manager")} and "System Manager" not in _roles():
+        frappe.throw("只有采购、副总经理或系统管理员可以生成 PO。")
 
 
 def _new_material_serial():
@@ -273,7 +267,7 @@ def _notification_link(document_type, document_name):
 
 def _notify(subject, content, document_type, document_name, source_requests=None):
     source_requests = list(source_requests or [])
-    recipients = {PMC_APPROVER_USER.lower(), PROCUREMENT_MANAGER_USER.lower(), account_user(QINGBO_USER)}
+    recipients = {position_user("pmc"), position_user("procurement_manager"), position_user("vice_manager")}
     for request_name in source_requests:
         try:
             source = frappe.get_doc("OA Approval Request", request_name)
@@ -413,7 +407,7 @@ def _price_summary(doc):
         "lines": [row.as_dict() for row in (doc.lines or [])], "quotes": quotes,
         "supplier_comparisons": _supplier_comparisons(doc, quotes),
         "steps": _approval_steps(doc.name), "modified": str(doc.modified or ""),
-        "can_select_quote": (_user() == account_user(QINGBO_USER) or "System Manager" in _roles()) and doc.status == "待审批",
+        "can_select_quote": (_user() == position_user("vice_manager") or "System Manager" in _roles()) and doc.status == "待审批",
     }
 
 
@@ -887,8 +881,8 @@ def select_supplier_comparison(price_approval, supplier):
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
     if approval.status != "待审批":
         frappe.throw("只有待审批的价格审批单可以选择最终成交供应商。")
-    if _user() != account_user(QINGBO_USER) and "System Manager" not in _roles():
-        frappe.throw("只有演示员工37可以在价格审批阶段选择成交供应商。")
+    if _user() != position_user("vice_manager") and "System Manager" not in _roles():
+        frappe.throw("只有副总经理可以在价格审批阶段选择成交供应商。")
     _apply_supplier_selection(approval, supplier)
     frappe.db.commit()
     _notify(
@@ -1031,7 +1025,7 @@ def withdraw_price_approval(name, note=None):
     _require_purchase()
     doc = frappe.get_doc("OA Price Approval", _text(name))
     if doc.status != "待审批":
-        frappe.throw("只有待演示员工37审批的价格审批单可以撤回。")
+        frappe.throw("只有待副总经理审批的价格审批单可以撤回。")
     _release_reserved_pr_lines(doc)
     frappe.db.delete("OA Approval Step", {"parent": doc.name})
     doc.status = "草稿"
@@ -1074,7 +1068,7 @@ def submit_price_approval(name):
     step.update({
         "parent": doc.name, "parentfield": "steps", "parenttype": "OA Price Approval",
         "idx": 1, "step_index": 1, "label": "价格审批：演示员工21", "mode": "approve",
-        "approvers": json.dumps([account_user(QINGBO_USER)], ensure_ascii=False), "status": "待审批",
+        "approvers": json.dumps([position_user("vice_manager")], ensure_ascii=False), "status": "待审批",
         "approved_by": "[]", "step_key": str(uuid4()), "origin": "base",
     })
     step.insert(ignore_permissions=True)
@@ -1087,8 +1081,8 @@ def submit_price_approval(name):
 
 @frappe.whitelist(methods=["POST"])
 def approve_price_approval(name, note=None):
-    if _user() != account_user(QINGBO_USER) and "System Manager" not in _roles():
-        frappe.throw("只有演示员工37或系统管理员可以审批价格审批单。")
+    if _user() != position_user("vice_manager") and "System Manager" not in _roles():
+        frappe.throw("只有副总经理或系统管理员可以审批价格审批单。")
     doc = frappe.get_doc("OA Price Approval", _text(name))
     if doc.status != "待审批":
         frappe.throw("当前价格审批单不在待审批状态。")

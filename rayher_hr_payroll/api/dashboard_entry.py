@@ -1,3 +1,4 @@
+from rayher_hr_payroll.position_access import position_users
 import frappe
 from frappe.utils import getdate, nowdate
 
@@ -9,10 +10,7 @@ RD_TYPES = ("全时研发", "非全时研发", "研发辅助")
 def _can_view_procurement_financial():
     user = str(frappe.session.user or "").strip().lower()
     roles = set(frappe.get_roles(user) or [])
-    return user in {
-        "person033@staff.example.invalid", "person046@staff.example.invalid", "person030@staff.example.invalid",
-        "person060@staff.example.invalid", "admin@staff.example.invalid", "administrator",
-    } or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
+    return user in position_users("procurement_manager", "vice_manager", "general_manager") or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
 
 
 def _procurement_overview():

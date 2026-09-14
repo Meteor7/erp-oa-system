@@ -192,7 +192,7 @@ def test_customer_service_is_sales_and_uses_electronic_asset_then_executive_cosi
 
     assert labels(steps) == [
         "出纳审核",
-        "固定资产审批：演示员工18",
+        "IT负责人：演示员工18",
         "财务主管：演示员工16",
         "副总经理：演示员工21、总经理：演示员工29",
         "出纳确认付款",
@@ -435,3 +435,23 @@ def test_procurement_payment_is_stage_specific_but_expense_payment_keeps_departm
         asset_category=OTHER_ASSET,
     )
     assert any(step["mode"] == "all" for step in buying_payment)
+
+@pytest.fixture(autouse=True)
+def current_position_fixture(monkeypatch):
+    from rayher_hr_payroll import oa_approval as module
+    values = {
+        "hr_manager": ("人事经理", "演示员工10", module.ADMIN_APPROVER_USER),
+        "finance_auditor": ("出纳", "演示员工32", module.FINANCE_AUDITOR_USER),
+        "finance_accountant": ("总账会计", "演示员工19", module.FINANCE_ACCOUNTANT_USER),
+        "finance_manager": ("财务主管", "演示员工16", module.FINANCE_MANAGER_USER),
+        "vice_manager": ("副总经理", "演示员工21", module.VICE_MANAGER_USER),
+        "general_manager": ("总经理", "演示员工29", module.GENERAL_MANAGER_USER),
+        "pmc": ("PMC", "演示员工178", module.PMC_APPROVER_USER),
+        "procurement_manager": ("采购经办人", "演示员工216", module.PROCUREMENT_MANAGER_USER),
+        "production_asset_owner": ("生产设备负责人", "演示员工241", module.PRODUCTION_APPROVER_USER),
+        "it_asset_owner": ("IT负责人", "演示员工18", module.IT_APPROVER_USER),
+    }
+    def resolve(key):
+        label, name, user = values[key]
+        return {"role_key": key, "role_label": label, "employee_name": name, "user": user}
+    monkeypatch.setattr(module, "resolve_role", resolve)

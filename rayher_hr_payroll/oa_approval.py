@@ -1,3 +1,4 @@
+from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
 from rayher_hr_payroll.identity_accounts import account_user
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
@@ -70,26 +71,18 @@ def _clean(value):
     return str(value or "").strip()
 
 
-def _fallback_roles():
-    return {
-        "pmc": {"role_label": "PMC", "user": PMC_APPROVER_USER, "employee_name": PMC_APPROVER_NAME},
-        "hr_manager": {"role_label": "人事经理", "user": ADMIN_APPROVER_USER, "employee_name": "演示员工10"},
-        "finance_auditor": {"role_label": "出纳", "user": FINANCE_AUDITOR_USER, "employee_name": FINANCE_AUDITOR_NAME},
-        "finance_accountant": {"role_label": "总账会计", "user": FINANCE_ACCOUNTANT_USER, "employee_name": FINANCE_ACCOUNTANT_NAME},
-        "finance_manager": {"role_label": "财务主管", "user": FINANCE_MANAGER_USER, "employee_name": FINANCE_MANAGER_NAME},
-        "vice_manager": {"role_label": "副总经理", "user": account_user(VICE_MANAGER_USER), "employee_name": VICE_MANAGER_NAME},
-        "general_manager": {"role_label": "总经理", "user": GENERAL_MANAGER_USER, "employee_name": GENERAL_MANAGER_NAME},
-        "production_asset_owner": {"role_label": "生产设备负责人", "user": PRODUCTION_APPROVER_USER, "employee_name": PRODUCTION_APPROVER_NAME},
-        "procurement_manager": {"role_label": "采购经办人", "user": PROCUREMENT_MANAGER_USER, "employee_name": PROCUREMENT_MANAGER_NAME},
-    }
+class _RoleSnapshots(dict):
+    def __missing__(self, key):
+        try:
+            value = resolve_role(key)
+        except ApprovalRoleResolutionError as exc:
+            raise ApprovalRouteError(str(exc)) from exc
+        self[key] = value
+        return value
 
 
 def _roles(roles=None):
-    result = _fallback_roles()
-    for key, value in (roles or {}).items():
-        if value:
-            result[key] = dict(value)
-    return result
+    return _RoleSnapshots({key: dict(value) for key, value in (roles or {}).items() if value})
 
 
 def _role_label(snapshot, *, name_only=False, with_name=False):
@@ -183,7 +176,7 @@ def _append_unique_approval(steps, label, approver, *, mode="approve", applicant
 
 def _top_supervisor(name, user, roles=None):
     snapshots = _roles(roles)
-    top_values = set(TOP_SUPERVISORS)
+    top_values = set()
     for key in ("vice_manager", "general_manager"):
         top_values.add(_clean(snapshots[key].get("user")))
         top_values.add(_clean(snapshots[key].get("employee_name")))
@@ -273,7 +266,8 @@ def build_expense_payment_route(
         hr = snapshots["hr_manager"]
         _append_unique_approval(steps, ASSET_APPROVAL_LABEL_PREFIX + "人事经理", _role_user(hr, "人事经理"))
     elif asset == IT_ASSET:
-        _append_unique_approval(steps, ASSET_APPROVAL_LABEL_PREFIX + IT_APPROVER_NAME, IT_APPROVER_USER)
+        it = snapshots["it_asset_owner"]
+        _append_unique_approval(steps, _role_label(it, with_name=True), _role_user(it, "IT负责人"))
     elif asset == PRODUCTION_ASSET:
         production = snapshots["production_asset_owner"]
         _append_unique_approval(steps, _role_label(production, with_name=True), _role_user(production, "生产设备负责人"))

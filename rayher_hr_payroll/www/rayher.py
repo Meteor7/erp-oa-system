@@ -1,3 +1,4 @@
+from rayher_hr_payroll.position_access import position_flags
 import frappe
 
 from rayher_hr_payroll.oa_feature_gate import boot_access_flags
@@ -16,5 +17,6 @@ def get_context(context):
         "full_name": frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user,
         "roles": frappe.get_roles(),
         "oa_access": boot_access_flags(frappe.session.user),
+        "position_access": position_flags(frappe.session.user),
     }
     return context

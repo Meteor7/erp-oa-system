@@ -1,3 +1,4 @@
+from rayher_hr_payroll.position_access import position_users, current_supervisors, executive_names
 import json
 from contextlib import ExitStack
 from datetime import date
@@ -52,9 +53,7 @@ from rayher_hr_payroll.oa_assignments import (
     sync_current_assignments,
 )
 from rayher_hr_payroll.oa_organization import (
-    DIRECT_SUPERVISOR_BY_EMPLOYEE,
     EXCLUDED_MANAGERS,
-    TOP_EXECUTIVES,
     OrganizationResolutionError,
     resolve_stage_two_supervisor,
     resolve_top_executive,
@@ -91,13 +90,6 @@ PROCUREMENT_REQUEST_TYPES = {
     REQUEST_PROCUREMENT_PAYMENT,
 }
 PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "Rayher Business Executive"}
-PROCUREMENT_PRICE_USERS = {
-    "person076@staff.example.invalid",
-    "person033@staff.example.invalid",
-    "person046@staff.example.invalid", "person030@staff.example.invalid",
-    "admin@staff.example.invalid",
-    "administrator",
-}
 PROCUREMENT_PO_ROLES = PROCUREMENT_GLOBAL_ROLES | {"Accounts User", "Finance User"}
 
 SOURCE_MANUAL = "\u624b\u5de5\u65b0\u5efa"
@@ -127,6 +119,8 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
             keys.append("vice_manager")
         if asset_category == ADMIN_ASSET:
             keys.append("hr_manager")
+        elif asset_category == IT_ASSET:
+            keys.append("it_asset_owner")
         elif asset_category == PRODUCTION_ASSET:
             keys.append("production_asset_owner")
     elif request_type == REQUEST_PROCUREMENT:
@@ -559,7 +553,7 @@ def _employee_context(user=None, employee=None):
         "upper_supervisor": "",
         "upper_supervisor_user": "",
     }
-    if employee_name in DIRECT_SUPERVISOR_BY_EMPLOYEE:
+    if employee_name in current_supervisors():
         try:
             resolution = resolve_stage_two_supervisor(employee_name, _enabled_employee_user)
         except OrganizationResolutionError as exc:
@@ -596,13 +590,13 @@ def _employee_context(user=None, employee=None):
             )
             context["supervisor_user"] = _clean(supervisor_row.get("user_id")).lower()
             context["supervisor_decision"] = (
-                "skip" if context["supervisor"] in TOP_EXECUTIVES else "approve"
+                "skip" if context["supervisor"] in executive_names() else "approve"
             )
             cursor = supervisor_row
             visited = {row.name}
             for _index in range(20):
                 manager_name = _clean(cursor.get("employee_name"))
-                if manager_name in TOP_EXECUTIVES:
+                if manager_name in executive_names():
                     context["upper_supervisor"] = manager_name
                     context["upper_supervisor_user"] = _clean(cursor.get("user_id")).lower()
                     break
@@ -656,7 +650,7 @@ def _leave_employee_context(user=None):
         "supervisor_decision": "",
         "supervisor_path": [],
     }
-    if employee_name in TOP_EXECUTIVES:
+    if employee_name in executive_names():
         context.update(
             {
                 "supervisor": employee_name,
@@ -1090,7 +1084,7 @@ def _procurement_document_visibility(doc, user=None):
         return {"can_view_procurement_price": False, "can_view_procurement_po": False}
     candidate = _clean(user or frappe.session.user).lower()
     roles = set(frappe.get_roles(candidate) or [])
-    price_user = candidate in PROCUREMENT_PRICE_USERS or bool(roles & PROCUREMENT_GLOBAL_ROLES)
+    price_user = candidate in position_users("pmc", "procurement_manager", "vice_manager") or bool(roles & PROCUREMENT_GLOBAL_ROLES)
     po_user = price_user or bool(roles & PROCUREMENT_PO_ROLES)
     price_numbers = _clean(getattr(doc, "price_approval_numbers", None))
     po_numbers = _clean(getattr(doc, "po_numbers", None))
@@ -5076,10 +5070,7 @@ def get_approval_center_dashboard(kind, limit=200):
         rows = result.get("rows") or []
         user = _clean(frappe.session.user).lower()
         roles = set(frappe.get_roles(user) or [])
-        can_view_financial = user in {
-            "person033@staff.example.invalid", "person046@staff.example.invalid", "person030@staff.example.invalid",
-            "person060@staff.example.invalid", "admin@staff.example.invalid", "administrator",
-        } or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
+        can_view_financial = user in position_users("procurement_manager", "vice_manager", "general_manager") or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
         result["can_view_financial"] = can_view_financial
         if kind == "request":
             request_names = [row["name"] for row in rows if row.get("request_type") == REQUEST_PROCUREMENT]

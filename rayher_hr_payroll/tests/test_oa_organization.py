@@ -119,3 +119,9 @@ def test_recent_excel_employee_routes_are_server_mapped():
     }
     for employee_name, supervisor_name in expected.items():
         assert DIRECT_SUPERVISOR_BY_EMPLOYEE[employee_name] == supervisor_name
+
+@pytest.fixture(autouse=True)
+def organization_fixture(monkeypatch):
+    from rayher_hr_payroll import oa_organization as module
+    monkeypatch.setattr(module, "current_supervisors", lambda: dict(module.DIRECT_SUPERVISOR_BY_EMPLOYEE))
+    monkeypatch.setattr(module, "executive_names", lambda: set(module.TOP_EXECUTIVES))
