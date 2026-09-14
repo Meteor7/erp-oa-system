@@ -6,7 +6,7 @@
  "istable": 0,
  "issingle": 0,
  "track_changes": 1,
- "autoname": "format:OCC-{#####}",
+ "autoname": "OCC-.#####",
  "title_field": "employee_name",
  "fields": [
   {"fieldname": "employee", "label": "员工", "fieldtype": "Link", "options": "Employee", "reqd": 1, "in_list_view": 1},
