@@ -35,7 +35,7 @@ def _position_step(role_key, mode="approve", prefix=""):
 
 def adapt_bootstrap(source):
     source = replace_once(source, "from __future__ import annotations",
-                          "from __future__ import annotations\\nfrom rayher_hr_payroll.identity_accounts import account_user")
+                          "from __future__ import annotations\nfrom rayher_hr_payroll.identity_accounts import account_user")
     start = source.index("def plan_business_accounts():")
     end = source.index("\n\ndef ", start + 1)
     body = source[start:end].replace("ACCOUNT_SPECS", "specs")
@@ -51,7 +51,7 @@ def adapt_access(source):
 
 def adapt_procurement(source):
     source = replace_once(source, "from __future__ import annotations",
-                          "from __future__ import annotations\\nfrom rayher_hr_payroll.identity_accounts import account_user")
+                          "from __future__ import annotations\nfrom rayher_hr_payroll.identity_accounts import account_user")
     source = replace_once(source, "CHAIN_USERS = PMC_USERS | PURCHASE_USERS | {QINGBO_USER}",
                           'CHAIN_USERS = PMC_USERS | PURCHASE_USERS | {QINGBO_USER, "person030@staff.example.invalid"}')
     source = source.replace("PURCHASE_USERS | {QINGBO_USER} and", "PURCHASE_USERS | {account_user(QINGBO_USER)} and")
