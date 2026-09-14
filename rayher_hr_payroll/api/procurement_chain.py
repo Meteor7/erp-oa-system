@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 import frappe
+from rayher_hr_payroll.identity_accounts import account_user
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.api.material_progress import _ensure_all_rows
@@ -22,7 +23,7 @@ PRODUCTION_RECEIPT_USERS = {PRODUCTION_APPROVER_USER.lower(), "admin@staff.examp
 PO_PAYMENT_PUSH_SOURCE = "PO付款下推"
 PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "Rayher Business Executive"}
 PRICE_ENTRY_ROLES = {"Purchase User", "Purchase Manager"}
-CHAIN_USERS = PMC_USERS | PURCHASE_USERS | {QINGBO_USER}
+CHAIN_USERS = PMC_USERS | PURCHASE_USERS | {QINGBO_USER, "person030@staff.example.invalid"}
 
 
 def _text(value):
@@ -175,7 +176,7 @@ def _require_pmc():
 
 
 def _require_purchase_or_qingbo():
-    if _user() not in PURCHASE_USERS | {QINGBO_USER} and "System Manager" not in _roles():
+    if _user() not in PURCHASE_USERS | {account_user(QINGBO_USER)} and "System Manager" not in _roles():
         frappe.throw("只有采购、演示员工37或系统管理员可以生成 PO。")
 
 
@@ -272,7 +273,7 @@ def _notification_link(document_type, document_name):
 
 def _notify(subject, content, document_type, document_name, source_requests=None):
     source_requests = list(source_requests or [])
-    recipients = {PMC_APPROVER_USER.lower(), PROCUREMENT_MANAGER_USER.lower(), QINGBO_USER}
+    recipients = {PMC_APPROVER_USER.lower(), PROCUREMENT_MANAGER_USER.lower(), account_user(QINGBO_USER)}
     for request_name in source_requests:
         try:
             source = frappe.get_doc("OA Approval Request", request_name)
@@ -412,7 +413,7 @@ def _price_summary(doc):
         "lines": [row.as_dict() for row in (doc.lines or [])], "quotes": quotes,
         "supplier_comparisons": _supplier_comparisons(doc, quotes),
         "steps": _approval_steps(doc.name), "modified": str(doc.modified or ""),
-        "can_select_quote": (_user() == QINGBO_USER or "System Manager" in _roles()) and doc.status == "待审批",
+        "can_select_quote": (_user() == account_user(QINGBO_USER) or "System Manager" in _roles()) and doc.status == "待审批",
     }
 
 
@@ -886,7 +887,7 @@ def select_supplier_comparison(price_approval, supplier):
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
     if approval.status != "待审批":
         frappe.throw("只有待审批的价格审批单可以选择最终成交供应商。")
-    if _user() != QINGBO_USER and "System Manager" not in _roles():
+    if _user() != account_user(QINGBO_USER) and "System Manager" not in _roles():
         frappe.throw("只有演示员工37可以在价格审批阶段选择成交供应商。")
     _apply_supplier_selection(approval, supplier)
     frappe.db.commit()
@@ -1073,7 +1074,7 @@ def submit_price_approval(name):
     step.update({
         "parent": doc.name, "parentfield": "steps", "parenttype": "OA Price Approval",
         "idx": 1, "step_index": 1, "label": "价格审批：演示员工21", "mode": "approve",
-        "approvers": json.dumps([QINGBO_USER], ensure_ascii=False), "status": "待审批",
+        "approvers": json.dumps([account_user(QINGBO_USER)], ensure_ascii=False), "status": "待审批",
         "approved_by": "[]", "step_key": str(uuid4()), "origin": "base",
     })
     step.insert(ignore_permissions=True)
@@ -1086,7 +1087,7 @@ def submit_price_approval(name):
 
 @frappe.whitelist(methods=["POST"])
 def approve_price_approval(name, note=None):
-    if _user() != QINGBO_USER and "System Manager" not in _roles():
+    if _user() != account_user(QINGBO_USER) and "System Manager" not in _roles():
         frappe.throw("只有演示员工37或系统管理员可以审批价格审批单。")
     doc = frappe.get_doc("OA Price Approval", _text(name))
     if doc.status != "待审批":

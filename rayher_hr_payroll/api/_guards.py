@@ -10,7 +10,7 @@ RD_HR_ROLES = ("System Manager", "HR User", "HR Manager", "Accounts User")
 
 # Temporary restriction for a test account. Remove the account from this set
 # when the sensitive HR permissions should be restored.
-HR_SENSITIVE_HIDDEN_USERS = {"person046@staff.example.invalid"}
+HR_SENSITIVE_HIDDEN_USERS = {"person046@staff.example.invalid", "person030@staff.example.invalid"}
 
 
 def is_hr_sensitive_hidden():

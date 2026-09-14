@@ -16,7 +16,7 @@ const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-
 
 // Temporary test-account restriction. Remove the account from this set to restore
 // the sensitive HR pages and fields without changing role assignments.
-const HR_SENSITIVE_HIDDEN_USERS = new Set(['person046@staff.example.invalid']);
+const HR_SENSITIVE_HIDDEN_USERS = new Set(['person046@staff.example.invalid', 'person030@staff.example.invalid']);
 
 const PAGE_ROLES = {
   '/dashboard': APPROVAL,
@@ -61,7 +61,7 @@ function myRoles() {
 const PROCUREMENT_PRICE_USERS = new Set([
   'person076@staff.example.invalid',
   'person033@staff.example.invalid',
-  'person046@staff.example.invalid',
+  'person046@staff.example.invalid', 'person030@staff.example.invalid',
   'admin@staff.example.invalid',
   'administrator',
 ]);
@@ -98,7 +98,7 @@ function accessPath(path) {
   return path;
 }
 
-const MATERIAL_PROGRESS_USERS = new Set(['person076@staff.example.invalid', 'person033@staff.example.invalid', 'person046@staff.example.invalid']);
+const MATERIAL_PROGRESS_USERS = new Set(['person076@staff.example.invalid', 'person033@staff.example.invalid', 'person046@staff.example.invalid', 'person030@staff.example.invalid']);
 
 function canSeeMaterialProgress() {
   const user = String((typeof window !== 'undefined' && (window.user || window.full_name)) || '').toLowerCase();

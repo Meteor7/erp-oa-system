@@ -94,7 +94,7 @@ PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager
 PROCUREMENT_PRICE_USERS = {
     "person076@staff.example.invalid",
     "person033@staff.example.invalid",
-    "person046@staff.example.invalid",
+    "person046@staff.example.invalid", "person030@staff.example.invalid",
     "admin@staff.example.invalid",
     "administrator",
 }
@@ -5077,7 +5077,7 @@ def get_approval_center_dashboard(kind, limit=200):
         user = _clean(frappe.session.user).lower()
         roles = set(frappe.get_roles(user) or [])
         can_view_financial = user in {
-            "person033@staff.example.invalid", "person046@staff.example.invalid",
+            "person033@staff.example.invalid", "person046@staff.example.invalid", "person030@staff.example.invalid",
             "person060@staff.example.invalid", "admin@staff.example.invalid", "administrator",
         } or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
         result["can_view_financial"] = can_view_financial

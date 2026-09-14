@@ -10,7 +10,7 @@ def _can_view_procurement_financial():
     user = str(frappe.session.user or "").strip().lower()
     roles = set(frappe.get_roles(user) or [])
     return user in {
-        "person033@staff.example.invalid", "person046@staff.example.invalid",
+        "person033@staff.example.invalid", "person046@staff.example.invalid", "person030@staff.example.invalid",
         "person060@staff.example.invalid", "admin@staff.example.invalid", "administrator",
     } or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
 

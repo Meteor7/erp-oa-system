@@ -1,3 +1,4 @@
+from rayher_hr_payroll.identity_accounts import account_user
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_LEAVE,
@@ -76,7 +77,7 @@ def _fallback_roles():
         "finance_auditor": {"role_label": "出纳", "user": FINANCE_AUDITOR_USER, "employee_name": FINANCE_AUDITOR_NAME},
         "finance_accountant": {"role_label": "总账会计", "user": FINANCE_ACCOUNTANT_USER, "employee_name": FINANCE_ACCOUNTANT_NAME},
         "finance_manager": {"role_label": "财务主管", "user": FINANCE_MANAGER_USER, "employee_name": FINANCE_MANAGER_NAME},
-        "vice_manager": {"role_label": "副总经理", "user": VICE_MANAGER_USER, "employee_name": VICE_MANAGER_NAME},
+        "vice_manager": {"role_label": "副总经理", "user": account_user(VICE_MANAGER_USER), "employee_name": VICE_MANAGER_NAME},
         "general_manager": {"role_label": "总经理", "user": GENERAL_MANAGER_USER, "employee_name": GENERAL_MANAGER_NAME},
         "production_asset_owner": {"role_label": "生产设备负责人", "user": PRODUCTION_APPROVER_USER, "employee_name": PRODUCTION_APPROVER_NAME},
         "procurement_manager": {"role_label": "采购经办人", "user": PROCUREMENT_MANAGER_USER, "employee_name": PROCUREMENT_MANAGER_NAME},

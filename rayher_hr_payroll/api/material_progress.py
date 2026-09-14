@@ -4,6 +4,7 @@ import json
 from datetime import date
 
 import frappe
+from rayher_hr_payroll.identity_accounts import account_user
 from frappe.utils import get_datetime, getdate, now_datetime
 
 from rayher_hr_payroll.oa_approval import PMC_APPROVER_USER, REQUEST_PROCUREMENT, PROCUREMENT_MANAGER_USER
@@ -24,7 +25,7 @@ EDITABLE_FIELDS = {
     "po_closed": "PO 是否关闭",
     "remarks": "备注",
 }
-BOARD_USERS = {PMC_APPROVER_USER.lower(), PROCUREMENT_MANAGER_USER.lower(), "person046@staff.example.invalid"}
+BOARD_USERS = {PMC_APPROVER_USER.lower(), PROCUREMENT_MANAGER_USER.lower(), "person046@staff.example.invalid", "person030@staff.example.invalid"}
 
 
 def _new_material_serial():
@@ -501,7 +502,7 @@ def list_material_progress(search="", requester="", status="", limit=500, offset
 def _recipient_users(source):
     users = []
     requester = _requester_user(source)
-    for user in (requester, getattr(source, "purchaser_user", None), getattr(source, "project_owner", None), PMC_APPROVER_USER, PROCUREMENT_MANAGER_USER, "person046@staff.example.invalid"):
+    for user in (requester, getattr(source, "purchaser_user", None), getattr(source, "project_owner", None), PMC_APPROVER_USER, PROCUREMENT_MANAGER_USER, account_user("person046@staff.example.invalid")):
         value = _clean(user).lower()
         if value and value not in users:
             users.append(value)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 
 import frappe
+from rayher_hr_payroll.identity_accounts import account_user
 
 from rayher_hr_payroll.access_control import BUSINESS_EXECUTIVE_ROLE
 
@@ -193,7 +194,8 @@ def plan_all_active_employee_accounts():
 
 
 def plan_business_accounts(specs=None):
-    specs = tuple(ACCOUNT_SPECS if specs is None else specs)
+    specs = tuple({**row, "user_id": account_user(row["user_id"])}
+                  for row in (ACCOUNT_SPECS if specs is None else specs))
     user_ids = list(
         dict.fromkeys(
             user_id
