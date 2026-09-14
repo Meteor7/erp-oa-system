@@ -291,18 +291,18 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
             for old, target in employee_map.items():
                 temp = "IDENTITY-TMP-" + transaction_id + "-" + old
                 frappe.rename_doc("Employee", old, temp, force=True, show_alert=False,
-                                  rebuild_search=False, ignore_permissions=True)
+                                  rebuild_search=False)
                 temp_names[temp] = target
             for temp, target in temp_names.items():
                 frappe.rename_doc("Employee", temp, target, force=True, show_alert=False,
-                                  rebuild_search=False, ignore_permissions=True)
+                                  rebuild_search=False)
                 if frappe.db.has_column("Employee", "employee"):
                     frappe.db.set_value("Employee", target, "employee", target, update_modified=False)
             for row in rows:
                 old, new = row["primary_user"], row["target_user"]
                 if old and old != new:
                     frappe.rename_doc("User", old, new, force=True, show_alert=False,
-                                      rebuild_search=False, ignore_permissions=True)
+                                      rebuild_search=False)
                 if not old:
                     password = secrets.token_urlsafe(24)
                     doc = frappe.get_doc({"doctype": "User", "email": new,
