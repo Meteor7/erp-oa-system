@@ -53,6 +53,18 @@ def provision(backup_path):
             assignment.update({"role_key": "hr_manager", "role_label": "人事经理",
                                "employee": None, "user": WILLIAM, "enabled": 1})
             assignment.save(ignore_permissions=True)
+            finance_employee = frappe.db.get_value(
+                "Employee", {"employee_name": "演示员工32", "status": "Active"}, "name")
+            if not finance_employee:
+                raise ValueError("Reviewed finance successor has no active Employee")
+            finance_name = frappe.db.get_value("OA Approval Role Assignment",
+                                              {"role_key": "finance_auditor"}, "name")
+            finance = (frappe.get_doc("OA Approval Role Assignment", finance_name)
+                       if finance_name else frappe.new_doc("OA Approval Role Assignment"))
+            finance.update({"role_key": "finance_auditor", "role_label": "出纳",
+                            "employee": finance_employee, "user": "person055@staff.example.invalid",
+                            "enabled": 1})
+            finance.save(ignore_permissions=True)
         assert resolve_role("hr_manager")["user"] == WILLIAM
         assert resolve_role("finance_auditor")["user"] == "person055@staff.example.invalid"
         after = business_snapshot({})
