@@ -50,8 +50,8 @@ def provision(backup_path):
                                        {"role_key": "hr_manager"}, "name")
             assignment = (frappe.get_doc("OA Approval Role Assignment", name)
                           if name else frappe.new_doc("OA Approval Role Assignment"))
-            assignment.update(role_key="hr_manager", role_label="人事经理",
-                              employee=None, user=WILLIAM, enabled=1)
+            assignment.update({"role_key": "hr_manager", "role_label": "人事经理",
+                               "employee": None, "user": WILLIAM, "enabled": 1})
             assignment.save(ignore_permissions=True)
         assert resolve_role("hr_manager")["user"] == WILLIAM
         assert resolve_role("finance_auditor")["user"] == "person055@staff.example.invalid"
