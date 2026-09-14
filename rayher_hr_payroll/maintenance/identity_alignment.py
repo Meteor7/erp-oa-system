@@ -289,6 +289,13 @@ def verify_backup(path, expected_database=None, max_age_seconds=3600):
     return str(path)
 
 
+def enqueue_without_contact_sync(original, *args, **kwargs):
+    method = args[0] if args else kwargs.get("method")
+    if method == "frappe.core.doctype.user.user.create_contact":
+        return None
+    return original(*args, **kwargs)
+
+
 def _write_private(path, payload):
     with open(path, "x", encoding="utf-8") as stream:
         os.chmod(path, 0o600)
@@ -330,6 +337,7 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
     commit = frappe.db.commit
     from frappe.core.doctype.user.user import User
     original_self_share = User.share_with_self
+    original_enqueue = frappe.enqueue
     def preserve_self_share(user):
         if frappe.db.exists("DocShare", {"share_doctype": "User",
                 "share_name": user.name, "user": user.name}):
@@ -342,7 +350,9 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
         # Frappe User.after_rename clears sessions through a helper that commits.
         # Defer ALL such commits until every preservation assertion has passed.
         with patch.object(frappe.db, "commit", lambda *a, **k: None), \
-                patch.object(User, "share_with_self", preserve_self_share):
+                patch.object(User, "share_with_self", preserve_self_share), \
+                patch.object(frappe, "enqueue", lambda *a, **k:
+                             enqueue_without_contact_sync(original_enqueue, *a, **k)):
             report["created_companies"] = []
             for spec in reviewed["missing_companies"]:
                 frappe.get_doc({"doctype": "Company", **spec}).insert(ignore_permissions=True)

@@ -131,3 +131,15 @@ def test_company_creation_plan_is_idempotent_and_rejects_collisions(module):
         module.company_plan([spec], [dict(current, default_currency="USD")])
     with pytest.raises(ValueError, match="abbreviation"):
         module.company_plan([spec], [dict(current, name="Another")])
+
+
+def test_migration_does_not_queue_postcommit_contact_rewrites(module):
+    calls = []
+    def enqueue(*args, **kwargs):
+        calls.append((args, kwargs))
+        return "queued"
+    assert module.enqueue_without_contact_sync(enqueue, "frappe.core.doctype.user.user.create_contact", user="u", enqueue_after_commit=True) is None
+    assert module.enqueue_without_contact_sync(enqueue, method="frappe.core.doctype.user.user.create_contact") is None
+    assert calls == []
+    assert module.enqueue_without_contact_sync(enqueue, "other.task", value=1) == "queued"
+    assert calls == [(("other.task",), {"value": 1})]
