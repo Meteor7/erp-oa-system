@@ -392,15 +392,15 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
                     if not frappe.db.exists("Role", role):
                         frappe.get_doc({"doctype": "Role", "role_name": role,
                                         "desk_access": 1}).insert(ignore_permissions=True)
+                frappe.db.set_value("Employee", row["target_employee"],
+                    {"user_id": row["target_user"], "status": row["status"],
+                     "relieving_date": row["relieving_date"]}, update_modified=False)
                 user = frappe.get_doc("User", row["target_user"])
                 user.first_name, user.middle_name, user.last_name = row["person"], None, None
                 user.enabled = int(row["status"] == "Active")
                 user.send_welcome_email = 0
                 user.set("roles", [{"role": role} for role in row["roles"]])
                 user.save(ignore_permissions=True)
-                frappe.db.set_value("Employee", row["target_employee"],
-                    {"user_id": row["target_user"], "status": row["status"],
-                     "relieving_date": row["relieving_date"]}, update_modified=False)
             admin = frappe.get_doc("User", "admin@staff.example.invalid")
             for role in load_manifest()["admin_roles"]:
                 if not frappe.db.exists("Role", role):
