@@ -11,6 +11,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
+import time
 from unittest.mock import patch
 
 import frappe
@@ -231,14 +233,19 @@ def auth_fingerprints(rows):
     return result
 
 
-def verify_backup(path):
+def verify_backup(path, expected_database=None, max_age_seconds=3600):
     path = Path(path).resolve()
     if not path.is_file() or path.stat().st_size == 0:
         raise ValueError("A fresh database backup is required")
+    if not 0 <= time.time() - path.stat().st_mtime <= max_age_seconds:
+        raise ValueError("Database backup is stale; take a fresh backup")
     with gzip.open(path, "rb") as stream:
         header = stream.read(2048)
         if b"MySQL" not in header and b"MariaDB" not in header:
             raise ValueError("Unexpected database backup header")
+        database = re.search(rb"^-- Host:.*?Database:\s*(\S+)", header, re.MULTILINE)
+        if expected_database and (not database or database.group(1).decode() != expected_database):
+            raise ValueError("Backup belongs to a different database")
         while stream.read(1024 * 1024):
             pass
     return str(path)
@@ -258,7 +265,7 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
         raise ValueError("Identity cutover requires maintenance mode")
     if rehearsal and "identity-qa" not in frappe.local.site:
         raise ValueError("Rehearsal is restricted to an isolated identity-qa site")
-    backup = verify_backup(backup_path)
+    backup = verify_backup(backup_path, expected_database=None if rehearsal else frappe.conf.db_name)
     reviewed = plan()
     if reviewed["fingerprint"] != expected_fingerprint:
         raise ValueError("Identity data changed since preflight; review the new plan")
@@ -357,7 +364,7 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
                 raise ValueError("Business preservation mismatch: " + ", ".join(changed))
             for target, expected in auth.items():
                 actual = frappe.db.sql(
-                    "SELECT fieldname,password,encrypted FROM __Auth WHERE doctype='User' AND name=%s",
+                    "SELECT fieldname,password,encrypted FROM __Auth WHERE doctype='User' AND name=%s ORDER BY fieldname,encrypted",
                     target)
                 if digest(actual) != expected:
                     raise ValueError("Existing password changed: " + target)

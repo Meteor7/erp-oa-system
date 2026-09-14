@@ -91,3 +91,16 @@ def test_text_repair_rejects_concurrent_cell_changes(module):
     module.frappe.db = SimpleNamespace(sql=lambda query, args: [("third-party",)])
     with pytest.raises(ValueError, match="changed during migration"):
         module.apply_text_references([("tabX", "X1", "user", "old", "new")], {"old":"new"})
+
+
+def test_backup_rejects_other_database_and_stale_file(module, tmp_path):
+    import gzip, os, time
+    backup = tmp_path / "backup.sql.gz"
+    with gzip.open(backup, "wb") as stream:
+        stream.write(b"-- MariaDB dump\n-- Host: db    Database: expected_db\n")
+    assert module.verify_backup(backup, "expected_db") == str(backup.resolve())
+    with pytest.raises(ValueError, match="different database"):
+        module.verify_backup(backup, "production_db")
+    os.utime(backup, (time.time() - 7200, time.time() - 7200))
+    with pytest.raises(ValueError, match="stale"):
+        module.verify_backup(backup, "expected_db")
