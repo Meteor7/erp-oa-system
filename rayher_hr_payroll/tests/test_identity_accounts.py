@@ -14,3 +14,12 @@ def test_resolution_follows_current_site_binding_without_import_cache(monkeypatc
     binding[0] = old
     assert account_user(old) == old
     assert account_user("person047@staff.example.invalid") == "person047@staff.example.invalid"
+
+
+def test_old_server_domain_and_wang_account_follow_same_person(monkeypatch):
+    def value(doctype, filters, field):
+        return {"演示员工21": "person030@staff.example.invalid",
+                "演示员工30": "person059@staff.example.invalid"}[filters["employee_name"]]
+    monkeypatch.setitem(sys.modules, "frappe", SimpleNamespace(db=SimpleNamespace(get_value=value)))
+    assert account_user("person046@business.example.invalid") == "person030@staff.example.invalid"
+    assert account_user("person007@staff.example.invalid") == "person059@staff.example.invalid"
