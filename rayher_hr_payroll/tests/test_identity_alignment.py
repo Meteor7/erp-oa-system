@@ -76,3 +76,18 @@ def test_target_already_aligned_is_idempotent(module):
         [{"name":p["target_user"],"full_name":"Alice"}])
     assert module.mappings(rows) == ({}, {})
     assert rows[0]["primary_user"] == p["target_user"]
+
+def test_cycle_text_repair_does_not_map_framework_updated_cell_twice(module):
+    calls = []
+    def sql(query, args):
+        calls.append((query, args))
+        return [("B",)] if query.startswith("SELECT") else None
+    module.frappe.db = SimpleNamespace(sql=sql)
+    assert module.apply_text_references([("tabTimesheet", "TS1", "employee", "A", "B")],
+                                       {"A": "B", "B": "A"}) == {}
+    assert len(calls) == 1
+
+def test_text_repair_rejects_concurrent_cell_changes(module):
+    module.frappe.db = SimpleNamespace(sql=lambda query, args: [("third-party",)])
+    with pytest.raises(ValueError, match="changed during migration"):
+        module.apply_text_references([("tabX", "X1", "user", "old", "new")], {"old":"new"})

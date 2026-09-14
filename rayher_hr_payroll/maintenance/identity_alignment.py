@@ -158,12 +158,13 @@ def quote(identifier):
     return "`" + identifier.replace("`", "``") + "`"
 
 
-def repair_text_references(mapping):
-    # Link/Dynamic Link are handled by Frappe rename. These exact-token repairs cover
-    # Data/JSON fields such as step.approvers, action_by, _assign and source snapshots.
-    changed = {}
+def prepare_text_references(mapping):
+    # Capture original cells BEFORE any rename, otherwise cyclic employee mappings
+    # would transform an already-renamed identifier a second time.
+    pending = []
     user_children = {"tab" + f.options for f in frappe.get_meta("User").get_table_fields()}
-    excluded = {"tabUser", "tabSessions", "tabVersion", "tabComment", "tabActivity Log"} | user_children
+    excluded = {"tabUser", "tabEmployee", "tabSessions", "tabVersion",
+                "tabComment", "tabActivity Log"} | user_children
     for table in frappe.db.get_tables():
         if not table.startswith("tab") or table in excluded:
             continue
@@ -181,10 +182,27 @@ def repair_text_references(mapping):
                 old = row[field]
                 new = replace_value(old, mapping)
                 if new != old:
-                    frappe.db.sql("UPDATE " + quote(table) + " SET " + quote(field)
-                                  + "=%s WHERE name=%s", (new, row["name"]))
-                    key = table + "." + field
-                    changed[key] = changed.get(key, 0) + 1
+                    pending.append((table, row["name"], field, old, new))
+    return pending
+
+
+def apply_text_references(pending, mapping):
+    changed = {}
+    for table, name, field, old, new in pending:
+        target_name = mapping.get(name, name)
+        current = frappe.db.sql("SELECT " + quote(field) + " FROM " + quote(table)
+                                + " WHERE name=%s", target_name)
+        if not current:
+            raise ValueError("Reference row disappeared: " + table + "/" + name)
+        value = current[0][0]
+        if value == new:
+            continue  # Framework already updated this Link/Dynamic Link/owner.
+        if value != old:
+            raise ValueError("Reference changed during migration: " + table + "." + field)
+        frappe.db.sql("UPDATE " + quote(table) + " SET " + quote(field)
+                      + "=%s WHERE name=%s", (new, target_name))
+        key = table + "." + field
+        changed[key] = changed.get(key, 0) + 1
     return changed
 
 
@@ -252,6 +270,7 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
     if any(r["target_employee"] not in seeds for r in missing):
         raise ValueError("Private seed records missing for new employees")
     before = business_snapshot(full_map)
+    pending_text = prepare_text_references(full_map)
     auth = auth_fingerprints(rows)
     transaction_id = secrets.token_hex(8)
     folder = Path(frappe.get_site_path("private", "identity-alignment"))
@@ -328,7 +347,7 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
                                     "desk_access": 1}).insert(ignore_permissions=True)
             admin.set("roles", [{"role": r} for r in load_manifest()["admin_roles"]])
             admin.save(ignore_permissions=True)
-            report["text_repairs"] = repair_text_references(full_map)
+            report["text_repairs"] = apply_text_references(pending_text, full_map)
             maximum = max(int(r["target_employee"].rsplit("-", 1)[1]) for r in rows)
             frappe.db.sql("""INSERT INTO tabSeries (name,current) VALUES ('HR-EMP-',%s)
                 ON DUPLICATE KEY UPDATE current=GREATEST(current,VALUES(current))""", maximum)
