@@ -21,11 +21,11 @@ def adapt_common(name, source):
             value = resolve_role(key)
             self[key] = value
             return value
-    
-    
+
+
     def _roles(roles=None):
         return _RoleSnapshots({key: dict(value) for key, value in (roles or {}).items() if value})
-    
+
     '''+s[end:]
      s=s.replace("top_values = set(TOP_SUPERVISORS)","top_values = set()")
      s=s.replace('_append_unique_approval(steps, ASSET_APPROVAL_LABEL_PREFIX + IT_APPROVER_NAME, IT_APPROVER_USER)', 'it = snapshots["it_asset_owner"]\n        _append_unique_approval(steps, _role_label(it, with_name=True), _role_user(it, "IT负责人"))')
@@ -72,7 +72,7 @@ def adapt_common(name, source):
       const positions = (typeof window !== 'undefined' && window.position_access) || {};
       return keys.some(key => positions[key] === true);
     }
-    
+
     '''
      s=s.replace("function currentLogin() {",helper+"function currentLogin() {",1)
      s=s.replace("PROCUREMENT_PRICE_USERS.has(currentLogin())","holdsPosition('pmc', 'procurement_manager', 'vice_manager')")
@@ -82,7 +82,7 @@ def adapt_common(name, source):
      s=s.replace("MATERIAL_PROGRESS_USERS.has(user)","holdsPosition('pmc', 'procurement_manager', 'vice_manager')")
     else:raise ValueError(name)
     if p.suffix==".py":compile(s,str(p),"exec")
-    
+
     return s
 
 
