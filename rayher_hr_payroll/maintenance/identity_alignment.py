@@ -142,7 +142,24 @@ def mappings(rows):
     return employee, user
 
 
-def business_snapshot(mapping):
+def normalize_account_shares(rows, new_users):
+    result = []
+    for original in rows:
+        row = dict(original)
+        if row.get("share_doctype") == "User" and row.get("user") == row.get("share_name"):
+            # User.save refreshes its own profile share timestamp. All existing
+            # permission values, row identities and business shares remain checked.
+            row.pop("modified", None)
+            if row["user"] in new_users:
+                expected = {"read": 1, "write": 1, "share": 1, "submit": 0, "everyone": 0}
+                if any(row.get(k) != value for k, value in expected.items()):
+                    raise ValueError("Unexpected new account self-share permissions")
+                continue
+        result.append(row)
+    return result
+
+
+def business_snapshot(mapping, new_users=()):
     result = {}
     for table in sorted(frappe.db.get_tables()):
         if not table.startswith("tab") or not table[3:].startswith(BUSINESS_PREFIXES):
@@ -152,7 +169,9 @@ def business_snapshot(mapping):
             continue
         rows = frappe.db.sql("SELECT * FROM " + quote(table) + " ORDER BY name", as_dict=True)
         canonical = [normalize(dict(row), mapping) for row in rows]
-        result[table] = {"count": len(rows), "digest": digest(canonical)}
+        if table == "tabDocShare":
+            canonical = normalize_account_shares(canonical, new_users)
+        result[table] = {"count": len(canonical), "digest": digest(canonical)}
     return result
 
 
@@ -276,7 +295,8 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
     seeds = json.loads(Path(seed_path).read_text()) if seed_path else {}
     if any(r["target_employee"] not in seeds for r in missing):
         raise ValueError("Private seed records missing for new employees")
-    before = business_snapshot(full_map)
+    new_users = {r["target_user"] for r in rows if not r["primary_user"]}
+    before = business_snapshot(full_map, new_users)
     pending_text = prepare_text_references(full_map)
     auth = auth_fingerprints(rows)
     transaction_id = secrets.token_hex(8)
@@ -358,7 +378,7 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
             maximum = max(int(r["target_employee"].rsplit("-", 1)[1]) for r in rows)
             frappe.db.sql("""INSERT INTO tabSeries (name,current) VALUES ('HR-EMP-',%s)
                 ON DUPLICATE KEY UPDATE current=GREATEST(current,VALUES(current))""", maximum)
-            after = business_snapshot({})
+            after = business_snapshot({}, new_users)
             if before != after:
                 changed = [t for t in set(before) | set(after) if before.get(t) != after.get(t)]
                 raise ValueError("Business preservation mismatch: " + ", ".join(changed))

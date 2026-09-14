@@ -104,3 +104,19 @@ def test_backup_rejects_other_database_and_stale_file(module, tmp_path):
     os.utime(backup, (time.time() - 7200, time.time() - 7200))
     with pytest.raises(ValueError, match="stale"):
         module.verify_backup(backup, "expected_db")
+
+
+def test_self_share_audit_only_allows_expected_profile_metadata(module):
+    existing = {"name": "share1", "share_doctype": "User", "user": "old@x",
+                "share_name": "old@x", "modified": "yesterday", "read": 1,
+                "write": 1, "share": 1, "submit": 0, "everyone": 0}
+    refreshed = dict(existing, modified="today")
+    assert module.normalize_account_shares([existing], set()) == module.normalize_account_shares([refreshed], set())
+    changed = dict(refreshed, write=0)
+    assert module.normalize_account_shares([existing], set()) != module.normalize_account_shares([changed], set())
+    new = dict(existing, name="share2", user="new@x", share_name="new@x")
+    assert module.normalize_account_shares([existing, new], {"new@x"}) == module.normalize_account_shares([existing], set())
+    with pytest.raises(ValueError, match="permissions"):
+        module.normalize_account_shares([dict(new, everyone=1)], {"new@x"})
+    business = dict(existing, share_doctype="Timesheet", share_name="TS1")
+    assert module.normalize_account_shares([business], {"old@x"}) == [business]
