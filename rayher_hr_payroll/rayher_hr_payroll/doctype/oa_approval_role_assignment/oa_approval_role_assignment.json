@@ -5,7 +5,13 @@
   "creation": "2026-08-15 00:00:00.000000",
   "doctype": "DocType",
   "engine": "InnoDB",
-  "field_order": ["role_key", "role_label", "employee", "user", "enabled"],
+  "field_order": [
+    "role_key",
+    "role_label",
+    "employee",
+    "user",
+    "enabled"
+  ],
   "fields": [
     {
       "fieldname": "role_key",
@@ -28,7 +34,7 @@
       "in_list_view": 1,
       "label": "Employee",
       "options": "Employee",
-      "reqd": 1
+      "reqd": 0
     },
     {
       "fieldname": "user",

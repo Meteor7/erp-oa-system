@@ -241,3 +241,26 @@ def test_role_assignment_doctype_has_unique_role_and_user_links():
         "vice_manager", "general_manager", "production_asset_owner",
         "procurement_manager",
     }
+
+def test_hr_assignment_overrides_designation_until_employee_profile_is_available():
+    store = MemoryStore()
+    store.by_designation["人事经理"] = [employee(user="other@example.com")]
+    store.assignments["hr_manager"] = {
+        "role_key": "hr_manager", "role_label": "人事经理", "employee": "",
+        "employee_name": "William Liu", "user": "liuwilliam@example.com", "enabled": 1,
+    }
+    store.enabled_users.update({"other@example.com", "liuwilliam@example.com"})
+    assert resolve_role("hr_manager", store=store)["user"] == "liuwilliam@example.com"
+    assert resolve_role("hr_manager", store=store)["employee"] == ""
+    store.enabled_users.remove("liuwilliam@example.com")
+    with pytest.raises(ApprovalRoleResolutionError, match="账号未启用"):
+        resolve_role("hr_manager", store=store)
+
+
+def test_designation_successor_is_resolved_without_changing_route_code():
+    store = MemoryStore()
+    store.by_designation["出纳"] = [employee(user="first@example.com")]
+    store.enabled_users.update({"first@example.com", "second@example.com"})
+    assert resolve_role("finance_auditor", store=store)["user"] == "first@example.com"
+    store.by_designation["出纳"] = [employee(user="second@example.com")]
+    assert resolve_role("finance_auditor", store=store)["user"] == "second@example.com"

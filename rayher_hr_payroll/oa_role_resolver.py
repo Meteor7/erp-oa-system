@@ -50,6 +50,12 @@ class FrappeRoleStore:
         )
         if row and row.get("employee"):
             row["employee_name"] = frappe.db.get_value("Employee", row["employee"], "employee_name") or ""
+        if row and not row.get("employee"):
+            row["employee_name"] = frappe.db.get_value("User", row["user"], "full_name") or ""
+        if row and row.get("employee"):
+            employee = self.get_employee(row["employee"])
+            if not employee or employee.status != "Active" or employee.user_id != row["user"]:
+                raise ApprovalRoleResolutionError("审批岗位绑定的员工状态或账号不匹配")
         return row
 
     def employees_for_designation(self, designation):
@@ -168,8 +174,8 @@ def resolve_role(role_key, *, store=None):
     if not spec:
         raise ApprovalRoleResolutionError(f"未知审批角色：{role_key}")
     store = _store(store)
-    if spec.get("assignment_required"):
-        row = store.get_assignment(role_key)
+    row = store.get_assignment(role_key)
+    if row or spec.get("assignment_required"):
         if not row or not int(_get(row, "enabled") or 0):
             raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到有效配置")
         result = _snapshot(role_key, spec, row)
