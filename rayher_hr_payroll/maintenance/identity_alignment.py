@@ -145,7 +145,7 @@ def business_snapshot(mapping):
     for table in sorted(frappe.db.get_tables()):
         if not table.startswith("tab") or not table[3:].startswith(BUSINESS_PREFIXES):
             continue
-        columns = frappe.db.get_table_columns(table)
+        columns = [c["name"] for c in frappe.db.get_table_columns_description(table)]
         if "name" not in columns:
             continue
         rows = frappe.db.sql("SELECT * FROM " + quote(table) + " ORDER BY name", as_dict=True)
@@ -212,7 +212,7 @@ def redirect_alias(old, new):
     update_link_field_values(get_link_fields("User"), old, new, "User")
     rename_dynamic_links("User", old, new)
     for table in frappe.db.get_tables():
-        columns = frappe.db.get_table_columns(table)
+        columns = [c["name"] for c in frappe.db.get_table_columns_description(table)]
         for field in ("owner", "modified_by"):
             if field in columns:
                 frappe.db.sql("UPDATE " + quote(table) + " SET " + quote(field)
