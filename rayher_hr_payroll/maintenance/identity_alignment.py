@@ -121,6 +121,22 @@ def build_plan(manifest, employees, users):
     return result
 
 
+def company_plan(specs, existing):
+    by_name = {c["name"]: c for c in existing}
+    missing = []
+    for spec in specs:
+        current = by_name.get(spec["company_name"])
+        if current:
+            for field in ("abbr", "default_currency", "country"):
+                if current.get(field) != spec[field]:
+                    raise ValueError("Company configuration differs: " + spec["company_name"])
+        else:
+            if any(c.get("abbr") == spec["abbr"] for c in existing):
+                raise ValueError("Company abbreviation already occupied")
+            missing.append(spec)
+    return missing
+
+
 def plan():
     manifest = load_manifest()
     employees = frappe.get_all("Employee",
@@ -130,8 +146,12 @@ def plan():
     rows = build_plan(manifest, employees, users)
     roles = frappe.get_all("Has Role", filters={"parenttype": "User"},
                            fields=["parent", "role"], order_by="parent,role")
-    return {"rows": rows, "fingerprint": digest({
-        "manifest": manifest, "employees": employees, "users": users, "roles": roles})}
+    companies = frappe.get_all("Company",
+        fields=["name", "abbr", "default_currency", "country"], order_by="name")
+    missing_companies = company_plan(manifest.get("companies", []), companies)
+    return {"rows": rows, "missing_companies": missing_companies, "fingerprint": digest({
+        "manifest": manifest, "employees": employees, "users": users, "roles": roles,
+        "companies": companies})}
 
 
 def mappings(rows):
@@ -316,11 +336,17 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
             return
         return original_self_share(user)
     original_user = frappe.session.user
+    commit_attempted = False
+    committed = False
     try:
         # Frappe User.after_rename clears sessions through a helper that commits.
         # Defer ALL such commits until every preservation assertion has passed.
         with patch.object(frappe.db, "commit", lambda *a, **k: None), \
                 patch.object(User, "share_with_self", preserve_self_share):
+            report["created_companies"] = []
+            for spec in reviewed["missing_companies"]:
+                frappe.get_doc({"doctype": "Company", **spec}).insert(ignore_permissions=True)
+                report["created_companies"].append(spec["company_name"])
             temp_names = {}
             for old, target in employee_map.items():
                 temp = "IDENTITY-TMP-" + transaction_id + "-" + old
@@ -405,6 +431,11 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
                 if bool(frappe.db.get_value("User", row["target_user"], "enabled")) != (
                         row["status"] == "Active"):
                     raise ValueError("Login state mismatch")
+            for row in rows:
+                actual_roles = set(frappe.get_all("Has Role",
+                    filters={"parent": row["target_user"], "parenttype": "User"}, pluck="role"))
+                if actual_roles != set(row["roles"]):
+                    raise ValueError("Account roles mismatch: " + row["target_user"])
             report["after"] = after
             report["passwords_preserved"] = len(auth)
             # Store only new credentials in a private 0600 file, never in tool output.
@@ -413,7 +444,9 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
             frappe.db.rollback()
             report["state"] = "rehearsed-and-rolled-back"
         else:
+            commit_attempted = True
             commit()
+            committed = True
             report["state"] = "committed"
         report["new_accounts"] = len(credentials)
         report["credentials_file"] = str(credentials_path) if not rehearsal else None
@@ -423,8 +456,10 @@ def apply(expected_fingerprint, backup_path, seed_path=None, rehearsal=False,
                 "new_accounts": len(credentials), "passwords_preserved": len(auth)}
     except Exception:
         frappe.db.rollback()
-        report["state"] = "rolled-back-on-error"
+        report["state"] = ("committed-with-postcommit-error" if committed else
+                           "commit-outcome-unknown" if commit_attempted else "rolled-back-on-error")
         report_path.write_text(json.dumps(report, ensure_ascii=False, default=str, indent=2))
         raise
     finally:
         frappe.set_user(original_user)
+

@@ -120,3 +120,14 @@ def test_self_share_audit_only_allows_expected_profile_metadata(module):
         module.normalize_account_shares([dict(new, everyone=1)], {"new@x"})
     business = dict(existing, share_doctype="Timesheet", share_name="TS1")
     assert module.normalize_account_shares([business], {"old@x"}) == [business]
+
+
+def test_company_creation_plan_is_idempotent_and_rejects_collisions(module):
+    spec = {"company_name": "Shanghai", "abbr": "SHGL", "default_currency": "CNY", "country": "China"}
+    assert module.company_plan([spec], []) == [spec]
+    current = {"name": "Shanghai", **spec}
+    assert module.company_plan([spec], [current]) == []
+    with pytest.raises(ValueError, match="configuration differs"):
+        module.company_plan([spec], [dict(current, default_currency="USD")])
+    with pytest.raises(ValueError, match="abbreviation"):
+        module.company_plan([spec], [dict(current, name="Another")])
