@@ -12,7 +12,8 @@
     "user",
     "enabled",
     "role_profile",
-    "parent_position"
+    "parent_position",
+    "designation"
   ],
   "fields": [
     {
@@ -64,6 +65,12 @@
       "fieldtype": "Link",
       "options": "OA Approval Role Assignment",
       "label": "\u4e0a\u7ea7\u5c97\u4f4d"
+    },
+    {
+      "fieldname": "designation",
+      "fieldtype": "Link",
+      "options": "Designation",
+      "label": "\u4efb\u804c\u804c\u4f4d"
     }
   ],
   "index_web_pages_for_search": 1,

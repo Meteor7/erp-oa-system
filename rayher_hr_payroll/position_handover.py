@@ -91,6 +91,12 @@ def apply_assignment(doc):
         return
     if not doc.employee:
         frappe.throw("启用岗位交接需要关联员工档案；个人资料可后续补齐")
+    # Shared incumbency makes employee-level subordinates ambiguous; require explicit separation.
+    if previous and previous != doc.employee and frappe.db.exists("OA Approval Role Assignment",
+            {"employee": previous, "enabled": 1, "name": ["!=", doc.name]}):
+        frappe.throw("原任兼任多个岗位，请先明确各岗位的下属归属再交接")
+    if doc.get("designation"):
+        frappe.db.set_value("Employee", doc.employee, "designation", doc.designation)
     supervisor = None
     if doc.get("parent_position"):
         parent = frappe.get_doc("OA Approval Role Assignment", doc.parent_position)
