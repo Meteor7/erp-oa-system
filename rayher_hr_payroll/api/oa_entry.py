@@ -1278,6 +1278,14 @@ def _sync_payment_plan_row(payment_doc, status):
 
 
 def _procurement_chain_summary(doc):
+    from rayher_hr_payroll.procurement_summary_cache import prepared_summary
+    cached = prepared_summary(doc.name)
+    if cached is not None:
+        return cached
+    return _calculate_procurement_chain(doc)
+
+
+def _calculate_procurement_chain(doc, data=None):
     empty = {
         "stage": "demand" if not (_clean(getattr(doc, "business_status", None)).startswith("需求已批准") or getattr(doc, "workflow_status", None) == STATUS_COMPLETED) else "await_pr",
         "label": "需求审批中" if not (_clean(getattr(doc, "business_status", None)).startswith("需求已批准") or getattr(doc, "workflow_status", None) == STATUS_COMPLETED) else "等待 PMC 提 PR",
@@ -1294,38 +1302,44 @@ def _procurement_chain_summary(doc):
     try:
         source_lines = list(getattr(doc, "business_lines", []) or [])
         requested = {row.name: Decimal(str(getattr(row, "quantity", 0) or 0)) for row in source_lines}
-        pr_lines = frappe.get_all(
-            "OA Procurement Request Line", filters={"source_request": doc.name},
-            fields=["parent", "source_line", "quantity", "remaining_quantity"], limit_page_length=0,
-        )
-        active_price_approvals = frappe.get_all(
-            "OA Price Approval", filters={"status": ["not in", ["已取消"]]},
-            pluck="name", limit_page_length=0,
-        )
-        price_lines = frappe.get_all(
-            "OA Price Approval Line",
-            filters={"source_request": doc.name, "parent": ["in", active_price_approvals or ["__none__"]]},
-            fields=["parent", "source_line", "quantity"], limit_page_length=0,
-        )
-        po_lines = frappe.get_all(
-            "OA Purchase Order Line", filters={"source_request": doc.name},
-            fields=["parent", "source_line", "quantity"], limit_page_length=0,
-        )
+        if data is None:
+            pr_lines = frappe.get_all(
+                "OA Procurement Request Line", filters={"source_request": doc.name},
+                fields=["parent", "source_line", "quantity", "remaining_quantity"], limit_page_length=0,
+            )
+            active_price_approvals = frappe.get_all(
+                "OA Price Approval", filters={"status": ["not in", ["已取消"]]},
+                pluck="name", limit_page_length=0,
+            )
+            price_lines = frappe.get_all(
+                "OA Price Approval Line",
+                filters={"source_request": doc.name, "parent": ["in", active_price_approvals or ["__none__"]]},
+                fields=["parent", "source_line", "quantity"], limit_page_length=0,
+            )
+            po_lines = frappe.get_all(
+                "OA Purchase Order Line", filters={"source_request": doc.name},
+                fields=["parent", "source_line", "quantity"], limit_page_length=0,
+            )
+            pr_names = sorted({row.parent for row in pr_lines if row.parent})
+            price_names = sorted({row.parent for row in price_lines if row.parent})
+            po_names = sorted({row.parent for row in po_lines if row.parent})
+            price_status = {
+                row.name: _clean(row.status) for row in frappe.get_all(
+                    "OA Price Approval", filters={"name": ["in", price_names]},
+                    fields=["name", "status"], limit_page_length=0,
+                )
+            } if price_names else {}
+            po_status = {
+                row.name: _clean(row.status) for row in frappe.get_all(
+                    "OA Purchase Order", filters={"name": ["in", po_names]},
+                    fields=["name", "status"], limit_page_length=0,
+                )
+            } if po_names else {}
+        else:
+            pr_lines, price_lines, po_lines, price_status, po_status = data
         pr_names = sorted({row.parent for row in pr_lines if row.parent})
         price_names = sorted({row.parent for row in price_lines if row.parent})
         po_names = sorted({row.parent for row in po_lines if row.parent})
-        price_status = {
-            row.name: _clean(row.status) for row in frappe.get_all(
-                "OA Price Approval", filters={"name": ["in", price_names]},
-                fields=["name", "status"], limit_page_length=0,
-            )
-        } if price_names else {}
-        po_status = {
-            row.name: _clean(row.status) for row in frappe.get_all(
-                "OA Purchase Order", filters={"name": ["in", po_names]},
-                fields=["name", "status"], limit_page_length=0,
-            )
-        } if po_names else {}
 
         pr_quantity = {}
         pending_price_sources = set()
@@ -3466,7 +3480,9 @@ def list_requests(view="mine", limit=50, request_type=None, name=None):
         ]
     if view == "pending":
         docs = [doc for doc in docs if _can_act_on_current_step(doc)]
-    return [_summarize_doc(doc) for doc in docs]
+    from rayher_hr_payroll.procurement_summary_cache import prepare_summaries
+    with prepare_summaries(docs, _calculate_procurement_chain):
+        return [_summarize_doc(doc) for doc in docs]
 
 
 def _result_name(row):
