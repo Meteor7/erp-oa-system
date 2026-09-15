@@ -101,7 +101,7 @@ def apply_assignment(doc):
         supervisor = frappe.db.get_value("Employee", previous, "reports_to")
     else:
         supervisor = frappe.db.get_value("Employee", doc.employee, "reports_to")
-    rows = frappe.get_all("Employee", fields=["name", "status", "reports_to"], limit_page_length=0)
+    rows = frappe.db.sql("SELECT name, status, reports_to FROM tabEmployee ORDER BY name FOR UPDATE", as_dict=True)
     changes = reporting_plan(rows, previous, doc.employee, supervisor)
     for employee, parent in changes.items():
         frappe.db.set_value("Employee", employee, "reports_to", parent)
@@ -130,3 +130,17 @@ def validate_parent_chain(doc):
             frappe.throw("岗位上级不能形成循环")
         seen.add(cursor)
         cursor = frappe.db.get_value("OA Approval Role Assignment", cursor, "parent_position")
+
+def on_profile_update(doc, method=None):
+    """Changing the shared position template updates all its current holders."""
+    import frappe
+    if not frappe.get_meta("OA Approval Role Assignment").has_field("role_profile"):
+        return
+    old = doc.get_doc_before_save()
+    previous = {r.role for r in old.roles} if old else set()
+    required = {r.role for r in doc.roles}
+    for assignment in frappe.get_all("OA Approval Role Assignment",
+            filters={"role_profile": doc.name, "enabled": 1},
+            fields=["name", "user"], limit_page_length=0):
+        sync_roles(assignment.user, previous, required,
+                   independent_roles(assignment.user, assignment.name))

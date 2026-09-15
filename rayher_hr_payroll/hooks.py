@@ -111,3 +111,6 @@ scheduler_events = {
         "rayher_hr_payroll.organization_master_data.sync_effective_leaver_statuses",
     ],
 }
+
+# Synchronize current holders of a position permission template.
+doc_events["Role Profile"] = {"on_update": "rayher_hr_payroll.position_handover.on_profile_update"}
