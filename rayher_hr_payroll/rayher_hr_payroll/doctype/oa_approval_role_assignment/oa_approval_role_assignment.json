@@ -10,7 +10,9 @@
     "role_label",
     "employee",
     "user",
-    "enabled"
+    "enabled",
+    "role_profile",
+    "parent_position"
   ],
   "fields": [
     {
@@ -50,6 +52,18 @@
       "fieldtype": "Check",
       "in_list_view": 1,
       "label": "Enabled"
+    },
+    {
+      "fieldname": "role_profile",
+      "fieldtype": "Link",
+      "options": "Role Profile",
+      "label": "\u5c97\u4f4d\u6743\u9650\u6a21\u677f"
+    },
+    {
+      "fieldname": "parent_position",
+      "fieldtype": "Link",
+      "options": "OA Approval Role Assignment",
+      "label": "\u4e0a\u7ea7\u5c97\u4f4d"
     }
   ],
   "index_web_pages_for_search": 1,
@@ -76,5 +90,6 @@
   ],
   "sort_field": "role_key",
   "sort_order": "ASC",
-  "states": []
+  "states": [],
+  "track_changes": 1
 }
