@@ -169,7 +169,7 @@ def _snapshot(role_key, spec, row, user=None):
     }
 
 
-def resolve_role(role_key, *, store=None):
+def _resolve_role_uncached(role_key, *, store=None):
     role_key = _text(role_key)
     spec = ROLE_SPECS.get(role_key)
     if not spec:
@@ -226,3 +226,12 @@ def bootstrap_pmc(*, store=None):
 
 def bootstrap_procurement_manager(*, store=None):
     return _bootstrap_position("procurement_manager", store)
+
+
+def resolve_role(role_key, *, store=None):
+    from rayher_hr_payroll.list_read_scope import active, reuse
+    if store is not None or not active():
+        return _resolve_role_uncached(role_key, store=store)
+    import frappe
+    key = (frappe.local.site, frappe.session.user, _text(role_key))
+    return reuse(key, lambda: _resolve_role_uncached(role_key))

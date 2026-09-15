@@ -1078,7 +1078,7 @@ def _request_capabilities(doc, user=None):
     }
 
 
-def _procurement_document_visibility(doc, user=None):
+def _procurement_document_visibility(doc, user=None, *, chain=None):
     """Expose downstream procurement links only to their business owners."""
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
         return {"can_view_procurement_price": False, "can_view_procurement_po": False}
@@ -1088,7 +1088,7 @@ def _procurement_document_visibility(doc, user=None):
     po_user = price_user or bool(roles & PROCUREMENT_PO_ROLES)
     price_numbers = _clean(getattr(doc, "price_approval_numbers", None))
     po_numbers = _clean(getattr(doc, "po_numbers", None))
-    chain = _procurement_chain_summary(doc)
+    chain = _procurement_chain_summary(doc) if chain is None else chain
     has_price = bool(price_numbers or chain.get("price_approval_numbers"))
     has_po = bool(po_numbers or chain.get("po_numbers"))
     demand_approved = _clean(getattr(doc, "business_status", None)).startswith("需求已批准") or getattr(doc, "workflow_status", None) in {STATUS_COMPLETED, "已通过", "已审批", "已结束"}
@@ -1396,9 +1396,9 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         )
     )
     capabilities = _request_capabilities(doc)
-    document_visibility = _procurement_document_visibility(doc)
-    workflow_metadata = _workflow_metadata(doc)
     chain_summary = _procurement_chain_summary(doc)
+    document_visibility = _procurement_document_visibility(doc, chain=chain_summary)
+    workflow_metadata = _workflow_metadata(doc)
     po_fulfillment_records = []
     source_po = _clean(getattr(doc, "source_purchase_order", None))
     if getattr(doc, "request_type", None) == REQUEST_PROCUREMENT_PAYMENT and source_po:
@@ -3394,7 +3394,11 @@ def mark_my_notifications_read(names=None, all_notifications=0):
     return {"marked": len(rows)}
 
 
+from rayher_hr_payroll.list_read_scope import read_scope
+
+
 @frappe.whitelist()
+@read_scope
 def list_requests(view="mine", limit=50, request_type=None, name=None):
     allowed_types = visible_request_types(REQUEST_TYPES)
     if request_type:
