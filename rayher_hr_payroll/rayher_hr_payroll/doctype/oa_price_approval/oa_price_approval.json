@@ -7,6 +7,7 @@
   "track_changes": 1,
   "field_order": [
     "status",
+    "pr_quantities_released",
     "created_by",
     "source_prs",
     "summary",
@@ -19,7 +20,7 @@
       "fieldname": "status",
       "fieldtype": "Select",
       "label": "Status",
-      "options": "草稿\n待审批\n已通过\n已拒绝\n已转PO",
+      "options": "草稿\n待审批\n已通过\n已拒绝\n已转PO\n已取消",
       "default": "草稿",
       "in_list_view": 1
     },
@@ -59,6 +60,15 @@
       "fieldname": "summary",
       "fieldtype": "Small Text",
       "label": "采购比价总结"
+    },
+    {
+      "fieldname": "pr_quantities_released",
+      "fieldtype": "Check",
+      "label": "PR Quantities Released",
+      "default": "0",
+      "read_only": 1,
+      "hidden": 1,
+      "no_copy": 1
     }
   ],
   "permissions": [

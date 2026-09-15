@@ -681,17 +681,23 @@ def create_price_approval(lines):
     doc = frappe.new_doc("OA Price Approval")
     doc.status, doc.created_by = "草稿", frappe.session.user
     prs, seen = set(), set()
+    locked_prs = {
+        name: frappe.get_doc("OA Procurement Request", name, for_update=True)
+        for name in sorted({_text(raw.get("source_pr")) for raw in values})
+    }
     for raw in values:
         pr_name, pr_line_name = _text(raw.get("source_pr")), _text(raw.get("source_pr_line"))
         key = (pr_name, pr_line_name)
         if key in seen:
             frappe.throw("同一 PR 物料不能在一张价格审批单中重复选择。")
         seen.add(key)
-        pr = frappe.get_doc("OA Procurement Request", pr_name)
+        pr = locked_prs[pr_name]
         line = next((row for row in (pr.lines or []) if row.name == pr_line_name), None)
         if not line or _text(pr.status) in {"草稿", "Draft", "已取消", "已关闭"}:
             frappe.throw("PR 明细无效或当前不可生成价格审批单。")
         remaining = _decimal(line.remaining_quantity or 0)
+        if remaining < 0 or remaining > _decimal(line.quantity) - _decimal(line.po_quantity):
+            frappe.throw(f"PR {pr_name} 的剩余数量异常，请先核对。")
         quantity = _decimal(raw.get("quantity") or remaining, "本次价格审批数量")
         if quantity <= 0 or quantity > remaining:
             frappe.throw(f"PR {pr_name} 的物料 {line.material_serial} 可选数量为 {remaining}。")
@@ -1004,26 +1010,64 @@ def update_price_approval_summary(name, summary):
     return _price_summary(doc)
 
 
+def _locked_pr_documents(lines):
+    """Use a stable lock order for all quantity writers in this workflow."""
+    return {
+        name: frappe.get_doc("OA Procurement Request", name, for_update=True)
+        for name in sorted({_text(line.source_pr) for line in lines if line.source_pr})
+    }
+
+
+def _change_reserved_pr_lines(approval, *, release, lines=None):
+    """Move quantities atomically; the caller saves the approval in this transaction."""
+    rows = list(approval.lines if lines is None else lines)
+    prs = _locked_pr_documents(rows)
+    quantities = defaultdict(Decimal)
+    for row in rows:
+        if not row.source_pr or not row.source_pr_line or _decimal(row.quantity) <= 0:
+            frappe.throw("价格审批物料的 PR 关联或数量无效。")
+        quantities[(row.source_pr, row.source_pr_line)] += _decimal(row.quantity)
+    changes = []
+    for (pr_name, line_name), quantity in quantities.items():
+        pr = prs[pr_name]
+        line = next((item for item in pr.lines if item.name == line_name), None)
+        if not line:
+            frappe.throw("价格审批关联的 PR 物料不存在。")
+        remaining = _decimal(line.remaining_quantity)
+        maximum = _decimal(line.quantity) - _decimal(line.po_quantity)
+        if remaining < 0 or remaining > maximum:
+            frappe.throw(f"PR {pr_name} 的剩余数量异常，请先核对。")
+        if not release and (_text(pr.status) in {"草稿", "Draft", "已取消", "已关闭"} or quantity > remaining):
+            frappe.throw(f"PR {pr_name} 的可用数量不足或状态不可用，请重新核对价格审批数量。")
+        updated = remaining + quantity if release else remaining - quantity
+        if updated < 0 or updated > maximum:
+            frappe.throw(f"PR {pr_name} 的数量占用与释放不一致，请先核对。")
+        changes.append((line, updated))
+    for line, updated in changes:
+        line.remaining_quantity = float(updated)
+        line.save(ignore_permissions=True)
+    return set(prs)
+
+
 def _release_reserved_pr_lines(approval):
-    """Release quantities reserved by a price approval back to their PR lines."""
-    released = set()
-    for line in approval.lines or []:
-        if not line.source_pr or not line.source_pr_line:
-            continue
-        pr_doc = frappe.get_doc("OA Procurement Request", line.source_pr)
-        pr_line = next((item for item in pr_doc.lines if item.name == line.source_pr_line), None)
-        if not pr_line:
-            continue
-        pr_line.remaining_quantity = float(_decimal(pr_line.remaining_quantity) + _decimal(line.quantity))
-        pr_line.save(ignore_permissions=True)
-        released.add(line.source_pr)
+    if approval.get("pr_quantities_released"):
+        return set()
+    released = _change_reserved_pr_lines(approval, release=True)
+    approval.pr_quantities_released = 1
     return released
+
+
+def _reserve_released_pr_lines(approval):
+    if not approval.get("pr_quantities_released"):
+        return
+    _change_reserved_pr_lines(approval, release=False)
+    approval.pr_quantities_released = 0
 
 
 @frappe.whitelist(methods=["POST"])
 def withdraw_price_approval(name, note=None):
     _require_purchase()
-    doc = frappe.get_doc("OA Price Approval", _text(name))
+    doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status != "待审批":
         frappe.throw("只有待副总经理审批的价格审批单可以撤回。")
     _release_reserved_pr_lines(doc)
@@ -1041,7 +1085,7 @@ def withdraw_price_approval(name, note=None):
 @frappe.whitelist(methods=["POST"])
 def cancel_price_approval(name, note=None):
     _require_purchase()
-    doc = frappe.get_doc("OA Price Approval", _text(name))
+    doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status not in {"草稿", "待审批"}:
         frappe.throw("只有草稿或待审批的价格审批单可以取消。")
     _release_reserved_pr_lines(doc)
@@ -1056,12 +1100,13 @@ def cancel_price_approval(name, note=None):
 @frappe.whitelist(methods=["POST"])
 def submit_price_approval(name):
     _require_purchase()
-    doc = frappe.get_doc("OA Price Approval", _text(name))
+    doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status != "草稿":
         frappe.throw("当前价格审批单不能提交。")
     if not _text(getattr(doc, "summary", None)):
         frappe.throw("提交价格审批前必须填写采购比价总结。")
     _validate_supplier_comparisons(doc)
+    _reserve_released_pr_lines(doc)
     doc.status = "待审批"
     doc.save(ignore_permissions=True)
     step = frappe.new_doc("OA Approval Step")
@@ -1083,7 +1128,7 @@ def submit_price_approval(name):
 def approve_price_approval(name, note=None):
     if _user() != position_user("vice_manager") and "System Manager" not in _roles():
         frappe.throw("只有副总经理或系统管理员可以审批价格审批单。")
-    doc = frappe.get_doc("OA Price Approval", _text(name))
+    doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status != "待审批":
         frappe.throw("当前价格审批单不在待审批状态。")
     selected_suppliers = {_text(line.selected_supplier) for line in doc.lines if _text(line.selected_supplier) and line.selected_quote}
@@ -1091,15 +1136,9 @@ def approve_price_approval(name, note=None):
         frappe.throw("请先选择一个至少有一项有效报价的最终成交供应商。")
     if any(line.selected_quote and (not line.selected_unit_price or not _text(line.payment_method)) for line in doc.lines):
         frappe.throw("已选择的报价缺少单价或付款方式。")
-    # Lines without a quote from the selected supplier are returned to PR.
-    for line in doc.lines:
-        if line.selected_quote:
-            continue
-        pr_doc = frappe.get_doc("OA Procurement Request", line.source_pr)
-        pr_line = next((item for item in pr_doc.lines if item.name == line.source_pr_line), None)
-        if pr_line:
-            pr_line.remaining_quantity = float(_decimal(pr_line.remaining_quantity) + _decimal(line.quantity))
-            pr_line.save(ignore_permissions=True)
+    # Only unselected quantities return to PR; selected quantities become POs.
+    _change_reserved_pr_lines(doc, release=True,
+                              lines=[line for line in doc.lines if not line.selected_quote])
     doc.status = "已通过"
     doc.save(ignore_permissions=True)
     frappe.db.set_value("OA Approval Step", {"parent": doc.name, "step_index": 1}, {
@@ -1117,9 +1156,10 @@ def approve_price_approval(name, note=None):
 @frappe.whitelist(methods=["POST"])
 def generate_po_drafts(price_approval):
     _require_purchase_or_qingbo()
-    approval = frappe.get_doc("OA Price Approval", _text(price_approval))
+    approval = frappe.get_doc("OA Price Approval", _text(price_approval), for_update=True)
     if approval.status not in {"已通过", "已转PO"}:
         frappe.throw("价格审批通过后才能生成 PO。")
+    _locked_pr_documents(approval.lines)
     groups = defaultdict(list)
     for line in approval.lines:
         if not line.selected_supplier or not line.selected_quote or _decimal(line.selected_total) <= 0:
