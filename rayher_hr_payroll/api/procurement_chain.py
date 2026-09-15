@@ -1136,6 +1136,7 @@ def approve_price_approval(name, note=None):
         frappe.throw("请先选择一个至少有一项有效报价的最终成交供应商。")
     if any(line.selected_quote and (not line.selected_unit_price or not _text(line.payment_method)) for line in doc.lines):
         frappe.throw("已选择的报价缺少单价或付款方式。")
+    _locked_pr_documents(doc.lines)
     # Only unselected quantities return to PR; selected quantities become POs.
     _change_reserved_pr_lines(doc, release=True,
                               lines=[line for line in doc.lines if not line.selected_quote])
