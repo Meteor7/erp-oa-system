@@ -92,7 +92,7 @@ def test_personal_approved_leave_reduces_cap_and_withdrawal_restores_it(calendar
         "day_limit": 2, "hour_limit": 16, "work_dates": dates,
         "calendar_source": "employee_holiday_list", "holiday_list": "Calendar",
     })
-    rows = [{"request_type": "请假申请", "workflow_status": "已完成", "from_date": "2026-09-01", "to_date": "2026-09-02",
+    rows = [{"request_type": "请假申请", "workflow_status": "已完成", "leave_type": "事假", "from_date": "2026-09-01", "to_date": "2026-09-02",
              "attendance_days": [{"work_date": "2026-09-01", "hours": 4.25}, {"work_date": "2026-09-02", "hours": 8}]}]
     def get_all(doctype, *, filters, **kwargs):
         assert filters["employee"] == "EMP-1"
@@ -115,7 +115,7 @@ def test_all_workdays_on_leave_means_zero_cap(calendar_module, monkeypatch):
         "day_limit": 1, "hour_limit": 8, "work_dates": [date(2026, 9, 1)],
         "calendar_source": "weekday_fallback", "holiday_list": "",
     })
-    frappe.get_all = lambda *a, **k: [{"request_type": "请假申请", "workflow_status": "已完成", "from_date": "2026-09-01", "to_date": "2026-09-01"}]
+    frappe.get_all = lambda *a, **k: [{"request_type": "请假申请", "workflow_status": "已完成", "leave_type": "事假", "from_date": "2026-09-01", "to_date": "2026-09-01"}]
     result = mod.resolve_monthly_work_limit(2026, 9, employee="EMP-1")
     assert result["hour_limit"] == result["day_limit"] == 0
 
@@ -129,6 +129,6 @@ def test_save_cap_uses_current_read_instead_of_stale_snapshot(calendar_module, m
     def sql(query, args, **kwargs):
         assert query.endswith("FOR UPDATE")
         assert args[0] == "EMP-1"
-        return [{"request_type": "请假申请", "workflow_status": "已完成", "from_date": "2026-09-01", "to_date": "2026-09-01"}]
+        return [{"request_type": "请假申请", "workflow_status": "已完成", "leave_type": "事假", "from_date": "2026-09-01", "to_date": "2026-09-01"}]
     frappe.db = types.SimpleNamespace(sql=sql)
     assert mod.resolve_monthly_work_limit(2026, 9, employee="EMP-1", lock=True)["hour_limit"] == 0

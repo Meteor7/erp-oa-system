@@ -5211,4 +5211,6 @@ def get_attendance_options(request_type, from_date=None, to_date=None):
             days = [{"work_date": d.isoformat(), "hours": 8} for d in dates]
         except ValueError as exc:
             frappe.throw(str(exc))
-    return {"days": days, "balance": get_balance(ctx["employee"]), "leave_types": LEAVE_TYPES}
+    from rayher_hr_payroll.annual_leave import get_annual_balance
+    return {"days": days, "balance": get_balance(ctx["employee"]),
+            "annual_balance": get_annual_balance(ctx["employee"]), "leave_types": LEAVE_TYPES}

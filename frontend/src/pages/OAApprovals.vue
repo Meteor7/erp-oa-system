@@ -223,6 +223,8 @@ const draftSubmitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.sub
 const withdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_request' });
 const attendanceOptions = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_attendance_options', method: 'GET' });
 const attendanceBalance = ref(null);
+const annualBalance = ref(null);
+const annualLeaveBlocked = computed(() => currentRequestType.value === REQUEST_LEAVE && leaveForm.leave_type === "年假" && (!annualBalance.value?.eligible || attendanceHours.value > Number(annualBalance.value?.available_hours || 0)));
 const leaveTypes = ref([]);
 let attendanceVersion = 0;
 let hydratingAttendance = false;
@@ -397,11 +399,13 @@ async function refreshAttendance(replaceDays = true) {
     const data = await attendanceOptions.fetch({ request_type: currentRequestType.value, from_date: leaveForm.from_date || "", to_date: leaveForm.to_date || "" });
     if (version !== attendanceVersion) return;
     attendanceBalance.value = data.balance;
+    annualBalance.value = data.annual_balance;
     leaveTypes.value = data.leave_types || [];
     if (replaceDays) leaveForm.attendance_days = data.days || [];
   } catch (error) {
     if (version !== attendanceVersion) return;
     if (replaceDays) leaveForm.attendance_days = [];
+    annualBalance.value = null;
     errMsg.value = serverMessage(error, T.loadFailed);
   }
 }
@@ -419,7 +423,7 @@ async function withdrawAttendance(row) {
 }
 
 function validateLeave() {
-  return Boolean(!attendanceOptions.loading && attendanceHours.value > 0 && leaveForm.subject.trim() && leaveForm.department.trim() && leaveForm.supervisor.trim() && leaveForm.from_date && leaveForm.to_date);
+  return Boolean(!attendanceOptions.loading && !annualLeaveBlocked.value && attendanceHours.value > 0 && leaveForm.subject.trim() && leaveForm.department.trim() && leaveForm.supervisor.trim() && leaveForm.from_date && leaveForm.to_date);
 }
 
 function fmtAmount(value) {
@@ -817,6 +821,13 @@ onBeforeUnmount(() => {
       <nav class='flex gap-4 text-sm'><router-link to='/approval/leave'>请假</router-link><router-link to='/approval/overtime'>加班</router-link><router-link to='/approval/comp-time'>调休</router-link></nav>
       <p v-if='errMsg' class='text-sm text-red-700'>{{ errMsg }}</p>
       <p v-if='attendanceBalance' class='rounded border bg-white p-3 text-sm'>调休可用：<strong>{{ attendanceBalance.available_hours }} 小时</strong> · 加班累计：{{ attendanceBalance.credit_hours }} · 申请中占用：{{ attendanceBalance.reserved_hours }} · 已用：{{ attendanceBalance.used_hours }}<span v-if='attendanceBalance.available_hours < 0' class='ml-2 text-red-700'>余额不足，请联系人事处理</span></p>
+      <div v-if='currentRequestType === REQUEST_LEAVE && annualBalance' class='rounded border bg-white p-3 text-sm space-y-1' role='region' aria-label='我的年假余额'>
+        <p>我的年假可用：<strong>{{ annualBalance.available_hours }} 小时 / {{ Number((annualBalance.available_hours / 8).toFixed(2)) }} 天</strong></p>
+        <p>累计发放：{{ annualBalance.credit_hours }} 小时 · 申请中占用：{{ annualBalance.reserved_hours }} 小时 · 已用：{{ annualBalance.used_hours }} 小时</p>
+        <p class='text-gray-600'>入职满12个月发放5天，此后每个入职周年增加5天；未用余额累计保留，不清零。<span v-if='annualBalance.next_grant_date'>下次发放：{{ annualBalance.next_grant_date }}</span></p>
+        <p v-if='annualBalance.eligibility_message' class='text-amber-700'>{{ annualBalance.eligibility_message }}</p>
+        <p v-else-if='annualBalance.available_hours <= 0' class='text-amber-700'>当前没有可用年假余额。</p>
+      </div>
       <section v-if='!isLeaveInnerPage' class='oa-overview-strip' :aria-label='pageConfig.title + "概览"'>
         <div class='oa-overview-primary'>
           <div class='oa-overview-label'>我的待办</div>
@@ -856,13 +867,14 @@ onBeforeUnmount(() => {
           </div>
           <div class='mt-4 space-y-3'>
             <label v-if='currentRequestType === REQUEST_LEAVE' class='flex items-center gap-3 text-sm'>请假类型<select v-model='leaveForm.leave_type' class='rounded border px-3 py-2'><option v-for='item in leaveTypes' :key='item'>{{ item }}</option></select></label>
-            <p class='text-sm text-gray-600'>{{ currentRequestType === REQUEST_LEAVE ? '审批完成后按每日时长扣减对应月份工时上限。' : currentRequestType === REQUEST_OVERTIME ? '提交申请即按1:1增加调休额度，不增加月度工时上限。' : '提交占用额度，审批通过后正式扣减；不减少月度工时上限。' }}</p>
+            <p class='text-sm text-gray-600'>{{ currentRequestType === REQUEST_LEAVE ? (leaveForm.leave_type === '事假' ? '事假审批完成后扣减工时上限：半天＝4小时，工作日上限减0.5天；跨月分别计算。' : '此类请假不扣减月度工作日和工时上限。年假另外占用、扣减年假余额。') : currentRequestType === REQUEST_OVERTIME ? '提交申请即按1:1增加调休额度，不增加月度工时上限。' : '提交占用额度，审批通过后正式扣减；不减少月度工时上限。' }}</p>
+            <p v-if='currentRequestType === REQUEST_LEAVE && leaveForm.leave_type === "年假" && annualLeaveBlocked' class='text-sm text-amber-700'>{{ annualBalance?.eligibility_message || '年假可用余额不足，不能提交本次申请。' }}</p>
             <div class='max-h-64 overflow-auto rounded border'><div v-for='day in leaveForm.attendance_days' :key='day.work_date' class='flex items-center justify-between border-b px-3 py-2 text-sm'><label :for='`hours-${day.work_date}`'>{{ day.work_date }}</label><div><input :id='`hours-${day.work_date}`' v-model='day.hours' type='number' min='0' :max='currentRequestType === REQUEST_OVERTIME ? 24 : 8' step='0.01' class='w-24 rounded border px-2 py-1 text-right' /> 小时</div></div></div>
             <p class='text-sm'>合计 {{ attendanceHours }} 小时 / {{ Number((attendanceHours / 8).toFixed(2)) }} 天（1天＝8小时）</p>
           </div>
           <div v-if='leaveDraftName' class='mt-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800'>正在编辑：{{ leaveDraftName }}</div>
           <div class='mt-3 flex items-center gap-3'>
-            <Button variant='solid' :loading='saving' :disabled='attendanceOptions.loading || !attendanceHours' @click='submitLeaveRequest'>{{ T.submit }}</Button>
+            <Button variant='solid' :loading='saving' :disabled='attendanceOptions.loading || !attendanceHours || annualLeaveBlocked' @click='submitLeaveRequest'>{{ T.submit }}</Button>
             <span v-if='message' class='text-sm text-green-600'>{{ message }}</span>
             <span v-if='errMsg' class='text-sm text-red-600'>{{ errMsg }}</span>
           </div>

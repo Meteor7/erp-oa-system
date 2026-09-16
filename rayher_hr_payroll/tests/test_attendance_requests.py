@@ -11,7 +11,7 @@ from rayher_hr_payroll.oa_approval import build_route
 
 
 def leave(**extra):
-    return {"request_type": hr.REQUEST_LEAVE, "workflow_status": "已完成",
+    return {"request_type": hr.REQUEST_LEAVE, "workflow_status": "已完成", "leave_type": "事假",
             "from_date": "2026-08-31", "to_date": "2026-09-02", **extra}
 
 

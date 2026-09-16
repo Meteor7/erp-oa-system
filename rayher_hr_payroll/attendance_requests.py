@@ -71,14 +71,14 @@ def normalize_days(raw, start, end, *, overtime=False, work_dates=None):
 
 
 def leave_hours_by_date(rows, work_dates):
-    """Only completed leave reduces limits; old date-only OA leave is a full workday."""
+    """Only completed personal leave reduces limits; half a day is four hours."""
     dates = set(work_dates)
     result = {}
     for row in rows:
         if value(row, "request_type") != REQUEST_LEAVE or value(row, "workflow_status") not in COMPLETED:
             continue
-        # Legacy comp-time must never reduce the monthly cap.
-        if value(row, "leave_type") in {"调休", "调休假", "Compensatory Off"}:
+        # Paid, other and unclassified historical leave do not reduce the cap.
+        if value(row, "leave_type") != "事假":
             continue
         raw = value(row, "attendance_days")
         if raw:
@@ -129,7 +129,7 @@ def prepare_request(doc):
         overtime = doc.request_type == REQUEST_OVERTIME
         days = normalize_days(value(doc, "attendance_days"), start, end, overtime=overtime,
                               work_dates=None if overtime else work_dates_for_range(doc.employee, start, end))
-        if doc.request_type == REQUEST_LEAVE and value(doc, "leave_type") not in (*LEAVE_TYPES, None, ""):
+        if doc.request_type == REQUEST_LEAVE and value(doc, "leave_type") not in LEAVE_TYPES:
             raise ValueError("请选择有效请假类型；调休请使用调休申请")
     except ValueError as exc:
         frappe.throw(str(exc))
@@ -192,12 +192,14 @@ def validate_attendance_request(doc):
     # Keep historical approved date-only leave readable; normalize when submitted/edited.
     if before is None or value(before, "workflow_status") == "草稿":
         prepare_request(doc)
+    from rayher_hr_payroll.annual_leave import validate_annual_request
+    validate_annual_request(doc, before)
     sync_balance(doc)
 
 
 def warn_leave_over_limit(doc):
     import frappe
-    if value(doc, "request_type") != REQUEST_LEAVE or value(doc, "workflow_status") not in COMPLETED:
+    if value(doc, "request_type") != REQUEST_LEAVE or value(doc, "workflow_status") not in COMPLETED or value(doc, "leave_type") != "事假":
         return
     before = doc.get_doc_before_save()
     if before and value(before, "workflow_status") in COMPLETED:
