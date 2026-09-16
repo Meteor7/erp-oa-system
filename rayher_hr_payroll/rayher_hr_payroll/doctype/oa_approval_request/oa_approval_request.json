@@ -20,6 +20,9 @@
     "urgency",
     "from_date",
     "to_date",
+    "leave_type",
+    "attendance_days",
+    "duration_hours",
     "amount",
     "currency",
     "approved_amount",
@@ -124,7 +127,7 @@
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Request Type",
-      "options": "请假申请\n费用付款申请\n采购申请\n购买申请\n采购付款",
+      "options": "请假申请\n费用付款申请\n采购申请\n购买申请\n采购付款\n加班申请\n调休申请",
       "reqd": 1
     },
     {
@@ -791,6 +794,27 @@
       "fieldtype": "Data",
       "label": "Source PO Payment Plan Row",
       "read_only": 1
+    },
+    {
+      "fieldname": "leave_type",
+      "fieldtype": "Select",
+      "label": "请假类型",
+      "options": "\n事假\n病假\n年假\n婚假\n产假\n陪产假\n丧假\n其他假",
+      "depends_on": "eval:doc.request_type == '请假申请'"
+    },
+    {
+      "fieldname": "attendance_days",
+      "fieldtype": "Long Text",
+      "label": "每日时长",
+      "hidden": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "duration_hours",
+      "fieldtype": "Float",
+      "precision": "2",
+      "label": "申请小时数",
+      "read_only": 1
     }
   ],
   "index_web_pages_for_search": 1,
@@ -858,4 +882,3 @@
   "sort_order": "DESC",
   "states": []
 }
-

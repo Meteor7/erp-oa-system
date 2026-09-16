@@ -118,3 +118,20 @@ def test_draft_business_content_remains_editable(guard):
     changed = Doc(dict(before, supplier="供应商B"), before=before)
 
     module.validate_request_mutation(changed)
+
+
+@pytest.mark.parametrize("field,value", [("attendance_days", '[{"work_date":"2026-09-01","hours":24}]'), ("duration_hours", 999)])
+def test_client_cannot_forge_attendance_credit(guard, field, value):
+    module, frappe = guard
+    before = Doc({"request_type": "加班申请", "employee": "EMP-A", "workflow_status": "草稿"})
+    changed = Doc(dict(before, **{field: value}), before=before)
+    with pytest.raises(frappe.PermissionError):
+        module.validate_request_mutation(changed)
+
+
+@pytest.mark.parametrize("field,value", [("from_date", "2026-09-02"), ("to_date", "2026-09-30"), ("leave_type", "事假")])
+def test_active_leave_dates_and_type_cannot_be_changed_directly(guard, field, value):
+    module, frappe = guard
+    before = Doc({"request_type": "请假申请", "workflow_status": "已完成"})
+    with pytest.raises(frappe.PermissionError):
+        module.validate_request_mutation(Doc(dict(before, **{field: value}), before=before))

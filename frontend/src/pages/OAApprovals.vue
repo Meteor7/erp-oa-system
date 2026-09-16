@@ -5,12 +5,17 @@ import { useRoute, useRouter } from 'vue-router';
 import ExpenseWorkbench from '../components/ExpenseWorkbench.vue';
 
 const REQUEST_LEAVE = '\u8bf7\u5047\u7533\u8bf7';
+const REQUEST_OVERTIME = '加班申请';
+const REQUEST_COMP_TIME = '调休申请';
+const ATTENDANCE_TYPES = [REQUEST_LEAVE, REQUEST_OVERTIME, REQUEST_COMP_TIME];
 const REQUEST_EXPENSE_PAYMENT = '\u8d39\u7528\u4ed8\u6b3e\u7533\u8bf7';
 const ASSET_ADMIN = '非电子类固定资产（人事/行政）';
 const ASSET_IT = '电子类固定资产（IT）';
 const ASSET_OTHER = '其他';
 
 const PAGE_CONFIG = {
+  '/approval/overtime': { requestType: REQUEST_OVERTIME, title: '加班审批', formTitle: '新建加班申请' },
+  '/approval/comp-time': { requestType: REQUEST_COMP_TIME, title: '调休审批', formTitle: '新建调休申请' },
   '/approval/leave': {
     requestType: REQUEST_LEAVE,
     title: '\u8bf7\u5047\u5ba1\u6279',
@@ -93,13 +98,16 @@ const STATUS_COLUMNS = [
 
 const route = useRoute();
 const router = useRouter();
-const pageConfig = computed(() => PAGE_CONFIG[route.path] || PAGE_CONFIG['/approval/leave']);
+const attendanceBase = computed(() => route.path.startsWith('/approval/overtime') ? '/approval/overtime' : route.path.startsWith('/approval/comp-time') ? '/approval/comp-time' : '/approval/leave');
+const pageConfig = computed(() => PAGE_CONFIG[route.path] || PAGE_CONFIG[attendanceBase.value]);
 const currentRequestType = computed(() => pageConfig.value.requestType);
-const isLeave = computed(() => currentRequestType.value === REQUEST_LEAVE);
+const isLeave = computed(() => ATTENDANCE_TYPES.includes(currentRequestType.value));
 const isLeaveInnerPage = computed(() => isLeave.value && Boolean(route.params.name || route.query.request));
 const isPurchase = computed(() => currentRequestType.value === REQUEST_EXPENSE_PAYMENT);
 
 const leaveForm = reactive({
+  leave_type: '事假',
+  attendance_days: [],
   subject: '',
   department: '',
   supervisor: '',
@@ -212,6 +220,13 @@ const creator = createResource({ url: 'rayher_hr_payroll.api.oa_entry.create_req
 const leaveDraftUpdater = createResource({ url: 'rayher_hr_payroll.api.oa_entry.update_leave_draft' });
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
 const draftSubmitter = createResource({ url: 'rayher_hr_payroll.api.oa_entry.submit_request' });
+const withdrawer = createResource({ url: 'rayher_hr_payroll.api.oa_entry.withdraw_request' });
+const attendanceOptions = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_attendance_options', method: 'GET' });
+const attendanceBalance = ref(null);
+const leaveTypes = ref([]);
+let attendanceVersion = 0;
+let hydratingAttendance = false;
+const attendanceHours = computed(() => Math.round(leaveForm.attendance_days.reduce((total, day) => total + Number(day.hours || 0), 0) * 100) / 100);
 const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_paid' });
 const consumptionSaver = createResource({ url: 'rayher_hr_payroll.api.oa_entry.save_consumption_detail' });
 const invoiceAdder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.add_invoice' });
@@ -340,7 +355,7 @@ function applyDefaults() {
 function previewPayload() {
   if (isLeave.value) {
     return {
-      request_type: REQUEST_LEAVE,
+      request_type: currentRequestType.value,
       subject: leaveForm.subject.trim(),
     };
   }
@@ -372,11 +387,39 @@ async function reloadLists() {
     await reloadPurchase();
     return;
   }
-  await Promise.allSettled([mine.reload(), pending.reload(), previewRoute()]);
+  await Promise.allSettled([mine.reload(), pending.reload(), previewRoute(), refreshAttendance(false)]);
+}
+
+async function refreshAttendance(replaceDays = true) {
+  if (!isLeave.value) return;
+  const version = ++attendanceVersion;
+  try {
+    const data = await attendanceOptions.fetch({ request_type: currentRequestType.value, from_date: leaveForm.from_date || null, to_date: leaveForm.to_date || null });
+    if (version !== attendanceVersion) return;
+    attendanceBalance.value = data.balance;
+    leaveTypes.value = data.leave_types || [];
+    if (replaceDays) leaveForm.attendance_days = data.days || [];
+  } catch (error) {
+    if (version !== attendanceVersion) return;
+    if (replaceDays) leaveForm.attendance_days = [];
+    errMsg.value = serverMessage(error, T.loadFailed);
+  }
+}
+
+async function withdrawAttendance(row) {
+  saving.value = true;
+  errMsg.value = '';
+  try {
+    await withdrawer.submit({ name: row.name });
+    await reloadLists();
+    await loadLeaveDetail(row.name);
+    message.value = '已撤回，工时上限和调休余额已重新计算';
+  } catch (error) { errMsg.value = serverMessage(error, T.actionFailed); }
+  finally { saving.value = false; }
 }
 
 function validateLeave() {
-  return Boolean(leaveForm.subject.trim() && leaveForm.department.trim() && leaveForm.supervisor.trim() && leaveForm.from_date && leaveForm.to_date);
+  return Boolean(!attendanceOptions.loading && attendanceHours.value > 0 && leaveForm.subject.trim() && leaveForm.department.trim() && leaveForm.supervisor.trim() && leaveForm.from_date && leaveForm.to_date);
 }
 
 function fmtAmount(value) {
@@ -440,6 +483,7 @@ function manualPayload(submit) {
 }
 
 function leaveDays(row) {
+  if (row?.duration_hours != null && Number(row.duration_hours) > 0) return `${Number(row.duration_hours)} 小时 / ${Number((Number(row.duration_hours) / 8).toFixed(2))} 天`;
   if (!row?.from_date || !row?.to_date) return '-';
   const start = new Date(`${row.from_date}T00:00:00`);
   const end = new Date(`${row.to_date}T00:00:00`);
@@ -464,7 +508,7 @@ function eventActor(event) {
 function selectLeave(row) {
   if (!row?.name) return;
   selectedLeaveName.value = row.name;
-  router.push({ name: 'leave-detail', params: { name: row.name } });
+  router.push(`${attendanceBase.value}/${encodeURIComponent(row.name)}`);
 }
 
 async function loadLeaveDetail(name) {
@@ -473,7 +517,7 @@ async function loadLeaveDetail(name) {
   try {
     const rows = await leaveDetailLoader.fetch({
       view: 'all',
-      request_type: REQUEST_LEAVE,
+      request_type: currentRequestType.value,
       name: requested,
       limit: 1,
     }) || [];
@@ -486,8 +530,12 @@ async function loadLeaveDetail(name) {
 
 function hydrateLeaveDraft(row) {
   if (!row || row.kanban_status !== 'draft') return;
+  if (isLeaveInnerPage.value) router.push(attendanceBase.value);
+  hydratingAttendance = Boolean(row.attendance_days?.length && (leaveForm.from_date !== row.from_date || leaveForm.to_date !== row.to_date));
   leaveDraftName.value = row.name;
   Object.assign(leaveForm, {
+    leave_type: row.leave_type || '事假',
+    attendance_days: (row.attendance_days || []).map((day) => ({ ...day })),
     subject: row.subject || '',
     department: row.department || leaveForm.department,
     supervisor: row.supervisor || leaveForm.supervisor,
@@ -510,6 +558,8 @@ async function submitLeaveRequest() {
       subject: leaveForm.subject.trim(),
       from_date: leaveForm.from_date,
       to_date: leaveForm.to_date,
+      attendance_days: JSON.stringify(leaveForm.attendance_days),
+      leave_type: currentRequestType.value === REQUEST_LEAVE ? leaveForm.leave_type : '',
       reason: leaveForm.reason.trim(),
     };
     if (leaveDraftName.value) {
@@ -517,10 +567,10 @@ async function submitLeaveRequest() {
       await leaveDraftUpdater.submit({ name, ...fields });
       await draftSubmitter.submit({ name });
     } else {
-      await creator.submit({ request_type: REQUEST_LEAVE, ...fields });
+      await creator.submit({ request_type: currentRequestType.value, ...fields });
     }
     message.value = T.saved;
-    Object.assign(leaveForm, { subject: '', from_date: '', to_date: '', reason: '' });
+    Object.assign(leaveForm, { subject: '', from_date: '', to_date: '', reason: '', attendance_days: [] });
     leaveDraftName.value = '';
     await reloadLists();
   } catch (error) {
@@ -688,7 +738,15 @@ watch(
   () => previewRoute(),
   { immediate: false }
 );
+watch([() => leaveForm.from_date, () => leaveForm.to_date], () => {
+  if (hydratingAttendance) { hydratingAttendance = false; refreshAttendance(false); return; }
+  refreshAttendance(true);
+});
 watch(currentRequestType, () => {
+  leaveDraftName.value = '';
+  lastAutoHydratedDraft.value = '';
+  leaveDetailLoader.data = null;
+  Object.assign(leaveForm, { subject: '', from_date: '', to_date: '', reason: '', attendance_days: [] });
   message.value = '';
   errMsg.value = '';
   reloadLists();
@@ -730,6 +788,7 @@ watch(leaveRows, (rows) => {
   if (requested && !rows.some((row) => row.name === requested)) loadLeaveDetail(requested);
 });
 onMounted(() => {
+  refreshAttendance(false);
   leaveRefreshTimer = window.setInterval(() => {
     if (isLeave.value && !saving.value && document.visibilityState === 'visible') reloadLists();
   }, 10000);
@@ -743,18 +802,21 @@ onBeforeUnmount(() => {
   <div class='oa-page space-y-4'>
     <div v-if='isLeave' class='oa-header flex flex-col gap-3 border-b border-gray-200 pb-4 md:flex-row md:items-end md:justify-between'>
       <div>
-        <router-link v-if='isLeaveInnerPage' to='/approval/leave' class='mb-2 inline-flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-gray-900'>← 返回请假审批</router-link>
+        <router-link v-if='isLeaveInnerPage' :to='attendanceBase' class='mb-2 inline-flex items-center gap-1 text-sm font-medium text-gray-500 hover:text-gray-900'>← 返回{{ pageConfig.title }}</router-link>
         <div v-if='isLeaveInnerPage && selectedLeave' class='oa-kicker'>{{ selectedLeave.name }} · {{ selectedLeave.workflow_status }}</div>
-        <h2 class='text-xl font-semibold text-gray-950'>{{ isLeaveInnerPage ? '请假申请' : pageConfig.title }}</h2>
+        <h2 class='text-xl font-semibold text-gray-950'>{{ isLeaveInnerPage ? currentRequestType : pageConfig.title }}</h2>
         <p class='mt-1 text-sm text-gray-500'>{{ isLeaveInnerPage ? (selectedLeave ? `审批详情 · 当前节点：${selectedLeave.current_step_label || '已结束'}` : '正在加载请假单详情…') : '提交申请、查看本人记录与待审批事项' }}</p>
       </div>
       <div class='flex items-center gap-2'>
-        <router-link v-if='isLeaveInnerPage' to='/approval/leave' class='oa-primary inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-semibold text-white'>＋ 新建请假</router-link>
+        <router-link v-if='isLeaveInnerPage' :to='attendanceBase' class='oa-primary inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-semibold text-white'>＋ 新建{{ currentRequestType }}</router-link>
         <Button variant='subtle' @click='reloadLists'>{{ T.refresh }}</Button>
       </div>
     </div>
 
     <template v-if='isLeave'>
+      <nav class='flex gap-4 text-sm'><router-link to='/approval/leave'>请假</router-link><router-link to='/approval/overtime'>加班</router-link><router-link to='/approval/comp-time'>调休</router-link></nav>
+      <p v-if='errMsg' class='text-sm text-red-700'>{{ errMsg }}</p>
+      <p v-if='attendanceBalance' class='rounded border bg-white p-3 text-sm'>调休可用：<strong>{{ attendanceBalance.available_hours }} 小时</strong> · 加班累计：{{ attendanceBalance.credit_hours }} · 申请中占用：{{ attendanceBalance.reserved_hours }} · 已用：{{ attendanceBalance.used_hours }}<span v-if='attendanceBalance.available_hours < 0' class='ml-2 text-red-700'>余额不足，请联系人事处理</span></p>
       <section v-if='!isLeaveInnerPage' class='oa-overview-strip' aria-label='请假审批概览'>
         <div class='oa-overview-primary'>
           <div class='oa-overview-label'>我的待办</div>
@@ -792,9 +854,15 @@ onBeforeUnmount(() => {
               <textarea v-model='leaveForm.reason' rows='3' class='border border-gray-300 rounded px-3 py-2 resize-y'></textarea>
             </label>
           </div>
+          <div class='mt-4 space-y-3'>
+            <label v-if='currentRequestType === REQUEST_LEAVE' class='flex items-center gap-3 text-sm'>请假类型<select v-model='leaveForm.leave_type' class='rounded border px-3 py-2'><option v-for='item in leaveTypes' :key='item'>{{ item }}</option></select></label>
+            <p class='text-sm text-gray-600'>{{ currentRequestType === REQUEST_LEAVE ? '审批完成后按每日时长扣减对应月份工时上限。' : currentRequestType === REQUEST_OVERTIME ? '提交申请即按1:1增加调休额度，不增加月度工时上限。' : '提交占用额度，审批通过后正式扣减；不减少月度工时上限。' }}</p>
+            <div class='max-h-64 overflow-auto rounded border'><div v-for='day in leaveForm.attendance_days' :key='day.work_date' class='flex items-center justify-between border-b px-3 py-2 text-sm'><label :for='`hours-${day.work_date}`'>{{ day.work_date }}</label><div><input :id='`hours-${day.work_date}`' v-model='day.hours' type='number' min='0' :max='currentRequestType === REQUEST_OVERTIME ? 24 : 8' step='0.01' class='w-24 rounded border px-2 py-1 text-right' /> 小时</div></div></div>
+            <p class='text-sm'>合计 {{ attendanceHours }} 小时 / {{ Number((attendanceHours / 8).toFixed(2)) }} 天（1天＝8小时）</p>
+          </div>
           <div v-if='leaveDraftName' class='mt-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800'>正在编辑：{{ leaveDraftName }}</div>
           <div class='mt-3 flex items-center gap-3'>
-            <Button variant='solid' :loading='saving' @click='submitLeaveRequest'>{{ T.submit }}</Button>
+            <Button variant='solid' :loading='saving' :disabled='attendanceOptions.loading || !attendanceHours' @click='submitLeaveRequest'>{{ T.submit }}</Button>
             <span v-if='message' class='text-sm text-green-600'>{{ message }}</span>
             <span v-if='errMsg' class='text-sm text-red-600'>{{ errMsg }}</span>
           </div>
@@ -822,7 +890,7 @@ onBeforeUnmount(() => {
         <div class='overflow-x-auto'>
           <table class='oa-table w-full table-fixed text-sm'>
             <thead class='border-b text-gray-500'>
-              <tr><th class='px-3 py-2 text-left'>{{ T.subject }}</th><th class='px-3 py-2 text-left'>请假日期</th><th class='px-3 py-2 text-left'>{{ T.status }}</th><th class='px-3 py-2 text-left'>最近驳回</th><th class='px-3 py-2 text-right'>{{ T.action }}</th></tr>
+              <tr><th class='px-3 py-2 text-left'>{{ T.subject }}</th><th class='px-3 py-2 text-left'>申请日期</th><th class='px-3 py-2 text-left'>{{ T.status }}</th><th class='px-3 py-2 text-left'>最近驳回</th><th class='px-3 py-2 text-right'>{{ T.action }}</th></tr>
             </thead>
             <tbody>
               <tr v-for='row in mine.data || []' :key='row.name' class='border-b last:border-0' :class='row.kanban_status === "draft" && rejectionEvent(row) ? "bg-amber-50" : ""'>
@@ -841,7 +909,7 @@ onBeforeUnmount(() => {
       <Card v-if='!isLeaveInnerPage' :title='T.pendingTitle' class='oa-panel oa-table-panel oa-pending-panel'>
         <div class='overflow-x-auto'>
           <table class='oa-table w-full table-fixed text-sm'>
-            <thead class='border-b text-gray-500'><tr><th class='px-3 py-2 text-left'>申请</th><th class='px-3 py-2 text-left'>申请人/部门</th><th class='px-3 py-2 text-left'>请假日期</th><th class='px-3 py-2 text-left'>事由</th><th class='px-3 py-2 text-left'>当前节点</th><th class='px-3 py-2 text-right'>操作</th></tr></thead>
+            <thead class='border-b text-gray-500'><tr><th class='px-3 py-2 text-left'>申请</th><th class='px-3 py-2 text-left'>申请人/部门</th><th class='px-3 py-2 text-left'>申请日期</th><th class='px-3 py-2 text-left'>事由</th><th class='px-3 py-2 text-left'>当前节点</th><th class='px-3 py-2 text-right'>操作</th></tr></thead>
             <tbody>
               <tr v-for='row in pending.data || []' :key='row.name' class='border-b last:border-0'>
                 <td class='px-3 py-2'><div class='font-medium'>{{ row.subject }}</div><div class='text-xs text-gray-500'>{{ row.name }}</div></td>
@@ -858,16 +926,18 @@ onBeforeUnmount(() => {
       </Card>
 
       <section v-if='isLeaveInnerPage && selectedLeave' class='oa-detail-panel'>
-        <div class='oa-detail-heading flex flex-wrap items-start justify-between gap-3'><div><div class='oa-kicker'>请假申请详情</div><h3 class='mt-1 text-xl font-semibold text-gray-950'>{{ selectedLeave.subject || '未填写主题' }}</h3><p class='mt-1 text-sm text-gray-500'>{{ selectedLeave.employee_name }} · {{ selectedLeave.department }}</p></div><div class='oa-status'>{{ selectedLeave.workflow_status }}</div></div>
+        <div class='oa-detail-heading flex flex-wrap items-start justify-between gap-3'><div><div class='oa-kicker'>{{ currentRequestType }}详情</div><h3 class='mt-1 text-xl font-semibold text-gray-950'>{{ selectedLeave.subject || '未填写主题' }}</h3><p class='mt-1 text-sm text-gray-500'>{{ selectedLeave.employee_name }} · {{ selectedLeave.department }}</p></div><div class='oa-status'>{{ selectedLeave.workflow_status }}</div></div>
         <div v-if='rejectionEvent(selectedLeave)' class='oa-rejection mt-3 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-900'>最近驳回：{{ eventActor(rejectionEvent(selectedLeave)) }} · {{ formatEventTime(rejectionEvent(selectedLeave).timestamp || rejectionEvent(selectedLeave).acted_on) }} · {{ rejectionEvent(selectedLeave).note }}</div>
         <dl class='oa-meta-grid mt-5 grid gap-3 text-sm md:grid-cols-3'>
           <div><dt class='text-gray-500'>申请人</dt><dd>{{ selectedLeave.employee_name }}</dd></div><div><dt class='text-gray-500'>部门</dt><dd>{{ selectedLeave.department }}</dd></div><div><dt class='text-gray-500'>直属主管</dt><dd>{{ selectedLeave.supervisor }}</dd></div>
-          <div><dt class='text-gray-500'>开始日期</dt><dd>{{ selectedLeave.from_date }}</dd></div><div><dt class='text-gray-500'>结束日期</dt><dd>{{ selectedLeave.to_date }}</dd></div><div><dt class='text-gray-500'>请假时长</dt><dd>{{ leaveDays(selectedLeave) }}</dd></div>
-          <div class='md:col-span-3'><dt class='text-gray-500'>请假事由</dt><dd class='whitespace-pre-wrap'>{{ selectedLeave.reason || '-' }}</dd></div>
+          <div><dt class='text-gray-500'>开始日期</dt><dd>{{ selectedLeave.from_date }}</dd></div><div><dt class='text-gray-500'>结束日期</dt><dd>{{ selectedLeave.to_date }}</dd></div><div><dt class='text-gray-500'>申请时长</dt><dd>{{ leaveDays(selectedLeave) }}</dd></div>
+          <div class='md:col-span-3'><dt class='text-gray-500'>申请事由</dt><dd class='whitespace-pre-wrap'>{{ selectedLeave.reason || '-' }}</dd></div>
         </dl>
         <div class='oa-detail-section oa-attachments mt-4'><h4 class='text-sm font-medium'>附件</h4><div v-if='selectedLeave.attachments?.length' class='mt-2 flex flex-wrap gap-2'><a v-for='file in selectedLeave.attachments' :key='file.name' :href='file.file_url' target='_blank' rel='noopener' class='text-sm text-blue-700 hover:underline'>{{ file.file_name }}</a></div><p v-else class='mt-1 text-sm text-gray-400'>无附件</p></div>
         <div class='oa-detail-section oa-timeline mt-4'><h4 class='text-sm font-medium'>审批轨迹与意见</h4><ol class='mt-2 space-y-2'><li v-for='step in selectedLeave.steps || []' :key='step.step_key' class='grid gap-2 border-b border-gray-100 pb-2 text-sm md:grid-cols-[1fr_140px_1fr]'><span>{{ step.step_index }}. {{ step.label }}<span class='ml-2 text-xs text-gray-500'>{{ step.approvers.join(' / ') }}</span></span><span>{{ step.status }}</span><span class='text-gray-600'>{{ step.note || '-' }}<span v-if='step.action_by' class='ml-2 text-xs'>{{ step.action_by }} · {{ formatEventTime(step.acted_on) }}</span></span></li></ol></div>
         <div v-if='selectedLeave.operation_log?.length' class='oa-detail-section oa-history mt-4'><h4 class='text-sm font-medium'>历史操作</h4><ol class='mt-2 space-y-1 text-sm text-gray-600'><li v-for='(event, index) in [...selectedLeave.operation_log].reverse()' :key='index'>{{ formatEventTime(event.timestamp || event.acted_on) }} · {{ event.action }} · {{ eventActor(event) }}<span v-if='event.note'> · {{ event.note }}</span></li></ol></div>
+        <div v-if='selectedLeave.can_withdraw' class='mt-4'><Button :loading='saving' @click='withdrawAttendance(selectedLeave)'>撤回申请</Button></div>
+        <div v-if='selectedLeave.attendance_days?.length' class='mt-4 text-sm'><div v-for='day in selectedLeave.attendance_days' :key='day.work_date'>{{ day.work_date }}：{{ day.hours }} 小时</div></div>
         <div v-if='selectedLeave.can_act' class='oa-action-bar mt-5 border-t border-gray-200 bg-slate-50 px-4 py-4'><textarea v-model='actionNote' rows='2' class='w-full rounded border px-3 py-2 text-sm' placeholder='审批意见（可选）'></textarea><div class='mt-2 flex flex-wrap gap-2'><Button variant='solid' @click='act(selectedLeave, "approve")'>通过</Button><select v-model='rejectTargetByRequest[selectedLeave.name]' class='rounded border px-3 py-2 text-sm'><option v-for='target in selectedLeave.rejection_targets || []' :key='target.target' :value='target.target'>驳回至：{{ target.label }}</option></select><Button variant='subtle' @click='act(selectedLeave, "reject")'>驳回</Button></div></div>
       </section>
       <section v-else-if='isLeaveInnerPage' class='border-t border-gray-200 bg-white py-10 text-center text-sm text-gray-500'>

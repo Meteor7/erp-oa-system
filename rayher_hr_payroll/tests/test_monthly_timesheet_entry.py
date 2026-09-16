@@ -32,7 +32,7 @@ def monthly_module(monkeypatch):
     monkeypatch.setattr(
         mod,
         "resolve_monthly_work_limit",
-        lambda year, month, employee=None, company=None: {
+        lambda year, month, employee=None, company=None, lock=False: {
             "day_limit": 31,
             "hour_limit": 248,
             "calendar_source": "company_holiday_list",
@@ -584,7 +584,7 @@ def test_list_monthly_entries_returns_resolved_day_and_hour_limits(monthly_modul
     monkeypatch.setattr(
         mod,
         "resolve_monthly_work_limit",
-        lambda year, month, employee=None, company=None: {
+        lambda year, month, employee=None, company=None, lock=False: {
             "day_limit": 22,
             "hour_limit": 176,
             "calendar_source": "company_holiday_list",
@@ -609,7 +609,7 @@ def test_save_monthly_entries_rejects_total_above_resolved_workday_limit(monthly
     monkeypatch.setattr(
         mod,
         "resolve_monthly_work_limit",
-        lambda year, month, employee=None, company=None: {
+        lambda year, month, employee=None, company=None, lock=False: {
             "day_limit": 20,
             "hour_limit": 160,
             "calendar_source": "employee_holiday_list",

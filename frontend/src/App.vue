@@ -8,7 +8,11 @@ const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo.p
 const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
   { label: '审批中心', items: [
-    { to: '/approval/leave', step: '01', label: '请假审批' },
+    { step: '01', label: '请假/加班/调休', children: [
+      { to: '/approval/leave', label: '请假审批' },
+      { to: '/approval/overtime', label: '加班审批' },
+      { to: '/approval/comp-time', label: '调休审批' },
+    ] },
     { step: '02', label: '采购/购买申请', children: [
       { to: '/approval/procurement', label: '采购申请' },
       { to: '/approval/procurement/price-approvals', label: '价格审批' },

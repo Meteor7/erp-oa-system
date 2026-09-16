@@ -37,6 +37,8 @@ const PAGE_ROLES = {
   '/entry': TIME_VIEW,
   '/oa': APPROVAL,
   '/approval/leave': APPROVAL,
+  '/approval/overtime': APPROVAL,
+  '/approval/comp-time': APPROVAL,
   '/approval/procurement': APPROVAL,
   '/approval/direct-purchase': APPROVAL,
   '/approval/request-dashboard': APPROVAL,
@@ -90,6 +92,9 @@ export function canEditProcurementPrice() {
 }
 
 function accessPath(path) {
+  for (const base of ['/approval/leave', '/approval/overtime', '/approval/comp-time']) {
+    if (path.startsWith(base + '/')) return base;
+  }
   if (path === '/approval/procurement/new' || /^\/approval\/procurement\/[^/]+\/pmc-edit$/.test(path)) return '/approval/procurement';
   if (path === '/approval/direct-purchase/new') return '/approval/direct-purchase';
   return path;

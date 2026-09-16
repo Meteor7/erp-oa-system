@@ -1,3 +1,4 @@
+from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES
 from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
 from rayher_hr_payroll.identity_accounts import account_user
 from rayher_hr_payroll.oa_document_types import (
@@ -463,7 +464,7 @@ def build_route(
     upper_supervisor_user=None,
     roles=None,
 ):
-    if request_type == REQUEST_LEAVE:
+    if request_type in ATTENDANCE_TYPES:
         return build_leave_route(
             department=department,
             supervisor=supervisor,

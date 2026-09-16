@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import frappe
+
+from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES, REQUEST_OVERTIME, REQUEST_COMP_TIME, attendance_request_transaction
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
@@ -48,6 +50,7 @@ from rayher_hr_payroll.procurement_workflow import (
 )
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 from rayher_hr_payroll.oa_assignments import (
+    _request_link,
     notify_rejected_applicant,
     notify_request_applicant,
     sync_current_assignments,
@@ -59,7 +62,7 @@ from rayher_hr_payroll.oa_organization import (
     resolve_top_executive,
 )
 
-REQUEST_TYPES = [REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT]
+REQUEST_TYPES = [REQUEST_OVERTIME, REQUEST_COMP_TIME, REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT]
 ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, PRODUCTION_ASSET, OTHER_ASSET]
 EXPENSE_FIXED_CATEGORY_BY_ASSET = {
     ADMIN_ASSET: "办公家具、工具及器具",
@@ -111,7 +114,7 @@ INVOICE_DUPLICATE = "\u91cd\u590d\u53d1\u7968"
 
 
 def _resolve_approval_roles(request_type, *, department="", asset_category="", purchase_method=""):
-    if request_type == REQUEST_LEAVE:
+    if request_type in ATTENDANCE_TYPES:
         keys = ["hr_manager", "general_manager" if "财务" in _clean(department) else "vice_manager"]
     elif request_type == REQUEST_EXPENSE_PAYMENT:
         keys = ["finance_auditor", "finance_manager", "general_manager"]
@@ -698,13 +701,13 @@ def _route_context(
     request_type=None,
     applicant_employee=None,
 ):
-    if request_type == REQUEST_LEAVE:
+    if request_type in ATTENDANCE_TYPES:
         ctx = _leave_employee_context()
     elif request_type == REQUEST_PROCUREMENT and applicant_employee:
         ctx = _employee_context(employee=applicant_employee)
     else:
         ctx = _employee_context()
-    if request_type == REQUEST_LEAVE:
+    if request_type in ATTENDANCE_TYPES:
         if not ctx.get("employee"):
             raise ApprovalRouteError("当前账号未关联在职员工，不能提交请假申请")
         ctx["department"] = _canonical_department(ctx.get("department"))
@@ -770,18 +773,18 @@ def _require_leave_accounts(steps, copied_to):
 
 def _notify_copied_users(doc):
     request_type = getattr(doc, "request_type", None)
-    if request_type not in {REQUEST_LEAVE, REQUEST_PROCUREMENT, REQUEST_PROCUREMENT_PAYMENT}:
+    if request_type not in {*ATTENDANCE_TYPES, REQUEST_PROCUREMENT, REQUEST_PROCUREMENT_PAYMENT}:
         return
     subject_prefix = (
-        "请假申请抄送"
-        if request_type == REQUEST_LEAVE
+        request_type + "抄送"
+        if request_type in ATTENDANCE_TYPES
         else "采购合同交期抄送"
         if request_type == REQUEST_PROCUREMENT
         else "采购付款结果汇总"
     )
     content = (
-        "请假申请 {0} 已提交，现抄送给你查阅。".format(doc.name)
-        if request_type == REQUEST_LEAVE
+        f"{request_type} {doc.name} 已提交，现抄送给你查阅。"
+        if request_type in ATTENDANCE_TYPES
         else "采购申请 {0} 的合同交期已确认，现抄送给你查阅。".format(doc.name)
         if request_type != REQUEST_PROCUREMENT_PAYMENT
         else "采购付款 {0} 已完成出纳办理，现汇总给你查阅。".format(doc.name)
@@ -1140,7 +1143,7 @@ def _with_expense_attachments(doc, lines):
 
 
 def _request_attachments(doc):
-    if getattr(doc, "request_type", None) != REQUEST_LEAVE:
+    if getattr(doc, "request_type", None) not in ATTENDANCE_TYPES:
         return []
     return frappe.get_all(
         "File",
@@ -1437,6 +1440,9 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "subject": doc.subject,
         "doc_type": getattr(doc, "doc_type", None),
         "urgency": getattr(doc, "urgency", None),
+        "attendance_days": _parse_json(getattr(doc, "attendance_days", None), default=[]),
+        "duration_hours": getattr(doc, "duration_hours", None),
+        "leave_type": getattr(doc, "leave_type", None),
         "from_date": doc.from_date,
         "to_date": doc.to_date,
         "amount": doc.amount,
@@ -1686,7 +1692,7 @@ def _advance_after_step(doc, step):
                 doc.business_status = "需求已批准/待询价"
         elif doc.request_type == REQUEST_DIRECT_PURCHASE and _clean(getattr(doc, "business_status", None)) == "待审批":
             doc.business_status = "待付款"
-        elif doc.request_type == REQUEST_LEAVE:
+        elif doc.request_type in ATTENDANCE_TYPES:
             doc.business_status = "已完成"
         return
     doc.workflow_status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
@@ -1856,6 +1862,8 @@ def _build_request_doc(
     asset_category=None,
     from_date=None,
     to_date=None,
+    attendance_days=None,
+    leave_type=None,
     amount=None,
     reason=None,
     submit=True,
@@ -1882,7 +1890,7 @@ def _build_request_doc(
     ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
     route = preview_route(request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=submit)
     steps = route["steps"]
-    if request_type == REQUEST_LEAVE and submit and (not from_date or not to_date):
+    if request_type in ATTENDANCE_TYPES and submit and (not from_date or not to_date):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
     lines, total = _normalize_expense_lines(expense_lines, fallback_amount=amount, fallback_subject=subject)
     if request_type == REQUEST_EXPENSE_PAYMENT and submit and not lines:
@@ -1909,6 +1917,8 @@ def _build_request_doc(
             "subject": subject or request_type,
             "doc_type": doc_type or DOC_TYPES[0],
             "urgency": urgency or URGENCY[0],
+            "attendance_days": json.dumps(attendance_days) if isinstance(attendance_days, list) else attendance_days,
+            "leave_type": leave_type or "",
             "from_date": from_date,
             "to_date": to_date,
             "amount": total if request_type == REQUEST_EXPENSE_PAYMENT else _money(amount),
@@ -2103,7 +2113,7 @@ def _submit_draft(doc):
     if doc.workflow_status != STATUS_DRAFT:
         return
     old_status = doc.workflow_status
-    if doc.request_type == REQUEST_LEAVE and (not doc.from_date or not doc.to_date):
+    if doc.request_type in ATTENDANCE_TYPES and (not doc.from_date or not doc.to_date):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT and not list(getattr(doc, "expense_lines", []) or []):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
@@ -2288,9 +2298,9 @@ def preview_route(
         )
         copied_to = (
             leave_copy_recipients(ctx.get("applicant_user"), roles=roles)
-            if request_type == REQUEST_LEAVE else []
+            if request_type in ATTENDANCE_TYPES else []
         )
-        if request_type == REQUEST_LEAVE:
+        if request_type in ATTENDANCE_TYPES:
             _require_leave_accounts(steps, copied_to)
         return {
             "context": ctx,
@@ -2310,6 +2320,8 @@ def create_request(
     asset_category=None,
     from_date=None,
     to_date=None,
+    attendance_days=None,
+    leave_type=None,
     amount=None,
     reason=None,
     submit=1,
@@ -2345,6 +2357,8 @@ def create_request(
         asset_category=asset_category,
         from_date=from_date,
         to_date=to_date,
+        attendance_days=attendance_days,
+        leave_type=leave_type,
         amount=amount,
         reason=reason,
         submit=False,
@@ -2376,17 +2390,20 @@ def create_request(
     _save_document(doc)
     if requested_submit:
         _sync_assignments_after_save(doc)
+        if doc.request_type in ATTENDANCE_TYPES:
+            _notify_copied_users(doc)
     return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])
-def update_leave_draft(name, subject, from_date, to_date, reason=None):
+@attendance_request_transaction
+def update_leave_draft(name, subject, from_date, to_date, reason=None, attendance_days=None, leave_type=None):
     request_name = _bounded_optional_text(name, "Request", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
         invoice_service._request_permission(doc, "edit", current=True)
-        if doc.request_type != REQUEST_LEAVE or doc.workflow_status != STATUS_DRAFT:
+        if doc.request_type not in ATTENDANCE_TYPES or doc.workflow_status != STATUS_DRAFT:
             frappe.throw(frappe._("\u53ea\u6709\u8bf7\u5047\u8349\u7a3f\u53ef\u4ee5\u4fee\u6539\u3002"))
         clean_subject = _bounded_optional_text(subject, "\u4e3b\u9898", 140)
         clean_reason = _bounded_optional_text(reason, "\u4e8b\u7531", 1000)
@@ -2396,6 +2413,8 @@ def update_leave_draft(name, subject, from_date, to_date, reason=None):
             frappe.throw(frappe._("\u8bf7\u5047\u4e3b\u9898\u3001\u5f00\u59cb\u65e5\u671f\u548c\u7ed3\u675f\u65e5\u671f\u4e0d\u80fd\u4e3a\u7a7a\u3002"))
         if start_date > end_date:
             frappe.throw(frappe._("\u5f00\u59cb\u65e5\u671f\u4e0d\u80fd\u665a\u4e8e\u7ed3\u675f\u65e5\u671f\u3002"))
+        doc.attendance_days = json.dumps(attendance_days) if isinstance(attendance_days, list) else attendance_days
+        doc.leave_type = leave_type or ""
         doc.subject = clean_subject
         doc.from_date = start_date
         doc.to_date = end_date
@@ -2838,6 +2857,7 @@ def _set_procurement_payment_paid_state(doc):
 
 
 @frappe.whitelist(methods=["POST"])
+@attendance_request_transaction
 def submit_request(name, no_invoice_reason=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     supplied_reason = None
@@ -3325,6 +3345,8 @@ def get_my_approval_summary():
     if _clean(frappe.session.user) in {"", "Guest"}:
         frappe.throw(frappe._("请先登录。"))
     routes = {
+        REQUEST_OVERTIME: {"key": "overtime", "label": "加班", "route": "/approval/overtime"},
+        REQUEST_COMP_TIME: {"key": "comp_time", "label": "调休", "route": "/approval/comp-time"},
         REQUEST_LEAVE: {"key": "leave", "label": "请假", "route": "/approval/leave"},
         REQUEST_PROCUREMENT: {"key": "procurement", "label": "采购", "route": "/approval/procurement"},
         REQUEST_DIRECT_PURCHASE: {"key": "direct_purchase", "label": "购买", "route": "/approval/direct-purchase"},
@@ -4014,6 +4036,7 @@ def _validate_procurement_material_codes(doc, step):
 
 
 @frappe.whitelist(methods=["POST"])
+@attendance_request_transaction
 def action_request(name, action="approve", note=None, reject_target=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
@@ -4577,6 +4600,7 @@ def push_invoices_to_request(invoice_names, payment_info=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@attendance_request_transaction
 def withdraw_request(name, note=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
@@ -4912,6 +4936,7 @@ def list_approval_people(query="", limit=20):
 
 
 @frappe.whitelist(methods=["POST"])
+@attendance_request_transaction
 def add_sign_request(name, approver, position, opinion):
     request_name = _bounded_optional_text(name, "Request", 140)
     with invoice_service._transaction_lock("request", request_name):
@@ -5165,3 +5190,20 @@ def list_approval_business_documents(request):
         return list_documents(request)
     except BusinessDocumentError as exc:
         frappe.throw(str(exc))
+
+
+@frappe.whitelist()
+def get_attendance_options(request_type, from_date=None, to_date=None):
+    from rayher_hr_payroll.attendance_requests import LEAVE_TYPES, date_range, work_dates_for_range, get_balance
+    if request_type not in ATTENDANCE_TYPES:
+        frappe.throw("不支持的申请类型")
+    require_request_type_access(request_type)
+    ctx = _leave_employee_context()
+    days = []
+    if from_date and to_date:
+        try:
+            dates = date_range(from_date, to_date) if request_type == REQUEST_OVERTIME else sorted(work_dates_for_range(ctx["employee"], from_date, to_date))
+            days = [{"work_date": d.isoformat(), "hours": 8} for d in dates]
+        except ValueError as exc:
+            frappe.throw(str(exc))
+    return {"days": days, "balance": get_balance(ctx["employee"]), "leave_types": LEAVE_TYPES}

@@ -4,6 +4,8 @@ import json
 
 import frappe
 
+from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES, REQUEST_OVERTIME, REQUEST_COMP_TIME
+
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_LEAVE,
@@ -15,6 +17,7 @@ from rayher_hr_payroll.oa_feature_gate import visible_request_types
 
 
 REQUEST_TYPES = (
+    REQUEST_OVERTIME, REQUEST_COMP_TIME,
     REQUEST_LEAVE,
     REQUEST_EXPENSE_PAYMENT,
     REQUEST_PROCUREMENT,

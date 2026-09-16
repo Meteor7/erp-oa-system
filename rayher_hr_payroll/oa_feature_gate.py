@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import frappe
 
+from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES, REQUEST_OVERTIME, REQUEST_COMP_TIME
+
 from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT, REQUEST_LEAVE
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
@@ -12,6 +14,8 @@ from rayher_hr_payroll.oa_document_types import (
 ADMIN_USERS = {"Administrator", "admin@staff.example.invalid"}
 DRAFT_ONLY_REQUEST_TYPES = set()
 FEATURE_CONFIG_BY_REQUEST_TYPE = {
+    REQUEST_OVERTIME: "leave_approval_admin_only",
+    REQUEST_COMP_TIME: "leave_approval_admin_only",
     REQUEST_LEAVE: "leave_approval_admin_only",
     REQUEST_EXPENSE_PAYMENT: "expense_reimbursement_admin_only",
     REQUEST_PROCUREMENT: "procurement_application_admin_only",
@@ -19,6 +23,8 @@ FEATURE_CONFIG_BY_REQUEST_TYPE = {
     REQUEST_PROCUREMENT_PAYMENT: "procurement_payment_admin_only",
 }
 BOOT_FLAG_BY_REQUEST_TYPE = {
+    REQUEST_OVERTIME: "overtime_approval",
+    REQUEST_COMP_TIME: "comp_time_approval",
     REQUEST_LEAVE: "leave_approval",
     REQUEST_EXPENSE_PAYMENT: "expense_reimbursement",
     REQUEST_PROCUREMENT: "procurement_application",

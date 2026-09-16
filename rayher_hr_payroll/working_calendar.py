@@ -38,7 +38,7 @@ def _complete_holiday_list(name, first_day, last_day):
     return from_date <= first_day and to_date >= last_day
 
 
-def resolve_monthly_work_limit(year, month, employee=None, company=None):
+def resolve_monthly_calendar(year, month, employee=None, company=None):
     year = int(year)
     month = int(month)
     first_day = date(year, month, 1)
@@ -89,3 +89,37 @@ def resolve_monthly_work_limit(year, month, employee=None, company=None):
         "holiday_list": selected_list,
         "work_dates": work_dates,
     }
+
+
+def resolve_monthly_work_limit(year, month, employee=None, company=None, *, lock=False):
+    from rayher_hr_payroll.attendance_requests import leave_hours_by_date
+    result = resolve_monthly_calendar(year, month, employee=employee, company=company)
+    base_hours = result["hour_limit"]
+    deductions = {}
+    if employee:
+        first_day = date(int(year), int(month), 1)
+        last_day = date(int(year), int(month), monthrange(int(year), int(month))[1])
+        rows = frappe.get_all(
+            "OA Approval Request",
+            filters={"employee": employee, "request_type": "请假申请",
+                     "workflow_status": ["in", ["已完成", "已通过"]],
+                     "from_date": ["<=", last_day], "to_date": [">=", first_day]},
+            fields=["name", "request_type", "workflow_status", "from_date", "to_date", "leave_type", "attendance_days"],
+            limit_page_length=0,
+        )
+        if lock:
+            # Current read after the employee mutex; a snapshot taken before approval
+            # must not permit a stale monthly cap under REPEATABLE READ.
+            rows = frappe.db.sql(
+                "SELECT name, request_type, workflow_status, from_date, to_date, leave_type, attendance_days "
+                "FROM `tabOA Approval Request` WHERE employee = %s AND request_type = %s "
+                "AND workflow_status IN (%s, %s) AND from_date <= %s AND to_date >= %s FOR UPDATE",
+                (employee, "请假申请", "已完成", "已通过", last_day, first_day), as_dict=True,
+            )
+        deductions = leave_hours_by_date(rows, result["work_dates"])
+    leave_hours = float(sum(deductions.values()))
+    result.update({"base_hour_limit": base_hours, "leave_hours": leave_hours,
+                   "hour_limit": max(0, base_hours - leave_hours),
+                   "day_limit": max(0, base_hours - leave_hours) / HOURS_PER_WORKDAY,
+                   "leave_hours_by_date": {d.isoformat(): float(h) for d, h in deductions.items()}})
+    return result

@@ -42,6 +42,8 @@ def test_switches_are_independent_and_reversible(gate):
     ) == [module.REQUEST_EXPENSE_PAYMENT]
     assert module.boot_access_flags("employee@example.com") == {
         "leave_approval": False,
+        "overtime_approval": False,
+        "comp_time_approval": False,
         "expense_reimbursement": True,
         "procurement_application": True,
         "direct_purchase_application": True,
@@ -84,3 +86,15 @@ def test_procurement_routes_are_open_without_opening_unknown_types(gate):
         assert module.can_access_request_type(request_type, "manager@example.com") is True
     with pytest.raises(ValueError):
         module.can_access_request_type("unknown", "employee@example.com")
+
+
+
+def test_attendance_types_follow_leave_gate(gate):
+    module, frappe = gate
+    frappe.conf["leave_approval_admin_only"] = 1
+    for kind in (module.REQUEST_OVERTIME, module.REQUEST_COMP_TIME):
+        assert not module.can_access_request_type(kind, "employee@example.com")
+        assert module.can_access_request_type(kind, "Administrator")
+    frappe.conf["leave_approval_admin_only"] = 0
+    for kind in (module.REQUEST_OVERTIME, module.REQUEST_COMP_TIME):
+        assert module.can_access_request_type(kind, "employee@example.com")

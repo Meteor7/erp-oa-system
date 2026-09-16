@@ -9,6 +9,8 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 test("approval center defines the four business flows and two dashboards", () => {
   assert.deepEqual(Object.keys(APPROVAL_CENTER_ROUTES), [
     "/approval/leave",
+    "/approval/overtime",
+    "/approval/comp-time",
     "/approval/procurement",
     "/approval/direct-purchase",
     "/approval/request-dashboard",
@@ -88,7 +90,7 @@ test("existing payment and reimbursement aliases remain on OA approvals", () => 
 
 test("leave approvals render one detailed pending table", () => {
   const source = read("../src/pages/OAApprovals.vue");
-  assert.match(source, /请假日期/);
+  assert.match(source, /申请日期/);
   assert.match(source, /查看详情/);
   assert.match(source, /<Card v-if='!isLeaveInnerPage' :title='T\.pendingTitle' class='oa-panel oa-table-panel oa-pending-panel'>/);
 });
@@ -96,11 +98,11 @@ test("leave approvals render one detailed pending table", () => {
 test("leave approvals open each request in a dedicated inner page", () => {
   const source = read("../src/pages/OAApprovals.vue");
   assert.match(source, /isLeaveInnerPage/);
-  assert.match(source, /name: 'leave-detail'/);
-  assert.match(source, /返回请假审批/);
-  assert.match(source, /新建请假/);
-  assert.match(source, /router.push\(\{ name: 'leave-detail'/);
-  assert.match(source, /请假申请/);
+  assert.match(source, /attendanceBase/);
+  assert.match(source, /返回\{\{ pageConfig.title \}\}/);
+  assert.match(source, /新建\{\{ currentRequestType \}\}/);
+  assert.match(source, /encodeURIComponent\(row.name\)/);
+  assert.match(source, /REQUEST_LEAVE/);
   assert.match(source, /v-if='isLeaveInnerPage && selectedLeave'/);
 });
 
@@ -111,4 +113,12 @@ test("returned leave drafts can be edited and resubmitted", () => {
   assert.match(source, /leaveDraftName/);
   assert.match(source, /mine\.data/);
   assert.match(source, /draftSubmitter\.submit/);
+});
+
+
+test("overtime and compensatory leave follow the leave access flag", () => {
+  for (const route of ["/approval/overtime", "/approval/comp-time"]) {
+    assert.equal(isApprovalRouteEnabled(route, { leave_approval: false }), false);
+    assert.equal(isApprovalRouteEnabled(route, { leave_approval: true }), true);
+  }
 });

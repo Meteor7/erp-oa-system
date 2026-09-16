@@ -16,6 +16,7 @@ from rayher_hr_payroll.oa_document_types import (
 DRAFT_STATUS = "草稿"
 CLOSED_REQUEST_TYPES = set()
 SERVER_OWNED_FIELDS = {
+    "attendance_days", "duration_hours",
     "request_type",
     "company",
     "employee",
@@ -61,6 +62,7 @@ SERVER_OWNED_FIELDS = {
     "followup_status",
 }
 DRAFT_ONLY_BUSINESS_FIELDS = {
+    "from_date", "to_date", "leave_type",
     "subject", "reason", "urgency", "asset_nature", "fixed_asset_category",
     "asset_category", "procurement_scope", "expected_delivery_date", "project",
     "non_project_allocation_type", "non_project_cost_center",

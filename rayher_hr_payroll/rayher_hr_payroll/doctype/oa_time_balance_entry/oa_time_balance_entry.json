@@ -1,0 +1,58 @@
+{
+  "doctype": "DocType",
+  "name": "OA Time Balance Entry",
+  "module": "Rayher HR Payroll",
+  "autoname": "hash",
+  "engine": "InnoDB",
+  "field_order": [
+    "source_request",
+    "employee",
+    "credit_hours",
+    "reserved_hours",
+    "used_hours"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_request",
+      "fieldtype": "Data",
+      "label": "来源申请",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "employee",
+      "fieldtype": "Link",
+      "options": "Employee",
+      "label": "员工",
+      "reqd": 1
+    },
+    {
+      "fieldname": "credit_hours",
+      "fieldtype": "Float",
+      "precision": "2",
+      "label": "加班额度",
+      "default": "0"
+    },
+    {
+      "fieldname": "reserved_hours",
+      "fieldtype": "Float",
+      "precision": "2",
+      "label": "占用时长",
+      "default": "0"
+    },
+    {
+      "fieldname": "used_hours",
+      "fieldtype": "Float",
+      "precision": "2",
+      "label": "已用时长",
+      "default": "0"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

@@ -176,8 +176,8 @@ def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project, day_l
     day_limit = Decimal(
         str(day_limit if day_limit is not None else monthrange(int(year), int(month))[1])
     )
-    if total_days > day_limit:
-        frappe.throw(frappe._("该员工当月累计发生天数不能超过所选月份的自然日天数。"))
+    if calculated_hours(total_days) > calculated_hours(day_limit):
+        frappe.throw(frappe._("该员工当月累计工时不能超过扣除请假后的可填报上限。"))
     return prepared
 
 
@@ -498,6 +498,9 @@ def list_monthly_entries(period, employee=None):
         "employee_count": employee_count,
         "day_limit": limit["day_limit"],
         "hour_limit": limit["hour_limit"],
+        "base_hour_limit": limit.get("base_hour_limit", limit["hour_limit"]),
+        "leave_hours": limit.get("leave_hours", 0),
+        "over_limit_hours": max(0, round(total_hours - limit["hour_limit"], 2)) if employee else 0,
         "calendar_source": limit["calendar_source"],
         "holiday_list": limit["holiday_list"],
         "has_legacy_sources": has_legacy_sources,
@@ -595,7 +598,6 @@ def save_monthly_entries(period, employee, rows, expected_revision=None):
     daily = _daily_module()
     _require_monthly_employee(employee, "edit")
     ensure_not_locked(period_text, "lock_timesheets", "工时")
-    limit = resolve_monthly_work_limit(year, month, employee=employee)
     if daily._period_has_submitted_allocation(year, month):
         frappe.throw(frappe._("本期已存在已提交的研发费用分摊，请先撤销分摊后再调整工时。"))
 
@@ -606,6 +608,9 @@ def save_monthly_entries(period, employee, rows, expected_revision=None):
             frappe.throw(frappe._("月度工时数据格式不正确。"))
     if not isinstance(rows, list):
         frappe.throw(frappe._("月度工时数据格式不正确。"))
+    lock_period_import(year, month)
+    frappe.db.get_value("Employee", employee, "name", for_update=True)
+    limit = resolve_monthly_work_limit(year, month, employee=employee, lock=True)
     prepared = prepare_monthly_rows(
         rows,
         year,

@@ -1,5 +1,7 @@
 export const APPROVAL_CENTER_ROUTES = Object.freeze({
   '/approval/leave': { flag: 'leave_approval', label: '请假审批' },
+  '/approval/overtime': { flag: 'leave_approval', label: '加班审批' },
+  '/approval/comp-time': { flag: 'leave_approval', label: '调休审批' },
   '/approval/procurement': { flag: 'procurement_application', label: '采购申请' },
   '/approval/direct-purchase': { flag: 'direct_purchase_application', label: '购买申请' },
   '/approval/request-dashboard': { flag: 'procurement_application', label: '申请看板' },

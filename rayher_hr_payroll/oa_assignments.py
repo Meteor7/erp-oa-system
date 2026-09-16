@@ -11,6 +11,8 @@ CLOSED_TODO_STATUS = "Closed"
 
 REQUEST_ROUTES = {
     "请假申请": "/planck-semicon/approval/leave",
+    "加班申请": "/planck-semicon/approval/overtime",
+    "调休申请": "/planck-semicon/approval/comp-time",
     "采购申请": "/planck-semicon/approval/procurement",
     "购买申请": "/planck-semicon/approval/direct-purchase",
     "采购付款": "/planck-semicon/approval/procurement-payment",
