@@ -394,7 +394,7 @@ async function refreshAttendance(replaceDays = true) {
   if (!isLeave.value) return;
   const version = ++attendanceVersion;
   try {
-    const data = await attendanceOptions.fetch({ request_type: currentRequestType.value, from_date: leaveForm.from_date || null, to_date: leaveForm.to_date || null });
+    const data = await attendanceOptions.fetch({ request_type: currentRequestType.value, from_date: leaveForm.from_date || "", to_date: leaveForm.to_date || "" });
     if (version !== attendanceVersion) return;
     attendanceBalance.value = data.balance;
     leaveTypes.value = data.leave_types || [];
@@ -817,7 +817,7 @@ onBeforeUnmount(() => {
       <nav class='flex gap-4 text-sm'><router-link to='/approval/leave'>请假</router-link><router-link to='/approval/overtime'>加班</router-link><router-link to='/approval/comp-time'>调休</router-link></nav>
       <p v-if='errMsg' class='text-sm text-red-700'>{{ errMsg }}</p>
       <p v-if='attendanceBalance' class='rounded border bg-white p-3 text-sm'>调休可用：<strong>{{ attendanceBalance.available_hours }} 小时</strong> · 加班累计：{{ attendanceBalance.credit_hours }} · 申请中占用：{{ attendanceBalance.reserved_hours }} · 已用：{{ attendanceBalance.used_hours }}<span v-if='attendanceBalance.available_hours < 0' class='ml-2 text-red-700'>余额不足，请联系人事处理</span></p>
-      <section v-if='!isLeaveInnerPage' class='oa-overview-strip' aria-label='请假审批概览'>
+      <section v-if='!isLeaveInnerPage' class='oa-overview-strip' :aria-label='pageConfig.title + "概览"'>
         <div class='oa-overview-primary'>
           <div class='oa-overview-label'>我的待办</div>
           <div class='oa-overview-value'>{{ leavePendingCount }}<span>项</span></div>

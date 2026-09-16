@@ -5198,7 +5198,12 @@ def get_attendance_options(request_type, from_date=None, to_date=None):
     if request_type not in ATTENDANCE_TYPES:
         frappe.throw("不支持的申请类型")
     require_request_type_access(request_type)
-    ctx = _leave_employee_context()
+    try:
+        ctx = _leave_employee_context()
+    except ApprovalRouteError as exc:
+        frappe.throw(str(exc).replace("请假申请", request_type))
+    from_date = None if from_date in (None, "", "null", "undefined") else from_date
+    to_date = None if to_date in (None, "", "null", "undefined") else to_date
     days = []
     if from_date and to_date:
         try:
