@@ -18,6 +18,27 @@ import {
 import { documentChecklistForRequest } from '../lib/businessDocumentChecklist';
 import { canSeeProcurementPrice } from '../lib/access';
 
+// Keep long material names and specifications visible, including values filled by the catalog.
+function resizeMaterialField(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.max(58, el.scrollHeight + 2) + 'px';
+}
+const materialFieldObservers = new WeakMap();
+const vAutoGrow = {
+  mounted(el) {
+    resizeMaterialField(el);
+    let width = el.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = el.getBoundingClientRect().width;
+      if (nextWidth !== width) { width = nextWidth; resizeMaterialField(el); }
+    });
+    observer.observe(el);
+    materialFieldObservers.set(el, observer);
+  },
+  updated: resizeMaterialField,
+  unmounted(el) { materialFieldObservers.get(el)?.disconnect(); materialFieldObservers.delete(el); },
+};
+
 const route = useRoute();
 const router = useRouter();
 const config = computed(() => ({
@@ -1418,7 +1439,27 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
               </div>
               <span v-if="isProcurement && selectedRequest.business_lines?.some((line) => !line.material_code)" class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">部分物料待 PMC 绑定编号</span>
             </div>
-            <div class="overflow-x-auto border border-gray-200">
+            <div v-if="isProcurement" class="request-materials material-details">
+              <article v-for="(line, index) in selectedRequest.business_lines || []" :key="line.name || index" class="request-material">
+                <header class="material-row-head"><strong>第 {{ index + 1 }} 项</strong></header>
+                <div class="material-fields"><div class="material-field span-3"><span>物料编号 / 流水号</span><p class="font-mono">{{ line.material_code || line.category_code || '待 PMC 补充' }}</p><p class="text-xs text-teal-700">{{ line.material_serial || '提交后自动生成' }}</p><p v-if="line.category_path" class="text-xs text-gray-500">{{ line.category_path }}</p></div>
+<div class="material-field span-2"><span>物料名称</span><p>{{ line.item_name || '-' }}</p></div>
+<div class="material-field span-2"><span>Product name</span><p>{{ line.product_name || '-' }}</p></div>
+<div class="material-field span-3"><span>规格型号</span><p>{{ line.specification || '-' }}</p></div>
+<div class="material-field span-1"><span>数量</span><p>{{ line.quantity || 0 }}</p></div>
+<div class="material-field span-1"><span>单位</span><p>{{ line.unit || '-' }}</p></div></div>
+                <div class="material-fields material-fields-secondary"><div class="material-field span-3"><span>产品描述</span><p>{{ line.product_desc || '-' }}</p></div>
+<div class="material-field span-3"><span>Product description</span><p>{{ line.product_desc_en || '-' }}</p></div>
+<div class="material-field span-1"><span>商品品牌</span><p>{{ line.brand || '-' }}</p></div>
+<div class="material-field span-1"><span>Brand</span><p>{{ line.brand_en || '-' }}</p></div>
+<div class="material-field span-1"><span>单价</span><p>{{ Number(line.unit_price || 0) > 0 ? formatMoney(line.unit_price) : '待询价' }}</p></div>
+<div class="material-field span-1"><span>金额</span><p>{{ Number(line.amount || 0) > 0 ? formatMoney(line.amount) : (Number(line.unit_price || 0) > 0 ? formatMoney(Number(line.quantity || 0) * Number(line.unit_price || 0)) : '-') }}</p></div>
+<div class="material-field span-2"><span>备注</span><p>{{ line.remarks || '-' }}</p></div></div>
+              </article>
+              <p v-if="!selectedRequest.business_lines?.length" class="p-5 text-center text-gray-400">该申请没有明细</p>
+              <div v-if="Number(selectedRequest.amount || 0) > 0" class="p-4 text-right text-sm font-semibold">当前总金额 ¥ {{ formatMoney(selectedRequest.amount) }}</div>
+            </div>
+            <div v-else class="overflow-x-auto border border-gray-200">
               <table :class="isProcurement ? 'min-w-[1180px]' : 'min-w-[860px]'" class="w-full text-sm">
                 <thead class="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500">
                   <tr><th v-if="isProcurement" class="px-4 py-3 lg:pl-5">物料编号</th><th v-if="isProcurement" class="px-4 py-3">物料流水号</th><th class="px-5 py-3 lg:pl-6">物品名称</th><th class="px-4 py-3">规格</th><th class="px-4 py-3">产品描述</th><th v-if="isProcurement" class="px-4 py-3">品牌</th><th class="px-4 py-3 text-right">数量</th><th class="px-4 py-3">单位</th><th class="px-4 py-3 text-right">单价</th><th class="px-4 py-3 text-right">金额</th><th class="px-5 py-3 lg:pr-6">备注</th></tr>
@@ -1780,7 +1821,10 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
      <div v-if="pmcEditMode && Object.keys(materialSuggestions).length" class="border-t border-amber-200 bg-amber-50 px-5 py-4 lg:px-6"><h3 class="text-sm font-semibold text-amber-900">物料重复与智能分类建议</h3><p class="mt-1 text-xs text-amber-800">建议仅供 PMC 核对；人工选择的分类不会被自动覆盖。规格型号命中或名称、型号、品牌完全一致时，请优先绑定已有物料。</p><div class="mt-3 grid gap-2 md:grid-cols-2"><div v-for="(suggestion, index) in materialSuggestions" :key="index" class="rounded-md border border-amber-200 bg-white p-3 text-xs text-gray-700"><div class="font-medium">第{{ Number(index) + 1 }}项：{{ suggestion.risk_assessment?.level }}｜{{ suggestion.risk_assessment?.action }}</div><div v-if="suggestion.duplicates?.identity?.length" class="mt-1 text-red-700">名称、规格型号、品牌完全一致：{{ suggestion.duplicates.identity.map((item) => item.material_code).join('、') }}，建议绑定已有物料。</div><div v-else-if="suggestion.duplicates?.spec?.length" class="mt-1 text-red-700">规格型号命中：{{ suggestion.duplicates.spec.map((item) => item.material_code).join('、') }}，建议先核对后再新增。</div><div v-if="suggestion.duplicates?.spec_format?.length" class="mt-1 text-amber-700">规格型号仅分隔符/书写格式不同：{{ suggestion.duplicates.spec_format.map((item) => item.material_code).join('、') }}，需人工确认是否同一型号。</div><div v-if="suggestion.duplicates?.name?.length" class="mt-1 text-gray-600">仅名称相同：{{ suggestion.duplicates.name.map((item) => item.material_code).join('、') }}，请继续核对规格、品牌和用途。</div><div v-if="suggestion.suggested_category" class="mt-1">智能分类建议：{{ suggestion.suggested_category.category_code }}（{{ suggestion.suggested_category.category_path || '分类路径待补充' }}，置信度 {{ suggestion.suggested_category.confidence }}%）</div><div v-if="suggestion.matches?.length" class="mt-1 text-[11px] text-gray-500">参考物料：{{ suggestion.matches.slice(0, 3).map((item) => `${item.material_code} ${item.material_name || ''}`).join('、') }}</div></div></div></div>
       <div v-if="isProcurement" class="border-t border-gray-200">
         <div class="flex items-center justify-between border-b border-gray-100 bg-white px-5 py-3 lg:px-6"><div class="flex items-center gap-2"><h3 class="text-sm font-semibold text-gray-900" title="选择物料编号会自动带出完整物料资料">采购明细</h3><span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{{ form.business_lines.length }} 项</span></div><button type="button" class="inline-flex h-8 items-center gap-2 rounded-md border border-gray-300 px-3 text-sm font-medium hover:border-gray-400 hover:bg-gray-50" @click="addLine"><FeatherIcon name="plus" class="h-4 w-4" />添加一行</button></div>
-        <div class="request-lines-scroll overflow-x-auto" :class="{ 'request-lines-expanded': form.business_lines.some((line) => line.category_open || line.material_open) }"><table class="request-lines-table min-w-[1800px] w-full text-sm"><colgroup><col style="width: 22%" /><col style="width: 8%" /><col style="width: 8%" /><col style="width: 8%" /><col style="width: 9%" /><col style="width: 9%" /><col style="width: 5%" /><col style="width: 5%" /><col style="width: 4%" /><col style="width: 4%" /><col style="width: 7%" /><col style="width: 8%" /><col style="width: 3%" /></colgroup><thead class="border-y border-gray-200 bg-gray-50 text-left text-xs text-gray-500"><tr><th class="p-3 lg:pl-6" title="逐级选择，至少三级">物料编号</th><th class="p-3">物料名称</th><th class="p-3">Product name</th><th class="p-3">规格型号</th><th class="p-3">产品描述</th><th class="p-3">Product description</th><th class="p-3">商品品牌</th><th class="p-3">Brand</th><th class="p-3">数量</th><th class="p-3">单位</th><th class="p-3">{{ isProcurement ? '需求阶段单价' : '单价' }}</th><th class="p-3">备注</th><th class="w-12"></th></tr></thead><tbody><tr v-for="(line, index) in form.business_lines" :key="index" class="border-b border-gray-100 align-top"><td class="relative p-3 lg:pl-6" data-label="物料编号"><div class="relative w-[26rem] min-w-[26rem] shrink-0">
+        <div class="request-materials">
+          <article v-for="(line, index) in form.business_lines" :key="index" class="request-material">
+            <header class="material-row-head"><strong>第 {{ index + 1 }} 项</strong><button type="button" class="rounded-md p-2 text-red-600 hover:bg-red-50" title="删除明细" @click="removeLine(index)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button></header>
+            <div class="material-fields"><div class="material-field span-3"><span title="逐级选择，至少三级">物料编号</span><div class="relative min-w-0">
   <div class="flex items-stretch">
     <input v-model="line.material_query" class="min-w-0 flex-1 rounded-l-md border-gray-300 px-2 py-1.5 text-xs" placeholder="搜索物料编号或名称" title="至少选择到三级；没有下一级时可停在当前级，由 PMC 后续补全" @focus="searchMaterials(index, line)" @input="searchMaterials(index, line)" @keydown.enter.prevent="selectFirstMaterial(index, line)" />
     <button type="button" class="flex w-9 shrink-0 items-center justify-center rounded-r-md border border-l-0 border-gray-300 bg-gray-50 text-gray-500 hover:bg-gray-100" title="逐级选择物料编号" :aria-expanded="line.category_open" @click="line.category_open ? closeCategoryPicker(line) : openCategoryPicker(line)">
@@ -1789,14 +1833,14 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
   </div>
   <div v-if="line.material_open && materialMatchesFor(index).length && !line.category_open" class="material-picker-panel relative mt-2 max-h-72 w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl">
     <button v-for="item in materialMatchesFor(index)" :key="item.material_code" type="button" class="block w-full px-3 py-2 text-left text-xs hover:bg-gray-50" @mousedown.prevent="selectMaterial(index, line, item)">
-      <span class="font-mono text-gray-500">{{ item.material_code }}</span><span class="ml-2 font-medium text-gray-900">{{ item.material_name }}</span><span class="mt-0.5 block truncate text-[11px] text-gray-400">{{ item.specification || item.category_path }}</span>
+      <span class="font-mono text-gray-500">{{ item.material_code }}</span><span class="ml-2 font-medium text-gray-900">{{ item.material_name }}</span><span class="mt-0.5 block whitespace-normal break-words text-[11px] text-gray-400">{{ item.specification || item.category_path }}</span>
     </button>
   </div>
   <div v-if="line.category_open" class="material-picker-panel relative mt-2 w-[26rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
     <div v-if="line.material_code" class="flex items-center justify-between border-b border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900"><span>已选物料编号</span><button type="button" class="font-medium underline underline-offset-2" @mousedown.prevent="clearMaterialSelection(line)">不绑定物料编号，交由 PMC 补充</button></div>
     <div class="flex items-center gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-500">
       <button v-if="line.category_picker_path?.length" type="button" class="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-100" @click="goBackCategory(line)">返回</button>
-      <span class="truncate">{{ line.category_picker_path?.length ? categoryPickerPathLabels(line).join(' / ') : '选择一级分类' }}</span>
+      <span class="whitespace-normal break-words">{{ line.category_picker_path?.length ? categoryPickerPathLabels(line).join(' / ') : '选择一级分类' }}</span>
     </div>
     <div class="max-h-64 overflow-y-auto p-1">
       <button v-for="item in categoryChildrenFor(line)" :key="item.category_code" type="button" class="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-sm hover:bg-blue-50" @mousedown.prevent="chooseCategoryNode(index, line, item)">
@@ -1807,7 +1851,7 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
         <p class="px-3 py-1.5 text-[11px] text-gray-500">选择物料编号</p>
         <button v-for="item in categoryMaterialsFor(line)" :key="item.material_code" type="button" class="block w-full rounded-md px-3 py-2.5 text-left text-sm hover:bg-blue-50" @mousedown.prevent="chooseCategoryMaterial(index, line, item)">
           <span class="font-mono text-gray-500">{{ item.material_code }}</span><span class="ml-2 font-medium text-gray-900">{{ item.material_name }}</span>
-          <span class="mt-0.5 block truncate text-[11px] text-gray-500">{{ item.specification || '-' }} · {{ item.brand || '-' }} · {{ item.unit || '-' }}</span>
+          <span class="mt-0.5 block whitespace-normal break-words text-[11px] text-gray-500">{{ item.specification || '-' }} · {{ item.brand || '-' }} · {{ item.unit || '-' }}</span>
         </button>
       </div>
       <p v-if="!categoryChildrenFor(line).length && !categoryMaterialsFor(line).length" class="px-3 py-4 text-center text-xs text-gray-400">暂无下级分类或物料</p>
@@ -1816,8 +1860,21 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
       <button type="button" class="flex w-full items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700" @mousedown.prevent="confirmCategorySelection(line)">确认当前物料编号，交由 PMC 后续完善</button>
     </div>
   </div>
-  <div v-if="line.category_code" class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"><span class="text-gray-400">{{ line.material_code ? '已绑定物料编号' : '待 PMC 完善物料编号' }}</span><span class="truncate rounded bg-gray-50 px-1.5 py-0.5 font-mono text-gray-600">{{ line.material_code || line.category_code }}</span><button v-if="line.material_code" type="button" class="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 hover:bg-amber-100" @click="clearMaterialSelection(line)">改为新增物料</button></div>
-</div></td><td class="p-3"><input v-model="line.item_name" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" class="w-40 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model="line.product_name" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" :placeholder="line.material_code ? '物料库未填写' : 'Product name'" class="w-36 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model="line.specification" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" class="w-36 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><textarea v-model="line.product_desc" rows="2" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" class="w-56 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><textarea v-model="line.product_desc_en" rows="2" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" :placeholder="line.material_code ? '物料库未填写' : 'Product description'" class="w-48 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model="line.brand" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" class="w-24 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model="line.brand_en" :readonly="!!line.material_code" :class="line.material_code ? 'bg-gray-100 text-gray-500' : ''" :placeholder="line.material_code ? '物料库未填写' : 'Brand'" class="w-24 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model.number="line.quantity" type="number" min="0.0001" step="0.0001" class="w-20 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model="line.unit" class="w-16 rounded-md border-gray-300 px-2 py-1.5" /></td><td class="p-3"><input v-model.number="line.unit_price" type="number" min="0" step="0.01" :disabled="isProcurement" :placeholder="isProcurement ? '询价后录入' : ''" class="w-28 rounded-md border-gray-300 px-2 py-1.5 disabled:bg-gray-100 disabled:text-gray-400" /></td><td class="p-3"><input v-model="line.remarks" class="w-40 rounded-md border-gray-300 px-2 py-1.5" /></td><td><button type="button" class="rounded-md p-2 text-red-600 hover:bg-red-50" title="删除明细" @click="removeLine(index)"><FeatherIcon name="trash-2" class="h-4 w-4" /> </button></td></tr></tbody></table></div>
+  <div v-if="line.category_code" class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"><span class="text-gray-400">{{ line.material_code ? '已绑定物料编号' : '待 PMC 完善物料编号' }}</span><span class="break-all rounded bg-gray-50 px-1.5 py-0.5 font-mono text-gray-600">{{ line.material_code || line.category_code }}</span><button v-if="line.material_code" type="button" class="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800 hover:bg-amber-100" @click="clearMaterialSelection(line)">改为新增物料</button></div>
+</div></div>
+<label class="material-field span-2"><span>物料名称</span><textarea v-model="line.item_name" v-auto-grow rows="2" :readonly="!!line.material_code"></textarea></label>
+<label class="material-field span-2"><span>Product name</span><textarea v-model="line.product_name" v-auto-grow rows="2" :readonly="!!line.material_code" :placeholder="line.material_code ? '物料库未填写' : 'Product name'"></textarea></label>
+<label class="material-field span-3"><span>规格型号</span><textarea v-model="line.specification" v-auto-grow rows="2" :readonly="!!line.material_code"></textarea></label>
+<label class="material-field span-1"><span>数量</span><input v-model.number="line.quantity" type="number" min="0.0001" step="0.0001" /></label>
+<label class="material-field span-1"><span>单位</span><textarea v-model="line.unit" v-auto-grow rows="2"></textarea></label></div>
+            <div class="material-fields material-fields-secondary"><label class="material-field span-3"><span>产品描述</span><textarea v-model="line.product_desc" v-auto-grow rows="2" :readonly="!!line.material_code"></textarea></label>
+<label class="material-field span-3"><span>Product description</span><textarea v-model="line.product_desc_en" v-auto-grow rows="2" :readonly="!!line.material_code" :placeholder="line.material_code ? '物料库未填写' : 'Product description'"></textarea></label>
+<label class="material-field span-1"><span>商品品牌</span><textarea v-model="line.brand" v-auto-grow rows="2" :readonly="!!line.material_code"></textarea></label>
+<label class="material-field span-1"><span>Brand</span><textarea v-model="line.brand_en" v-auto-grow rows="2" :readonly="!!line.material_code" :placeholder="line.material_code ? '物料库未填写' : 'Brand'"></textarea></label>
+<label class="material-field span-1"><span>需求阶段单价</span><input v-model.number="line.unit_price" type="number" min="0" step="0.01" disabled placeholder="询价后录入" /></label>
+<label class="material-field span-3"><span>备注</span><textarea v-model="line.remarks" v-auto-grow rows="2"></textarea></label></div>
+          </article>
+        </div>
       </div>
       <div v-else class="border-t border-gray-200">
         <div class="flex items-center justify-between border-b border-gray-100 bg-white px-5 py-3 lg:px-6"><div class="flex items-center gap-2"><h3 class="text-sm font-semibold text-gray-900">购买明细</h3><span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{{ form.business_lines.length }} 项</span></div><button type="button" class="inline-flex h-8 items-center gap-2 rounded-md border border-gray-300 px-3 text-sm font-medium hover:border-gray-400 hover:bg-gray-50" @click="addLine"><FeatherIcon name="plus" class="h-4 w-4" />添加一行</button></div>
@@ -1864,132 +1921,34 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
   outline: none;
 }
 
-/* Let the detail rows determine the height; expand only while a picker is open. */
-.request-lines-scroll {
-  max-height: none;
-  overflow-y: visible;
-}
 
-.request-lines-scroll.request-lines-expanded {
-  overflow-y: visible;
-}
-
-.request-lines-table tbody tr {
-  min-height: 0;
-}
-
-.request-lines-table td {
-  vertical-align: top;
-}
-.material-picker-panel {
-  width: 360px;
-  max-width: calc(100vw - 2rem);
-  max-height: 18rem;
-  overscroll-behavior: contain;
-  color: rgb(31 41 55);
-}
-
-.material-picker-panel button {
-  min-height: 2.5rem;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-
-.material-picker-panel .font-mono {
-  letter-spacing: 0;
-  color: rgb(107 114 128);
-  font-size: 0.72rem;
-}
-
-@media (min-width: 1101px) {
-  .request-lines-table {
-    min-width: 0 !important;
-    table-layout: fixed;
-  }
-
-  .request-lines-table td input,
-  .request-lines-table td textarea {
-    max-width: 100%;
-    width: 100%;
-  }
-
-  .request-lines-table td:first-child > .relative {
-    min-width: 0;
-    width: 100%;
-  }
-}
+.request-materials { padding: 16px; background: #f7f9fa; display: grid; gap: 14px; }
+.request-material { min-width: 0; border: 1px solid #dce3e5; border-radius: 6px; background: white; }
+.material-row-head { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 4px 14px; border-bottom: 1px solid #e6ebed; background: #f8fafb; color: #53666c; font-size: 12px; }
+.material-fields { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; padding: 14px; align-items: start; }
+.material-fields-secondary { border-top: 1px solid #e8edef; }
+.material-field { display: flex; flex-direction: column; min-width: 0; gap: 6px; color: #263b42; font-size: 13px; }
+.material-field > span { color: #667980; font-size: 12px; line-height: 1.5; }
+.material-field p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.material-field input, .material-field textarea { width: 100%; min-width: 0; border: 1px solid #cbd5db; border-radius: 5px; padding: 7px 8px; font-size: 13px; line-height: 1.55; }
+.material-field textarea { min-height: 58px; overflow-y: hidden; resize: vertical; overflow-wrap: anywhere; }
+.material-field textarea[readonly] { background: #f6f8f9; color: #42565e; }
+.material-field input:disabled { background: #f6f8f9; color: #809198; }
+.material-field input:focus, .material-field textarea:focus { border-color: #176f73; outline: 1px solid #176f73; }
+.span-1 { grid-column: span 1; }
+.span-2 { grid-column: span 2; }
+.span-3 { grid-column: span 3; }
+.material-picker-panel { width: 100%; max-height: 24rem; overscroll-behavior: contain; color: #1f2937; }
+.material-picker-panel button { min-height: 2.5rem; }
+.material-picker-panel .font-mono { letter-spacing: 0; font-size: 0.72rem; }
 @media (max-width: 1100px) {
-  .request-lines-scroll {
-    overflow-x: visible !important;
-  }
-
-  .request-lines-table,
-  .request-lines-table thead,
-  .request-lines-table tbody,
-  .request-lines-table tr,
-  .request-lines-table td {
-    display: block;
-    width: 100%;
-  }
-
-  .request-lines-table {
-    min-width: 0 !important;
-  }
-
-  .request-lines-table thead {
-    display: none;
-  }
-
-  .request-lines-table tr {
-    padding: 0.5rem 0;
-  }
-
-  .request-lines-table td {
-    align-items: center;
-    display: grid;
-    grid-template-columns: minmax(96px, 22%) minmax(0, 1fr);
-    gap: 0.75rem;
-    padding: 0.4rem 1.25rem;
-  }
-
-  .request-lines-table td:first-child {
-    display: block;
-    padding-top: 0.75rem;
-  }
-
-  .request-lines-table td:nth-child(2)::before { content: '物料名称'; }
-  .request-lines-table td:nth-child(3)::before { content: 'Product name'; }
-  .request-lines-table td:nth-child(4)::before { content: '规格型号'; }
-  .request-lines-table td:nth-child(5)::before { content: '产品描述'; }
-  .request-lines-table td:nth-child(6)::before { content: 'Product description'; }
-  .request-lines-table td:nth-child(7)::before { content: '商品品牌'; }
-  .request-lines-table td:nth-child(8)::before { content: 'Brand'; }
-  .request-lines-table td:nth-child(9)::before { content: '数量'; }
-  .request-lines-table td:nth-child(10)::before { content: '单位'; }
-  .request-lines-table td:nth-child(11)::before { content: '单价'; }
-  .request-lines-table td:nth-child(12)::before { content: '备注'; }
-  .request-lines-table td:nth-child(13) { display: flex; justify-content: flex-end; }
-  .request-lines-table td::before {
-    color: rgb(107 114 128);
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-
-  .request-lines-table td input,
-  .request-lines-table td textarea,
-  .request-lines-table td .w-40,
-  .request-lines-table td .w-36,
-  .request-lines-table td .w-56,
-  .request-lines-table td .w-32,
-  .request-lines-table td .w-24,
-  .request-lines-table td .w-20 {
-    max-width: 100%;
-    width: 100%;
-  }
-
-  .request-lines-table td:first-child > .relative {
-    min-width: 0;
-    width: 100%;
-  }
+  .material-fields { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .material-field.span-1 { grid-column: span 2; }
+}
+@media (max-width: 640px) {
+  .request-materials { padding: 10px; }
+  .material-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
+  .material-field.span-1 { grid-column: span 1; }
+  .material-field.span-2, .material-field.span-3 { grid-column: span 2; }
 }
 </style>
-

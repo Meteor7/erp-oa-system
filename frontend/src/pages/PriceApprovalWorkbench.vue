@@ -107,6 +107,7 @@ function clearMessage() { notice.value = ''; error.value = ''; }
 function fail(err, fallback) { error.value = err?.messages?.[0] || err?.message || fallback; }
 function keyOfPr(pr, line) { return pr.name + ':' + line.name; }
 function supplierComparisons() { return activeApproval.value?.supplier_comparisons || []; }
+const selectedSupplier = computed(() => supplierComparisons().find((group) => group.is_selected));
 function supplierCount() { return supplierSlots.value.filter((slot) => String(slot.supplier || '').trim()).length; }
 function comparisonPrice(slot, line) { return slot?.prices?.[line.name] || {}; }
 function supplierSlotFromGroup(group, index) {
@@ -304,6 +305,7 @@ async function submitCurrent() {
 }
 async function approveCurrent() {
   clearMessage();
+  if (!selectedSupplier.value) { error.value = '请先选择成交供应商，再审批通过'; return; }
   try {
     const result = await actions.approveApproval.submit({ name: activeApproval.value.name });
     notice.value = '审批通过，已按商业条件生成 ' + result.po_names.length + ' 张 PO 草稿';
@@ -576,9 +578,16 @@ async function closeCurrentPo() {
               <button v-if="canEditPrice && activeApproval.status === '草稿'" type="button" class="primary-button" @click="submitCurrent"><FeatherIcon name="send" class="h-4 w-4" />提交价格审批</button>
               <button v-if="canEditPrice && activeApproval.status === '草稿'" type="button" class="secondary-button" @click="cancelCurrent"><FeatherIcon name="x-circle" class="h-4 w-4" />取消价格审批</button>
               <button v-if="canEditPrice && activeApproval.status === '待审批'" type="button" class="secondary-button" @click="withdrawCurrent"><FeatherIcon name="corner-up-left" class="h-4 w-4" />撤回修改</button>
-              <button v-if="activeApproval.can_select_quote && activeApproval.status === '待审批' && supplierComparisons().some((group) => group.is_selected)" type="button" class="approve-button" @click="approveCurrent"><FeatherIcon name="check-circle" class="h-4 w-4" />演示员工37审批通过</button>
+              <button v-if="activeApproval.can_select_quote && activeApproval.status === '待审批'" type="button" class="approve-button" :disabled="!selectedSupplier" :aria-describedby="!selectedSupplier ? 'supplier-selection-hint' : undefined" @click="approveCurrent"><FeatherIcon name="check-circle" class="h-4 w-4" />演示员工37审批通过</button>
             </div>
           </header>
+
+          <div v-if="activeApproval.can_select_quote && activeApproval.status === '待审批'" class="approval-guidance" :class="{ 'supplier-selected': selectedSupplier }" role="status">
+            <div class="approval-steps"><span :class="{ done: selectedSupplier }">1 · 选择成交供应商</span><FeatherIcon name="arrow-right" class="h-4 w-4" /><span>2 · 确认金额并审批通过</span></div>
+            <p v-if="!selectedSupplier" id="supplier-selection-hint">请先在供应商名称下点击“选择此供应商”，再点击“演示员工37审批通过”。采购推荐仅供参考，需要您确认成交供应商。</p>
+            <p v-else>已选择：<strong>{{ selectedSupplier.supplier }}</strong> · 成交总额 {{ money(activeApproval.total_amount) }}。请核对报价后点击“演示员工37审批通过”。</p>
+            <button v-if="approvalView !== 'compare'" type="button" class="secondary-button" @click="approvalView = 'compare'">查看供应商比价</button>
+          </div>
 
           <div class="approval-view-tabs" role="tablist" aria-label="价格审批单内容">
             <button type="button" :class="{ active: approvalView === 'compare' }" @click="approvalView = 'compare'">供应商比价</button>
@@ -619,6 +628,7 @@ async function closeCurrentPo() {
                           <strong v-else>{{ slot.supplier || `供应商 ${index + 1}` }}</strong>
                           <span v-if="slot.is_recommended" class="recommend-label">采购推荐</span>
                           <span v-if="slot.is_selected" class="chosen-label">演示员工37已选</span>
+                          <button v-if="activeApproval.can_select_quote && slot.original_supplier && !slot.is_selected" type="button" class="select-supplier-button" @click="chooseSupplierComparison(slot)"><FeatherIcon name="check-circle" class="h-4 w-4" />选择此供应商</button>
                         </div>
                       </th>
                     </tr>
@@ -719,7 +729,7 @@ async function closeCurrentPo() {
                             <label v-if="canEditPrice && activeApproval.status === '草稿' && slot.supplier" class="recommend-toggle-inline"><input v-model="slot.is_recommended" type="checkbox" />采购推荐</label>
                             <span v-if="slot.is_selected" class="chosen-label">演示员工37已选</span>
                             <div class="row-actions package-actions">
-                              <button v-if="activeApproval.can_select_quote && slot.original_supplier && !slot.is_selected" type="button" title="演示员工37选择该供应商作为成交供应商" @click="chooseSupplierComparison(slot)"><FeatherIcon name="check-circle" class="h-4 w-4" /></button>
+                              <button v-if="activeApproval.can_select_quote && slot.original_supplier && !slot.is_selected" type="button" title="演示员工37选择该供应商作为成交供应商" @click="chooseSupplierComparison(slot)"><FeatherIcon name="check-circle" class="h-4 w-4" />选择此供应商</button>
                               <button v-if="canEditPrice && activeApproval.status === '草稿' && slot.supplier" type="button" class="save-slot-button" title="保存该供应商报价" @click="saveSupplierSlot(slot)"><FeatherIcon name="save" class="h-4 w-4" />保存</button>
                               <button v-if="canEditPrice && activeApproval.status === '草稿' && slot.original_supplier" type="button" class="danger-icon" title="删除供应商报价" @click="removeSupplierComparison(slot)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button>
                             </div>
@@ -941,6 +951,15 @@ async function closeCurrentPo() {
 .primary-button:disabled { background: #9ba8aa; border-color: #9ba8aa; cursor: not-allowed; }
 .secondary-button { background: white; border-color: #aebbbc; color: #344b4f; }
 .approve-button { background: #21774f; border-color: #21774f; color: white; }
+.approve-button:disabled { background: #e5e9e9; border-color: #d2dada; color: #798788; cursor: not-allowed; }
+.approval-guidance { margin: 14px; padding: 12px 16px; border: 1px solid #e5c886; border-radius: 5px; background: #fffaf0; color: #765313; font-size: 12px; }
+.approval-guidance.supplier-selected { border-color: #b1d8c8; background: #f0faf5; color: #256048; }
+.approval-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-weight: 700; }
+.approval-steps .done { color: #21774f; }
+.approval-guidance p { margin: 7px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
+.approval-guidance > button { margin-top: 8px; }
+.select-supplier-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 9px; border: 1px solid #176f73; border-radius: 4px; background: white; color: #176f73; font-size: 12px; white-space: nowrap; }
+.select-supplier-button:hover { background: #e5f2f0; }
 .table-frame { width: 100%; overflow: auto; }
 .data-grid { width: 100%; min-width: 1280px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12px; }
 .min-pr-grid { min-width: 1360px; }
@@ -1137,8 +1156,8 @@ async function closeCurrentPo() {
 .quote-matrix .supplier-group-heading { border-left: 2px solid #c4d0d1; }
 .quote-matrix .supplier-group-heading.recommended { background: #edf7f2; }
 .quote-matrix .supplier-group-heading.chosen { background: #dff3ec; box-shadow: inset 0 3px #17806f; }
-.supplier-heading-content { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.supplier-heading-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.supplier-heading-content { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.supplier-heading-content strong { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; font-size: 11px; }
 .supplier-inline { box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid #b9c7c9; background: #fff; padding: 4px 5px; color: #263238; font-size: 10px; }
 .supplier-name-input { flex: 1; min-width: 90px; font-weight: 700; }
 .number-input { text-align: right; }
