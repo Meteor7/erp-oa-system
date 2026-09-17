@@ -35,6 +35,9 @@ const props = defineProps({
 const emit = defineEmits(['request-created', 'supplemented']);
 
 const rows = ref([]);
+// Unsaved edits per invoice name. The recognition poll replaces `rows` every
+// 1.5s while any invoice is still recognizing; edits are re-applied on top.
+const pendingEdits = reactive({});
 const selectedName = ref('');
 const checkedNames = ref([]);
 const busy = ref(false);
@@ -96,6 +99,25 @@ function syncDerivedTotal(row, field) {
   if (derived) row.total_amount = derived;
 }
 
+function rememberEdits(row) {
+  if (!row?.name) return;
+  const names = [...fields.map(([name]) => name), 'expense_description'];
+  pendingEdits[row.name] = Object.fromEntries(names.map((name) => [name, row[name]]));
+}
+
+function forgetEdits(name) {
+  if (name && name in pendingEdits) delete pendingEdits[name];
+}
+
+function withPendingEdits(row) {
+  const edits = pendingEdits[row?.name];
+  if (!edits) return row;
+  const merged = { ...row };
+  if (isEditable(row)) fields.forEach(([name]) => { if (name in edits) merged[name] = edits[name]; });
+  if (isContextEditable(row) && 'expense_description' in edits) merged.expense_description = edits.expense_description;
+  return merged;
+}
+
 function cleanError(error, fallback) {
   return String(error?.message || fallback).replace(/<[^>]*>/g, '').trim();
 }
@@ -147,7 +169,7 @@ function schedulePoll() {
 async function reload(showError = true) {
   loading.value = true;
   try {
-    rows.value = await listWorkbenchInvoices({ view: 'all', status: statusFilter.value, limit: 300 }) || [];
+    rows.value = (await listWorkbenchInvoices({ view: 'all', status: statusFilter.value, limit: 300 }) || []).map(withPendingEdits);
     if (!rows.value.some((row) => row.name === selectedName.value)) selectedName.value = rows.value[0]?.name || '';
     syncChecked();
     schedulePoll();
@@ -198,6 +220,7 @@ async function saveFields(row) {
     }
     updated = await updateInvoiceExpenseContext(updated.name, row.expense_description);
     rows.value = rows.value.map((item) => item.name === updated.name ? updated : item);
+    forgetEdits(updated.name);
     message.value = '识别内容、费用说明和附件状态已保存。';
   } catch (error) {
     errorMessage.value = cleanError(error, '识别内容保存失败');
@@ -214,6 +237,7 @@ async function confirmRow(row) {
     await updateInvoiceExpenseContext(row.name, row.expense_description);
     const updated = await confirmInvoice(row.name, Object.fromEntries(fields.map(([name]) => [name, row[name]])));
     rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    forgetEdits(row.name);
     message.value = updated.conflict ? '检测到疑似重复发票，请财务复核。' : '发票内容已确认，可勾选下推。';
   } catch (error) {
     errorMessage.value = cleanError(error, '发票确认失败');
@@ -271,6 +295,7 @@ async function undoConfirm(row) {
   try {
     const updated = await unconfirmInvoice(row.name, '用户撤回确认');
     rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    forgetEdits(row.name);
     syncChecked();
     message.value = '已撤回确认，可重新修改识别内容。';
   } catch (error) {
@@ -285,6 +310,7 @@ async function retryRow(row) {
   try {
     const updated = await retryInvoice(row.name);
     rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    forgetEdits(row.name);
     schedulePoll();
   } catch (error) {
     errorMessage.value = cleanError(error, '重新识别失败');
@@ -300,6 +326,7 @@ async function resolveRow(row) {
   try {
     const updated = await resolveDuplicate(row.name, reason);
     rows.value = rows.value.map((item) => item.name === row.name ? updated : item);
+    forgetEdits(row.name);
     message.value = '重复标记已解除，请再次确认内容。';
   } catch (error) {
     errorMessage.value = cleanError(error, '重复复核失败');
@@ -540,13 +567,13 @@ onBeforeUnmount(() => {
             <div class="grid gap-3 sm:grid-cols-2">
               <label v-for="[name, label, type] in fields" :key="name" class="text-xs font-medium text-gray-500" :class="name === 'project_name' || name === 'invoice_category' ? 'sm:col-span-2' : ''">
                 {{ label }}
-                <input v-model="selectedRow[name]" :type="type" @input="syncDerivedTotal(selectedRow, name)" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-600" />
+                <input v-model="selectedRow[name]" :type="type" @input="syncDerivedTotal(selectedRow, name); rememberEdits(selectedRow)" :step="type === 'number' ? '0.01' : undefined" :disabled="!isEditable(selectedRow)" class="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-600" />
               </label>
             </div>
             <section class="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
               <label class="block text-xs font-semibold text-gray-700">
                 费用说明 <span class="text-red-500">*</span>
-                <textarea v-model="selectedRow.expense_description" rows="3" maxlength="1000" :disabled="!isContextEditable(selectedRow)" class="mt-2 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50" placeholder="请填写本次费用用途，例如：客户拜访往返交通费"></textarea>
+                <textarea v-model="selectedRow.expense_description" @input="rememberEdits(selectedRow)" rows="3" maxlength="1000" :disabled="!isContextEditable(selectedRow)" class="mt-2 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:border-gray-200 disabled:bg-gray-50" placeholder="请填写本次费用用途，例如：客户拜访往返交通费"></textarea>
               </label>
               <div class="mt-4 flex items-center justify-between gap-3">
                 <div>

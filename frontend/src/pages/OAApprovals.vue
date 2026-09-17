@@ -1,7 +1,7 @@
 <script setup>
 import { Button, Card, createResource } from 'frappe-ui';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 import ExpenseWorkbench from '../components/ExpenseWorkbench.vue';
 
 const REQUEST_LEAVE = '\u8bf7\u5047\u7533\u8bf7';
@@ -174,6 +174,7 @@ const selectedRequestName = ref('');
 const selectedLeaveName = ref('');
 const leaveDraftName = ref('');
 const lastAutoHydratedDraft = ref('');
+const returnedDraft = ref(null);
 let leaveRefreshTimer = null;
 const selectedConsumptionName = ref('');
 const pushSelection = ref([]);
@@ -371,8 +372,6 @@ function previewPayload() {
 }
 
 async function previewRoute() {
-  errMsg.value = '';
-  preview.data = null;
   try {
     await preview.submit(previewPayload());
   } catch (error) {
@@ -391,6 +390,12 @@ async function reloadLists() {
     return;
   }
   await Promise.allSettled([mine.reload(), pending.reload(), previewRoute(), refreshAttendance(false)]);
+}
+
+// Timer-driven refresh: lists and balances only. It never touches the form or
+// the route preview, so nothing the user is typing can be replaced.
+async function pollLeaveLists() {
+  await Promise.allSettled([mine.reload(), pending.reload(), refreshAttendance(false)]);
 }
 
 async function refreshAttendance(replaceDays = true) {
@@ -551,6 +556,30 @@ function hydrateLeaveDraft(row) {
     to_date: row.to_date || '',
     reason: row.reason || '',
   });
+}
+
+function leaveFormDirty() {
+  return Boolean(leaveForm.subject.trim() || leaveForm.from_date || leaveForm.to_date || leaveForm.reason.trim());
+}
+
+function confirmDiscardLeaveForm() {
+  return !leaveFormDirty() || window.confirm('当前表单还有未提交的内容，继续将会丢失，是否继续？');
+}
+
+function openReturnedDraft() {
+  const row = returnedDraft.value;
+  if (!row) return;
+  if (leaveDraftName.value !== row.name && !confirmDiscardLeaveForm()) return;
+  lastAutoHydratedDraft.value = row.name;
+  selectedLeaveName.value = row.name;
+  hydrateLeaveDraft(row);
+  returnedDraft.value = null;
+}
+
+function warnBeforeUnload(event) {
+  if (!isLeave.value || !leaveFormDirty()) return;
+  event.preventDefault();
+  event.returnValue = '';
 }
 
 async function submitLeaveRequest() {
@@ -772,12 +801,10 @@ watch(leaveRows, (rows) => {
   } else if (!rows.some((row) => row.name === selectedLeaveName.value)) {
     selectedLeaveName.value = rows[0]?.name || '';
   }
-  const returnedDraft = (mine.data || []).find((row) => row.kanban_status === 'draft' && rejectionEvent(row));
-  if (returnedDraft && returnedDraft.name !== lastAutoHydratedDraft.value) {
-    lastAutoHydratedDraft.value = returnedDraft.name;
-    selectedLeaveName.value = returnedDraft.name;
-    hydrateLeaveDraft(returnedDraft);
-  }
+  // A returned (rejected) draft is only announced here; it is filled into the
+  // form when the user clicks the banner, never by a background refresh.
+  const returned = (mine.data || []).find((row) => row.kanban_status === 'draft' && rejectionEvent(row));
+  returnedDraft.value = returned && returned.name !== leaveDraftName.value ? returned : null;
 }, { immediate: true });
 watch(() => route.query.request, (name) => {
   if (name) {
@@ -795,13 +822,20 @@ watch(leaveRows, (rows) => {
   const requested = String(route.params.name || route.query.request || '');
   if (requested && !rows.some((row) => row.name === requested)) loadLeaveDetail(requested);
 });
+onBeforeRouteUpdate((to) => {
+  if (!isLeave.value || String(to.path || '').startsWith(attendanceBase.value)) return true;
+  return confirmDiscardLeaveForm();
+});
+onBeforeRouteLeave(() => !isLeave.value || confirmDiscardLeaveForm());
 onMounted(() => {
   refreshAttendance(false);
+  window.addEventListener('beforeunload', warnBeforeUnload);
   leaveRefreshTimer = window.setInterval(() => {
-    if (isLeave.value && !saving.value && document.visibilityState === 'visible') reloadLists();
-  }, 10000);
+    if (isLeave.value && !saving.value && document.visibilityState === 'visible') pollLeaveLists();
+  }, 30000);
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', warnBeforeUnload);
   if (leaveRefreshTimer) window.clearInterval(leaveRefreshTimer);
 });
 </script>
@@ -876,6 +910,10 @@ onBeforeUnmount(() => {
             <div class='max-h-64 overflow-auto rounded border'><div v-for='day in leaveForm.attendance_days' :key='day.work_date' class='flex items-center justify-between border-b px-3 py-2 text-sm'><label :for='`hours-${day.work_date}`'>{{ day.work_date }}</label><div><input :id='`hours-${day.work_date}`' v-model='day.hours' type='number' min='0' :max='currentRequestType === REQUEST_OVERTIME ? 24 : 8' step='0.01' class='w-24 rounded border px-2 py-1 text-right' /> 小时</div></div></div>
             <p class='text-sm'>合计 {{ attendanceHours }} 小时 / {{ Number((attendanceHours / 8).toFixed(2)) }} 天（1天＝8小时）</p>
           </div>
+          <div v-if='returnedDraft' class='mt-3 flex flex-wrap items-center justify-between gap-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800'>
+            <span>申请 {{ returnedDraft.name }} 已被退回，可修改后重新提交。</span>
+            <Button @click='openReturnedDraft'>查看并填入</Button>
+          </div>
           <div v-if='leaveDraftName' class='mt-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800'>正在编辑：{{ leaveDraftName }}</div>
           <div class='mt-3 flex items-center gap-3'>
             <Button variant='solid' :loading='saving' :disabled='attendanceOptions.loading || !attendanceHours || annualLeaveBlocked' @click='submitLeaveRequest'>{{ T.submit }}</Button>
@@ -885,7 +923,7 @@ onBeforeUnmount(() => {
         </Card>
 
         <Card :title='T.routeTitle' class='oa-panel oa-flow-panel'>
-          <div v-if='preview.loading' class='text-sm text-gray-500 py-4'>...</div>
+          <div v-if='preview.loading && !routeSteps.length' class='text-sm text-gray-500 py-4'>...</div>
           <div v-else-if='!routeSteps.length' class='oa-empty-flow text-sm text-gray-400 py-4'>填写部门和直属主管后，这里会显示实际审批路径</div>
           <ol v-else class='space-y-2'>
             <li v-for='step in routeSteps' :key='step.step_index' class='oa-route-step rounded border border-gray-200 px-3 py-2'>
@@ -1194,7 +1232,7 @@ onBeforeUnmount(() => {
 
       <template v-if='purchaseTab === "flow"'>
         <Card :title='T.routeTitle'>
-          <div v-if='preview.loading' class='text-sm text-gray-500 py-4'>...</div>
+          <div v-if='preview.loading && !routeSteps.length' class='text-sm text-gray-500 py-4'>...</div>
           <ol v-else class='grid grid-cols-1 gap-2 md:grid-cols-2'>
             <li v-for='step in routeSteps' :key='step.step_index' class='rounded border border-gray-200 px-3 py-2'>
               <div class='flex items-center justify-between gap-2'>
