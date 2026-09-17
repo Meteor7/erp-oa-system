@@ -54,23 +54,31 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 These guidelines are working if: fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
 5. File-Write Encryption on This Machine (HARD RULE)
-This machine has TipRay 天锐绿盾 transparent encryption (TsdEncrypt.sys driver, `%TSD-Header-###%` file prefix).
-The encryption hook treats `claude.exe` as a 受控应用 (controlled application): reads get plaintext, but WRITES get encrypted on save. Any file written via Claude Code's `Write`, `Edit`, or `NotebookEdit` tools is corrupted on disk (8192-byte `%TSD-Header-###%` blob).
+This machine has TipRay 天锐绿盾 transparent encryption (TsdEncrypt.sys driver, `%TSD-Header-###%` file prefix, on-disk size a multiple of 8192).
+Whether a written file comes out encrypted depends on WHICH PROCESS creates it and whether that process has opened a protected file. Verified on this machine 2026-09-17: most writers produce ciphertext for .py/.js/.json/.md/.csv/.html (and sometimes .vue), which breaks git commits, Docker deploys and builds.
 
-Workaround (no IT approval needed):
-- NEVER use `Write`, `Edit`, or `NotebookEdit` tools on any file in this project.
-- ALL file writes must go through `Bash` tool, using one of:
-  - `cat > file << 'EOF' ... EOF` heredoc
-  - `cmd //c "echo ... > file"` (cmd.exe is a trusted writer)
-  - `cmd //c "move /Y source dest"` (Fuck_LvDun trick to overwrite encrypted files with plaintext)
-  - `wsl -e python3 -c "open('/mnt/e/...','w').write(...)"` (Python via WSL)
-  - `sed -i`, `awk`, etc. for in-place edits
+The ONLY allowed way to write project files (verified plaintext for .py/.js/.json/.md/.csv/.vue/.html, new files and overwriting existing files):
+- Read the source with `git show HEAD:<path>` or python, modify the text in python.
+- Let cmd.exe create the target file via its `>` redirect, and feed the bytes through stdin. cmd.exe itself must NOT open any source file:
 
-Verified safe writers (produce plaintext): bash heredoc, python via wsl, cmd echo, cmd move, sed/awk in bash.
-Verified UNSAFE writer (produces `%TSD-Header-###%` encrypted output): Claude Code's Write/Edit tools.
+```python
+import subprocess, sys
+def write(target, text):
+    cmd = 'cmd.exe /d /s /c ""' + sys.executable + '" -c "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())" > "' + str(target) + '""'
+    subprocess.run(cmd, input=text.encode("utf-8"), check=True)
+```
 
-To recover an already-encrypted file: `cmd //c "type ENCRYPTED_FILE > PLAINTEXT_OUTPUT"` (cmd.exe `type` is a trusted reader; output is plaintext).
+Run such python from PowerShell as `@' ... '@ | python -`.
 
-Long-term fix (requires IT): have IT add `E:\libreR\` as a "明文目录" (plaintext directory) in the TipRay 管理控制台, or promote `claude.exe` to 信任进程.
+FORBIDDEN writers (produce `%TSD-Header-###%` ciphertext):
+- Claude Code `Write`, `Edit`, `NotebookEdit` tools.
+- `cmd.exe /c "type SRC > DEST"` (this is what encrypted PreRequestCenter.vue / PriceApprovalWorkbench.vue on 2026-09-16), and any cmd command that reads a file and redirects it.
+- WSL writes, e.g. `wsl ... sh -c 'cat SRC > DEST'`.
+- Bash `>` / heredoc / `sed -i` / `awk` redirects, PowerShell `Set-Content` / `Out-File` / `[IO.File]::WriteAllText`.
+- Local `node` / `vite build` / `yarn build` (build and test inside Docker instead).
 
-Until that's done: this rule is absolute. No Write/Edit tool calls in this project.
+Verify EVERY write with git, never with python (python may see decrypted bytes):
+- `git diff --numstat -- <path>` must show line counts, not `-  -` / `Bin`; or `git hash-object --no-filters <path>` equals the expected hash.
+- If a file turns out encrypted: stop and tell the user. Do not commit it and do not deploy it.
+
+Reading: `cmd.exe type` of a protected file may return ciphertext and does NOT decrypt. An already-encrypted file that is unchanged from Git can be restored with `git checkout -- <path>` (only with the user's go-ahead). The real long-term fix is IT: mark `D:\rayher` as a plaintext directory in TipRay, or trust the development processes by name.
