@@ -227,6 +227,7 @@ const annualBalance = ref(null);
 const annualLeaveBlocked = computed(() => currentRequestType.value === REQUEST_LEAVE && leaveForm.leave_type === "年假" && (!annualBalance.value?.eligible || attendanceHours.value > Number(annualBalance.value?.available_hours || 0)));
 const leaveTypes = ref([]);
 let attendanceVersion = 0;
+let attendanceDaysLoading = false;
 let hydratingAttendance = false;
 const attendanceHours = computed(() => Math.round(leaveForm.attendance_days.reduce((total, day) => total + Number(day.hours || 0), 0) * 100) / 100);
 const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_paid' });
@@ -393,8 +394,9 @@ async function reloadLists() {
 }
 
 async function refreshAttendance(replaceDays = true) {
-  if (!isLeave.value) return;
+  if (!isLeave.value || (!replaceDays && attendanceDaysLoading)) return;
   const version = ++attendanceVersion;
+  if (replaceDays) attendanceDaysLoading = true;
   try {
     const data = await attendanceOptions.fetch({ request_type: currentRequestType.value, from_date: leaveForm.from_date || "", to_date: leaveForm.to_date || "" });
     if (version !== attendanceVersion) return;
@@ -407,6 +409,8 @@ async function refreshAttendance(replaceDays = true) {
     if (replaceDays) leaveForm.attendance_days = [];
     annualBalance.value = null;
     errMsg.value = serverMessage(error, T.loadFailed);
+  } finally {
+    if (version === attendanceVersion) attendanceDaysLoading = false;
   }
 }
 
