@@ -58,11 +58,14 @@ const pendingApprovalCategories = computed(() => todoCategories.value.filter((it
 const actionItems = computed(() => procurement.data?.action_items || []);
 const costVisible = computed(() => Boolean(cost.data?.visible));
 const hrVisible = computed(() => Boolean(hr.data?.visible));
+const errorText = (resource) => resource.error?.messages?.[0] || resource.error?.message || String(resource.error || '');
+const costPending = computed(() => cost.loading || Boolean(cost.error));
+const hrPending = computed(() => hr.loading || Boolean(hr.error));
 const rdVisible = computed(() => Boolean(d.data) && canSee('/allocation-dashboard'));
 const tabs = computed(() => [
   { key: 'mine', label: '我的待办', count: oaTodos.data?.total || 0, show: true },
-  { key: 'biz', label: '经营看板', show: costVisible.value },
-  { key: 'hr', label: '人事看板', show: hrVisible.value },
+  { key: 'biz', label: '经营看板', show: costVisible.value || costPending.value },
+  { key: 'hr', label: '人事看板', show: hrVisible.value || hrPending.value },
   { key: 'rd', label: '研发核算', show: rdVisible.value },
 ].filter((item) => item.show));
 
@@ -337,6 +340,8 @@ const stages = [
     <!-- 经营看板 -->
     <section v-show="tab === 'biz'" class="space-y-4">
       <div v-if="cost.loading" class="flex items-center gap-2 py-8 text-sm text-gray-500"><FeatherIcon name="loader" class="h-4 w-4" /><span>正在统计公司费用...</span></div>
+      <div v-else-if="cost.error" class="rounded-xl border border-red-100 bg-red-50 px-5 py-4 text-sm text-red-700">经营数据加载失败：{{ errorText(cost) }}</div>
+      <div v-else-if="cost.data && !cost.data.visible" class="rounded-xl border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500">你的账号没有查看公司费用的权限，仅财务和公司领导可见。</div>
       <template v-else-if="cost.data?.visible">
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div class="rounded-xl border-0 bg-gradient-to-br from-[#FF9B1F] to-[#F27A00] p-5 text-white">
@@ -417,7 +422,10 @@ const stages = [
 
     <!-- 人事看板 -->
     <section v-show="tab === 'hr'" class="space-y-4">
-      <template v-if="hr.data?.visible">
+      <div v-if="hr.loading" class="flex items-center gap-2 py-8 text-sm text-gray-500"><FeatherIcon name="loader" class="h-4 w-4" /><span>正在统计请假与加班...</span></div>
+      <div v-else-if="hr.error" class="rounded-xl border border-red-100 bg-red-50 px-5 py-4 text-sm text-red-700">人事数据加载失败：{{ errorText(hr) }}</div>
+      <div v-else-if="hr.data && !hr.data.visible" class="rounded-xl border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500">你的账号没有查看人事统计的权限，仅人事、部门主管和公司领导可见。</div>
+      <template v-else-if="hr.data?.visible">
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div class="rounded-xl bg-gradient-to-br from-[#FF9B1F] to-[#F27A00] p-5 text-white">
             <div class="text-sm text-white/85">本期请假</div>
