@@ -35,7 +35,27 @@ const charts = reactive({});
 const oaTodos = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_approval_summary', method: 'GET', auto: true });
 const queue = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_approval_queue', method: 'GET', makeParams: () => ({ limit: 8 }), auto: true });
 const myRequests = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_requests', method: 'GET', makeParams: () => ({ limit: 6 }), auto: true });
-const notifications = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_notifications', method: 'GET', makeParams: () => ({ limit: 8 }), auto: true });
+const noteCategory = ref('mine');
+const noteUnreadOnly = ref(true);
+const notifications = createResource({
+  url: 'rayher_hr_payroll.api.overview_entry.get_my_notification_feed', method: 'GET',
+  makeParams: () => ({ category: noteCategory.value, unread_only: noteUnreadOnly.value ? 1 : 0, limit: 20 }), auto: true,
+});
+const noteReader = createResource({ url: 'rayher_hr_payroll.api.overview_entry.mark_notifications_read', method: 'POST' });
+const noteCategories = computed(() => notifications.data?.categories || []);
+const noteItems = computed(() => notifications.data?.items || []);
+function openNote(item) {
+  markNoteRead(item);
+  if (item.route) router.push({ path: item.route, query: item.query || {} });
+}
+function markNoteRead(item) {
+  if (!item.unread) return;
+  noteReader.submit({ names: JSON.stringify(item.names) }).then(() => notifications.reload());
+}
+function markCategoryRead() {
+  noteReader.submit({ category: noteCategory.value }).then(() => notifications.reload());
+}
+watch([noteCategory, noteUnreadOnly], () => notifications.reload());
 const procurement = createResource({ url: 'rayher_hr_payroll.api.dashboard_entry.get_procurement_overview', method: 'GET', auto: true });
 const myLeave = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_leave_summary', method: 'GET', auto: true });
 const cost = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_cost_overview', method: 'GET', makeParams: () => ({ scope: scope.value, period: currentPeriod.value }), auto: true });
@@ -228,7 +248,7 @@ function openApprovalTodo(item) {
   router.push({ path: item.route, query: item.requests?.length ? { request: item.requests[0] } : {} });
 }
 function openAlert(item) { router.push({ path: item.route, query: item.po ? { po: item.po } : {} }); }
-function openNotification(item) { if (item?.link) window.location.assign(String(item.link)); }
+
 
 watch(() => cost.data, () => { if (cost.data?.visible && !selectedProject.value && cost.data.projects.length) openProject(cost.data.projects[0]); else redraw(); });
 watch(() => hr.data, redraw);
@@ -377,17 +397,33 @@ const stages = [
       </div>
 
       <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
-        <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-          <div><h2 class="text-sm font-semibold text-gray-900">通知</h2><p class="mt-1 text-xs text-gray-500">只保留需要你知道或行动的消息</p></div>
-          <span class="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700">未读 {{ notifications.data?.unread || 0 }}</span>
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-3">
+          <div><h2 class="text-sm font-semibold text-gray-900">通知</h2><p class="mt-1 text-xs text-gray-500">只是知会你，需要你动手的事都在上面的「要我处理」里</p></div>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="flex items-center gap-1.5 text-xs text-gray-600"><input v-model="noteUnreadOnly" type="checkbox" class="rounded border-gray-300" />只看未读</label>
+            <button type="button" class="text-xs text-gray-500 underline hover:text-[#E57A00]" @click="markCategoryRead">本类全部已读</button>
+          </div>
         </div>
-        <button v-for="item in notifications.data?.items || []" :key="item.name" type="button" class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openNotification(item)">
-          <span class="h-2 w-2 shrink-0 rounded-full" :class="item.read ? 'bg-gray-300' : 'bg-red-500'"></span>
-          <span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-gray-900">{{ item.subject || item.document_name }}</strong>
-            <span class="mt-0.5 block truncate text-xs text-gray-500">{{ item.read ? '已读' : '待查看' }}</span></span>
-          <FeatherIcon name="external-link" class="h-4 w-4 text-gray-300" />
+        <div class="flex flex-wrap gap-1.5 border-b border-gray-100 px-5 py-2.5">
+          <button v-for="item in noteCategories" :key="item.key" type="button"
+            class="rounded-lg px-3 py-1.5 text-xs" :class="noteCategory === item.key ? 'bg-gray-900 font-semibold text-white' : 'text-gray-600 hover:bg-gray-100'"
+            @click="noteCategory = item.key">
+            {{ item.label }}<span v-if="item.unread" class="ml-1.5 font-semibold" :class="noteCategory === item.key ? 'text-[#FFB547]' : 'text-[#E57A00]'">{{ item.unread }}</span>
+          </button>
+        </div>
+        <button v-for="item in noteItems" :key="item.names[0]" type="button"
+          class="flex w-full items-start gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-[#FFFCF7]"
+          :class="item.unread ? 'bg-[#FFFDF8]' : ''" @click="openNote(item)">
+          <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" :class="item.unread ? 'bg-[#FF8F00]' : 'bg-gray-300'"></span>
+          <span class="min-w-0 flex-1">
+            <strong class="block text-sm font-medium text-gray-900">{{ item.event }}<span v-if="item.title">：{{ item.title }}</span></strong>
+            <span class="mt-0.5 block text-xs text-gray-500">
+              {{ item.detail }}<span v-if="item.more"> · 该单据还有 {{ item.more }} 条</span>
+            </span>
+          </span>
+          <span class="shrink-0 text-xs text-gray-400">{{ (item.created || '').slice(5, 16) }}</span>
         </button>
-        <p v-if="!notifications.loading && !(notifications.data?.items || []).length" class="px-5 py-8 text-center text-sm text-gray-400">暂无通知</p>
+        <p v-if="!notifications.loading && !noteItems.length" class="px-5 py-10 text-center text-sm text-gray-400">这一类没有{{ noteUnreadOnly ? '未读' : '' }}通知</p>
       </div>
     </section>
 

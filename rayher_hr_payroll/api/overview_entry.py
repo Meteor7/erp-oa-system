@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+import re
 from collections import defaultdict
 from datetime import date
 
@@ -548,3 +549,149 @@ def get_my_requests(limit=6):
                           order_by="modified desc", limit_page_length=int(limit or 6))
     steps = _steps_by_parent([row.name for row in docs])
     return {"items": [request_progress(row, steps.get(row.name, [])) for row in docs]}
+
+
+# --- notifications -----------------------------------------------------------
+
+# Events that mean "go and do something": the queue already shows them, so they
+# never repeat here.
+ACTION_EVENTS = ("待处理", "待审批", "待办理", "待你处理")
+MINE_EVENTS = ("已通过", "已拒绝", "已退回", "被退回", "已付款", "已完成", "已撤回", "已关闭")
+CC_MARK = "抄送"
+DOC_ROUTES = {
+    "OA Purchase Order": ("/approval/procurement/price-approvals", "po"),
+    "OA Price Approval": ("/approval/procurement/price-approvals", "request"),
+    "OA Procurement Request": ("/approval/procurement/price-approvals", "request"),
+    "OA Material Progress": ("/approval/material-progress", "request"),
+}
+CATEGORY_LABELS = [("mine", "我的申请"), ("cc", "抄送我的"), ("biz", "业务进展"), ("sys", "系统与指派")]
+
+
+def _clean_subject(subject):
+    """Strip the machine tail like [oa-assignment:OA-2026-1:uuid] and the id list."""
+    text = re.sub(r"\s*\[[^\]]*\]\s*$", "", str(subject or "")).strip()
+    event, _, rest = text.partition("：")
+    return event.strip(), rest.strip()
+
+
+def _short(value, limit=40):
+    value = str(value or "").strip()
+    return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
+def _document_summary(doctype, name):
+    """A human line for the document a notification points at."""
+    if not doctype or not name:
+        return {"title": "", "detail": "", "route": "", "query": {}}
+    if doctype == "OA Approval Request":
+        row = frappe.db.get_value("OA Approval Request", name,
+                                  ["subject", "request_type", "employee_name", "amount", "approved_amount",
+                                   "current_step_label"], as_dict=True) or {}
+        amount = float(row.get("approved_amount") or row.get("amount") or 0)
+        detail = " · ".join(filter(None, [
+            row.get("employee_name") and f"申请人 {row['employee_name']}",
+            amount and f"¥ {amount:,.2f}",
+            row.get("current_step_label") and f"当前 {row['current_step_label']}",
+        ]))
+        route = ROUTE_BY_TYPE.get(row.get("request_type"), "/approval/request-dashboard")
+        return {"title": row.get("subject") or name, "detail": detail, "route": route, "query": {"request": name}}
+    if doctype == "OA Purchase Order":
+        row = frappe.db.get_value("OA Purchase Order", name,
+                                  ["supplier", "status", "total_amount"], as_dict=True) or {}
+        item = frappe.db.get_value("OA Purchase Order Line", {"parent": name}, "item_name")
+        detail = " · ".join(filter(None, [row.get("supplier"), row.get("status"),
+                                          row.get("total_amount") and f"¥ {float(row['total_amount']):,.2f}"]))
+        return {"title": _short(item or "采购订单"), "detail": detail,
+                "route": DOC_ROUTES[doctype][0], "query": {"po": name}}
+    if doctype in ("OA Price Approval", "OA Procurement Request"):
+        child = "OA Price Approval Line" if doctype == "OA Price Approval" else "OA Procurement Request Line"
+        source = frappe.db.get_value(child, {"parent": name}, ["source_request", "item_name"], as_dict=True) or {}
+        subject = frappe.db.get_value("OA Approval Request", source.get("source_request"), "subject") if source.get("source_request") else None
+        total = frappe.db.get_value(doctype, name, "total_amount") if doctype == "OA Price Approval" else None
+        detail = " · ".join(filter(None, [source.get("item_name"), total and f"¥ {float(total):,.2f}"]))
+        route, key = DOC_ROUTES[doctype]
+        return {"title": _short(subject or source.get("item_name") or name), "detail": detail,
+                "route": route, "query": {key: name}}
+    if doctype in DOC_ROUTES:
+        route, key = DOC_ROUTES[doctype]
+        return {"title": name, "detail": "", "route": route, "query": {key: name}}
+    return {"title": name, "detail": "", "route": "", "query": {}}
+
+
+def classify(subject, doctype, name, user, applicants):
+    event, _ = _clean_subject(subject)
+    if CC_MARK in event:
+        return "cc", event
+    if any(word in event for word in ACTION_EVENTS):
+        return "action", event
+    if applicants.get(name) == user or any(word in event for word in MINE_EVENTS) and applicants.get(name) == user:
+        return "mine", event
+    if doctype == "OA Approval Request" and applicants.get(name) == user:
+        return "mine", event
+    if doctype in DOC_ROUTES or doctype == "OA Approval Request":
+        return "biz", event
+    return "sys", event
+
+
+@frappe.whitelist()
+def get_my_notification_feed(category="mine", unread_only=1, limit=20):
+    """Notifications written for people: what happened, to what, by whom."""
+    user = frappe.session.user
+    if not user or user == "Guest":
+        frappe.throw(frappe._("请先登录。"))
+    rows = frappe.get_all("Notification Log", filters={"for_user": user},
+                          fields=["name", "subject", "email_content", "document_type", "document_name",
+                                  "read", "creation", "type"],
+                          order_by="creation desc", limit_page_length=400)
+    request_names = [row.document_name for row in rows if row.document_type == "OA Approval Request"]
+    applicants = {}
+    if request_names:
+        for row in frappe.get_all("OA Approval Request", filters={"name": ["in", request_names]},
+                                  fields=["name", "owner"], limit_page_length=0):
+            applicants[row.name] = row.owner
+    counts = {key: 0 for key, _ in CATEGORY_LABELS}
+    grouped, order = {}, []
+    for row in rows:
+        bucket, event = classify(row.subject, row.document_type, row.document_name, user, applicants)
+        if bucket == "action":
+            continue
+        if not row.read:
+            counts[bucket] = counts.get(bucket, 0) + 1
+        if bucket != category:
+            continue
+        key = f"{row.document_type}:{row.document_name}" if row.document_name else row.name
+        if key in grouped:
+            grouped[key]["more"] += 1
+            grouped[key]["unread"] = grouped[key]["unread"] or not row.read
+            grouped[key]["names"].append(row.name)
+            continue
+        summary = _document_summary(row.document_type, row.document_name)
+        grouped[key] = {"event": event or "通知", "title": summary["title"] or event,
+                        "detail": summary["detail"], "route": summary["route"], "query": summary["query"],
+                        "created": str(row.creation), "unread": not row.read, "more": 0,
+                        "names": [row.name], "document": row.document_name or ""}
+        order.append(key)
+    items = [grouped[key] for key in order]
+    if int(unread_only or 0):
+        items = [item for item in items if item["unread"]]
+    return {"category": category, "categories": [{"key": key, "label": label, "unread": counts.get(key, 0)}
+                                                 for key, label in CATEGORY_LABELS],
+            "alert_unread": counts.get("mine", 0) + counts.get("cc", 0),
+            "items": items[: int(limit or 20)]}
+
+
+@frappe.whitelist(methods=["POST"])
+def mark_notifications_read(names=None, category=None):
+    """Mark one group, or a whole category, as read for the signed-in user."""
+    from rayher_hr_payroll.api import oa_entry
+
+    user = frappe.session.user
+    if not user or user == "Guest":
+        frappe.throw(frappe._("请先登录。"))
+    targets = frappe.parse_json(names) if isinstance(names, str) else (names or [])
+    if category:
+        feed = get_my_notification_feed(category=category, unread_only=1, limit=400)
+        targets = [name for item in feed["items"] for name in item["names"]]
+    if not targets:
+        return {"marked": 0}
+    return oa_entry.mark_my_notifications_read(names=targets)

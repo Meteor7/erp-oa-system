@@ -72,3 +72,12 @@ test('the queue is one list covering approvals and hands-on tasks', () => {
   assert.match(source, /'采购订单'/);
   assert.match(source, /item\.query \|\| \{ request: item\.name \}/);
 });
+
+test('notifications read as plain language, grouped per document', () => {
+  assert.match(source, /get_my_notification_feed/);
+  assert.match(source, /mark_notifications_read/);
+  assert.match(source, /noteCategory/);
+  assert.match(source, /只看未读/);
+  assert.match(source, /该单据还有/);
+  assert.match(source, /本类全部已读/);
+});
