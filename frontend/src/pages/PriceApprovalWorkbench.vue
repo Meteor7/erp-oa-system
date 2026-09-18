@@ -578,14 +578,14 @@ async function closeCurrentPo() {
               <button v-if="canEditPrice && activeApproval.status === '草稿'" type="button" class="primary-button" @click="submitCurrent"><FeatherIcon name="send" class="h-4 w-4" />提交价格审批</button>
               <button v-if="canEditPrice && activeApproval.status === '草稿'" type="button" class="secondary-button" @click="cancelCurrent"><FeatherIcon name="x-circle" class="h-4 w-4" />取消价格审批</button>
               <button v-if="canEditPrice && activeApproval.status === '待审批'" type="button" class="secondary-button" @click="withdrawCurrent"><FeatherIcon name="corner-up-left" class="h-4 w-4" />撤回修改</button>
-              <button v-if="activeApproval.can_select_quote && activeApproval.status === '待审批'" type="button" class="approve-button" :disabled="!selectedSupplier" :aria-describedby="!selectedSupplier ? 'supplier-selection-hint' : undefined" @click="approveCurrent"><FeatherIcon name="check-circle" class="h-4 w-4" />演示员工37审批通过</button>
+              <button v-if="activeApproval.can_select_quote && activeApproval.status === '待审批'" type="button" class="approve-button" :disabled="!selectedSupplier" :aria-describedby="!selectedSupplier ? 'supplier-selection-hint' : undefined" @click="approveCurrent"><FeatherIcon name="check-circle" class="h-4 w-4" />审批通过</button>
             </div>
           </header>
 
           <div v-if="activeApproval.can_select_quote && activeApproval.status === '待审批'" class="approval-guidance" :class="{ 'supplier-selected': selectedSupplier }" role="status">
             <div class="approval-steps"><span :class="{ done: selectedSupplier }">1 · 选择成交供应商</span><FeatherIcon name="arrow-right" class="h-4 w-4" /><span>2 · 确认金额并审批通过</span></div>
-            <p v-if="!selectedSupplier" id="supplier-selection-hint">请先在供应商名称下点击“选择此供应商”，再点击“演示员工37审批通过”。采购推荐仅供参考，需要您确认成交供应商。</p>
-            <p v-else>已选择：<strong>{{ selectedSupplier.supplier }}</strong> · 成交总额 {{ money(activeApproval.total_amount) }}。请核对报价后点击“演示员工37审批通过”。</p>
+            <p v-if="!selectedSupplier" id="supplier-selection-hint">请先在供应商名称下点击“选择此供应商”，再点击“审批通过”。采购推荐仅供参考，需要您确认成交供应商。</p>
+            <p v-else>已选择：<strong>{{ selectedSupplier.supplier }}</strong> · 成交总额 {{ money(activeApproval.total_amount) }}。请核对报价后点击“审批通过”。</p>
             <button v-if="approvalView !== 'compare'" type="button" class="secondary-button" @click="approvalView = 'compare'">查看供应商比价</button>
           </div>
 
@@ -627,7 +627,7 @@ async function closeCurrentPo() {
                           <input v-if="canEditPrice && activeApproval.status === '草稿'" v-model="slot.supplier" class="supplier-inline supplier-name-input" :placeholder="`供应商 ${index + 1}`" />
                           <strong v-else>{{ slot.supplier || `供应商 ${index + 1}` }}</strong>
                           <span v-if="slot.is_recommended" class="recommend-label">采购推荐</span>
-                          <span v-if="slot.is_selected" class="chosen-label">演示员工37已选</span>
+                          <span v-if="slot.is_selected" class="chosen-label">已选成交</span>
                           <button v-if="activeApproval.can_select_quote && slot.original_supplier && !slot.is_selected" type="button" class="select-supplier-button" @click="chooseSupplierComparison(slot)"><FeatherIcon name="check-circle" class="h-4 w-4" />选择此供应商</button>
                         </div>
                       </th>
@@ -727,9 +727,9 @@ async function closeCurrentPo() {
                         <div class="supplier-footer-content">
                           <div class="supplier-summary-actions">
                             <label v-if="canEditPrice && activeApproval.status === '草稿' && slot.supplier" class="recommend-toggle-inline"><input v-model="slot.is_recommended" type="checkbox" />采购推荐</label>
-                            <span v-if="slot.is_selected" class="chosen-label">演示员工37已选</span>
+                            <span v-if="slot.is_selected" class="chosen-label">已选成交</span>
                             <div class="row-actions package-actions">
-                              <button v-if="activeApproval.can_select_quote && slot.original_supplier && !slot.is_selected" type="button" title="演示员工37选择该供应商作为成交供应商" @click="chooseSupplierComparison(slot)"><FeatherIcon name="check-circle" class="h-4 w-4" />选择此供应商</button>
+                              <button v-if="activeApproval.can_select_quote && slot.original_supplier && !slot.is_selected" type="button" title="选择该供应商作为成交供应商" @click="chooseSupplierComparison(slot)"><FeatherIcon name="check-circle" class="h-4 w-4" />选择此供应商</button>
                               <button v-if="canEditPrice && activeApproval.status === '草稿' && slot.supplier" type="button" class="save-slot-button" title="保存该供应商报价" @click="saveSupplierSlot(slot)"><FeatherIcon name="save" class="h-4 w-4" />保存</button>
                               <button v-if="canEditPrice && activeApproval.status === '草稿' && slot.original_supplier" type="button" class="danger-icon" title="删除供应商报价" @click="removeSupplierComparison(slot)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button>
                             </div>
