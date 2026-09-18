@@ -59,7 +59,6 @@ function markCategoryRead() {
   noteReader.submit({ category: noteCategory.value }).then(() => notifications.reload());
 }
 watch([noteCategory, noteUnreadOnly], () => notifications.reload());
-const procurement = createResource({ url: 'rayher_hr_payroll.api.dashboard_entry.get_procurement_overview', method: 'GET', auto: true });
 const myLeave = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_leave_summary', method: 'GET', auto: true });
 const cost = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_cost_overview', method: 'GET', makeParams: () => ({ scope: scope.value, period: currentPeriod.value }), auto: true });
 const costDetail = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_project_cost_detail', method: 'GET' });
@@ -101,7 +100,6 @@ function queueDetail(item) {
 function openQueueItem(item) { router.push({ path: item.route, query: item.query || { request: item.name } }); }
 const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: 'inbox' }) })));
 const pendingApprovalCategories = computed(() => todoCategories.value.filter((item) => Number(item.count || 0) > 0));
-const actionItems = computed(() => procurement.data?.action_items || []);
 const costVisible = computed(() => Boolean(cost.data?.visible));
 const hrVisible = computed(() => Boolean(hr.data?.visible));
 const errorText = (resource) => resource.error?.messages?.[0] || resource.error?.message || String(resource.error || '');
@@ -121,8 +119,6 @@ const wan = (x) => (Math.abs(Number(x || 0)) >= 10000 ? (Number(x) / 10000).toFi
 const share = (part, total) => (total ? Math.round((Number(part || 0) / Number(total)) * 100) : 0);
 const deltaText = (value) => (value === null || value === undefined ? '暂无对比' : `${value > 0 ? '▲' : '▼'} ${Math.abs(value)}% ${compareLabel.value}`);
 const deltaClass = (value) => (value === null || value === undefined ? 'text-gray-400' : value > 0 ? 'text-red-600' : 'text-emerald-600');
-const actionTone = (severity) => ({ urgent: 'bg-red-50 text-red-700', attention: 'bg-amber-50 text-amber-700', ready: 'bg-sky-50 text-sky-700' }[severity] || 'bg-gray-100 text-gray-600');
-const actionLabel = (severity) => ({ urgent: '紧急', attention: '需关注', ready: '待办理' }[severity] || '待处理');
 
 function draw(id, option) {
   const el = document.getElementById(id);
@@ -250,7 +246,6 @@ function openApprovalTodo(item) {
   if (!item?.route) return;
   router.push({ path: item.route, query: item.requests?.length ? { request: item.requests[0] } : {} });
 }
-function openAlert(item) { router.push({ path: item.route, query: item.po ? { po: item.po } : {} }); }
 
 
 watch(() => cost.data, () => { if (cost.data?.visible && !selectedProject.value && cost.data.projects.length) openProject(cost.data.projects[0]); else redraw(); });
@@ -367,16 +362,6 @@ const stages = [
           <p v-if="myLeave.data.annual.message" class="mt-3 text-xs text-amber-700">{{ myLeave.data.annual.message }}</p>
           <p v-else class="mt-3 text-xs text-gray-500">下次发放：{{ myLeave.data.annual.next_grant_date }} 起 +{{ myLeave.data.annual.next_grant_days }} 天</p>
         </div>
-      </div>
-
-      <div v-if="procurement.data?.visible && actionItems.length" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
-        <div class="border-b border-gray-200 px-5 py-3"><h2 class="text-sm font-semibold text-gray-900">现在要处理</h2><p class="mt-1 text-xs text-gray-500">每个付款期只显示一条行动项，先处理紧急和阻塞事项</p></div>
-        <button v-for="item in actionItems.slice(0, 6)" :key="item.key" type="button" class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openAlert(item)">
-          <span class="rounded px-2 py-1 text-[11px] font-medium" :class="actionTone(item.severity)">{{ actionLabel(item.severity) }}</span>
-          <span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-gray-900">{{ item.action }}：{{ item.detail }}</strong>
-            <span class="mt-0.5 block truncate text-xs text-gray-500">当前节点：{{ item.status }} · {{ item.title }}<span v-if="item.due_label"> · {{ item.due_label }}</span></span></span>
-          <FeatherIcon name="arrow-right" class="h-4 w-4 shrink-0 text-gray-300" />
-        </button>
       </div>
 
       <div v-if="myRequestItems.length" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
