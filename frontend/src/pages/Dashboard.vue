@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, nextTick } from 'vue';
+import { computed, onBeforeUnmount, ref, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { FeatherIcon, createResource } from 'frappe-ui';
 import * as echarts from 'echarts/core';
@@ -17,7 +17,15 @@ const JADE = '#1FA58C';
 const SUN = '#FFB547';
 const SKY = '#A9BDF6';
 const MIST = '#CDD3DC';
-const AXIS = { axisLine: { lineStyle: { color: '#EEF1F5' } }, axisTick: { show: false }, axisLabel: { color: '#8A93A3' }, splitLine: { lineStyle: { color: '#EEF1F5' } } };
+const AXIS = { axisLine: { show: true, lineStyle: { color: '#C9CFD8' } }, axisTick: { show: false }, axisLabel: { color: '#6B7385', fontSize: 12 }, splitLine: { lineStyle: { color: '#EEF1F5' } }, nameTextStyle: { color: '#8A93A3', fontSize: 12, align: 'left' } };
+// 类目轴：每个类目都出标签，标签多或长时斜排，过长截断（悬停看全名）
+const catAxis = (data, extra = {}) => {
+  const longest = Math.max(1, ...data.map((item) => String(item ?? '').length));
+  return { ...AXIS, type: 'category', data, ...extra, axisLabel: { ...AXIS.axisLabel, interval: 0, rotate: data.length * longest > 70 ? 30 : 0, width: 96, overflow: 'truncate' } };
+};
+const valAxis = (name, formatter) => ({ ...AXIS, type: 'value', name, axisLine: { show: false }, axisLabel: { ...AXIS.axisLabel, ...(formatter ? { formatter } : {}) } });
+// 堆叠柱顶部显示合计
+const totalLabel = (totals, format) => ({ show: true, position: 'top', color: '#4A5365', fontSize: 11, formatter: (p) => (totals[p.dataIndex] ? format(totals[p.dataIndex]) : '') });
 const BASE = {
   textStyle: { color: '#4A5365' },
   tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#E9ECF1', textStyle: { color: '#1A2130' } },
@@ -30,7 +38,8 @@ const tab = ref('mine');
 const scope = ref('month');
 const year = ref(new Date().getFullYear());
 const selectedProject = ref('');
-const charts = reactive({});
+// ECharts 实例不能放进 reactive：被 Vue 代理后再次 setOption 会抛错，图表空白或柱子挤成一团
+const charts = {};
 
 // Resources below fetch as soon as they are created, so their params must exist first.
 const currentPeriod = computed(() => (scope.value === 'year' ? String(year.value) : period.value));
@@ -120,10 +129,18 @@ const share = (part, total) => (total ? Math.round((Number(part || 0) / Number(t
 const deltaText = (value) => (value === null || value === undefined ? '暂无对比' : `${value > 0 ? '▲' : '▼'} ${Math.abs(value)}% ${compareLabel.value}`);
 const deltaClass = (value) => (value === null || value === undefined ? 'text-gray-400' : value > 0 ? 'text-red-600' : 'text-emerald-600');
 
+// 容器随 v-show / v-if / 侧栏折叠变宽变窄时，window resize 不会触发，改用 ResizeObserver 跟随容器尺寸
+const chartObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => entries.forEach((entry) => {
+  if (entry.contentRect.width > 0) echarts.getInstanceByDom(entry.target)?.resize();
+}));
+
 function draw(id, option) {
   const el = document.getElementById(id);
-  if (!el) return;
-  const chart = charts[id] || echarts.init(el);
+  if (!el || !el.offsetWidth) return; // 隐藏状态下宽度为 0，此时绘制会把柱子全挤到左边
+  let chart = charts[id];
+  if (chart && chart.getDom() !== el) { chartObserver?.unobserve(chart.getDom()); chart.dispose(); chart = null; } // v-if 重建了 DOM
+  if (!chart) { chart = echarts.init(el); chartObserver?.observe(el); }
+  chart.resize();
   chart.setOption({ ...BASE, ...option }, true);
   charts[id] = chart;
 }
@@ -133,12 +150,13 @@ function drawCost() {
   if (!data?.visible) return;
   const projects = data.projects.slice(0, 8);
   draw('cost-projects', {
-    xAxis: { ...AXIS, type: 'category', data: projects.map((row) => row.label) },
-    yAxis: { ...AXIS, type: 'value', axisLabel: { color: '#8A93A3', formatter: wan } },
+    tooltip: { ...BASE.tooltip, valueFormatter: money },
+    xAxis: catAxis(projects.map((row) => row.label)),
+    yAxis: valAxis('金额（元）', wan),
     series: [
       { name: '研发分摊', type: 'bar', stack: 's', barMaxWidth: 28, data: projects.map((row) => row.rd), itemStyle: { color: BRAND } },
       { name: '采购', type: 'bar', stack: 's', data: projects.map((row) => row.po), itemStyle: { color: COBALT } },
-      { name: '报销', type: 'bar', stack: 's', data: projects.map((row) => row.expense), itemStyle: { color: JADE, borderRadius: [6, 6, 0, 0] } },
+      { name: '报销', type: 'bar', stack: 's', data: projects.map((row) => row.expense), itemStyle: { color: JADE, borderRadius: [6, 6, 0, 0] }, label: totalLabel(projects.map((row) => Number(row.rd || 0) + Number(row.po || 0) + Number(row.expense || 0)), wan) },
     ],
   });
   draw('cost-mix', {
@@ -156,12 +174,13 @@ function drawCost() {
     }],
   });
   draw('cost-trend', {
-    xAxis: { ...AXIS, type: 'category', data: data.trend.map((row) => row.label) },
-    yAxis: { ...AXIS, type: 'value', axisLabel: { color: '#8A93A3', formatter: wan } },
+    tooltip: { ...BASE.tooltip, valueFormatter: money },
+    xAxis: catAxis(data.trend.map((row) => row.label)),
+    yAxis: valAxis('金额（元）', wan),
     series: [
       { name: '研发分摊', type: 'bar', stack: 't', barMaxWidth: 22, data: data.trend.map((row) => row.rd), itemStyle: { color: BRAND } },
       { name: '采购', type: 'bar', stack: 't', data: data.trend.map((row) => row.po), itemStyle: { color: COBALT } },
-      { name: '报销', type: 'bar', stack: 't', data: data.trend.map((row) => row.expense), itemStyle: { color: JADE, borderRadius: [5, 5, 0, 0] } },
+      { name: '报销', type: 'bar', stack: 't', data: data.trend.map((row) => row.expense), itemStyle: { color: JADE, borderRadius: [5, 5, 0, 0] }, label: totalLabel(data.trend.map((row) => Number(row.rd || 0) + Number(row.po || 0) + Number(row.expense || 0)), wan) },
     ],
   });
 }
@@ -183,8 +202,8 @@ function drawDetail() {
     grid: { left: 8, right: 70, top: 16, bottom: 6, containLabel: true },
     legend: { show: false },
     tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#E9ECF1', textStyle: { color: '#1A2130' }, formatter: (p) => `${p[0].name}：${money(p[0].value)}` },
-    xAxis: { ...AXIS, type: 'value', axisLabel: { color: '#8A93A3', formatter: wan } },
-    yAxis: { ...AXIS, type: 'category', data: rows.map((row) => row.label), axisLabel: { color: '#4A5365' }, splitLine: { show: false } },
+    xAxis: { ...AXIS, type: 'value', axisLine: { show: false }, axisLabel: { ...AXIS.axisLabel, formatter: wan } },
+    yAxis: { ...AXIS, type: 'category', data: rows.map((row) => row.label), axisLabel: { ...AXIS.axisLabel, color: '#4A5365', width: 140, overflow: 'truncate' }, splitLine: { show: false } },
     series: [{
       type: 'bar', barMaxWidth: 16,
       data: rows.map((row) => ({ value: row.amount, itemStyle: { color: row.color, borderRadius: [0, 4, 4, 0] } })),
@@ -206,16 +225,18 @@ function drawHr() {
     }],
   });
   draw('hr-departments', {
-    xAxis: { ...AXIS, type: 'category', data: data.by_department.map((row) => row.label) },
-    yAxis: { ...AXIS, type: 'value' },
+    tooltip: { ...BASE.tooltip, valueFormatter: (v) => `${n0(v)} 天` },
+    xAxis: catAxis(data.by_department.map((row) => row.label)),
+    yAxis: valAxis('天数', n0),
     series: [
       { name: '请假', type: 'bar', barMaxWidth: 16, data: data.by_department.map((row) => row.leave), itemStyle: { color: BRAND, borderRadius: [4, 4, 0, 0] } },
       { name: '加班', type: 'bar', barMaxWidth: 16, data: data.by_department.map((row) => row.overtime), itemStyle: { color: COBALT, borderRadius: [4, 4, 0, 0] } },
     ],
   });
   draw('hr-trend', {
-    xAxis: { ...AXIS, type: 'category', boundaryGap: false, data: data.trend.map((row) => row.label) },
-    yAxis: { ...AXIS, type: 'value' },
+    tooltip: { ...BASE.tooltip, valueFormatter: (v) => `${n0(v)} 天` },
+    xAxis: catAxis(data.trend.map((row) => row.label), { boundaryGap: false }),
+    yAxis: valAxis('天数', n0),
     series: [
       { name: '请假', type: 'line', smooth: true, symbolSize: 6, data: data.trend.map((row) => row.leave), itemStyle: { color: BRAND }, lineStyle: { width: 2.5 }, areaStyle: { color: 'rgba(255,143,0,.16)' } },
       { name: '加班', type: 'line', smooth: true, symbolSize: 6, data: data.trend.map((row) => row.overtime), itemStyle: { color: COBALT }, lineStyle: { width: 2 } },
@@ -227,7 +248,6 @@ function redraw() {
   nextTick(() => {
     if (tab.value === 'biz') { drawCost(); drawDetail(); }
     if (tab.value === 'hr') drawHr();
-    Object.values(charts).forEach((chart) => chart.resize());
   });
 }
 
@@ -255,10 +275,8 @@ watch(period, () => { d.reload(); if (scope.value === 'month') reloadScope(); })
 watch([scope, year], reloadScope);
 watch(tabs, (list) => { if (!list.some((item) => item.key === tab.value)) tab.value = list[0]?.key || 'mine'; });
 
-const onResize = () => Object.values(charts).forEach((chart) => chart.resize());
-onMounted(() => window.addEventListener('resize', onResize));
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', onResize);
+  chartObserver?.disconnect();
   Object.values(charts).forEach((chart) => chart.dispose());
 });
 
