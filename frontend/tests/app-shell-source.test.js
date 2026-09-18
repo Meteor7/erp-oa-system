@@ -63,8 +63,9 @@ test('personnel, accommodation and expense reimbursement use the wide workspace'
 });
 
 test('app shell uses the QIHENG DEMO brand', () => {
-  assert.ok(source.includes('QIHENG DEMO'));
-  assert.ok(source.includes('planck-semicon-logo.png'));
+  // the transparent mark carries the wordmark, so the shell shows it as an image
+  assert.ok(source.includes('planck-semicon-logo-mark.png'));
+  assert.ok(source.includes('示例企业032有限公司'));
 });
 
 test('app shell exposes overseas commissioned R&D in the finance ledger nav', () => {
