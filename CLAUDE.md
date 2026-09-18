@@ -82,3 +82,17 @@ Verify EVERY write with git, never with python (python may see decrypted bytes):
 - If a file turns out encrypted: stop and tell the user. Do not commit it and do not deploy it.
 
 Reading: `cmd.exe type` of a protected file may return ciphertext and does NOT decrypt. An already-encrypted file that is unchanged from Git can be restored with `git checkout -- <path>` (only with the user's go-ahead). The real long-term fix is IT: mark `D:\rayher` as a plaintext directory in TipRay, or trust the development processes by name.
+
+6. Development and Deployment Workflow (HARD RULE)
+Local Git is the only source of truth. Docker only ever runs a commit that exists in the local repo.
+
+The ONLY workflow:
+1. Edit in the local worktree `D:\rayher\rayher-logistics-main` (using the plaintext-safe writer from section 5).
+2. `git commit` locally. The pre-commit hook in `.githooks/` refuses TipRay ciphertext and non-UTF-8 text.
+   Enable it once per clone: `git config core.hooksPath .githooks`.
+3. Deploy with `powershell -File .\scripts\deploy-to-docker.ps1` (try `-DryRun` first).
+
+Never:
+- Edit, copy or commit source files inside the Docker container. The deploy script installs a hook that refuses commits there.
+- Deploy by copying files or by creating "mirror" commits in Docker. This is what split local and Docker history from 2026-09-15 to 2026-09-18 (reconciled in merge 51578c1).
+- Work around a refusal from the deploy script. If it says Docker diverged or is dirty: bring the Docker changes into the local repo (git bundle + merge), commit locally, then deploy. If it says a commit has encrypted or non-UTF-8 files: fix them locally and commit again.

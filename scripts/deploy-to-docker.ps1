@@ -10,6 +10,10 @@
 #
 # 默认: 本地 HEAD -> git bundle -> 容器 Git reset 到同一 commit -> 按需 yarn build -> 清缓存。
 # 未 commit 的本地改动不会进 Docker。GitHub 不是必须，没 push 也能部署。
+#
+# 唯一的开发流程: 本地工作区修改 -> 本地 git commit -> 本脚本部署。
+# 本脚本每次都会: 检查要部署的提交里没有天锐密文 / 非 UTF-8 文本;
+# 在容器的 Git 里装上禁止 commit 的钩子, 容器里不能直接改代码提交。
 
 [CmdletBinding()]
 param(
@@ -100,6 +104,12 @@ $localShort = (Invoke-GitLocal -GitArgs @("rev-parse", "--short", $Commit) | Sel
 $localBranch = (Invoke-GitLocal -GitArgs @("rev-parse", "--abbrev-ref", "HEAD") | Select-Object -Last 1).Trim()
 $localSubject = (Invoke-GitLocal -GitArgs @("log", "-1", "--format=%s", $localSha) | Select-Object -Last 1).Trim()
 
+Write-Host "checking $localShort for TipRay ciphertext and non-UTF-8 text..."
+& python (Join-Path $script:RepoRoot "scripts\check_plaintext.py") --commit $localSha
+if ($LASTEXITCODE -ne 0) {
+    throw "commit $localShort contains encrypted or non-UTF-8 files. Fix them locally, commit, then deploy again. Never patch them inside Docker."
+}
+
 $dockerSha = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", "HEAD")
 $dockerShort = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", "--short", "HEAD")
 $dockerBranch = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", "--abbrev-ref", "HEAD")
@@ -160,7 +170,7 @@ if ($dockerSourceDirty.Count -gt 0) {
     Write-Host "Docker source worktree is dirty (excluding frontend build output):"
     foreach ($item in $dockerSourceDirty) { Write-Host "  $item" }
     if (-not $Force) {
-        throw "refusing to overwrite dirty Docker source. After confirming there are no container-only edits, rerun with -Force."
+        throw "refusing to overwrite dirty Docker source. Someone edited code inside Docker. Bring those edits into the local repo and commit them there first; rerun with -Force only after confirming nothing in Docker needs keeping."
     }
 }
 
@@ -183,7 +193,7 @@ if ($DryRun) {
 if ($dockerSha -ne $localSha) {
     $isAncestor = Test-GitAncestor $dockerSha $localSha
     if (-not $isAncestor -and -not $Force) {
-        throw ("Docker {0} is not an ancestor of local {1} (diverged). Do not copy files; rerun with -Force only if local should overwrite Docker." -f $dockerShort, $localShort)
+        throw ("Docker {0} is not an ancestor of local {1} (diverged). Something was committed in Docker without this script. Do not copy files or commit inside Docker: fetch Docker's history (git bundle), merge it into the local branch, commit, then deploy again. Use -Force only if local should overwrite Docker." -f $dockerShort, $localShort)
     }
 
     if ($FromGitHub) {
@@ -224,6 +234,11 @@ if ($dockerSha -ne $localSha) {
     Invoke-Docker -Cmd @("exec", "-w", $AppPath, $Container, "git", "reset", "--hard", $localSha)
     Invoke-Docker -Cmd @("exec", "-w", $AppPath, $Container, "git", "clean", "-fd", "--", "frontend", "rayher_hr_payroll/public/frontend", "rayher_hr_payroll/www")
 }
+
+# Code changes reach Docker only through this script, so any commit made inside the container is refused.
+Write-Host "installing the no-commit guard in the Docker Git checkout..."
+$guard = "printf '%s\n' '#!/bin/sh' 'echo Committing inside Docker is not allowed. >&2' 'echo Edit in the local worktree, git commit locally, then run scripts/deploy-to-docker.ps1. >&2' 'exit 1' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit && cp .git/hooks/pre-commit .git/hooks/pre-merge-commit && (git config --unset core.hooksPath || true)"
+Invoke-Docker -Cmd @("exec", "-w", $AppPath, $Container, "sh", "-c", $guard)
 
 $newSha = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", "HEAD")
 if ($newSha -ne $localSha) {

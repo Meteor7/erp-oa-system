@@ -1,0 +1,6 @@
+#!/bin/sh
+# Enabled per clone with: git config core.hooksPath .githooks
+# Blocks commits that would record TipRay ciphertext or non-UTF-8 text.
+PY=python
+command -v "$PY" >/dev/null 2>&1 || PY=python3
+exec "$PY" scripts/check_plaintext.py --staged
