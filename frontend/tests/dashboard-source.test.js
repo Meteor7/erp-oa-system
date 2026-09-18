@@ -1,6 +1,6 @@
+import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
 
 const source = readFileSync(new URL("../src/pages/Dashboard.vue", import.meta.url), "utf8");
 
@@ -19,7 +19,39 @@ test("dashboard presents personal queues as actionable categories", () => {
   assert.match(source, /todoCategories/);
   assert.match(source, /openApprovalTodo\(item\)/);
   assert.match(source, /item\.requests\?\./);
-  assert.match(source, /个人审批工作台与本期经营数据/);
+  assert.match(source, /我的待办与公司经营数据/);
   assert.match(source, /月度核算流程/);
   assert.match(source, /数据完整度/);
+});
+
+test("tabs appear only for the data the server says the user may see", () => {
+  assert.match(source, /costVisible = computed\(\(\) => Boolean\(cost\.data\?\.visible\)\)/);
+  assert.match(source, /hrVisible = computed\(\(\) => Boolean\(hr\.data\?\.visible\)\)/);
+  assert.match(source, /key: 'biz', label: '经营看板', show: costVisible\.value/);
+  assert.match(source, /key: 'hr', label: '人事看板', show: hrVisible\.value/);
+  // a tab that disappears must never stay selected
+  assert.match(source, /if \(!list\.some\(\(item\) => item\.key === tab\.value\)\) tab\.value = list\[0\]\?\.key/);
+});
+
+test("cost views follow the month or year period selector", () => {
+  assert.match(source, /get_cost_overview/);
+  assert.match(source, /get_project_cost_detail/);
+  assert.match(source, /get_hr_overview/);
+  assert.match(source, /get_my_leave_summary/);
+  assert.match(source, /makeParams: \(\) => \(\{ scope: scope\.value, period: currentPeriod\.value \}\)/);
+  assert.match(source, /watch\(\[scope, year\], reloadScope\)/);
+});
+
+test("charts import only the pieces the dashboard draws", () => {
+  assert.match(source, /from 'echarts\/core'/);
+  assert.match(source, /BarChart, LineChart, PieChart/);
+  assert.match(source, /CanvasRenderer/);
+  assert.doesNotMatch(source, /from 'echarts'/);
+  assert.match(source, /chart\.dispose\(\)/);
+});
+
+test("personal leave balance is shown in days", () => {
+  assert.match(source, /1 天 = 8 小时/);
+  assert.match(source, /myLeave\.data\.annual\.available/);
+  assert.match(source, /myLeave\.data\.comp\.available/);
 });

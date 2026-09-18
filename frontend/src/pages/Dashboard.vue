@@ -1,139 +1,489 @@
 <script setup>
-import { computed, watch } from "vue";
-import { useRouter } from "vue-router";
-import { FeatherIcon, createResource } from "frappe-ui";
-import { canSee } from "../lib/access";
-import { period } from "../lib/period";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
+import { FeatherIcon, createResource } from 'frappe-ui';
+import * as echarts from 'echarts/core';
+import { BarChart, LineChart, PieChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+import { canSee } from '../lib/access';
+import { period } from '../lib/period';
+
+echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+
+const BRAND = '#FF8F00';
+const COBALT = '#3E63DD';
+const JADE = '#1FA58C';
+const SUN = '#FFB547';
+const SKY = '#A9BDF6';
+const MIST = '#CDD3DC';
+const AXIS = { axisLine: { lineStyle: { color: '#EEF1F5' } }, axisTick: { show: false }, axisLabel: { color: '#8A93A3' }, splitLine: { lineStyle: { color: '#EEF1F5' } } };
+const BASE = {
+  textStyle: { color: '#4A5365' },
+  tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#E9ECF1', textStyle: { color: '#1A2130' } },
+  grid: { left: 8, right: 18, top: 40, bottom: 6, containLabel: true },
+  legend: { top: 4, right: 8, icon: 'rect', itemWidth: 9, itemHeight: 9, textStyle: { color: '#6B7385' } },
+};
 
 const router = useRouter();
-const d = createResource({ url: "rayher_hr_payroll.api.dashboard_entry.get_dashboard", method: "GET", makeParams: () => ({ period: period.value }), auto: true });
-const oaTodos = createResource({ url: "rayher_hr_payroll.api.oa_entry.get_my_approval_summary", method: "GET", auto: true });
-const procurement = createResource({ url: "rayher_hr_payroll.api.dashboard_entry.get_procurement_overview", method: "GET", auto: true });
-const notifications = createResource({ url: "rayher_hr_payroll.api.oa_entry.get_my_notifications", method: "GET", makeParams: () => ({ limit: 8 }), auto: true });
+const tab = ref('mine');
+const scope = ref('month');
+const year = ref(new Date().getFullYear());
+const selectedProject = ref('');
+const charts = reactive({});
+
+const oaTodos = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_approval_summary', method: 'GET', auto: true });
+const notifications = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_notifications', method: 'GET', makeParams: () => ({ limit: 8 }), auto: true });
+const procurement = createResource({ url: 'rayher_hr_payroll.api.dashboard_entry.get_procurement_overview', method: 'GET', auto: true });
+const myLeave = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_leave_summary', method: 'GET', auto: true });
+const cost = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_cost_overview', method: 'GET', makeParams: () => ({ scope: scope.value, period: currentPeriod.value }), auto: true });
+const costDetail = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_project_cost_detail', method: 'GET' });
+const hr = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_hr_overview', method: 'GET', makeParams: () => ({ scope: scope.value, period: currentPeriod.value }), auto: true });
+const d = createResource({ url: 'rayher_hr_payroll.api.dashboard_entry.get_dashboard', method: 'GET', makeParams: () => ({ period: period.value }), auto: true });
+
+const currentPeriod = computed(() => (scope.value === 'year' ? String(year.value) : period.value));
+const scopeLabel = computed(() => (scope.value === 'year' ? `${year.value} 年` : period.value.replace(/(\d+)-(\d+)/, (m, y, mo) => `${y} 年 ${Number(mo)} 月`)));
+const compareLabel = computed(() => (scope.value === 'year' ? '较去年' : '较上月'));
+const years = computed(() => { const now = new Date().getFullYear(); return [now, now - 1, now - 2, now - 3]; });
+
 const todoPresentation = {
-  leave: { icon: "calendar", accent: "text-sky-700", surface: "bg-sky-50" },
-  procurement: { icon: "clipboard", accent: "text-amber-700", surface: "bg-amber-50" },
-  direct_purchase: { icon: "shopping-cart", accent: "text-emerald-700", surface: "bg-emerald-50" },
-  procurement_payment: { icon: "credit-card", accent: "text-indigo-700", surface: "bg-indigo-50" },
-  expense_payment: { icon: "file-text", accent: "text-rose-700", surface: "bg-rose-50" },
+  leave: { icon: 'calendar' }, overtime: { icon: 'clock' }, comp_time: { icon: 'refresh-cw' },
+  procurement: { icon: 'clipboard' }, direct_purchase: { icon: 'shopping-cart' },
+  procurement_payment: { icon: 'credit-card' }, expense_payment: { icon: 'file-text' },
 };
-const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: "inbox", accent: "text-gray-700", surface: "bg-gray-50" }) })));
+const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: 'inbox' }) })));
 const pendingApprovalCategories = computed(() => todoCategories.value.filter((item) => Number(item.count || 0) > 0));
-const firstPendingTodo = computed(() => pendingApprovalCategories.value[0] || null);
-const businessTodoCount = computed(() => (procurement.data?.action_items || []).length);
 const actionItems = computed(() => procurement.data?.action_items || []);
+const costVisible = computed(() => Boolean(cost.data?.visible));
+const hrVisible = computed(() => Boolean(hr.data?.visible));
+const rdVisible = computed(() => Boolean(d.data) && canSee('/allocation-dashboard'));
+const tabs = computed(() => [
+  { key: 'mine', label: '我的待办', count: oaTodos.data?.total || 0, show: true },
+  { key: 'biz', label: '经营看板', show: costVisible.value },
+  { key: 'hr', label: '人事看板', show: hrVisible.value },
+  { key: 'rd', label: '研发核算', show: rdVisible.value },
+].filter((item) => item.show));
+
+const n0 = (x) => Number(x || 0).toLocaleString('zh-CN');
+const money = (x) => '¥ ' + Number(x || 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+const wan = (x) => (Math.abs(Number(x || 0)) >= 10000 ? (Number(x) / 10000).toFixed(1) + '万' : n0(x));
+const share = (part, total) => (total ? Math.round((Number(part || 0) / Number(total)) * 100) : 0);
+const deltaText = (value) => (value === null || value === undefined ? '暂无对比' : `${value > 0 ? '▲' : '▼'} ${Math.abs(value)}% ${compareLabel.value}`);
+const deltaClass = (value) => (value === null || value === undefined ? 'text-gray-400' : value > 0 ? 'text-red-600' : 'text-emerald-600');
 const actionTone = (severity) => ({ urgent: 'bg-red-50 text-red-700', attention: 'bg-amber-50 text-amber-700', ready: 'bg-sky-50 text-sky-700' }[severity] || 'bg-gray-100 text-gray-600');
 const actionLabel = (severity) => ({ urgent: '紧急', attention: '需关注', ready: '待办理' }[severity] || '待处理');
-const stageItems = computed(() => procurement.data?.stages || []);
+
+function draw(id, option) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const chart = charts[id] || echarts.init(el);
+  chart.setOption({ ...BASE, ...option }, true);
+  charts[id] = chart;
+}
+
+function drawCost() {
+  const data = cost.data;
+  if (!data?.visible) return;
+  const projects = data.projects.slice(0, 8);
+  draw('cost-projects', {
+    xAxis: { ...AXIS, type: 'category', data: projects.map((row) => row.label) },
+    yAxis: { ...AXIS, type: 'value', axisLabel: { color: '#8A93A3', formatter: wan } },
+    series: [
+      { name: '研发分摊', type: 'bar', stack: 's', barMaxWidth: 28, data: projects.map((row) => row.rd), itemStyle: { color: BRAND } },
+      { name: '采购', type: 'bar', stack: 's', data: projects.map((row) => row.po), itemStyle: { color: COBALT } },
+      { name: '报销', type: 'bar', stack: 's', data: projects.map((row) => row.expense), itemStyle: { color: JADE, borderRadius: [6, 6, 0, 0] } },
+    ],
+  });
+  draw('cost-mix', {
+    tooltip: { trigger: 'item', backgroundColor: '#fff', borderColor: '#E9ECF1', textStyle: { color: '#1A2130' }, formatter: (p) => `${p.marker}${p.name}<br>${money(p.value)}（${p.percent}%）` },
+    legend: { bottom: 4, left: 'center', icon: 'rect', itemWidth: 9, itemHeight: 9, textStyle: { color: '#6B7385' } },
+    series: [{
+      type: 'pie', radius: ['54%', '76%'], center: ['50%', '44%'], padAngle: 2, labelLine: { show: false },
+      label: { show: true, position: 'center', formatter: `{a|费用合计}\n{b|${wan(data.totals.total)}}`, rich: { a: { color: '#8A93A3', fontSize: 12, lineHeight: 20 }, b: { color: '#1A2130', fontSize: 20, fontWeight: 600, lineHeight: 28 } } },
+      itemStyle: { borderRadius: 6 },
+      data: [
+        { name: '研发分摊', value: data.totals.rd, itemStyle: { color: BRAND } },
+        { name: '采购', value: data.totals.po, itemStyle: { color: COBALT } },
+        { name: '报销', value: data.totals.expense, itemStyle: { color: JADE } },
+      ],
+    }],
+  });
+  draw('cost-trend', {
+    xAxis: { ...AXIS, type: 'category', data: data.trend.map((row) => row.label) },
+    yAxis: { ...AXIS, type: 'value', axisLabel: { color: '#8A93A3', formatter: wan } },
+    series: [
+      { name: '研发分摊', type: 'bar', stack: 't', barMaxWidth: 22, data: data.trend.map((row) => row.rd), itemStyle: { color: BRAND } },
+      { name: '采购', type: 'bar', stack: 't', data: data.trend.map((row) => row.po), itemStyle: { color: COBALT } },
+      { name: '报销', type: 'bar', stack: 't', data: data.trend.map((row) => row.expense), itemStyle: { color: JADE, borderRadius: [5, 5, 0, 0] } },
+    ],
+  });
+}
+
+function drawDetail() {
+  const data = costDetail.data;
+  if (!data) return;
+  const groups = [
+    { rows: data.breakdown.rd, color: BRAND },
+    { rows: data.breakdown.po, color: COBALT },
+    { rows: data.breakdown.expense, color: JADE },
+  ];
+  const rows = [];
+  groups.forEach((group) => (group.rows || []).forEach((row) => rows.push({ ...row, color: group.color })));
+  rows.reverse();
+  draw('cost-detail', {
+    grid: { left: 8, right: 70, top: 16, bottom: 6, containLabel: true },
+    legend: { show: false },
+    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#E9ECF1', textStyle: { color: '#1A2130' }, formatter: (p) => `${p[0].name}：${money(p[0].value)}` },
+    xAxis: { ...AXIS, type: 'value', axisLabel: { color: '#8A93A3', formatter: wan } },
+    yAxis: { ...AXIS, type: 'category', data: rows.map((row) => row.label), axisLabel: { color: '#4A5365' }, splitLine: { show: false } },
+    series: [{
+      type: 'bar', barMaxWidth: 16,
+      data: rows.map((row) => ({ value: row.amount, itemStyle: { color: row.color, borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', color: '#4A5365', formatter: (o) => wan(o.value) },
+    }],
+  });
+}
+
+function drawHr() {
+  const data = hr.data;
+  if (!data?.visible) return;
+  const palette = [BRAND, COBALT, JADE, SUN, SKY, MIST];
+  draw('hr-types', {
+    tooltip: { trigger: 'item', backgroundColor: '#fff', borderColor: '#E9ECF1', textStyle: { color: '#1A2130' }, formatter: (p) => `${p.marker}${p.name}：${p.value} 天（${p.percent}%）` },
+    legend: { orient: 'vertical', right: 12, top: 'middle', icon: 'rect', itemWidth: 9, itemHeight: 9, textStyle: { color: '#6B7385' } },
+    series: [{
+      type: 'pie', radius: ['50%', '74%'], center: ['34%', '52%'], padAngle: 2, label: { show: false }, itemStyle: { borderRadius: 5 },
+      data: data.by_type.map((row, index) => ({ name: row.label, value: row.days, itemStyle: { color: palette[index % palette.length] } })),
+    }],
+  });
+  draw('hr-departments', {
+    xAxis: { ...AXIS, type: 'category', data: data.by_department.map((row) => row.label) },
+    yAxis: { ...AXIS, type: 'value' },
+    series: [
+      { name: '请假', type: 'bar', barMaxWidth: 16, data: data.by_department.map((row) => row.leave), itemStyle: { color: BRAND, borderRadius: [4, 4, 0, 0] } },
+      { name: '加班', type: 'bar', barMaxWidth: 16, data: data.by_department.map((row) => row.overtime), itemStyle: { color: COBALT, borderRadius: [4, 4, 0, 0] } },
+    ],
+  });
+  draw('hr-trend', {
+    xAxis: { ...AXIS, type: 'category', boundaryGap: false, data: data.trend.map((row) => row.label) },
+    yAxis: { ...AXIS, type: 'value' },
+    series: [
+      { name: '请假', type: 'line', smooth: true, symbolSize: 6, data: data.trend.map((row) => row.leave), itemStyle: { color: BRAND }, lineStyle: { width: 2.5 }, areaStyle: { color: 'rgba(255,143,0,.16)' } },
+      { name: '加班', type: 'line', smooth: true, symbolSize: 6, data: data.trend.map((row) => row.overtime), itemStyle: { color: COBALT }, lineStyle: { width: 2 } },
+    ],
+  });
+}
+
+function redraw() {
+  nextTick(() => {
+    if (tab.value === 'biz') { drawCost(); drawDetail(); }
+    if (tab.value === 'hr') drawHr();
+    Object.values(charts).forEach((chart) => chart.resize());
+  });
+}
+
+function openProject(row) {
+  selectedProject.value = row.project;
+  costDetail.submit({ project: row.project, scope: scope.value, period: currentPeriod.value }).then(redraw);
+}
+
+function reloadScope() {
+  cost.reload();
+  hr.reload();
+  if (selectedProject.value) costDetail.submit({ project: selectedProject.value, scope: scope.value, period: currentPeriod.value }).then(redraw);
+}
+
 function openApprovalTodo(item) {
   if (!item?.route) return;
-  const query = item.requests?.length ? { request: item.requests[0] } : {};
-  router.push({ path: item.route, query });
-}
-function openFirstTodo() { if (firstPendingTodo.value) openApprovalTodo(firstPendingTodo.value); }
-function openProcurementItem(item) {
-  if (!item?.route) return;
-  router.push({ path: item.route, query: item.filter ? { status: item.filter } : {} });
+  router.push({ path: item.route, query: item.requests?.length ? { request: item.requests[0] } : {} });
 }
 function openAlert(item) { router.push({ path: item.route, query: item.po ? { po: item.po } : {} }); }
-function openNotification(item) {
-  const link = String(item?.link || '');
-  if (!link) return;
-  window.location.assign(link);
-}
-function notificationDetail(item) {
-  const content = String(item?.email_content || '').trim();
-  const subject = String(item?.subject || '').trim();
-  const document = String(item?.document_name || '').trim();
-  if (content && content !== subject && content !== document) return content.replace(subject, '').trim() || '待查看业务通知';
-  return '待查看业务通知';
-}
-const n0 = (x) => (x || 0).toLocaleString("zh-CN");
-const money = (x) => Number(x || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function openNotification(item) { if (item?.link) window.location.assign(String(item.link)); }
+
+watch(() => cost.data, () => { if (cost.data?.visible && !selectedProject.value && cost.data.projects.length) openProject(cost.data.projects[0]); else redraw(); });
+watch(() => hr.data, redraw);
+watch(tab, redraw);
+watch(period, () => { d.reload(); if (scope.value === 'month') reloadScope(); });
+watch([scope, year], reloadScope);
+watch(tabs, (list) => { if (!list.some((item) => item.key === tab.value)) tab.value = list[0]?.key || 'mine'; });
+
+const onResize = () => Object.values(charts).forEach((chart) => chart.resize());
+onMounted(() => window.addEventListener('resize', onResize));
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize);
+  Object.values(charts).forEach((chart) => chart.dispose());
+});
+
 const stages = [
-  { route: "/personnel", n: "01", h: "人事信息", p: "员工档案", k: "emp", unit: "人", icon: "users" },
-  { route: "/ledger", n: "02", h: "研发台账", p: "研发人员归集", k: "ledger", unit: "人", icon: "book-open" },
-  { route: "/entry", n: "03", h: "工时汇总", p: "项目工时", k: "hours", unit: "h", icon: "clock" },
-  { route: "/allocation", n: "04", h: "费用分摊", p: "研发费用", k: "cost", unit: "元", icon: "pie-chart" },
+  { route: '/personnel', n: '01', h: '人事信息', p: '员工档案', k: 'emp', unit: '人', icon: 'users' },
+  { route: '/ledger', n: '02', h: '研发台账', p: '研发人员归集', k: 'ledger', unit: '人', icon: 'book-open' },
+  { route: '/entry', n: '03', h: '工时汇总', p: '项目工时', k: 'hours', unit: 'h', icon: 'clock' },
+  { route: '/allocation', n: '04', h: '费用分摊', p: '研发费用', k: 'cost', unit: '元', icon: 'pie-chart' },
 ];
-watch(period, () => d.reload());
 </script>
 
 <template>
-  <div class="space-y-6">
-    <header class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-4">
-      <div><h1 class="text-xl font-semibold text-gray-900">数据看板</h1><p class="mt-1 text-sm text-gray-500">个人审批工作台与本期经营数据</p></div>
-      <label class="flex items-center gap-3 text-sm text-gray-600"><span>会计期间</span><input v-model="period" type="month" class="h-9 rounded-md border-gray-300 bg-white px-3 text-sm shadow-none" /></label>
+  <div class="space-y-5">
+    <header class="flex flex-wrap items-end justify-between gap-4 border-b border-gray-200 pb-4">
+      <div>
+        <h1 class="text-xl font-semibold text-gray-900">数据看板</h1>
+        <p class="mt-1 text-sm text-gray-500">{{ scopeLabel }} · 我的待办与公司经营数据</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+          <button v-for="option in [{ v: 'month', l: '按月' }, { v: 'year', l: '按年' }]" :key="option.v" type="button"
+            class="rounded-md px-3 py-1.5 text-sm" :class="scope === option.v ? 'bg-[#FF8F00] font-semibold text-white' : 'text-gray-600 hover:bg-gray-50'"
+            @click="scope = option.v">{{ option.l }}</button>
+        </div>
+        <input v-if="scope === 'month'" v-model="period" type="month" aria-label="选择月份" class="h-9 rounded-lg border-gray-300 bg-white px-3 text-sm" />
+        <select v-else v-model.number="year" aria-label="选择年份" class="h-9 rounded-lg border-gray-300 bg-white px-3 text-sm">
+          <option v-for="option in years" :key="option" :value="option">{{ option }} 年</option>
+        </select>
+      </div>
     </header>
 
-    <section class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3"><div><h2 class="text-sm font-semibold text-gray-900">审批待办</h2><p class="mt-1 text-xs text-gray-500">只有需要你作出审批决定的事项会出现在这里</p></div><span class="text-sm font-semibold tabular-nums text-gray-900">{{ oaTodos.data?.total || 0 }} 项</span></div>
-      <div v-if="pendingApprovalCategories.length" class="flex flex-wrap items-center gap-2 px-4 py-3">
-        <button v-for="item in pendingApprovalCategories" :key="item.key" type="button" class="inline-flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-left hover:bg-gray-50" @click="openApprovalTodo(item)"><FeatherIcon :name="item.icon" class="h-4 w-4" :class="item.accent" /><span class="text-sm text-gray-700">{{ item.label }}</span><strong class="tabular-nums text-gray-900">{{ item.count }}</strong><FeatherIcon name="arrow-right" class="h-3.5 w-3.5 text-gray-300" /></button>
-      </div>
-      <div v-else-if="!oaTodos.loading" class="px-4 py-3 text-sm text-gray-500">当前没有审批待办</div>
-      <p v-if="oaTodos.loading" class="border-t border-gray-200 px-5 py-3 text-xs text-gray-500">正在更新审批待办...</p>
-      <p v-if="oaTodos.error" class="border-t border-red-100 bg-red-50 px-5 py-3 text-xs text-red-700">审批待办加载失败，请刷新后重试</p>
-    </section>
+    <nav v-if="tabs.length > 1" class="flex flex-wrap gap-2">
+      <button v-for="item in tabs" :key="item.key" type="button" class="rounded-lg px-4 py-2 text-sm"
+        :class="tab === item.key ? 'bg-gray-900 font-semibold text-white' : 'text-gray-600 hover:bg-gray-100'" @click="tab = item.key">
+        {{ item.label }}
+        <span v-if="item.count" class="ml-1.5 rounded-full bg-[#FF8F00] px-1.5 text-xs font-semibold text-white">{{ item.count }}</span>
+      </button>
+    </nav>
 
-    <section v-if="procurement.data?.visible" class="space-y-5">
-      <div class="flex items-end justify-between gap-3"><div><h2 class="text-base font-semibold text-gray-900">现在要处理</h2><p class="mt-1 text-xs text-gray-500">每个付款期只显示一条行动项，先处理紧急和阻塞事项</p></div><strong class="text-lg tabular-nums text-gray-900">{{ businessTodoCount }} 项</strong></div>
-      <div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <button v-for="item in actionItems.slice(0, 6)" :key="item.key" type="button" class="flex w-full items-center gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openAlert(item)">
-          <span class="rounded px-2 py-1 text-[11px] font-medium" :class="actionTone(item.severity)">{{ actionLabel(item.severity) }}</span>
-          <span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-gray-900">{{ item.action }}：{{ item.detail }}</strong><span class="mt-0.5 block truncate text-xs text-gray-500">当前节点：{{ item.status }} · {{ item.title }}<span v-if="item.context"> · 还需{{ item.context }}</span><span v-if="item.due_label"> · {{ item.due_label }}</span></span></span>
-          <FeatherIcon name="arrow-right" class="h-4 w-4 shrink-0 text-gray-300" />
-        </button>
-        <p v-if="!actionItems.length" class="px-4 py-8 text-center text-sm text-gray-400">当前没有需要处理的采购事项</p>
-      </div>
-      <div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <div class="border-b border-gray-200 px-4 py-3"><h3 class="text-sm font-semibold text-gray-900">流程位置</h3><p class="mt-1 text-xs text-gray-500">看数量集中在哪个阶段，不展开业务细节</p></div>
-        <div class="grid sm:grid-cols-2 xl:grid-cols-4">
-          <button v-for="stage in stageItems" :key="stage.key" type="button" class="flex items-center justify-between border-b border-gray-100 px-4 py-4 text-left hover:bg-gray-50 xl:border-b-0 xl:border-r last:border-r-0" @click="router.push(stage.route)"><span><span class="block text-xs text-gray-500">{{ stage.label }}</span><strong class="mt-1 block text-2xl tabular-nums text-gray-900">{{ stage.value }}</strong></span><FeatherIcon name="chevron-right" class="h-4 w-4 text-gray-300" /></button>
+    <!-- 我的待办 -->
+    <section v-show="tab === 'mine'" class="space-y-5">
+      <div class="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
+        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+            <div><h2 class="text-sm font-semibold text-gray-900">我的审批待办</h2><p class="mt-1 text-xs text-gray-500">只有需要你作出审批决定的事项会出现在这里</p></div>
+            <span class="text-sm font-semibold tabular-nums text-gray-900">{{ oaTodos.data?.total || 0 }} 项</span>
+          </div>
+          <button v-for="item in pendingApprovalCategories" :key="item.key" type="button"
+            class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openApprovalTodo(item)">
+            <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF4E6] text-[#E57A00]"><FeatherIcon :name="item.icon" class="h-4 w-4" /></span>
+            <span class="flex-1 text-sm text-gray-800">{{ item.label }}</span>
+            <strong class="tabular-nums text-gray-900">{{ item.count }}</strong>
+            <FeatherIcon name="arrow-right" class="h-4 w-4 text-gray-300" />
+          </button>
+          <p v-if="!pendingApprovalCategories.length && !oaTodos.loading" class="px-5 py-8 text-center text-sm text-gray-400">当前没有审批待办</p>
+          <p v-if="oaTodos.error" class="border-t border-red-100 bg-red-50 px-5 py-3 text-xs text-red-700">审批待办加载失败，请刷新后重试</p>
+        </div>
+
+        <div v-if="myLeave.data?.visible" class="rounded-xl border border-gray-200 bg-white p-5">
+          <div class="flex items-baseline justify-between"><h2 class="text-sm font-semibold text-gray-900">我的假期</h2><span class="text-xs text-gray-500">1 天 = 8 小时</span></div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl bg-[#FFF4E6] p-4">
+              <div class="text-xs text-gray-600">年假可用</div>
+              <div class="mt-1 text-3xl font-semibold tabular-nums text-gray-900">{{ myLeave.data.annual.available }}<span class="ml-1 text-sm font-normal text-gray-500">天</span></div>
+              <div class="mt-1 text-xs text-gray-500">已发放 {{ myLeave.data.annual.granted }} 天 · 已用 {{ myLeave.data.annual.used }} 天 · 申请中 {{ myLeave.data.annual.reserved }} 天</div>
+            </div>
+            <div class="rounded-xl bg-[#EEF2FD] p-4">
+              <div class="text-xs text-gray-600">调休可用</div>
+              <div class="mt-1 text-3xl font-semibold tabular-nums text-gray-900">{{ myLeave.data.comp.available }}<span class="ml-1 text-sm font-normal text-gray-500">天</span></div>
+              <div class="mt-1 text-xs text-gray-500">加班累计 {{ myLeave.data.comp.credit }} 天 · 已用 {{ myLeave.data.comp.used }} 天</div>
+            </div>
+          </div>
+          <p v-if="myLeave.data.annual.message" class="mt-3 text-xs text-amber-700">{{ myLeave.data.annual.message }}</p>
+          <p v-else class="mt-3 text-xs text-gray-500">下次发放：{{ myLeave.data.annual.next_grant_date }} 起 +{{ myLeave.data.annual.next_grant_days }} 天</p>
         </div>
       </div>
-      <div v-if="procurement.data.can_view_financial" class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <div class="grid grid-cols-2 divide-x divide-gray-200 sm:grid-cols-4"><div class="p-3"><div class="text-xs text-gray-500">PO计划总额</div><div class="mt-1 text-base font-semibold tabular-nums">¥ {{ money(procurement.data.amounts.po_total) }}</div></div><div class="p-3"><div class="text-xs text-gray-500">累计已付</div><div class="mt-1 text-base font-semibold tabular-nums">¥ {{ money(procurement.data.amounts.paid) }}</div></div><div class="p-3"><div class="text-xs text-gray-500">剩余未付</div><div class="mt-1 text-base font-semibold tabular-nums">¥ {{ money(procurement.data.amounts.unpaid) }}</div></div><div class="p-3"><div class="text-xs text-gray-500">可提交付款</div><div class="mt-1 text-base font-semibold tabular-nums">¥ {{ money(procurement.data.amounts.payable) }}</div></div></div>
+
+      <div v-if="procurement.data?.visible && actionItems.length" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div class="border-b border-gray-200 px-5 py-3"><h2 class="text-sm font-semibold text-gray-900">现在要处理</h2><p class="mt-1 text-xs text-gray-500">每个付款期只显示一条行动项，先处理紧急和阻塞事项</p></div>
+        <button v-for="item in actionItems.slice(0, 6)" :key="item.key" type="button" class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openAlert(item)">
+          <span class="rounded px-2 py-1 text-[11px] font-medium" :class="actionTone(item.severity)">{{ actionLabel(item.severity) }}</span>
+          <span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-gray-900">{{ item.action }}：{{ item.detail }}</strong>
+            <span class="mt-0.5 block truncate text-xs text-gray-500">当前节点：{{ item.status }} · {{ item.title }}<span v-if="item.due_label"> · {{ item.due_label }}</span></span></span>
+          <FeatherIcon name="arrow-right" class="h-4 w-4 shrink-0 text-gray-300" />
+        </button>
+      </div>
+
+      <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+          <div><h2 class="text-sm font-semibold text-gray-900">通知</h2><p class="mt-1 text-xs text-gray-500">只保留需要你知道或行动的消息</p></div>
+          <span class="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700">未读 {{ notifications.data?.unread || 0 }}</span>
+        </div>
+        <button v-for="item in notifications.data?.items || []" :key="item.name" type="button" class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openNotification(item)">
+          <span class="h-2 w-2 shrink-0 rounded-full" :class="item.read ? 'bg-gray-300' : 'bg-red-500'"></span>
+          <span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-gray-900">{{ item.subject || item.document_name }}</strong>
+            <span class="mt-0.5 block truncate text-xs text-gray-500">{{ item.read ? '已读' : '待查看' }}</span></span>
+          <FeatherIcon name="external-link" class="h-4 w-4 text-gray-300" />
+        </button>
+        <p v-if="!notifications.loading && !(notifications.data?.items || []).length" class="px-5 py-8 text-center text-sm text-gray-400">暂无通知</p>
       </div>
     </section>
 
-    <section class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3"><div><h2 class="text-sm font-semibold text-gray-900">通知</h2><p class="mt-1 text-xs text-gray-500">只保留需要你知道或行动的消息</p></div><span class="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700">未读 {{ notifications.data?.unread || 0 }}</span></div>
-      <button v-for="item in notifications.data?.items || []" :key="item.name" type="button" class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openNotification(item)"><span class="h-2 w-2 shrink-0 rounded-full" :class="item.read ? 'bg-gray-300' : 'bg-red-500'"></span><span class="min-w-0 flex-1"><strong class="block truncate text-sm font-medium text-gray-900">{{ item.subject || item.document_name }}</strong><span class="mt-0.5 block truncate text-xs text-gray-500">{{ item.read ? '已读' : '待查看' }} · {{ notificationDetail(item) }}</span></span><FeatherIcon name="external-link" class="h-4 w-4 text-gray-300" /></button>
-      <p v-if="!notifications.loading && !(notifications.data?.items || []).length" class="px-5 py-8 text-center text-sm text-gray-400">暂无通知</p>
+    <!-- 经营看板 -->
+    <section v-show="tab === 'biz'" class="space-y-4">
+      <div v-if="cost.loading" class="flex items-center gap-2 py-8 text-sm text-gray-500"><FeatherIcon name="loader" class="h-4 w-4" /><span>正在统计公司费用...</span></div>
+      <template v-else-if="cost.data?.visible">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-xl border-0 bg-gradient-to-br from-[#FF9B1F] to-[#F27A00] p-5 text-white">
+            <div class="text-sm text-white/85">费用合计</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums">{{ money(cost.data.totals.total) }}</div>
+            <div class="mt-1 text-xs text-white/85">{{ deltaText(cost.data.deltas.total) }}</div>
+          </div>
+          <div v-for="item in [
+              { key: 'rd', label: '研发分摊（含工资）', color: '#FF8F00' },
+              { key: 'po', label: '采购（PO 金额）', color: '#3E63DD' },
+              { key: 'expense', label: '报销', color: '#1FA58C' }]" :key="item.key"
+            class="rounded-xl border border-gray-200 bg-white p-5">
+            <div class="flex items-center gap-2 text-sm text-gray-600"><span class="h-2.5 w-2.5 rounded-sm" :style="{ background: item.color }"></span>{{ item.label }}</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ money(cost.data.totals[item.key]) }}</div>
+            <div class="mt-1 text-xs text-gray-500">占 {{ share(cost.data.totals[item.key], cost.data.totals.total) }}% ·
+              <span :class="deltaClass(cost.data.deltas[item.key])">{{ deltaText(cost.data.deltas[item.key]) }}</span></div>
+          </div>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+          <div class="rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">各项目费用</h2><span class="text-xs text-gray-500">按研发分摊 / 采购 / 报销堆叠</span></div>
+            <div id="cost-projects" class="h-[300px] px-2 pb-2"></div>
+          </div>
+          <div class="rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">费用构成</h2><span class="text-xs text-gray-500">{{ scopeLabel }}</span></div>
+            <div id="cost-mix" class="h-[300px] px-2 pb-2"></div>
+          </div>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-2">
+          <div class="rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">{{ scope === 'year' ? '年度费用趋势' : '月度费用趋势' }}</h2><span class="text-xs text-gray-500">{{ scope === 'year' ? '近 5 年' : '近 12 个月' }}</span></div>
+            <div id="cost-trend" class="h-[300px] px-2 pb-2"></div>
+          </div>
+          <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4 pb-2"><h2 class="text-sm font-semibold text-gray-900">项目费用排行</h2><span class="text-xs text-gray-500">点任意一行看该项目明细</span></div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead><tr class="border-b border-gray-200 text-xs text-gray-500">
+                  <th class="px-5 py-2 text-left font-medium">项目</th><th class="px-3 py-2 text-right font-medium">费用</th>
+                  <th class="px-3 py-2 text-left font-medium">占比</th><th class="px-5 py-2 text-right font-medium">{{ compareLabel }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="row in cost.data.projects.slice(0, 8)" :key="row.project" class="cursor-pointer border-b border-gray-100 last:border-b-0 hover:bg-[#FFFAF2]"
+                    :class="row.project === selectedProject ? 'bg-[#FFF4E6]' : ''" @click="openProject(row)">
+                    <td class="px-5 py-2.5 text-gray-800">{{ row.label }}</td>
+                    <td class="px-3 py-2.5 text-right tabular-nums">{{ money(row.total) }}</td>
+                    <td class="px-3 py-2.5"><div class="h-1.5 w-24 rounded bg-gray-100"><div class="h-full rounded bg-[#FF8F00]" :style="{ width: share(row.total, cost.data.projects[0].total) + '%' }"></div></div></td>
+                    <td class="px-5 py-2.5 text-right tabular-nums" :class="deltaClass(row.delta)">{{ row.delta === null ? '—' : (row.delta > 0 ? '▲' : '▼') + ' ' + Math.abs(row.delta) + '%' }}</td>
+                  </tr>
+                  <tr v-if="!cost.data.projects.length"><td colspan="4" class="px-5 py-8 text-center text-sm text-gray-400">本期没有费用数据</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="costDetail.data" class="rounded-xl border border-gray-200 bg-white">
+          <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">{{ costDetail.data.label }} · 费用明细</h2><span class="text-xs text-gray-500">{{ scopeLabel }}</span></div>
+          <div class="grid gap-0 xl:grid-cols-2">
+            <div class="space-y-3 border-b border-gray-100 p-5 xl:border-b-0 xl:border-r">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">费用合计</div><div class="mt-1 text-lg font-semibold tabular-nums">{{ money(costDetail.data.totals.total) }}</div></div>
+                <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">分摊工时</div><div class="mt-1 text-lg font-semibold tabular-nums">{{ n0(costDetail.data.hours) }} h</div></div>
+              </div>
+              <div class="space-y-2 text-sm">
+                <div class="flex justify-between"><span class="text-gray-600">研发分摊（含工资）</span><b class="tabular-nums">{{ money(costDetail.data.totals.rd) }}</b></div>
+                <div class="flex justify-between"><span class="text-gray-600">采购（PO 金额）</span><b class="tabular-nums">{{ money(costDetail.data.totals.po) }}</b></div>
+                <div class="flex justify-between"><span class="text-gray-600">报销</span><b class="tabular-nums">{{ money(costDetail.data.totals.expense) }}</b></div>
+              </div>
+              <p class="text-xs text-gray-500">明细按金额取前 8 项，颜色与上方口径一致。</p>
+            </div>
+            <div id="cost-detail" class="h-[300px] px-2 pb-2"></div>
+          </div>
+        </div>
+      </template>
     </section>
 
-    <div v-if="d.loading" class="flex items-center gap-2 py-8 text-sm text-gray-500"><FeatherIcon name="loader" class="h-4 w-4" /><span>正在加载公司数据...</span></div>
-    <template v-else-if="d.data">
-      <section>
-        <div class="mb-3"><h2 class="text-base font-semibold text-gray-900">本期经营概览</h2><p class="mt-1 text-xs text-gray-500">{{ period }} 数据快照</p></div>
-        <div class="grid overflow-hidden rounded-lg border border-gray-200 bg-white sm:grid-cols-2 xl:grid-cols-4">
+    <!-- 人事看板 -->
+    <section v-show="tab === 'hr'" class="space-y-4">
+      <template v-if="hr.data?.visible">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-xl bg-gradient-to-br from-[#FF9B1F] to-[#F27A00] p-5 text-white">
+            <div class="text-sm text-white/85">本期请假</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums">{{ hr.data.totals.leave_days }}<span class="ml-1 text-sm font-normal text-white/85">天</span></div>
+            <div class="mt-1 text-xs text-white/85">共 {{ hr.data.totals.leave_count }} 人次</div>
+          </div>
+          <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">加班</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.totals.overtime_days }}<span class="ml-1 text-sm font-normal text-gray-500">天</span></div>
+            <div class="mt-1 text-xs text-gray-500">已计入调休额度</div></div>
+          <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">已用调休</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.totals.comp_days }}<span class="ml-1 text-sm font-normal text-gray-500">天</span></div>
+            <div class="mt-1 text-xs text-gray-500">{{ hr.data.department || '全公司' }} · 在职 {{ hr.data.headcount }} 人</div></div>
+          <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">需要人事处理</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.alerts.missing_joining + hr.data.alerts.negative_comp }}<span class="ml-1 text-sm font-normal text-gray-500">项</span></div>
+            <div class="mt-1 text-xs text-gray-500">缺入职日期 {{ hr.data.alerts.missing_joining }} 人 · 调休为负 {{ hr.data.alerts.negative_comp }} 人</div></div>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-2">
+          <div class="rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">请假类型占比</h2><span class="text-xs text-gray-500">按天数</span></div>
+            <div id="hr-types" class="h-[290px] px-2 pb-2"></div>
+          </div>
+          <div class="rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">各部门请假与加班</h2><span class="text-xs text-gray-500">天</span></div>
+            <div id="hr-departments" class="h-[290px] px-2 pb-2"></div>
+          </div>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+          <div class="rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">请假与加班趋势</h2><span class="text-xs text-gray-500">{{ scope === 'year' ? '近 5 年' : '近 12 个月' }} · 天</span></div>
+            <div id="hr-trend" class="h-[290px] px-2 pb-2"></div>
+          </div>
+          <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <div class="flex items-baseline justify-between px-5 pt-4 pb-2"><h2 class="text-sm font-semibold text-gray-900">假期余额较多的员工</h2><span class="text-xs text-gray-500">提醒安排休假</span></div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead><tr class="border-b border-gray-200 text-xs text-gray-500"><th class="px-5 py-2 text-left font-medium">员工</th><th class="px-3 py-2 text-right font-medium">年假</th><th class="px-5 py-2 text-right font-medium">调休</th></tr></thead>
+                <tbody>
+                  <tr v-for="row in hr.data.balances" :key="row.employee" class="border-b border-gray-100 last:border-b-0">
+                    <td class="px-5 py-2.5 text-gray-800">{{ row.employee }}<span class="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">{{ row.department }}</span></td>
+                    <td class="px-3 py-2.5 text-right tabular-nums">{{ row.annual_days }} 天</td>
+                    <td class="px-5 py-2.5 text-right tabular-nums" :class="row.comp_days < 0 ? 'text-red-600' : ''">{{ row.comp_days }} 天</td>
+                  </tr>
+                  <tr v-if="!hr.data.balances.length"><td colspan="3" class="px-5 py-8 text-center text-sm text-gray-400">暂无员工余额数据</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- 研发核算 -->
+    <section v-show="tab === 'rd'" class="space-y-5">
+      <div v-if="d.loading" class="flex items-center gap-2 py-8 text-sm text-gray-500"><FeatherIcon name="loader" class="h-4 w-4" /><span>正在加载公司数据...</span></div>
+      <template v-else-if="d.data">
+        <div class="grid overflow-hidden rounded-xl border border-gray-200 bg-white sm:grid-cols-2 xl:grid-cols-4">
           <div class="border-b border-gray-200 p-5 sm:border-r xl:border-b-0"><div class="flex items-center justify-between text-sm text-gray-500"><span>员工总数</span><FeatherIcon name="users" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ d.data.kpi.total }}<span class="ml-1 text-sm font-normal text-gray-400">人</span></div><div class="mt-2 text-xs text-gray-500">{{ d.data.kpi.confirmed }} 人已确认归档</div></div>
           <div class="border-b border-gray-200 p-5 xl:border-b-0 xl:border-r"><div class="flex items-center justify-between text-sm text-gray-500"><span>研发台账在册</span><FeatherIcon name="book-open" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ d.data.kpi.ledger }}<span class="ml-1 text-sm font-normal text-gray-400">人</span></div><div class="mt-2 text-xs text-gray-500">研发信息完整后自动归集</div></div>
           <div class="border-b border-gray-200 p-5 sm:border-b-0 sm:border-r"><div class="flex items-center justify-between text-sm text-gray-500"><span>本期研发工时</span><FeatherIcon name="clock" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ n0(d.data.kpi.hours) }}<span class="ml-1 text-sm font-normal text-gray-400">h</span></div><div class="mt-2 text-xs text-gray-500">分布于 {{ d.data.kpi.projects }} 个在研项目</div></div>
           <div class="p-5"><div class="flex items-center justify-between text-sm text-gray-500"><span>本期待分摊费用</span><FeatherIcon name="pie-chart" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ n0(d.data.kpi.cost) }}<span class="ml-1 text-sm font-normal text-gray-400">元</span></div><div class="mt-2 text-xs text-gray-500">按工时分配率分摊</div></div>
         </div>
-      </section>
 
-      <section class="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <div>
-          <h2 class="mb-3 text-base font-semibold text-gray-900">月度核算流程</h2>
-          <div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-            <button v-for="s in stages.filter((x) => canSee(x.route))" :key="s.n" type="button" class="group flex w-full items-center gap-4 border-b border-gray-200 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="router.push(s.route)">
-              <span class="flex h-9 w-9 items-center justify-center rounded-md bg-gray-100 text-gray-600"><FeatherIcon :name="s.icon" class="h-4 w-4" /></span><span class="w-7 text-xs font-medium text-gray-400">{{ s.n }}</span><span class="min-w-0 flex-1"><strong class="block text-sm font-medium text-gray-900">{{ s.h }}</strong><span class="text-xs text-gray-500">{{ s.p }}</span></span><span class="text-right"><strong class="block text-lg font-semibold tabular-nums text-gray-900">{{ n0(d.data.pipeline[s.k]) }}</strong><span class="text-xs text-gray-400">{{ s.unit }}</span></span><FeatherIcon name="chevron-right" class="h-4 w-4 text-gray-300 group-hover:text-gray-600" />
-            </button>
+        <section class="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+          <div>
+            <h2 class="mb-3 text-base font-semibold text-gray-900">月度核算流程</h2>
+            <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+              <button v-for="s in stages.filter((x) => canSee(x.route))" :key="s.n" type="button" class="group flex w-full items-center gap-4 border-b border-gray-200 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="router.push(s.route)">
+                <span class="flex h-9 w-9 items-center justify-center rounded-md bg-gray-100 text-gray-600"><FeatherIcon :name="s.icon" class="h-4 w-4" /></span><span class="w-7 text-xs font-medium text-gray-400">{{ s.n }}</span>
+                <span class="min-w-0 flex-1"><strong class="block text-sm font-medium text-gray-900">{{ s.h }}</strong><span class="text-xs text-gray-500">{{ s.p }}</span></span>
+                <span class="text-right"><strong class="block text-lg font-semibold tabular-nums text-gray-900">{{ n0(d.data.pipeline[s.k]) }}</strong><span class="text-xs text-gray-400">{{ s.unit }}</span></span>
+                <FeatherIcon name="chevron-right" class="h-4 w-4 text-gray-300 group-hover:text-gray-600" />
+              </button>
+            </div>
           </div>
-        </div>
-        <div>
-          <h2 class="mb-3 text-base font-semibold text-gray-900">数据完整度</h2>
-          <div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
-            <div class="flex items-center justify-between border-b border-gray-200 px-4 py-4"><span class="text-sm text-gray-700">员工信息待补全</span><span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="d.data.todos.pending > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'">{{ d.data.todos.pending }} 人</span></div>
-            <div class="flex items-center justify-between border-b border-gray-200 px-4 py-4"><span class="text-sm text-gray-700">研发工时已填报</span><span class="text-sm font-medium tabular-nums text-gray-900">{{ d.data.todos.filled }} / {{ d.data.todos.ledger }} 人</span></div>
-            <div class="flex items-center justify-between border-b border-gray-200 px-4 py-4"><span class="text-sm text-gray-700">财务费用已导入</span><span class="text-sm font-medium tabular-nums text-gray-900">{{ d.data.todos.cost_items }} 项</span></div>
-            <div class="flex items-center justify-between px-4 py-4"><span class="text-sm text-gray-700">宿舍费用已登记</span><span class="text-sm font-medium tabular-nums text-gray-900">{{ d.data.todos.dorm_count }} 条</span></div>
+          <div>
+            <h2 class="mb-3 text-base font-semibold text-gray-900">数据完整度</h2>
+            <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+              <div class="flex items-center justify-between border-b border-gray-200 px-4 py-4"><span class="text-sm text-gray-700">员工信息待补全</span><span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="d.data.todos.pending > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'">{{ d.data.todos.pending }} 人</span></div>
+              <div class="flex items-center justify-between border-b border-gray-200 px-4 py-4"><span class="text-sm text-gray-700">研发工时已填报</span><span class="text-sm font-medium tabular-nums text-gray-900">{{ d.data.todos.filled }} / {{ d.data.todos.ledger }} 人</span></div>
+              <div class="flex items-center justify-between border-b border-gray-200 px-4 py-4"><span class="text-sm text-gray-700">财务费用已导入</span><span class="text-sm font-medium tabular-nums text-gray-900">{{ d.data.todos.cost_items }} 项</span></div>
+              <div class="flex items-center justify-between px-4 py-4"><span class="text-sm text-gray-700">宿舍费用已登记</span><span class="text-sm font-medium tabular-nums text-gray-900">{{ d.data.todos.dorm_count }} 条</span></div>
+            </div>
           </div>
-        </div>
-      </section>
-    </template>
+        </section>
+      </template>
+    </section>
   </div>
 </template>
