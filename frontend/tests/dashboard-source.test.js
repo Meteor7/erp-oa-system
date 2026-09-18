@@ -55,3 +55,12 @@ test("personal leave balance is shown in days", () => {
   assert.match(source, /myLeave\.data\.annual\.available/);
   assert.match(source, /myLeave\.data\.comp\.available/);
 });
+
+test('the approval queue lists real requests with waiting time', () => {
+  assert.match(source, /get_my_approval_queue/);
+  assert.match(source, /get_my_requests/);
+  assert.match(source, /queueItems/);
+  assert.match(source, /已超时/);
+  assert.match(source, /去审批/);
+  assert.match(source, /修改后重新提交/);
+});

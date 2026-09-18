@@ -350,3 +350,116 @@ def get_my_leave_summary():
                      "credit": days(comp.get("credit_hours")),
                      "used": days(comp.get("used_hours")),
                      "reserved": days(comp.get("reserved_hours"))}}
+
+
+# --- personal queue ----------------------------------------------------------
+
+ROUTE_BY_TYPE = {
+    "请假申请": "/approval/leave",
+    "加班申请": "/approval/overtime",
+    "调休申请": "/approval/comp-time",
+    "采购申请": "/approval/procurement",
+    "购买申请": "/approval/direct-purchase",
+    "采购付款": "/approval/procurement-payment",
+    "费用付款申请": "/approval/reimbursement",
+}
+OVERDUE_DAYS = 3
+
+
+def waiting_days(since):
+    if not since:
+        return 0
+    return max(0, (frappe.utils.now_datetime() - frappe.utils.get_datetime(since)).days)
+
+
+def queue_item(doc, steps):
+    """Shape one pending approval for the dashboard list."""
+    waited = waiting_days(doc.get("modified"))
+    amount = float(doc.get("approved_amount") or doc.get("amount") or 0)
+    current = next((row for row in steps if row.get("status") in ("待审批", "待办理", "")), None)
+    return {
+        "name": doc.get("name"),
+        "request_type": doc.get("request_type"),
+        "subject": doc.get("subject") or doc.get("name"),
+        "applicant": doc.get("employee_name") or doc.get("owner") or "",
+        "department": doc.get("department") or "",
+        "amount": amount,
+        "leave_type": doc.get("leave_type") or "",
+        "hours": float(doc.get("duration_hours") or 0),
+        "from_date": str(doc.get("from_date") or ""),
+        "to_date": str(doc.get("to_date") or ""),
+        "step_label": (current or {}).get("label") or doc.get("current_step_label") or "",
+        "waited_days": waited,
+        "overdue": waited >= OVERDUE_DAYS,
+        "route": ROUTE_BY_TYPE.get(doc.get("request_type"), "/approval/request-dashboard"),
+    }
+
+
+def _steps_by_parent(names):
+    rows = frappe.get_all("OA Approval Step", filters={"parent": ["in", names]},
+                          fields=["parent", "step_index", "label", "status", "note", "acted_on"],
+                          order_by="parent asc, step_index asc", limit_page_length=0) if names else []
+    grouped = defaultdict(list)
+    for row in rows:
+        grouped[row.parent].append(row)
+    return grouped
+
+
+@frappe.whitelist()
+def get_my_approval_queue(limit=8):
+    """The signed-in user's pending approvals, newest waiting first."""
+    from rayher_hr_payroll.api import oa_entry
+
+    summary = oa_entry.get_my_approval_summary()
+    names = [name for category in summary["categories"] for name in category["requests"]]
+    if not names:
+        return {"total": summary["total"], "items": []}
+    docs = frappe.get_all("OA Approval Request", filters={"name": ["in", names]},
+                          fields=["name", "request_type", "subject", "employee_name", "owner", "department",
+                                  "amount", "approved_amount", "leave_type", "duration_hours", "from_date",
+                                  "to_date", "current_step_label", "modified"],
+                          limit_page_length=0)
+    steps = _steps_by_parent([row.name for row in docs])
+    items = [queue_item(row, steps.get(row.name, [])) for row in docs]
+    items.sort(key=lambda row: row["waited_days"], reverse=True)
+    return {"total": summary["total"], "items": items[:int(limit or 8)]}
+
+
+def request_progress(doc, steps):
+    """Where a request of mine stands, and whether it came back for changes."""
+    total = len(steps) or 1
+    done = sum(1 for row in steps if row.get("status") in ("已通过", "已审批", "已完成", "已办理"))
+    returned = next((row for row in steps if row.get("status") in ("已拒绝", "已退回", "退回")), None)
+    return {
+        "name": doc.get("name"),
+        "request_type": doc.get("request_type"),
+        "subject": doc.get("subject") or doc.get("name"),
+        "amount": float(doc.get("approved_amount") or doc.get("amount") or 0),
+        "status": doc.get("workflow_status"),
+        "step_label": doc.get("current_step_label") or "",
+        "done_steps": done,
+        "total_steps": total,
+        "returned": bool(returned),
+        "returned_note": (returned or {}).get("note") or "",
+        "route": ROUTE_BY_TYPE.get(doc.get("request_type"), "/approval/request-dashboard"),
+    }
+
+
+@frappe.whitelist()
+def get_my_requests(limit=6):
+    """Requests I submitted that are still running or came back to me."""
+    user = _user()
+    if user in {"", "guest"}:
+        frappe.throw(frappe._("请先登录。"))
+    employee = frappe.db.get_value("Employee", {"user_id": user}, "name")
+    filters = {"workflow_status": ["in", ["待审批", "待办理", "草稿"]]}
+    if employee:
+        filters["employee"] = employee
+    else:
+        filters["owner"] = frappe.session.user
+    docs = frappe.get_all("OA Approval Request", filters=filters,
+                          fields=["name", "request_type", "subject", "amount", "approved_amount",
+                                  "workflow_status", "current_step_label", "modified"],
+                          order_by="modified desc", limit_page_length=int(limit or 6))
+    steps = _steps_by_parent([row.name for row in docs])
+    return {"items": [request_progress(row, steps.get(row.name, [])) for row in docs]}

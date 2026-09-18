@@ -33,6 +33,8 @@ const selectedProject = ref('');
 const charts = reactive({});
 
 const oaTodos = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_approval_summary', method: 'GET', auto: true });
+const queue = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_approval_queue', method: 'GET', makeParams: () => ({ limit: 8 }), auto: true });
+const myRequests = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_requests', method: 'GET', makeParams: () => ({ limit: 6 }), auto: true });
 const notifications = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_notifications', method: 'GET', makeParams: () => ({ limit: 8 }), auto: true });
 const procurement = createResource({ url: 'rayher_hr_payroll.api.dashboard_entry.get_procurement_overview', method: 'GET', auto: true });
 const myLeave = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_leave_summary', method: 'GET', auto: true });
@@ -53,6 +55,27 @@ const todoPresentation = {
   procurement: { icon: 'clipboard' }, direct_purchase: { icon: 'shopping-cart' },
   procurement_payment: { icon: 'credit-card' }, expense_payment: { icon: 'file-text' },
 };
+const typeMark = {
+  '请假申请': { mark: '假', tone: 'bg-[#EEF2FD] text-[#3E63DD]' },
+  '加班申请': { mark: '加', tone: 'bg-[#EEF2FD] text-[#3E63DD]' },
+  '调休申请': { mark: '休', tone: 'bg-[#EEF2FD] text-[#3E63DD]' },
+  '采购申请': { mark: '采', tone: 'bg-[#FFF4E6] text-[#E57A00]' },
+  '购买申请': { mark: '购', tone: 'bg-[#FFF4E6] text-[#E57A00]' },
+  '采购付款': { mark: '付', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
+  '费用付款申请': { mark: '报', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
+};
+const markOf = (type) => typeMark[type] || { mark: '单', tone: 'bg-gray-100 text-gray-600' };
+const queueItems = computed(() => queue.data?.items || []);
+const myRequestItems = computed(() => myRequests.data?.items || []);
+function queueDetail(item) {
+  const parts = [item.applicant && `${item.applicant} 提交`, item.department];
+  if (item.amount) parts.push(money(item.amount));
+  if (item.hours) parts.push(`${item.leave_type || ''} ${Number((item.hours / 8).toFixed(2))} 天（${item.hours} 小时）`.trim());
+  if (item.from_date) parts.push(item.to_date && item.to_date !== item.from_date ? `${item.from_date} 至 ${item.to_date}` : item.from_date);
+  parts.push(item.waited_days > 0 ? `已等待 ${item.waited_days} 天` : '今天提交');
+  return parts.filter(Boolean).join(' · ');
+}
+function openQueueItem(item) { router.push({ path: item.route, query: { request: item.name } }); }
 const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: 'inbox' }) })));
 const pendingApprovalCategories = computed(() => todoCategories.value.filter((item) => Number(item.count || 0) > 0));
 const actionItems = computed(() => procurement.data?.action_items || []);
@@ -279,18 +302,26 @@ const stages = [
       <div class="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-            <div><h2 class="text-sm font-semibold text-gray-900">我的审批待办</h2><p class="mt-1 text-xs text-gray-500">只有需要你作出审批决定的事项会出现在这里</p></div>
+            <div><h2 class="text-sm font-semibold text-gray-900">我的审批待办</h2><p class="mt-1 text-xs text-gray-500">等待最久的排在前面</p></div>
             <span class="text-sm font-semibold tabular-nums text-gray-900">{{ oaTodos.data?.total || 0 }} 项</span>
           </div>
-          <button v-for="item in pendingApprovalCategories" :key="item.key" type="button"
-            class="flex w-full items-center gap-3 border-b border-gray-100 px-5 py-3 text-left last:border-b-0 hover:bg-gray-50" @click="openApprovalTodo(item)">
-            <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF4E6] text-[#E57A00]"><FeatherIcon :name="item.icon" class="h-4 w-4" /></span>
-            <span class="flex-1 text-sm text-gray-800">{{ item.label }}</span>
-            <strong class="tabular-nums text-gray-900">{{ item.count }}</strong>
-            <FeatherIcon name="arrow-right" class="h-4 w-4 text-gray-300" />
-          </button>
-          <p v-if="!pendingApprovalCategories.length && !oaTodos.loading" class="px-5 py-8 text-center text-sm text-gray-400">当前没有审批待办</p>
-          <p v-if="oaTodos.error" class="border-t border-red-100 bg-red-50 px-5 py-3 text-xs text-red-700">审批待办加载失败，请刷新后重试</p>
+          <div v-for="item in queueItems" :key="item.name" class="flex flex-wrap items-center gap-3 border-b border-gray-100 px-5 py-3 last:border-b-0 hover:bg-[#FFFCF7]">
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold" :class="markOf(item.request_type).tone">{{ markOf(item.request_type).mark }}</span>
+            <span class="min-w-[180px] flex-1">
+              <strong class="block text-sm font-medium text-gray-900">{{ item.request_type }} · {{ item.subject }}</strong>
+              <span class="mt-0.5 block text-xs text-gray-500">{{ queueDetail(item) }}</span>
+            </span>
+            <span class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium" :class="item.overdue ? 'bg-red-50 text-red-700' : 'bg-[#FFF4E6] text-[#E57A00]'">{{ item.overdue ? '已超时' : '待审批' }}</span>
+            <button type="button" class="shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-[#FF8F00]" @click="openQueueItem(item)">去审批</button>
+          </div>
+          <div v-if="queue.loading && !queueItems.length" class="px-5 py-8 text-center text-sm text-gray-400">正在加载待办…</div>
+          <div v-else-if="!queueItems.length" class="px-5 py-10 text-center">
+            <p class="text-sm text-gray-500">当前没有需要你审批的事项</p>
+            <div class="mt-3 flex flex-wrap justify-center gap-2">
+              <button v-for="item in pendingApprovalCategories" :key="item.key" type="button" class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-[#FF8F00] hover:text-[#E57A00]" @click="openApprovalTodo(item)">{{ item.label }} {{ item.count }}</button>
+            </div>
+          </div>
+          <p v-if="oaTodos.error || queue.error" class="border-t border-red-100 bg-red-50 px-5 py-3 text-xs text-red-700">审批待办加载失败：{{ errorText(queue) || errorText(oaTodos) }}</p>
         </div>
 
         <div v-if="myLeave.data?.visible" class="rounded-xl border border-gray-200 bg-white p-5">
@@ -320,6 +351,26 @@ const stages = [
             <span class="mt-0.5 block truncate text-xs text-gray-500">当前节点：{{ item.status }} · {{ item.title }}<span v-if="item.due_label"> · {{ item.due_label }}</span></span></span>
           <FeatherIcon name="arrow-right" class="h-4 w-4 shrink-0 text-gray-300" />
         </button>
+      </div>
+
+      <div v-if="myRequestItems.length" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+          <div><h2 class="text-sm font-semibold text-gray-900">我发起的申请</h2><p class="mt-1 text-xs text-gray-500">进行中和被退回的申请</p></div>
+          <span class="text-sm font-semibold tabular-nums text-gray-900">{{ myRequestItems.length }} 项</span>
+        </div>
+        <div v-for="item in myRequestItems" :key="item.name" class="flex flex-wrap items-center gap-3 border-b border-gray-100 px-5 py-3 last:border-b-0">
+          <span class="min-w-[200px] flex-1">
+            <strong class="block text-sm font-medium text-gray-900">{{ item.request_type }} · {{ item.subject }}<span v-if="item.amount" class="ml-2 font-normal text-gray-500">{{ money(item.amount) }}</span></strong>
+            <span class="mt-0.5 block text-xs" :class="item.returned ? 'text-red-600' : 'text-gray-500'">
+              {{ item.returned ? ('被退回' + (item.returned_note ? '：' + item.returned_note : '')) : (item.step_label ? item.step_label + ' 审批中' : item.status) }}
+              · 第 {{ item.done_steps }} / {{ item.total_steps }} 步
+            </span>
+            <span class="mt-2 flex max-w-[280px] gap-1">
+              <i v-for="step in item.total_steps" :key="step" class="h-1.5 flex-1 rounded-full" :class="step <= item.done_steps ? 'bg-[#FF8F00]' : item.returned && step === item.done_steps + 1 ? 'bg-red-300' : 'bg-gray-200'"></i>
+            </span>
+          </span>
+          <button type="button" class="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium" :class="item.returned ? 'bg-gray-900 text-white hover:bg-[#FF8F00]' : 'border border-gray-200 text-gray-700 hover:border-[#FF8F00] hover:text-[#E57A00]'" @click="openQueueItem(item)">{{ item.returned ? '修改后重新提交' : '查看' }}</button>
+        </div>
       </div>
 
       <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
