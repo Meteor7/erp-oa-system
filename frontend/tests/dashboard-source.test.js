@@ -81,3 +81,11 @@ test('notifications read as plain language, grouped per document', () => {
   assert.match(source, /该单据还有/);
   assert.match(source, /本类全部已读/);
 });
+
+test('period params exist before any auto-fetching resource is created', () => {
+  // an auto resource calls makeParams immediately; a later const would throw and leave the tab empty
+  const defined = source.indexOf('const currentPeriod = computed(');
+  const firstResource = source.indexOf('createResource(');
+  assert.ok(defined > -1 && firstResource > -1);
+  assert.ok(defined < firstResource);
+});

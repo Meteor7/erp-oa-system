@@ -32,6 +32,9 @@ const year = ref(new Date().getFullYear());
 const selectedProject = ref('');
 const charts = reactive({});
 
+// Resources below fetch as soon as they are created, so their params must exist first.
+const currentPeriod = computed(() => (scope.value === 'year' ? String(year.value) : period.value));
+const scopeLabel = computed(() => (scope.value === 'year' ? `${year.value} 年` : period.value.replace(/(\d+)-(\d+)/, (m, y, mo) => `${y} 年 ${Number(mo)} 月`)));
 const oaTodos = createResource({ url: 'rayher_hr_payroll.api.oa_entry.get_my_approval_summary', method: 'GET', auto: true });
 const queue = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_approval_queue', method: 'GET', makeParams: () => ({ limit: 8 }), auto: true });
 const myRequests = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_my_requests', method: 'GET', makeParams: () => ({ limit: 6 }), auto: true });
@@ -63,8 +66,6 @@ const costDetail = createResource({ url: 'rayher_hr_payroll.api.overview_entry.g
 const hr = createResource({ url: 'rayher_hr_payroll.api.overview_entry.get_hr_overview', method: 'GET', makeParams: () => ({ scope: scope.value, period: currentPeriod.value }), auto: true });
 const d = createResource({ url: 'rayher_hr_payroll.api.dashboard_entry.get_dashboard', method: 'GET', makeParams: () => ({ period: period.value }), auto: true });
 
-const currentPeriod = computed(() => (scope.value === 'year' ? String(year.value) : period.value));
-const scopeLabel = computed(() => (scope.value === 'year' ? `${year.value} 年` : period.value.replace(/(\d+)-(\d+)/, (m, y, mo) => `${y} 年 ${Number(mo)} 月`)));
 const compareLabel = computed(() => (scope.value === 'year' ? '较去年' : '较上月'));
 const years = computed(() => { const now = new Date().getFullYear(); return [now, now - 1, now - 2, now - 3]; });
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
