@@ -226,8 +226,8 @@ const stages = [
 
 <template>
   <div class="space-y-5">
-    <header class="relative -mx-3 -mt-3 overflow-hidden border-b border-gray-200 bg-gradient-to-b from-[#FFF7ED] to-transparent px-3 pb-4 pt-5 sm:-mx-4 sm:-mt-4 sm:px-4 md:-mx-7 md:-mt-7 md:px-7">
-      <svg class="pointer-events-none absolute -right-10 -top-16 h-56 w-[520px]" viewBox="0 0 520 260" aria-hidden="true">
+    <header class="relative -mx-3 -mt-3 overflow-hidden border-b border-[#F3E7D6] bg-gradient-to-b from-[#FFF3E0] via-[#FFF9F0] to-[#F5F6F9] px-3 pb-5 pt-6 sm:-mx-4 sm:-mt-4 sm:px-4 md:-mx-7 md:-mt-7 md:px-7 lg:pb-6 lg:pt-8">
+      <svg class="pointer-events-none absolute -right-16 -top-20 h-72 w-[680px]" viewBox="0 0 520 260" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <g fill="none" stroke="#FF8F00">
           <ellipse cx="300" cy="150" rx="230" ry="70" transform="rotate(-16 300 150)" stroke-opacity=".18" stroke-width="2" />
           <ellipse cx="300" cy="150" rx="170" ry="48" transform="rotate(-16 300 150)" stroke-opacity=".12" stroke-width="2" />

@@ -49,6 +49,7 @@ const groups = [
 ];
 
 const WIDE_PAGE_PATHS = new Set([
+  '/dashboard',
   '/personnel',
   '/social-insurance',
   '/housing-fund',
