@@ -6,7 +6,7 @@ import * as echarts from 'echarts/core';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { canSee } from '../lib/access';
+import { canSee, currentUser } from '../lib/access';
 import { period } from '../lib/period';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
@@ -45,6 +45,8 @@ const currentPeriod = computed(() => (scope.value === 'year' ? String(year.value
 const scopeLabel = computed(() => (scope.value === 'year' ? `${year.value} 年` : period.value.replace(/(\d+)-(\d+)/, (m, y, mo) => `${y} 年 ${Number(mo)} 月`)));
 const compareLabel = computed(() => (scope.value === 'year' ? '较去年' : '较上月'));
 const years = computed(() => { const now = new Date().getFullYear(); return [now, now - 1, now - 2, now - 3]; });
+const greeting = computed(() => { const hour = new Date().getHours(); return hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
+const userName = computed(() => currentUser() || '');
 
 const todoPresentation = {
   leave: { icon: 'calendar' }, overtime: { icon: 'clock' }, comp_time: { icon: 'refresh-cw' },
@@ -224,9 +226,28 @@ const stages = [
 
 <template>
   <div class="space-y-5">
-    <header class="flex flex-wrap items-end justify-between gap-4 border-b border-gray-200 pb-4">
+    <header class="relative -mx-3 -mt-3 overflow-hidden border-b border-gray-200 bg-gradient-to-b from-[#FFF7ED] to-transparent px-3 pb-4 pt-5 sm:-mx-4 sm:-mt-4 sm:px-4 md:-mx-7 md:-mt-7 md:px-7">
+      <svg class="pointer-events-none absolute -right-10 -top-16 h-56 w-[520px]" viewBox="0 0 520 260" aria-hidden="true">
+        <g fill="none" stroke="#FF8F00">
+          <ellipse cx="300" cy="150" rx="230" ry="70" transform="rotate(-16 300 150)" stroke-opacity=".18" stroke-width="2" />
+          <ellipse cx="300" cy="150" rx="170" ry="48" transform="rotate(-16 300 150)" stroke-opacity=".12" stroke-width="2" />
+        </g>
+        <g fill="#FF8F00">
+          <rect x="120" y="96" width="9" height="9" rx="1.5" opacity=".35" />
+          <rect x="134" y="84" width="9" height="9" rx="1.5" opacity=".22" />
+          <rect x="134" y="98" width="9" height="9" rx="1.5" opacity=".12" />
+        </g>
+      </svg>
+      <div class="relative flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-gray-900">数据看板</h1>
+        <div class="flex items-center gap-2 text-xs font-semibold tracking-wider text-[#E57A00]">
+          <span class="grid grid-cols-2 gap-[2px]">
+            <i class="h-[5px] w-[5px] rounded-[1px] bg-[#FF8F00]"></i><i class="h-[5px] w-[5px] rounded-[1px] bg-[#FF8F00]/60"></i>
+            <i class="h-[5px] w-[5px] rounded-[1px] bg-[#FF8F00]/30"></i><i class="h-[5px] w-[5px]"></i>
+          </span>
+          示例企业管理系统 · 数据看板
+        </div>
+        <h1 class="mt-1.5 text-2xl font-semibold text-gray-900">{{ greeting }}<template v-if="userName">，{{ userName }}</template></h1>
         <p class="mt-1 text-sm text-gray-500">{{ scopeLabel }} · 我的待办与公司经营数据</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -240,15 +261,15 @@ const stages = [
           <option v-for="option in years" :key="option" :value="option">{{ option }} 年</option>
         </select>
       </div>
-    </header>
-
-    <nav v-if="tabs.length > 1" class="flex flex-wrap gap-2">
+      </div>
+      <nav v-if="tabs.length > 1" class="relative mt-4 flex flex-wrap gap-2">
       <button v-for="item in tabs" :key="item.key" type="button" class="rounded-lg px-4 py-2 text-sm"
         :class="tab === item.key ? 'bg-gray-900 font-semibold text-white' : 'text-gray-600 hover:bg-gray-100'" @click="tab = item.key">
         {{ item.label }}
         <span v-if="item.count" class="ml-1.5 rounded-full bg-[#FF8F00] px-1.5 text-xs font-semibold text-white">{{ item.count }}</span>
       </button>
-    </nav>
+      </nav>
+    </header>
 
     <!-- 我的待办 -->
     <section v-show="tab === 'mine'" class="space-y-5">

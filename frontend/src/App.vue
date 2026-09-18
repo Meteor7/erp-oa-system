@@ -211,18 +211,18 @@ function logout() {
 </script>
 <template>
   <div class='flex min-h-screen min-w-0 overflow-x-hidden bg-[#F5F6F9] text-[#1A2130]'>
-    <aside class='fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white text-gray-600 transition-transform duration-200 md:static md:translate-x-0' :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'">
+    <aside class='fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white text-gray-700 transition-transform duration-200 md:static md:translate-x-0' :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'">
       <div class='border-b border-gray-100 px-4 py-4'>
         <img :src='companyLogo' alt='示例企业032有限公司' class='mb-2.5 h-9 w-auto object-contain' />
         <div class='text-xs text-gray-400'>研发成本管理 · 示例企业032有限公司</div>
       </div>
       <nav class='p-2 flex-1 overflow-y-auto'>
         <div v-for='g in visibleGroups' :key='g.label' class='mb-2'>
-          <div class='px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400'>{{ g.label }}</div>
+          <div class='px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500'>{{ g.label }}</div>
           <template v-for='n in g.items' :key='n.to || n.label'>
             <div v-if='n.children'>
               <button type='button'
-                class='flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left text-sm text-gray-600 hover:bg-gray-50'
+                class='flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left text-sm font-medium text-gray-700 hover:bg-gray-50'
                 :aria-expanded='isNavGroupOpen(n)' @click='toggleNavGroup(n)'>
                 <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>
                 <span class='flex-1'>{{ n.label }}</span>
@@ -230,12 +230,12 @@ function logout() {
               </button>
               <div v-if='isNavGroupOpen(n)'>
                 <router-link v-for='child in n.children' :key='child.to' :to='child.to'
-                  class='ml-6 flex items-center rounded-lg px-2 py-1.5 text-[13px] text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                  class='ml-6 flex items-center rounded-lg px-2 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   active-class='bg-[#FFF4E6] font-semibold text-[#E57A00]'>{{ child.label }}</router-link>
               </div>
             </div>
             <router-link v-else :to='n.to'
-              class='flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm text-gray-600 hover:bg-gray-50'
+              class='flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50'
               active-class='bg-[#FFF4E6] font-semibold text-[#E57A00]'>
               <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>{{ n.label }}
             </router-link>
