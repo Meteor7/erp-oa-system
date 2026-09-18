@@ -63,19 +63,21 @@ const typeMark = {
   '购买申请': { mark: '购', tone: 'bg-[#FFF4E6] text-[#E57A00]' },
   '采购付款': { mark: '付', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
   '费用付款申请': { mark: '报', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
+  '价格审批': { mark: '价', tone: 'bg-[#FDEBEC] text-[#C9373D]' },
+  '采购订单': { mark: '单', tone: 'bg-[#EEF2FD] text-[#3E63DD]' },
 };
 const markOf = (type) => typeMark[type] || { mark: '单', tone: 'bg-gray-100 text-gray-600' };
 const queueItems = computed(() => queue.data?.items || []);
 const myRequestItems = computed(() => myRequests.data?.items || []);
 function queueDetail(item) {
-  const parts = [item.applicant && `${item.applicant} 提交`, item.department];
+  const parts = [item.applicant && (item.kind && item.kind !== item.request_type ? item.applicant : `${item.applicant} 提交`), item.department];
   if (item.amount) parts.push(money(item.amount));
   if (item.hours) parts.push(`${item.leave_type || ''} ${Number((item.hours / 8).toFixed(2))} 天（${item.hours} 小时）`.trim());
   if (item.from_date) parts.push(item.to_date && item.to_date !== item.from_date ? `${item.from_date} 至 ${item.to_date}` : item.from_date);
   parts.push(item.waited_days > 0 ? `已等待 ${item.waited_days} 天` : '今天提交');
   return parts.filter(Boolean).join(' · ');
 }
-function openQueueItem(item) { router.push({ path: item.route, query: { request: item.name } }); }
+function openQueueItem(item) { router.push({ path: item.route, query: item.query || { request: item.name } }); }
 const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: 'inbox' }) })));
 const pendingApprovalCategories = computed(() => todoCategories.value.filter((item) => Number(item.count || 0) > 0));
 const actionItems = computed(() => procurement.data?.action_items || []);
@@ -86,7 +88,7 @@ const costPending = computed(() => cost.loading || Boolean(cost.error));
 const hrPending = computed(() => hr.loading || Boolean(hr.error));
 const rdVisible = computed(() => Boolean(d.data) && canSee('/allocation-dashboard'));
 const tabs = computed(() => [
-  { key: 'mine', label: '我的待办', count: oaTodos.data?.total || 0, show: true },
+  { key: 'mine', label: '我的待办', count: queue.data?.total ?? (oaTodos.data?.total || 0), show: true },
   { key: 'biz', label: '经营看板', show: costVisible.value || costPending.value },
   { key: 'hr', label: '人事看板', show: hrVisible.value || hrPending.value },
   { key: 'rd', label: '研发核算', show: rdVisible.value },
@@ -302,21 +304,22 @@ const stages = [
       <div class="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-            <div><h2 class="text-sm font-semibold text-gray-900">我的审批待办</h2><p class="mt-1 text-xs text-gray-500">等待最久的排在前面</p></div>
-            <span class="text-sm font-semibold tabular-nums text-gray-900">{{ oaTodos.data?.total || 0 }} 项</span>
+            <div><h2 class="text-sm font-semibold text-gray-900">要我处理</h2><p class="mt-1 text-xs text-gray-500">审批和需要我动手的事都在这里，等待最久的排在前面</p></div>
+            <span class="text-sm font-semibold tabular-nums text-gray-900">{{ queue.data?.total ?? (oaTodos.data?.total || 0) }} 项</span>
           </div>
           <div v-for="item in queueItems" :key="item.name" class="flex flex-wrap items-center gap-3 border-b border-gray-100 px-5 py-3 last:border-b-0 hover:bg-[#FFFCF7]">
             <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold" :class="markOf(item.request_type).tone">{{ markOf(item.request_type).mark }}</span>
             <span class="min-w-[180px] flex-1">
-              <strong class="block text-sm font-medium text-gray-900">{{ item.request_type }} · {{ item.subject }}</strong>
+              <strong class="block text-sm font-medium text-gray-900">{{ item.kind || item.request_type }} · {{ item.subject }}</strong>
               <span class="mt-0.5 block text-xs text-gray-500">{{ queueDetail(item) }}</span>
             </span>
+            <span v-if="item.reason" class="shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] text-gray-600">{{ item.reason }}</span>
             <span class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium" :class="item.overdue ? 'bg-red-50 text-red-700' : 'bg-[#FFF4E6] text-[#E57A00]'">{{ item.overdue ? '已超时' : '待审批' }}</span>
-            <button type="button" class="shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-[#FF8F00]" @click="openQueueItem(item)">去审批</button>
+            <button type="button" class="shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-[#FF8F00]" @click="openQueueItem(item)">{{ item.reason === '我是审批人' || item.reason === '我是价格审批人' ? '去审批' : '去处理' }}</button>
           </div>
           <div v-if="queue.loading && !queueItems.length" class="px-5 py-8 text-center text-sm text-gray-400">正在加载待办…</div>
           <div v-else-if="!queueItems.length" class="px-5 py-10 text-center">
-            <p class="text-sm text-gray-500">当前没有需要你审批的事项</p>
+            <p class="text-sm text-gray-500">当前没有需要你处理的事项</p>
             <div class="mt-3 flex flex-wrap justify-center gap-2">
               <button v-for="item in pendingApprovalCategories" :key="item.key" type="button" class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-[#FF8F00] hover:text-[#E57A00]" @click="openApprovalTodo(item)">{{ item.label }} {{ item.count }}</button>
             </div>

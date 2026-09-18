@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(new URL("../src/pages/Dashboard.vue", import.meta.url), "utf8");
 
 test("personal approval todos render independently of company dashboard permission", () => {
-  const personalTodos = source.indexOf("我的审批待办");
+  const personalTodos = source.indexOf("要我处理");
   const companyLoading = source.indexOf('v-if="d.loading"');
   const companyData = source.indexOf('v-else-if="d.data"');
   assert.ok(personalTodos > -1);
@@ -63,4 +63,12 @@ test('the approval queue lists real requests with waiting time', () => {
   assert.match(source, /已超时/);
   assert.match(source, /去审批/);
   assert.match(source, /修改后重新提交/);
+});
+
+test('the queue is one list covering approvals and hands-on tasks', () => {
+  assert.match(source, /要我处理/);
+  assert.match(source, /item\.reason/);
+  assert.match(source, /'价格审批'/);
+  assert.match(source, /'采购订单'/);
+  assert.match(source, /item\.query \|\| \{ request: item\.name \}/);
 });

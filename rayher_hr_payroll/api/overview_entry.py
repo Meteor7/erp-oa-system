@@ -405,24 +405,109 @@ def _steps_by_parent(names):
     return grouped
 
 
+PROCUREMENT_ROUTE = "/approval/procurement/price-approvals"
+PAYMENT_ROUTE = "/approval/procurement-payment"
+
+
+def task_item(kind, title, detail, waited, route, reason, name, amount=0, query=None):
+    """One thing the signed-in user has to do, whatever document it lives on."""
+    return {"name": name, "kind": kind, "request_type": kind, "subject": title, "applicant": detail,
+            "department": "", "amount": float(amount or 0), "leave_type": "", "hours": 0,
+            "from_date": "", "to_date": "", "step_label": "", "reason": reason,
+            "waited_days": waited, "overdue": waited >= OVERDUE_DAYS,
+            "route": route, "query": query or {}}
+
+
+def _price_approval_tasks():
+    """Price approvals waiting for the person who signs them off."""
+    if _user() not in position_users("vice_manager") and "System Manager" not in _roles():
+        return []
+    rows = frappe.get_all("OA Price Approval", filters={"status": "待审批"},
+                          fields=["name", "total_amount", "modified", "owner"], limit_page_length=0)
+    return [task_item("价格审批", f"{row.name} 待选择成交供应商并审批",
+                      f"采购提交 · {frappe.db.get_value('User', row.owner, 'full_name') or row.owner}",
+                      waiting_days(row.modified), PROCUREMENT_ROUTE, "我是价格审批人", row.name,
+                      row.total_amount, {"request": row.name})
+            for row in rows]
+
+
+def _purchase_order_tasks():
+    """PO stages, each shown only to the role that has to act on it."""
+    user, roles = _user(), _roles()
+    is_purchase = user in position_users("procurement_manager") or bool(roles & {"Purchase User", "Purchase Manager"})
+    is_asset_owner = user in position_users("production_asset_owner")
+    is_admin = "System Manager" in roles
+    stages = {
+        "草稿": ("待采购确认订单", "我是采购", is_purchase or is_admin),
+        "待采购确认": ("待采购确认订单", "我是采购", is_purchase or is_admin),
+        "待合同复核": ("合同待复核", "我是采购", is_purchase or is_admin),
+        "待电子用印": ("合同待电子用印", "我负责用印", is_purchase or is_admin),
+        "供应商制作中": ("待登记到货", "我是生产主管", is_asset_owner or is_admin),
+        "到货验收中": ("待验收", "我是采购", is_purchase or is_admin),
+    }
+    rows = frappe.get_all("OA Purchase Order",
+                          filters={"status": ["in", list(stages)]},
+                          fields=["name", "status", "supplier", "total_amount", "modified"],
+                          limit_page_length=0)
+    items = []
+    for row in rows:
+        label, reason, allowed = stages[row.status]
+        if not allowed:
+            continue
+        items.append(task_item("采购订单", f"{row.name} {label}",
+                               f"{row.supplier or '供应商待定'} · {row.status}",
+                               waiting_days(row.modified), PAYMENT_ROUTE if row.status == "到货验收中" else PROCUREMENT_ROUTE,
+                               reason, row.name, row.total_amount, {"po": row.name}))
+    return items
+
+
+def _payment_tasks():
+    """Payment periods whose conditions are met, or blocked and waiting on me."""
+    from rayher_hr_payroll.api.procurement_chain import list_payment_work_items
+
+    try:
+        work_items = list_payment_work_items(limit=200) or []
+    except Exception as exc:
+        if not isinstance(exc, (frappe.PermissionError, frappe.ValidationError)):
+            raise
+        return []
+    items = []
+    for row in work_items:
+        if not row.get("can_push_payment"):
+            continue
+        items.append(task_item("采购付款", f"{row.get('po')} {row.get('installment_name') or '付款期次'} 可提交付款",
+                               f"金额 {float(row.get('amount') or 0):,.2f} · 条件已满足",
+                               waiting_days(row.get("planned_date")), PAYMENT_ROUTE,
+                               "我负责提交付款", str(row.get("po")), row.get("amount"),
+                               {"po": row.get("po")}))
+    return items
+
+
 @frappe.whitelist()
-def get_my_approval_queue(limit=8):
-    """The signed-in user's pending approvals, newest waiting first."""
+def get_my_approval_queue(limit=12):
+    """Everything waiting on the signed-in user, from every document type."""
     from rayher_hr_payroll.api import oa_entry
 
     summary = oa_entry.get_my_approval_summary()
     names = [name for category in summary["categories"] for name in category["requests"]]
-    if not names:
-        return {"total": summary["total"], "items": []}
-    docs = frappe.get_all("OA Approval Request", filters={"name": ["in", names]},
-                          fields=["name", "request_type", "subject", "employee_name", "owner", "department",
-                                  "amount", "approved_amount", "leave_type", "duration_hours", "from_date",
-                                  "to_date", "current_step_label", "modified"],
-                          limit_page_length=0)
-    steps = _steps_by_parent([row.name for row in docs])
-    items = [queue_item(row, steps.get(row.name, [])) for row in docs]
-    items.sort(key=lambda row: row["waited_days"], reverse=True)
-    return {"total": summary["total"], "items": items[:int(limit or 8)]}
+    items = []
+    if names:
+        docs = frappe.get_all("OA Approval Request", filters={"name": ["in", names]},
+                              fields=["name", "request_type", "subject", "employee_name", "owner", "department",
+                                      "amount", "approved_amount", "leave_type", "duration_hours", "from_date",
+                                      "to_date", "current_step_label", "modified"],
+                              limit_page_length=0)
+        steps = _steps_by_parent([row.name for row in docs])
+        for row in docs:
+            item = queue_item(row, steps.get(row.name, []))
+            item["reason"] = "我是审批人"
+            item["kind"] = row.request_type
+            item["query"] = {"request": row.name}
+            items.append(item)
+    for extra in (_price_approval_tasks(), _purchase_order_tasks(), _payment_tasks()):
+        items.extend(extra)
+    items.sort(key=lambda row: (not row["overdue"], -row["waited_days"]))
+    return {"total": len(items), "approval_total": summary["total"], "items": items[:int(limit or 12)]}
 
 
 def request_progress(doc, steps):
