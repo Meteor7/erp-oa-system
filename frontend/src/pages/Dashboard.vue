@@ -172,11 +172,13 @@ function drawCost() {
 function drawDetail() {
   const data = costDetail.data;
   if (!data) return;
-  const groups = [
-    { rows: data.breakdown.rd, color: BRAND },
-    { rows: data.breakdown.po, color: COBALT },
-    { rows: data.breakdown.expense, color: JADE },
-  ];
+  const groups = data.breakdown.department
+    ? [{ rows: data.breakdown.department, color: COBALT }]
+    : [
+      { rows: data.breakdown.rd, color: BRAND },
+      { rows: data.breakdown.po, color: COBALT },
+      { rows: data.breakdown.expense, color: JADE },
+    ];
   const rows = [];
   groups.forEach((group) => (group.rows || []).forEach((row) => rows.push({ ...row, color: group.color })));
   rows.reverse();
@@ -493,8 +495,9 @@ const stages = [
           <div class="flex items-baseline justify-between px-5 pt-4"><h2 class="text-sm font-semibold text-gray-900">{{ costDetail.data.label }} · 费用明细</h2><span class="text-xs text-gray-500">{{ scopeLabel }}</span></div>
           <div class="grid gap-0 xl:grid-cols-2">
             <div class="space-y-3 border-b border-gray-100 p-5 xl:border-b-0 xl:border-r">
-              <div class="grid grid-cols-2 gap-3">
+              <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">费用合计</div><div class="mt-1 text-lg font-semibold tabular-nums">{{ money(costDetail.data.totals.total) }}</div></div>
+                <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">参与人数</div><div class="mt-1 text-lg font-semibold tabular-nums">{{ costDetail.data.project === '__none__' ? '—' : costDetail.data.team + ' 人' }}</div></div>
                 <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">分摊工时</div><div class="mt-1 text-lg font-semibold tabular-nums">{{ n0(costDetail.data.hours) }} h</div></div>
               </div>
               <div class="space-y-2 text-sm">
@@ -502,7 +505,8 @@ const stages = [
                 <div class="flex justify-between"><span class="text-gray-600">采购（PO 金额）</span><b class="tabular-nums">{{ money(costDetail.data.totals.po) }}</b></div>
                 <div class="flex justify-between"><span class="text-gray-600">报销</span><b class="tabular-nums">{{ money(costDetail.data.totals.expense) }}</b></div>
               </div>
-              <p class="text-xs text-gray-500">明细按金额取前 8 项，颜色与上方口径一致。</p>
+              <div class="flex justify-between text-sm"><span class="text-gray-600">{{ costDetail.data.project === '__none__' ? '归集方式' : '项目负责人' }}</span><b>{{ costDetail.data.project === '__none__' ? '按部门归集' : (costDetail.data.owner || '未指定') }}</b></div>
+              <p class="text-xs text-gray-500">{{ costDetail.data.project === '__none__' ? '未挂项目的采购和报销按发生部门归集，右侧为各部门金额。' : '明细按金额取前 8 项，颜色与上方口径一致。' }}</p>
             </div>
             <div id="cost-detail" class="h-[300px] px-2 pb-2"></div>
           </div>
@@ -522,12 +526,12 @@ const stages = [
             <div class="mt-2 text-3xl font-semibold tabular-nums">{{ hr.data.totals.leave_days }}<span class="ml-1 text-sm font-normal text-white/85">天</span></div>
             <div class="mt-1 text-xs text-white/85">共 {{ hr.data.totals.leave_count }} 人次</div>
           </div>
+          <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">今日不在岗</div>
+            <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.away_today?.count || 0 }}<span class="ml-1 text-sm font-normal text-gray-500">人</span></div>
+            <div class="mt-1 text-xs text-gray-500">{{ (hr.data.away_today?.by_type || []).map((row) => row.label + ' ' + row.count).join(' · ') || '今天全员在岗' }}</div></div>
           <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">加班</div>
             <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.totals.overtime_days }}<span class="ml-1 text-sm font-normal text-gray-500">天</span></div>
-            <div class="mt-1 text-xs text-gray-500">已计入调休额度</div></div>
-          <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">已用调休</div>
-            <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.totals.comp_days }}<span class="ml-1 text-sm font-normal text-gray-500">天</span></div>
-            <div class="mt-1 text-xs text-gray-500">{{ hr.data.department || '全公司' }} · 在职 {{ hr.data.headcount }} 人</div></div>
+            <div class="mt-1 text-xs text-gray-500">已计入调休额度 · 已用调休 {{ hr.data.totals.comp_days }} 天</div></div>
           <div class="rounded-xl border border-gray-200 bg-white p-5"><div class="text-sm text-gray-600">需要人事处理</div>
             <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ hr.data.alerts.missing_joining + hr.data.alerts.negative_comp }}<span class="ml-1 text-sm font-normal text-gray-500">项</span></div>
             <div class="mt-1 text-xs text-gray-500">缺入职日期 {{ hr.data.alerts.missing_joining }} 人 · 调休为负 {{ hr.data.alerts.negative_comp }} 人</div></div>

@@ -155,11 +155,17 @@ def _po_rows(months):
                            pluck="name")
     if not names:
         return []
+    lines = frappe.get_all("OA Purchase Order Line", filters={"parent": ["in", names]},
+                           fields=["project", "amount", "item_name", "material_code", "source_request"],
+                           limit_page_length=0)
+    sources = {row.source_request for row in lines if row.source_request}
+    departments = {row.name: row.department for row in frappe.get_all(
+        "OA Approval Request", filters={"name": ["in", list(sources)]},
+        fields=["name", "department"], limit_page_length=0)} if sources else {}
     return [{"project": line.project, "kind": "po", "amount": line.amount,
-             "label": line.item_name or line.material_code or "采购物料"}
-            for line in frappe.get_all("OA Purchase Order Line", filters={"parent": ["in", names]},
-                                       fields=["project", "amount", "item_name", "material_code"],
-                                       limit_page_length=0)]
+             "label": line.item_name or line.material_code or "采购物料",
+             "department": departments.get(line.source_request) or ""}
+            for line in lines]
 
 
 def _expense_rows(months):
@@ -168,13 +174,15 @@ def _expense_rows(months):
                               filters={"request_type": EXPENSE_REQUEST,
                                        "workflow_status": ["in", EXPENSE_DONE],
                                        "modified": ["between", [start, frappe.utils.add_days(end, 1)]]},
-                              fields=["name", "project"], limit_page_length=0)
+                              fields=["name", "project", "department"], limit_page_length=0)
     if not requests:
         return []
     project_by_request = {row.name: row.project for row in requests}
+    department_by_request = {row.name: row.department for row in requests}
     return [{"project": line.project_name or project_by_request.get(line.parent),
              "kind": "expense", "amount": line.total_amount or line.amount,
-             "label": line.expense_account_level_2 or line.category or "其他报销"}
+             "label": line.expense_account_level_2 or line.category or "其他报销",
+             "department": department_by_request.get(line.parent) or ""}
             for line in frappe.get_all("OA Approval Expense Line",
                                        filters={"parent": ["in", list(project_by_request)]},
                                        fields=["parent", "project_name", "total_amount", "amount",
@@ -237,14 +245,38 @@ def get_project_cost_detail(project="", scope="month", period=None):
     hours = sum(hours_by_period.values())
     totals = {kind: sum(values.values()) for kind, values in groups.items()}
     totals["total"] = sum(totals.values())
-    label = NON_PROJECT_LABEL
+    label, owner, team = NON_PROJECT_LABEL, "", 0
     if key != NON_PROJECT:
-        label = frappe.db.get_value("Project", key, "project_name") or key
-    return {"project": key, "label": label, "totals": totals, "hours": round(hours, 1),
-            "breakdown": {kind: sorted(({"label": label_text, "amount": amount}
-                                        for label_text, amount in values.items()),
-                                       key=lambda row: row["amount"], reverse=True)[:8]
-                          for kind, values in groups.items()}}
+        row = frappe.db.get_value("Project", key, ["project_name", "project_owner_name"], as_dict=True) or {}
+        label = row.get("project_name") or key
+        owner = row.get("project_owner_name") or ""
+        team = _project_team(key, period_months(scope, year, month))
+    breakdown = {kind: sorted(({"label": label_text, "amount": amount}
+                               for label_text, amount in values.items()),
+                              key=lambda row: row["amount"], reverse=True)[:8]
+                 for kind, values in groups.items()}
+    if key == NON_PROJECT:
+        # unassigned spend is easier to act on grouped by the department that spent it
+        by_department = defaultdict(float)
+        for row in cost_rows(period_months(scope, year, month)):
+            if (row.get("project") or NON_PROJECT) != NON_PROJECT:
+                continue
+            by_department[row.get("department") or "未指定部门"] += float(row.get("amount") or 0)
+        breakdown["department"] = sorted(({"label": name, "amount": amount}
+                                          for name, amount in by_department.items()),
+                                         key=lambda row: row["amount"], reverse=True)[:8]
+    return {"project": key, "label": label, "owner": owner, "team": team,
+            "totals": totals, "hours": round(hours, 1), "breakdown": breakdown}
+
+
+def _project_team(project, months):
+    """How many people booked hours to the project in the period."""
+    start, end = month_range(months)
+    rows = frappe.db.sql("""select count(distinct ts.employee) as people
+                            from `tabTimesheet Detail` td join `tabTimesheet` ts on ts.name = td.parent
+                            where ts.docstatus = 1 and td.project = %s and date(td.from_time) between %s and %s""",
+                         (project, start, end))
+    return int(rows[0][0] or 0) if rows else 0
 
 
 def leave_stats(rows):
@@ -277,6 +309,25 @@ def leave_stats(rows):
                                  for key, value in by_department.items()),
                                 key=lambda row: row["leave"] + row["overtime"], reverse=True)[:10],
     }
+
+
+def _away_today(department=None):
+    """People on approved leave or comp-time today, by leave type."""
+    today = date.today()
+    filters = {"request_type": ["in", [attendance_requests.REQUEST_LEAVE, attendance_requests.REQUEST_COMP_TIME]],
+               "workflow_status": ["in", list(attendance_requests.COMPLETED)],
+               "from_date": ["<=", today], "to_date": [">=", today]}
+    if department:
+        filters["department"] = department
+    rows = frappe.get_all("OA Approval Request", filters=filters,
+                          fields=["employee", "employee_name", "leave_type", "request_type"],
+                          limit_page_length=0)
+    by_type = defaultdict(int)
+    for row in rows:
+        by_type[row.leave_type or ("调休" if row.request_type == attendance_requests.REQUEST_COMP_TIME else "请假")] += 1
+    return {"count": len({row.employee for row in rows}),
+            "by_type": sorted(({"label": key, "count": value} for key, value in by_type.items()),
+                              key=lambda item: item["count"], reverse=True)}
 
 
 def _attendance_rows(months, department=None):
@@ -322,7 +373,7 @@ def get_hr_overview(scope="month", period=None):
                          "comp_days": days(comp.get("available_hours"))})
     balances.sort(key=lambda row: row["annual_days"] + row["comp_days"], reverse=True)
     return {"visible": True, "scope": scope, "year": year, "month": month,
-            "department": department, "headcount": len(employees),
+            "department": department, "headcount": len(employees), "away_today": _away_today(department),
             "alerts": {"missing_joining": missing_joining,
                        "negative_comp": sum(1 for row in balances if row["comp_days"] < 0)},
             "trend": trend, "balances": balances[:8], **stats}
