@@ -287,7 +287,7 @@ def _status_detail(board, source, metrics, approval_steps=None, po_statuses=None
     if stage == "付款中":
         return metrics["payment_status"]
     if stage == "已关闭":
-        return "到货、验收、付款均完成"
+        return "关联 PO 均已关闭；到货、验收及付款请查看分批明细"
     return stage
 
 

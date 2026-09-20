@@ -447,7 +447,12 @@ async function cancelRow(row) {
       </section>
     </div>
     <div class="flex items-center justify-end gap-3 text-sm"><button type="button" :disabled="page === 0 || loader.loading" class="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40" @click="turnPage(-1)">上一页</button><span>第 {{ page + 1 }} 页 · 共 {{ total }} 项</span><button type="button" :disabled="!loader.data?.has_more || loader.loading" class="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40" @click="turnPage(1)">下一页</button></div>
-    <MaterialExecutionProgress v-if="executionLine" :key="executionLine.source_request + executionLine.source_line" :request="executionLine.source_request" :source-line="executionLine.source_line" expanded />
+    <div v-if="executionLine" class="fixed inset-0 z-50 flex justify-end bg-gray-900/40" @click.self="executionLine = null">
+      <aside role="dialog" aria-modal="true" aria-label="物料拆分明细" class="h-full w-full max-w-3xl overflow-y-auto bg-white shadow-xl">
+        <header class="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-5 py-4"><div><h2 class="font-semibold">物料拆分明细</h2><p class="mt-1 text-xs text-gray-500">来源 OA：{{ executionLine.source_request }}</p></div><button type="button" class="rounded border px-3 py-1 text-sm" @click="executionLine = null">关闭明细</button></header>
+        <MaterialExecutionProgress :key="executionLine.source_request + executionLine.source_line" :request="executionLine.source_request" :source-line="executionLine.source_line" expanded />
+      </aside>
+    </div>
   </div>
 </template>
 
