@@ -1,6 +1,6 @@
 <script setup>
 import { Button, FeatherIcon } from 'frappe-ui';
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
   ACTIVE_RECOGNITION_STATUSES,
   confirmInvoice,
@@ -65,6 +65,7 @@ const pushForm = reactive({
   account_no: '',
   reason: '',
 });
+watch(() => pushForm.doc_type, () => { pushForm.asset_category = ''; });
 let pollTimer = null;
 let disposed = false;
 
@@ -81,7 +82,7 @@ const fields = [
 const visibleRows = computed(() => rows.value.filter((row) => !statusFilter.value || row.recognition_status === statusFilter.value));
 const selectedRow = computed(() => rows.value.find((row) => row.name === selectedName.value) || visibleRows.value[0] || null);
 const applicant = computed(() => props.options?.current_applicant || props.options?.context || {});
-const assetCategories = computed(() => props.options?.asset_categories || ASSET_CATEGORIES);
+const assetCategories = computed(() => (props.options?.asset_categories || ASSET_CATEGORIES).filter((item) => item !== '其他'));
 const selectableRows = computed(() => rows.value.filter((row) => !invoiceSelectionReason(row)));
 const selectedTotal = computed(() => rows.value
   .filter((row) => checkedNames.value.includes(row.name))
@@ -433,13 +434,13 @@ function openPush() {
 
 async function submitPush() {
   errorMessage.value = '';
-  if (!pushForm.asset_category) {
+  if (pushForm.doc_type.startsWith('固定资产') && !pushForm.asset_category) {
     errorMessage.value = '请选择资产类型。';
     return;
   }
   busy.value = true;
   try {
-    const request = await pushInvoices(checkedNames.value, pushForm);
+    const request = await pushInvoices(checkedNames.value, { ...pushForm, asset_category: pushForm.doc_type.startsWith('固定资产') ? pushForm.asset_category : '其他' });
     showPush.value = false;
     checkedNames.value = [];
     pushForm.asset_category = '';
@@ -628,8 +629,9 @@ onBeforeUnmount(() => {
         <div class="grid max-h-[65vh] gap-3 overflow-y-auto p-5 md:grid-cols-3">
           <label class="text-xs text-gray-500 md:col-span-2">主题<input v-model="pushForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="付款/报销" /></label>
           <label class="text-xs text-gray-500">公司<select v-model="pushForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.companies || []" :key="item">{{ item }}</option></select></label>
-          <label class="text-xs text-gray-500">申请部门<select v-model="pushForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.departments || []" :key="item">{{ item }}</option></select></label>
-          <label class="text-xs text-gray-500">资产类型（必选）<select v-model="pushForm.asset_category" data-testid="ocr-asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
+          <label class="text-xs text-gray-500">申请部门<input :value="applicant.department" readonly class="mt-1 w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-gray-500">单据类型<select v-model="pushForm.doc_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option>非固定资产</option><option>固定资产</option></select></label>
+          <label v-if="pushForm.doc_type.startsWith('固定资产')" class="text-xs text-gray-500">资产类型（必选）<select v-model="pushForm.asset_category" data-testid="ocr-asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
           <label class="text-xs text-gray-500">申请人<input :value="applicant.employee_name || applicant.user" readonly class="mt-1 w-full rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600" /></label>
           <label class="text-xs text-gray-500">付款类型<input v-model="pushForm.payment_type" list="payment-type-suggestions" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="可自由填写" /><datalist id="payment-type-suggestions"><option v-for="item in props.options?.payment_types || []" :key="item" :value="item" /></datalist></label>
           <label class="text-xs text-gray-500">支付方式<select v-model="pushForm.payment_method" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in props.options?.payment_methods || []" :key="item">{{ item }}</option></select></label>

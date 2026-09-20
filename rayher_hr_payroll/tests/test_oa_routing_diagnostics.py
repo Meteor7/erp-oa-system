@@ -71,3 +71,12 @@ def test_required_account_diagnostics_find_missing_or_disabled_links():
 
 def test_static_required_approvers_only_contains_non_role_it_owner():
     assert REQUIRED_APPROVERS == {"演示员工18": "person068@staff.example.invalid"}
+
+
+import pytest
+
+@pytest.fixture(autouse=True)
+def organization_fixture(monkeypatch):
+    import rayher_hr_payroll.oa_organization as org
+    monkeypatch.setattr(org, "current_supervisors", lambda: org.DIRECT_SUPERVISOR_BY_EMPLOYEE)
+    monkeypatch.setattr(org, "executive_names", lambda: {"演示员工21", "演示员工29"})

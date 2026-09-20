@@ -35,9 +35,14 @@ def _clean(value):
     return str(value or "").strip()
 
 
+def can_access_board(user=None):
+    user = _clean(user or frappe.session.user).lower()
+    return user in position_users("pmc", "procurement_manager", "vice_manager") or "System Manager" in set(frappe.get_roles(user))
+
+
 def _board_user(user=None):
     user = _clean(user or frappe.session.user).lower()
-    if user in position_users("pmc", "procurement_manager", "vice_manager") or "System Manager" in set(frappe.get_roles(user)):
+    if can_access_board(user):
         return user
     frappe.throw("只有 PMC、采购和副总经理可以访问物料进度看板。")
 
@@ -135,16 +140,16 @@ def _related_status(board, po_statuses=None):
     po_names = [item for item in _clean(getattr(board, "po_numbers", "")).split(",") if item]
     if not po_names and _clean(getattr(board, "po_number", "")):
         po_names = [_clean(board.po_number)]
-    if po_names and (po_statuses is not None or frappe.db.exists("OA Purchase Order", po_names[-1])):
-        status = _clean((po_statuses or {}).get(po_names[-1])) if po_statuses is not None else _clean(frappe.get_doc("OA Purchase Order", po_names[-1]).status)
-        if status == "已关闭":
+    if po_names:
+        if po_statuses is None:
+            rows = frappe.get_all("OA Purchase Order", filters={"name": ["in", po_names]}, fields=["name", "status"], limit_page_length=0)
+            po_statuses = {row.name: row.status for row in rows}
+        statuses = {_clean(po_statuses.get(name)) for name in po_names}
+        if statuses == {"已关闭"}:
             return "已关闭"
-        if status in {"付款中"}:
-            return "付款中"
-        if status in {"到货验收中"}:
-            return "到货验收中"
-        if status in {"已生效", "供应商制作中"}:
-            return "供应商制作中"
+        for candidates, stage in (({"草稿", "待确认"}, "PO处理中"), ({"已生效", "供应商制作中"}, "供应商制作中"), ({"到货验收中"}, "到货验收中"), ({"付款中"}, "付款中")):
+            if statuses & candidates:
+                return stage
         return "PO处理中"
     if price_names:
         return "PO处理中"
@@ -164,7 +169,7 @@ def _derived_status(board, source, po_statuses=None):
         return workflow
     if workflow not in {"已完成", "已通过", "已审批", "已结束"}:
         if _clean(getattr(source, "business_status", None)).startswith("需求已批准"):
-            return "等待 PMC 提 PR"
+            return _related_status(board, po_statuses)
         return "OA审批中"
     return _related_status(board, po_statuses)
 
@@ -385,8 +390,9 @@ def _batch_chain_context(boards):
         "OA Procurement Request Line", filters=common_filters,
         fields=["source_request", "source_line", "quantity", "remaining_quantity"], limit_page_length=0,
     )
+    candidate_prices = frappe.get_all("OA Price Approval Line", filters=common_filters, pluck="parent", limit_page_length=0)
     active_price_approvals = frappe.get_all(
-        "OA Price Approval", filters={"status": ["not in", ["已取消"]]}, pluck="name", limit_page_length=0,
+        "OA Price Approval", filters={"name": ["in", list(set(candidate_prices)) or ["__none__"]], "status": ["not in", ["已取消"]]}, pluck="name", limit_page_length=0,
     )
     price_lines = frappe.get_all(
         "OA Price Approval Line",
@@ -463,39 +469,29 @@ def _batch_chain_context(boards):
 
 
 @frappe.whitelist()
-def list_material_progress(search="", requester="", status="", limit=500, offset=0):
+def list_material_progress(search="", requester="", status="", limit=50, offset=0, source_request=""):
     _board_user()
+    from rayher_hr_payroll.material_progress_query import FROM_SQL, conditions, stage_sql
     try:
-        limit = max(1, min(int(limit or 500), 2000))
+        limit = max(1, min(int(limit or 50), 200))
         offset = max(0, int(offset or 0))
     except (TypeError, ValueError):
         frappe.throw("分页参数格式无效。")
-    names = frappe.get_all(
-        "OA Material Progress",
-        fields=["name"],
-        order_by="modified desc, creation desc",
-        limit_page_length=0,
-    )
+    where, params = conditions(search, requester, status, source_request)
+    count = frappe.db.sql(f"SELECT COUNT(*) {FROM_SQL} WHERE {where}", params)[0][0]
+    params.update(limit=limit, offset=offset)
+    names = frappe.db.sql(f"SELECT b.name {FROM_SQL} WHERE {where} ORDER BY b.modified DESC,b.name DESC LIMIT %(limit)s OFFSET %(offset)s", params, as_dict=True)
     boards = [frappe.get_doc("OA Material Progress", item.name) for item in names]
-    metrics, sources, steps_by_source, po_statuses = _batch_chain_context(boards)
     result = []
-    for board in boards:
-        row = _serialize(
-            board,
-            source=sources[board.source_request],
-            metrics=metrics[(board.source_request, board.source_line)],
-            approval_steps=steps_by_source.get(board.source_request, []),
-            po_statuses=po_statuses,
-        )
-        if requester and row["requester"] != _clean(requester):
-            continue
-        if status and row["progress_status"] != _clean(status):
-            continue
-        if not _match(row, _clean(search)):
-            continue
-        result.append(row)
-    total = len(result)
-    return {"total": total, "items": result[offset: offset + limit], "requesters": sorted({row["requester"] for row in result if row["requester"]})}
+    if boards:
+        metrics, sources, steps_by_source, po_statuses = _batch_chain_context(boards)
+        for board in boards:
+            result.append(_serialize(board, source=sources[board.source_request], metrics=metrics[(board.source_request, board.source_line)], approval_steps=steps_by_source.get(board.source_request, []), po_statuses=po_statuses))
+    base_where, base_params = conditions(search, requester, "", source_request)
+    counts = frappe.db.sql(f"SELECT {stage_sql()} AS stage,COUNT(*) AS total {FROM_SQL} WHERE {base_where} GROUP BY stage", base_params, as_dict=True)
+    people_where, people_params = conditions(source_request=source_request)
+    people = frappe.db.sql(f"SELECT DISTINCT b.requester {FROM_SQL} WHERE {people_where} AND COALESCE(b.requester,'')!='' ORDER BY b.requester", people_params, as_dict=True)
+    return {"total": count, "items": result, "offset": offset, "limit": limit, "has_more": offset + len(result) < count, "stage_counts": {row.stage: row.total for row in counts}, "requesters": [row.requester for row in people]}
 
 
 def _recipient_users(source):

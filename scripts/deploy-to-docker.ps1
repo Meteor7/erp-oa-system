@@ -55,12 +55,7 @@ function Test-TipRayEncrypted {
 function Get-PlainCopy {
     param([string]$Path)
     if (-not (Test-TipRayEncrypted $Path)) { return $Path }
-    $plain = "$Path.plain"
-    Write-Host "TipRay ciphertext detected, decrypting with cmd type: $Path"
-    cmd /c "type `"$Path`" > `"$plain`""
-    if (-not (Test-Path $plain)) { throw "decrypt failed: $plain not created" }
-    if (Test-TipRayEncrypted $plain) { throw "still encrypted after decrypt: $plain" }
-    return $plain
+    throw "TipRay ciphertext detected: $Path. Deployment stopped; recreate and verify a plaintext Git bundle locally. cmd type cannot decrypt this file."
 }
 
 function Invoke-GitLocal {

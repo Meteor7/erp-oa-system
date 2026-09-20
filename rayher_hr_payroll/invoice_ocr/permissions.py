@@ -10,7 +10,7 @@ from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 _BATCH = "OA Invoice Import Batch"
 _RECORD = "OA Invoice Record"
 _VIEW_LOG = "OA Invoice View Log"
-_HIGH_PRIVILEGE_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager", "Rayher Business Executive"}
+_HIGH_PRIVILEGE_ROLES = {"System Manager", "Accounts User", "Rayher Business Executive"}
 
 
 def _get(doc, field, default=None):
@@ -122,12 +122,6 @@ def _can_read_request(request_name, user, roles=None, *, current=False):
         return True
     if identity.get("employee") and _get(request, "employee") == identity["employee"]:
         return True
-    if (
-        "Department Manager" in roles
-        and identity.get("department")
-        and _get(request, "department") == identity["department"]
-    ):
-        return True
     return bool(identity["actors"] & approvers)
 
 
@@ -200,8 +194,6 @@ def _request_scope_sql(request_alias, user, roles, identity):
     clauses = [f"{request_alias}.owner = {_escaped(user)}"]
     if identity.get("employee"):
         clauses.append(f"{request_alias}.employee = {_escaped(identity['employee'])}")
-    if "Department Manager" in roles and identity.get("department"):
-        clauses.append(f"{request_alias}.department = {_escaped(identity['department'])}")
 
     actor_checks = []
     for actor in sorted(identity["actors"]):

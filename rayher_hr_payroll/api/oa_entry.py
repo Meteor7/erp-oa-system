@@ -722,7 +722,7 @@ def _route_context(
         ctx["asset_category"] = OTHER_ASSET
         return ctx
 
-    organization_managed = bool(ctx.get("supervisor_decision"))
+    organization_managed = bool(ctx.get("employee"))
     selected_department = ctx.get("department") if organization_managed else (department or ctx.get("department"))
     ctx["department"] = _canonical_department(selected_department)
     if not organization_managed:
@@ -1786,7 +1786,7 @@ def _difference_reason(value):
     return value
 
 
-def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=None):
+def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=None, *, keep_incomplete=False):
     rows = _parse_json(expense_lines, [])
     if not rows and _money(fallback_amount) > 0:
         rows = [{"category": fallback_subject or REQUEST_EXPENSE_PAYMENT, "amount": fallback_amount, "description": fallback_subject or ""}]
@@ -1802,14 +1802,16 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
             )
             total_value = derived_total if derived_total is not None else row.get("amount")
         amount = _money(total_value)
-        if amount <= 0 and not source_invoice:
+        if amount < 0:
+            frappe.throw("费用金额不能为负数。")
+        if amount <= 0 and not source_invoice and not keep_incomplete:
             continue
         invoice_category = _clean(row.get("invoice_category"))
         project_name = _clean(row.get("project_name"))
         account_level_1 = _clean(row.get("expense_account_level_1"))
         account_level_2 = _clean(row.get("expense_account_level_2"))
         expense_item = _clean(row.get("expense_item"))
-        if account_level_1 or account_level_2:
+        if (account_level_1 or account_level_2) and not keep_incomplete:
             account_level_1, account_level_2, expense_item = _expense_account_pair(
                 account_level_1, account_level_2, required=True
             )
@@ -1888,17 +1890,21 @@ def _build_request_doc(
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
     ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
-    route = preview_route(request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=submit)
+    if request_type == REQUEST_EXPENSE_PAYMENT:
+        classification = _expense_classification(doc_type, asset_category, submitting=submit)
+        ctx["asset_category"] = classification["asset_category"]
+        doc_type = classification["doc_type"]
+    route = ({"steps": [], "copied_to": []} if request_type == REQUEST_EXPENSE_PAYMENT and not submit else preview_route(request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=submit))
     steps = route["steps"]
     if request_type in ATTENDANCE_TYPES and submit and (not from_date or not to_date):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
-    lines, total = _normalize_expense_lines(expense_lines, fallback_amount=amount, fallback_subject=subject)
+    lines, total = _normalize_expense_lines(expense_lines, fallback_amount=amount, fallback_subject=subject, keep_incomplete=request_type == REQUEST_EXPENSE_PAYMENT and not submit)
     if request_type == REQUEST_EXPENSE_PAYMENT and submit and not lines:
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
 
     initial_status = steps[0]["status"] if submit else STATUS_DRAFT
     expense_asset = (
-        _expense_dashboard_classification(ctx.get("asset_category"))
+        {key: classification[key] for key in ("asset_nature", "fixed_asset_category")}
         if request_type == REQUEST_EXPENSE_PAYMENT
         else {"asset_nature": "", "fixed_asset_category": ""}
     )
@@ -1970,6 +1976,24 @@ def _validate_expense_project_groups(doc):
         if not _clean(source.get("expense_description")):
             frappe.throw(frappe._("\u63d0\u4ea4\u524d\u5fc5\u987b\u586b\u5199\u6bcf\u9879\u8d39\u7528\u7684\u8d39\u7528\u8bf4\u660e\u3002"))
     return groups
+
+
+def _expense_classification(doc_type, asset_category, *, submitting=False):
+    kind = _clean(doc_type)
+    category = _clean(asset_category)
+    if not kind:
+        kind = "固定资产" if category and normalize_asset_category(category) != OTHER_ASSET else "非固定资产"
+    if kind == "非固定资产":
+        return {"doc_type": kind, "asset_category": OTHER_ASSET, "asset_nature": "非固定资产", "fixed_asset_category": ""}
+    if kind != "固定资产" and kind not in DOC_TYPES[1:]:
+        frappe.throw("不支持的单据类型。")
+    if category and category not in ASSET_CATEGORIES:
+        frappe.throw("不支持的资产类型。")
+    if submitting and (not category or category == OTHER_ASSET):
+        frappe.throw("固定资产必须选择具体资产类型。")
+    if category == OTHER_ASSET:
+        category = ""
+    return {"doc_type": kind, "asset_category": category, "asset_nature": "固定资产", "fixed_asset_category": EXPENSE_FIXED_CATEGORY_BY_ASSET.get(category, "")}
 
 
 def _required_asset_category(value):
@@ -2118,9 +2142,13 @@ def _submit_draft(doc):
     if doc.request_type == REQUEST_EXPENSE_PAYMENT and not list(getattr(doc, "expense_lines", []) or []):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8d39\u7528\u660e\u7ec6\u3002"))
     if doc.request_type == REQUEST_EXPENSE_PAYMENT:
-        doc.asset_category = _required_asset_category(getattr(doc, "asset_category", None))
-        for fieldname, value in _expense_dashboard_classification(doc.asset_category).items():
+        classification = _expense_classification(getattr(doc, "doc_type", None), getattr(doc, "asset_category", None), submitting=True)
+        for fieldname, value in classification.items():
             setattr(doc, fieldname, value)
+        for line in doc.expense_lines:
+            if not getattr(line, "issue_date", None) or _money(getattr(line, "amount", None)) <= 0:
+                frappe.throw("提交前必须填写每项费用的日期和正数金额。")
+            _expense_account_pair(getattr(line, "expense_account_level_1", None), getattr(line, "expense_account_level_2", None), required=True)
         _validate_expense_project_groups(doc)
         _validate_invoice_handling_submission(doc)
     elif doc.request_type == REQUEST_PROCUREMENT:
@@ -2239,6 +2267,7 @@ def get_options():
         "expense_account_tree": account_options(),
         "departments": DEPARTMENTS,
         "doc_types": DOC_TYPES,
+        "expense_doc_types": ["非固定资产", "固定资产"],
         "urgencies": URGENCY,
         "payment_types": PAYMENT_TYPES,
         "payment_methods": PAYMENT_METHODS,
@@ -3435,73 +3464,55 @@ from rayher_hr_payroll.list_read_scope import read_scope
 
 @frappe.whitelist()
 @read_scope
-def list_requests(view="mine", limit=50, request_type=None, name=None):
+def list_requests(view="mine", limit=50, request_type=None, name=None, offset=0):
+    from rayher_hr_payroll.oa_access import (
+        _active_identity, _actor_names as access_actors, _sql_current_step,
+        _sql_row_scope, _sql_type_scope,
+    )
     allowed_types = visible_request_types(REQUEST_TYPES)
     if request_type:
         require_request_type_access(request_type)
+        if request_type not in REQUEST_TYPES:
+            frappe.throw("不支持的 OA 申请类型。")
         allowed_types = [request_type]
     if not allowed_types:
         return []
-    if request_type and request_type not in REQUEST_TYPES:
-        frappe.throw(frappe._("不支持的 OA 申请类型。"))
-    roles = set(frappe.get_roles(frappe.session.user))
-    ctx = _employee_context()
     try:
         limit = max(1, min(int(limit or 50), 200))
+        offset = max(0, int(offset or 0))
     except (TypeError, ValueError):
-        frappe.throw(frappe._("查询数量格式无效。"))
-    exact_name = _report_text(name, "申请单号") if name is not None else ""
-    filters = {}
-    include_assigned = False
-    procurement_view = request_type in PROCUREMENT_REQUEST_TYPES
-    restricted_hr = bool(roles & HR_SCOPED_ROLES) and not _is_procurement_global_reader()
-    global_for_requested_type = _is_procurement_global_reader(
-        frappe.session.user, request_type
-    ) if procurement_view else False
+        frappe.throw("分页参数格式无效。")
+    if view not in {"mine", "pending", "all"}:
+        frappe.throw("不支持的申请列表视图。")
+    user = frappe.session.user
+    if not user or user == "Guest":
+        return []
+    roles = set(frappe.get_roles(user) or [])
+    identity = _active_identity(user)
+    actors = access_actors(user, identity)
+    clauses = [_sql_type_scope(allowed_types)]
+    table = "`tabOA Approval Request`"
     if view == "pending":
-        filters["workflow_status"] = ["in", list(ACTIVE_STATUSES)]
-    elif view == "all" and request_type in PROCUREMENT_REQUEST_TYPES and not global_for_requested_type:
-        filters = {}
-        include_assigned = True
-    elif view == "all" and roles & PRIVILEGED_ROLES and not restricted_hr:
-        filters = {}
-        # Mixed views still need per-document filtering for finance: payment
-        # requests are global, procurement demands remain scoped.
-        include_assigned = bool("Accounts User" in roles and not roles & HR_SCOPED_ROLES)
+        clauses.append(
+            f"{table}.workflow_status IN ('待审批', '待办理')"
+            if _is_oa_override_user(user) else _sql_current_step(actors, pending=True)
+        )
     elif view == "all":
-        filters = {}
-        include_assigned = True
+        clauses.append(_sql_row_scope(user, roles, identity, actors))
     else:
-        filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
-    filters["request_type"] = request_type if request_type else ["in", allowed_types]
-    if exact_name:
-        filters["name"] = exact_name
-    names = frappe.get_all(
-        "OA Approval Request",
-        filters=filters,
-        fields=["name"],
-        order_by="modified desc",
-        limit_page_length=limit,
+        own = [f"{table}.owner = {frappe.db.escape(user)}"]
+        if identity and identity.get("employee"):
+            own.append(f"{table}.employee = {frappe.db.escape(identity['employee'])}")
+        clauses.append("(" + " OR ".join(own) + ")")
+    if name is not None:
+        clauses.append(f"{table}.name = {frappe.db.escape(_report_text(name, '申请单号'))}")
+    names = frappe.db.sql(
+        f"SELECT {table}.name FROM {table} WHERE "
+        + " AND ".join(f"({clause})" for clause in clauses)
+        + f" ORDER BY {table}.modified DESC, {table}.name DESC LIMIT %s OFFSET %s",
+        (limit, offset), as_dict=True,
     )
     docs = [_load_request(_result_name(row)) for row in names]
-    if include_assigned:
-        user = frappe.session.user
-        restricted_hr = bool(roles & HR_SCOPED_ROLES) and not _is_procurement_global_reader(user)
-        privileged_non_procurement = bool(roles & PRIVILEGED_ROLES) and not restricted_hr
-        docs = [
-            doc for doc in docs
-            if (
-                getattr(doc, "request_type", None) in PROCUREMENT_REQUEST_TYPES
-                and _is_procurement_global_reader(user, getattr(doc, "request_type", None))
-            )
-            or (
-                getattr(doc, "request_type", None) not in PROCUREMENT_REQUEST_TYPES
-                and privileged_non_procurement
-            )
-            or _procurement_row_is_related(doc, user, ctx)
-        ]
-    if view == "pending":
-        docs = [doc for doc in docs if _can_act_on_current_step(doc)]
     from rayher_hr_payroll.procurement_summary_cache import prepare_summaries
     with prepare_summaries(docs, _calculate_procurement_chain):
         return [_summarize_doc(doc) for doc in docs]

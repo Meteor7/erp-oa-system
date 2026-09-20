@@ -133,9 +133,10 @@ const selectedRequest = computed(() => rows.value.find((row) => row.name === det
   || (exactRequest.value?.name === detailRequestName.value ? exactRequest.value : null));
 const departments = computed(() => options.data?.departments || []);
 const companies = computed(() => options.data?.companies || []);
-const docTypes = computed(() => options.data?.doc_types || []);
+const docTypes = computed(() => options.data?.expense_doc_types || ['非固定资产', '固定资产']);
+const isFixedAsset = computed(() => requestForm.doc_type.startsWith('固定资产'));
 const urgencies = computed(() => options.data?.urgencies || []);
-const assetCategories = computed(() => options.data?.asset_categories || FALLBACK_ASSET_CATEGORIES);
+const assetCategories = computed(() => (options.data?.asset_categories || FALLBACK_ASSET_CATEGORIES).filter((item) => item !== ASSET_OTHER));
 const paymentTypes = computed(() => options.data?.payment_types || []);
 const paymentMethods = computed(() => options.data?.payment_methods || []);
 const invoiceHandlingModes = computed(() => options.data?.invoice_handling_modes || ['已有发票', '暂未取得发票', '无需发票']);
@@ -337,8 +338,8 @@ async function addManualExpense() {
 function applyDefaults() {
   const context = options.data?.context || {};
   requestForm.company ||= first(companies.value);
-  requestForm.department ||= context.department || first(departments.value);
-  requestForm.supervisor ||= context.supervisor || '';
+  requestForm.department = context.department || '';
+  requestForm.supervisor = context.supervisor || '';
   requestForm.doc_type ||= first(docTypes.value);
   requestForm.urgency ||= first(urgencies.value);
   requestForm.payment_type ||= first(paymentTypes.value);
@@ -377,7 +378,7 @@ async function reload() {
 }
 async function saveRequest(submit) {
   errorMessage.value = '';
-  const valid = expenseLines.value.filter((line) => Number(line.total_amount || 0) > 0);
+  const valid = submit ? expenseLines.value.filter((line) => Number(line.total_amount || 0) > 0) : expenseLines.value.filter((line) => Object.entries(line).some(([key, value]) => key !== 'line_key' && value !== '' && value !== null));
   const hasIncompleteLine = expenseLines.value.some((line) => (
     !clean(line.project_name)
     || !clean(line.expense_account_level_1)
@@ -386,11 +387,11 @@ async function saveRequest(submit) {
     || Number(line.total_amount || 0) <= 0
     || !clean(line.expense_description || line.description)
   ));
-  if (!requestForm.department || !requestForm.asset_category || !requestForm.invoice_handling_mode || hasIncompleteLine) {
-    errorMessage.value = '请完整填写申请部门、发票处理方式、项目名称、费用科目、日期、金额和费用说明。';
+  if (submit && (!requestForm.department || (isFixedAsset.value && !requestForm.asset_category) || !requestForm.invoice_handling_mode || hasIncompleteLine || !valid.length)) {
+    errorMessage.value = '请完整填写申请部门、固定资产类型、发票处理方式、项目名称、费用科目、日期、金额和费用说明。';
     return;
   }
-  if (['暂未取得发票', '无需发票'].includes(requestForm.invoice_handling_mode) && !requestForm.source_request) {
+  if (submit && ['暂未取得发票', '无需发票'].includes(requestForm.invoice_handling_mode) && !requestForm.source_request) {
     errorMessage.value = '公司事前付款必须关联一张已审批通过且仍有可付款余额的购买申请。';
     return;
   }
@@ -398,7 +399,7 @@ async function saveRequest(submit) {
     errorMessage.value = '已有发票请从“上传发票”页面识别后生成申请。';
     return;
   }
-  if (!clean(requestForm.no_invoice_reason) || (requestForm.invoice_handling_mode === '暂未取得发票' && !requestForm.expected_invoice_date)) {
+  if (submit && (!clean(requestForm.no_invoice_reason) || (requestForm.invoice_handling_mode === '暂未取得发票' && !requestForm.expected_invoice_date))) {
     errorMessage.value = '请填写发票情况说明；暂未取得发票时还需填写预计取得日期。';
     return;
   }
@@ -406,9 +407,9 @@ async function saveRequest(submit) {
   try {
     const result = await creator.submit({
       request_type: REQUEST_TYPE,
-      subject: requestForm.subject.trim() || valid[0].project_name || valid[0].invoice_category || '费用付款/报销',
+      subject: requestForm.subject.trim() || valid[0]?.project_name || valid[0]?.invoice_category || '费用付款/报销',
       department: requestForm.department,
-      asset_category: requestForm.asset_category,
+      asset_category: isFixedAsset.value ? requestForm.asset_category : ASSET_OTHER,
       amount: total.value,
       reason: requestForm.reason,
       submit: submit ? 1 : 0,
@@ -649,6 +650,7 @@ async function submitAddSign() {
   }
 }
 watch(() => options.data, applyDefaults, { immediate: true });
+watch(() => requestForm.doc_type, () => { requestForm.asset_category = ''; });
 watch(selectedRequest, hydrateDraftSources, { immediate: true });
 watch(() => requestForm.invoice_handling_mode, (mode) => {
   if (mode === '已有发票') {
@@ -732,11 +734,11 @@ watch(() => requestForm.invoice_handling_mode, (mode) => {
             <div class="grid gap-3 md:grid-cols-3">
               <label class="text-xs text-gray-500">主题<input v-model="requestForm.subject" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" /></label>
               <label class="text-xs text-gray-500">公司<select v-model="requestForm.company" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in companies" :key="item">{{ item }}</option></select></label>
-              <label class="text-xs text-gray-500">申请部门<select v-model="requestForm.department" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in departments" :key="item">{{ item }}</option></select></label>
+              <label class="text-xs text-gray-500">申请部门<input :value="requestForm.department" readonly class="mt-1 w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm" placeholder="请在人事档案中维护部门" /></label>
               <div data-testid="resolved-supervisor" class="text-xs text-gray-500">部门主管<div class="mt-1 min-h-9 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">{{ requestForm.supervisor || '由系统按组织架构判断' }}</div></div>
               <label class="text-xs text-gray-500">单据类型<select v-model="requestForm.doc_type" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in docTypes" :key="item">{{ item }}</option></select></label>
               <label class="text-xs text-gray-500">紧急程度<select v-model="requestForm.urgency" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in urgencies" :key="item">{{ item }}</option></select></label>
-              <label class="text-xs text-gray-500">资产类型（必选）<select v-model="requestForm.asset_category" data-testid="asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
+              <label v-if="isFixedAsset" class="text-xs text-gray-500">资产类型（必选）<select v-model="requestForm.asset_category" data-testid="asset-category-select" required class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">请选择资产类型</option><option v-for="item in assetCategories" :key="item" :value="item">{{ item }}</option></select></label>
               <div class="md:col-span-3">
                 <p class="text-xs font-medium text-gray-600">业务性质与发票状态（必选）</p>
                 <div class="mt-2 grid overflow-hidden rounded-md border border-gray-300 md:grid-cols-3">

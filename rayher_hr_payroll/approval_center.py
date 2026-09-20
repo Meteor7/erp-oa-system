@@ -15,6 +15,7 @@ from rayher_hr_payroll.procurement_workflow import (
     validate_procurement_submission,
 )
 from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
+from rayher_hr_payroll.position_access import current_supervisors, executive_names
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_PROCUREMENT,
@@ -102,7 +103,7 @@ def _enabled_employee_user(employee_name):
 
 def _resolved_supervisor(employee_name, reports_to=""):
     employee_name = _name(employee_name)
-    if employee_name in DIRECT_SUPERVISOR_BY_EMPLOYEE or employee_name in TOP_EXECUTIVES:
+    if employee_name in current_supervisors() or employee_name in executive_names():
         try:
             resolution = resolve_stage_two_supervisor(
                 employee_name, _enabled_employee_user
@@ -134,7 +135,7 @@ def _resolved_supervisor(employee_name, reports_to=""):
         "supervisor": supervisor_name,
         "supervisor_user": _enabled_employee_user(supervisor_name),
         "supervisor_decision": (
-            "skip" if supervisor_name in TOP_EXECUTIVES else "approve"
+            "skip" if supervisor_name in executive_names() else "approve"
         ),
         "supervisor_path": [supervisor_name],
     }

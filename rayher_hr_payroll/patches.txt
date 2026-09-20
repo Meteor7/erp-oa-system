@@ -17,3 +17,4 @@ rayher_hr_payroll.patches.v1_0.update_procurement_contract_entity
 rayher_hr_payroll.patches.v1_0.normalize_contract_entity_name
 rayher_hr_payroll.patches.v1_0.normalize_contract_entity_name_v2
 rayher_hr_payroll.patches.v1_0.isolate_accommodation_occupancy_series
+rayher_hr_payroll.patches.v1_0.index_oa_progress_queries

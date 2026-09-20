@@ -59,6 +59,8 @@ class Row(dict):
 
 @pytest.fixture(autouse=True)
 def restore_service_frappe(monkeypatch):
+    monkeypatch.setitem(sys.modules, "frappe", frappe_stub)
+    monkeypatch.setitem(sys.modules, "frappe.utils", frappe_stub.utils)
     monkeypatch.setattr(service, "frappe", frappe_stub)
     monkeypatch.setattr(oa_entry, "frappe", frappe_stub)
     monkeypatch.setattr(oa_entry, "now_datetime", frappe_stub.utils.now_datetime)

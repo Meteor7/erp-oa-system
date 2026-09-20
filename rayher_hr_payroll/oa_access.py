@@ -35,6 +35,9 @@ HR_SCOPED_ROLES = {"HR Manager", "HR User"}
 PROCUREMENT_REQUEST_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT}
 PROCUREMENT_APPLICATION_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}
 PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "Rayher Business Executive"}
+GLOBAL_READ_ROLES = {"System Manager", "Rayher Business Executive"}
+PAYMENT_REQUEST_TYPES = {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}
+ACTIVE_STATUSES = {"待审批", "待办理"}
 DRAFT_STATUS = "草稿"
 READ_PTYPES = {None, "read", "select", "report", "export", "print", "email"}
 
@@ -91,39 +94,40 @@ def _sql_type_scope(allowed_types):
     return f"{table}.request_type in ({values})"
 
 
+def _sql_current_step(actors, *, pending=False):
+    table = "`tabOA Approval Request`"
+    checks = [
+        "JSON_CONTAINS(CASE WHEN JSON_VALID(step.approvers) THEN step.approvers ELSE '[]' END, "
+        + frappe.db.escape(json.dumps(actor, ensure_ascii=False)) + ")"
+        for actor in sorted(actors)
+    ]
+    if not checks:
+        return "1=0"
+    return (
+        f"{table}.workflow_status IN ('待审批', '待办理') AND EXISTS ("
+        "SELECT 1 FROM `tabOA Approval Step` step "
+        f"WHERE step.parent = {table}.name "
+        "AND step.parenttype = 'OA Approval Request' AND step.parentfield = 'steps' "
+        f"AND step.step_index = {table}.current_step_index "
+        "AND (" + " OR ".join(checks) + "))"
+    )
+
+
 def _sql_row_scope(user, roles, identity, actors):
     table = "`tabOA Approval Request`"
-    management_reader = user == "Administrator" or bool(roles & PROCUREMENT_GLOBAL_ROLES)
-    finance_reader = "Accounts User" in roles and not management_reader
-    if management_reader:
+    if user == "Administrator" or roles & GLOBAL_READ_ROLES:
         return "1=1"
     clauses = [f"{table}.owner = {frappe.db.escape(user)}"]
     if identity and identity.get("employee"):
-        clauses.append(
-            f"{table}.employee = {frappe.db.escape(identity['employee'])}"
-        )
-    clauses.append(f"{table}.purchaser_user = {frappe.db.escape(user)}")
-    actor_checks = [
-        "JSON_CONTAINS(step.approvers, {0})".format(
-            frappe.db.escape(json.dumps(actor, ensure_ascii=False))
-        )
-        for actor in sorted(actors)
-    ]
-    if actor_checks:
-        clauses.append(
-            "EXISTS (SELECT 1 FROM `tabOA Approval Step` step "
-            f"WHERE step.parent = {table}.name "
-            "AND step.parenttype = 'OA Approval Request' "
-            "AND step.parentfield = 'steps' "
-            f"AND step.step_index = {table}.current_step_index "
-            "AND JSON_VALID(step.approvers) "
-            "AND (" + " OR ".join(actor_checks) + "))"
-        )
-    scoped = "(" + " OR ".join(clauses) + ")"
-    if finance_reader:
-        values = ", ".join(frappe.db.escape(value) for value in sorted(PROCUREMENT_APPLICATION_TYPES))
-        return f"({table}.request_type not in ({values}) OR ({table}.request_type in ({values}) AND {scoped}))"
-    return scoped
+        clauses.append(f"{table}.employee = {frappe.db.escape(identity['employee'])}")
+    procurement = _sql_type_scope(PROCUREMENT_REQUEST_TYPES)
+    clauses.append(f"({procurement} AND {table}.purchaser_user = {frappe.db.escape(user)})")
+    if roles & PROCUREMENT_GLOBAL_ROLES:
+        clauses.append(procurement)
+    if "Accounts User" in roles:
+        clauses.append(_sql_type_scope(PAYMENT_REQUEST_TYPES))
+    clauses.append("(" + _sql_current_step(actors) + ")")
+    return "(" + " OR ".join(clauses) + ")"
 
 
 def oa_request_query(user=None):
@@ -153,6 +157,8 @@ def _parse_approvers(value):
 
 
 def _is_current_approver(doc, actors):
+    if _get(doc, "workflow_status") not in ACTIVE_STATUSES:
+        return False
     try:
         current = int(_get(doc, "current_step_index") or 0)
     except (TypeError, ValueError):
@@ -185,17 +191,16 @@ def _is_applicant(doc, user, identity):
 
 
 def _can_read(doc, user, roles, identity):
-    management_reader = user == "Administrator" or bool(roles & PROCUREMENT_GLOBAL_ROLES)
-    finance_reader = "Accounts User" in roles and not management_reader
     request_type = _get(doc, "request_type")
-    if management_reader:
+    if user == "Administrator" or roles & GLOBAL_READ_ROLES:
         return True
-    # Accounts User is global for payment requests, not procurement demands.
-    if finance_reader and request_type not in PROCUREMENT_APPLICATION_TYPES:
+    if request_type in PROCUREMENT_REQUEST_TYPES and roles & PROCUREMENT_GLOBAL_ROLES:
+        return True
+    if request_type in PAYMENT_REQUEST_TYPES and "Accounts User" in roles:
         return True
     if _is_owner(doc, user, identity):
         return True
-    if _get(doc, "purchaser_user") == user:
+    if request_type in PROCUREMENT_REQUEST_TYPES and _get(doc, "purchaser_user") == user:
         return True
     return _is_current_approver(doc, _actor_names(user, identity))
 

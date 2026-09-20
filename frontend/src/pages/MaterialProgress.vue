@@ -1,4 +1,5 @@
 <script setup>
+import MaterialExecutionProgress from "../components/MaterialExecutionProgress.vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { createResource, FeatherIcon } from 'frappe-ui';
 import { useRoute } from 'vue-router';
@@ -44,6 +45,11 @@ const message = ref('');
 const error = ref('');
 const selectedOrder = ref('');
 const route = useRoute();
+const page = ref(0);
+const pageSize = 50;
+const executionLine = ref(null);
+const sourceRequest = computed(() => String(route.query.request || ''));
+watch(() => route.query.request, () => { page.value = 0; executionLine.value = null; loader.reload(); });
 const tableRef = ref(null);
 const menuField = ref('');
 const menuSearch = ref('');
@@ -56,7 +62,7 @@ const prQuantities = ref({});
 const loader = createResource({
   url: 'rayher_hr_payroll.api.material_progress.list_material_progress',
   method: 'GET',
-  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: 2000 }),
+  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: pageSize, offset: page.value * pageSize, source_request: sourceRequest.value }),
   auto: true,
 });
 const updater = createResource({ url: 'rayher_hr_payroll.api.material_progress.update_material_progress' });
@@ -65,10 +71,14 @@ const prCreator = createResource({ url: 'rayher_hr_payroll.api.procurement_chain
 const rows = computed(() => loader.data?.items || []);
 const requesters = computed(() => loader.data?.requesters || []);
 const statusOptions = computed(() => [...new Set([...defaultStatuses, ...rows.value.map((row) => row.progress_status).filter(Boolean)])]);
-const counts = computed(() => rows.value.reduce((result, row) => {
-  result[row.progress_status] = (result[row.progress_status] || 0) + 1;
-  return result;
-}, {}));
+const counts = computed(() => loader.data?.stage_counts || {});
+const total = computed(() => Number(loader.data?.total || 0));
+const allStageCount = computed(() => Object.values(counts.value).reduce((sum, value) => sum + Number(value), 0));
+function turnPage(delta) { page.value += delta; selectedForPr.value = new Set(); executionLine.value = null; loader.reload(); }
+watch(rows, (items) => {
+  const line = String(route.query.source_line || '');
+  if (line && sourceRequest.value) executionLine.value = { source_request: sourceRequest.value, source_line: line };
+});
 const eligibleCount = computed(() => rows.value.filter((row) => Number(row.pr_eligible)).length);
 const lockedCount = computed(() => Math.max(0, rows.value.length - eligibleCount.value));
 
@@ -167,7 +177,8 @@ function selectStage(value) {
   query();
 }
 function refresh() { message.value = ''; error.value = ''; loader.reload(); }
-function query() { selectedOrder.value = ''; refresh(); }
+function query() {
+  page.value = 0; executionLine.value = null; selectedOrder.value = ''; refresh(); }
 function groupDate(group) {
   const dates = group.rows.map((row) => row.expected_delivery_date).filter(Boolean).sort();
   if (!dates.length) return '交期待确认';
@@ -379,19 +390,21 @@ async function cancelRow(row) {
       <button type="button" class="rounded-md bg-teal-700 px-5 py-2 text-sm font-medium text-white hover:bg-teal-800" @click="query">查询</button>
     </div>
 
+    <div v-if="sourceRequest" class="flex flex-wrap items-center justify-between gap-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm"><span>来源 OA：{{ sourceRequest }}</span><router-link :to="{ path: '/approval/procurement', query: { request: sourceRequest } }" class="text-blue-700">查看来源 OA →</router-link><router-link to="/approval/material-progress" class="text-gray-600">查看全部 OA</router-link></div>
+
     <div class="stage-strip">
-      <button type="button" :class="{ active: !status }" @click="status = ''; query()"><span>全部</span><strong>{{ rows.length }}</strong></button>
+      <button type="button" :class="{ active: !status }" @click="status = ''; query()"><span>全部</span><strong>{{ allStageCount }}</strong></button>
       <button v-for="(item, index) in stageStatuses" :key="item" type="button" :class="{ active: status === item }" @click="selectStage(item)">
         <small>{{ String(index + 1).padStart(2, '0') }}</small><span>{{ item }}</span><strong>{{ counts[item] || 0 }}</strong>
       </button>
     </div>
-    <div class="board-meta"><div class="flex flex-wrap items-center gap-2 text-sm"><span class="font-semibold text-gray-900">共 {{ rows.length }} 项物料</span><span class="board-count board-count-selectable">可提 PR {{ eligibleCount }}</span><span class="board-count board-count-locked">不可选 {{ lockedCount }}</span><span v-for="item in statusOptions.filter((value) => !stageStatuses.includes(value) && counts[value])" :key="item" class="rounded px-2 py-1 text-xs font-medium" :class="badgeClass(item)">{{ item }} {{ counts[item] }}</span></div><div class="board-legend"><span class="legend-item legend-selectable"><i></i>可提 PR</span><span class="legend-item legend-locked"><i></i>不可选</span><span class="legend-item legend-editable"><i></i>黄色单元格可编辑</span><button type="button" class="view-toggle" @click="showAllColumns = !showAllColumns"><FeatherIcon :name="showAllColumns ? 'chevron-left' : 'columns'" class="h-3.5 w-3.5" />{{ showAllColumns ? '收起扩展字段' : '显示全部字段' }}</button></div></div>
+    <div class="board-meta"><div class="flex flex-wrap items-center gap-2 text-sm"><span class="font-semibold text-gray-900">共 {{ total }} 项物料 · 本页 {{ rows.length }} 项</span><span class="board-count board-count-selectable">本页可提 PR {{ eligibleCount }}</span><span class="board-count board-count-locked">本页不可选 {{ lockedCount }}</span><span v-for="item in statusOptions.filter((value) => !stageStatuses.includes(value) && counts[value])" :key="item" class="rounded px-2 py-1 text-xs font-medium" :class="badgeClass(item)">{{ item }} {{ counts[item] }}</span></div><div class="board-legend"><span class="legend-item legend-selectable"><i></i>可提 PR</span><span class="legend-item legend-locked"><i></i>不可选</span><span class="legend-item legend-editable"><i></i>黄色单元格可编辑</span><button type="button" class="view-toggle" @click="showAllColumns = !showAllColumns"><FeatherIcon :name="showAllColumns ? 'chevron-left' : 'columns'" class="h-3.5 w-3.5" />{{ showAllColumns ? '收起扩展字段' : '显示全部字段' }}</button></div></div>
     <p v-if="message" class="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{{ message }}</p>
     <p v-if="error" class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ error }}</p>
 
     <div class="grid min-h-[620px] overflow-hidden rounded-md border border-gray-200 bg-white lg:grid-cols-[210px_minmax(0,1fr)]">
       <aside class="border-b border-gray-200 bg-gray-50 lg:border-b-0 lg:border-r">
-        <div class="border-b border-gray-200 px-4 py-3"><h2 class="text-sm font-semibold text-gray-900">OA订单</h2><p class="mt-0.5 text-xs text-gray-500">当前 {{ groups.length }} 张</p></div>
+        <div class="border-b border-gray-200 px-4 py-3"><h2 class="text-sm font-semibold text-gray-900">OA订单（本页）</h2><p class="mt-0.5 text-xs text-gray-500">当前 {{ groups.length }} 张</p></div>
         <div class="max-h-[620px] overflow-y-auto">
           <button v-for="group in groups" :key="group.key" type="button" class="block w-full border-b border-gray-200 px-3 py-3 text-left hover:bg-white" :class="selectedOrder === group.key ? 'border-l-4 border-l-teal-600 bg-white' : ''" @click="selectOrder(group)">
             <div class="flex items-center justify-between gap-2"><strong class="text-sm text-gray-900">{{ group.key }}</strong><span class="text-xs text-gray-500">{{ group.rows.length }} 项</span></div>
@@ -424,7 +437,7 @@ async function cancelRow(row) {
                 <tr v-for="row in group.rows" :key="row.name" :data-progress-row="row.name" class="hover:bg-gray-50" :class="{ 'bg-teal-50': selectedForPr.has(row.name) }">
                   <td class="selection-cell border-b border-r border-gray-200 px-2 py-2 text-center"><input type="checkbox" :checked="selectedForPr.has(row.name)" :disabled="!Number(row.pr_eligible)" :title="Number(row.pr_eligible) ? '选择生成 PR' : '需求审批未完成或已全部提 PR'" @change="togglePrRow(row, $event.target.checked)" /><span class="selection-badge" :class="Number(row.pr_eligible) ? 'is-selectable' : 'is-locked'">{{ selectionLabel(row) }}</span></td>
                   <td v-for="(column, columnIndex) in displayColumns" :key="column.field" class="editable-cell border-b border-r border-gray-200 px-2 py-2 align-top outline-none" :class="[column.field === 'progress_override' ? badgeClass(row.progress_status) : '', row.record_status === '已取消' ? 'text-gray-400' : '', canEditField(column.field) ? 'is-editable' : 'is-readonly']" :contenteditable="row.record_status !== '已取消' && canEditField(column.field)" spellcheck="false" :data-progress-field="column.field" :data-progress-column="columnIndex" :data-original="cellValue(row, column.field) || '无'" :title="canEditField(column.field) ? '可编辑：点击输入，失焦自动保存' : (cellValue(row, column.field) || '无')" @focus="canEditField(column.field) && beginCellEdit($event)" @blur="canEditField(column.field) && saveCell($event, row, column.field)" @keydown="cellKeydown"><input v-if="column.field === 'pr_create_quantity'" v-model.number="prQuantities[row.name]" type="number" min="0.0001" :max="row.pr_available_quantity" step="0.0001" class="h-7 w-full rounded border border-gray-300 bg-white px-1.5 text-right text-xs disabled:bg-gray-100" :disabled="!selectedForPr.has(row.name)" /><template v-else>{{ cellValue(row, column.field) || '无' }}</template></td>
-                  <td class="border-b border-gray-200 px-2 py-2 text-center"><button v-if="row.record_status !== '已取消'" type="button" class="inline-flex h-7 w-7 items-center justify-center rounded text-red-600 hover:bg-red-50" title="标记为取消" @click="cancelRow(row)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button><span v-else class="text-xs text-gray-400">已取消</span></td>
+                  <td class="border-b border-gray-200 px-2 py-2 text-center"><button type="button" class="mb-2 block text-xs text-blue-700" @click="executionLine = row">拆分明细</button><router-link :to="{ path: '/approval/procurement', query: { request: row.source_request } }" class="mb-2 block text-xs text-blue-700">来源 OA</router-link><button v-if="row.record_status !== '已取消'" type="button" class="inline-flex h-7 w-7 items-center justify-center rounded text-red-600 hover:bg-red-50" title="标记为取消" @click="cancelRow(row)"><FeatherIcon name="trash-2" class="h-4 w-4" /></button><span v-else class="text-xs text-gray-400">已取消</span></td>
                 </tr>
               </template>
               <tr v-if="!groups.length && !loader.loading"><td :colspan="displayColumns.length + 2" class="px-4 py-16 text-center text-sm text-gray-500">暂无符合条件的物料进度</td></tr>
@@ -433,6 +446,8 @@ async function cancelRow(row) {
         </div>
       </section>
     </div>
+    <div class="flex items-center justify-end gap-3 text-sm"><button type="button" :disabled="page === 0 || loader.loading" class="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40" @click="turnPage(-1)">上一页</button><span>第 {{ page + 1 }} 页 · 共 {{ total }} 项</span><button type="button" :disabled="!loader.data?.has_more || loader.loading" class="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40" @click="turnPage(1)">下一页</button></div>
+    <MaterialExecutionProgress v-if="executionLine" :key="executionLine.source_request + executionLine.source_line" :request="executionLine.source_request" :source-line="executionLine.source_line" expanded />
   </div>
 </template>
 

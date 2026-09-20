@@ -204,3 +204,24 @@ def test_finance_can_read_payment_requests_globally_but_not_procurement_demands(
     payment = {**demand, "request_type": module.REQUEST_PROCUREMENT_PAYMENT}
     assert module.oa_request_has_permission(demand, "read", "finance@example.com") is False
     assert module.oa_request_has_permission(payment, "read", "finance@example.com") is None
+
+
+@pytest.mark.parametrize("role", ["Purchase User", "Purchase Manager", "Accounts User"])
+def test_business_role_cannot_read_unrelated_leave(access, monkeypatch, role):
+    module, frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    frappe.get_roles = lambda user=None: ["Employee", role]
+    leave = {"request_type": module.REQUEST_LEAVE, "owner": "other@example.com", "employee": "EMP-B", "workflow_status": "待审批", "current_step_index": 1, "steps": []}
+    assert module.oa_request_has_permission(leave, "read", "alice@example.com") is False
+    assert "AND (1=1)" not in module.oa_request_query("alice@example.com")
+
+
+def test_future_node_does_not_grant_read_access(access, monkeypatch):
+    module, _ = access
+    monkeypatch.setattr(module, "_actor_names", lambda *args: {"alice@example.com"})
+    doc = {"request_type": module.REQUEST_LEAVE, "owner": "other@example.com", "employee": "EMP-B", "workflow_status": "待审批", "current_step_index": 1, "steps": [{"step_index": 2, "approvers": '["alice@example.com"]'}]}
+    assert module.oa_request_has_permission(doc, "read", "alice@example.com") is False
+    doc["current_step_index"] = 2
+    assert module.oa_request_has_permission(doc, "read", "alice@example.com") is None
+    doc["workflow_status"] = "已撤回"
+    assert module.oa_request_has_permission(doc, "read", "alice@example.com") is False

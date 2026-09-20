@@ -1,4 +1,5 @@
 <script setup>
+import MaterialExecutionProgress from "../components/MaterialExecutionProgress.vue";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { FeatherIcon, createResource } from 'frappe-ui';
 import { useRoute, useRouter } from 'vue-router';
@@ -1538,6 +1539,8 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
               <div v-if="isPayment"><dt class="text-[11px] text-gray-500">来源类型</dt><dd class="mt-0.5 text-sm font-medium text-gray-900">{{ selectedRequest.source_type || 'PO付款下推' }}</dd></div>
             </dl>
           </section>
+
+          <MaterialExecutionProgress v-if="isProcurement && !isInnerPage && selectedRequest" :key="selectedRequest.name" :request="selectedRequest.name" />
 
           <section v-if="isProcurement && !isInnerPage && showExecutionLinks" class="grid border-b border-gray-200 md:grid-cols-2">
             <router-link v-if="selectedRequest.can_view_procurement_price" :to="procurementChainRoute(selectedRequest)" class="group flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-5 hover:bg-gray-50 md:border-b-0 md:border-r lg:px-6">
