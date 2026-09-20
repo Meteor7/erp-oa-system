@@ -3,17 +3,14 @@ import { reactive, watch } from "vue";
 import { Card, Button, createResource } from "frappe-ui";
 import { displayCompany, displayDepartment } from "../lib/displayBrand.js";
 import { period } from "../lib/period";
+import { payrollAdjusted as adjusted, payrollProrated as prorated, payrollPayable as payable, payrollNet as net } from "../lib/payrollAmounts.js";
 const api="rayher_hr_payroll.api.hr_payroll_entry.";
 const rows=createResource({url:api+"get_payroll_rows",method:"GET",makeParams:()=>({period:period.value}),auto:true});
 const saver=createResource({url:api+"save_payroll_draft"});
 const adjuster=createResource({url:api+"apply_salary_adjustment"});
 const saving=reactive({}); const applying=reactive({}); const messages=reactive({}); const errors=reactive({});
-const n=v=>Number(v||0); const money=v=>n(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+const n=v=>Number(v||0); const money=v=>v==null?"—":n(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
 const gender=v=>v==="Female"?"女":v==="Male"?"男":v||"-";
-const adjusted=row=>n(row.base_salary)+n(row.salary_adjustment);
-const prorated=row=>n(row.total_working_days)>0?adjusted(row)*n(row.payment_days)/n(row.total_working_days):0;
-const payable=row=>prorated(row)+n(row.company_subsidy)+n(row.bonus)+n(row.other_adjustment);
-const net=row=>payable(row)-n(row.social_insurance)-n(row.housing_fund)-n(row.income_tax)-n(row.accommodation)-n(row.advanced_paid);
 const locked=row=>row.docstatus===1||Boolean(row.salary_slip&&!row.managed);
 async function saveRow(row){
   saving[row.employee]=true; errors[row.employee]=""; messages[row.employee]="";
@@ -32,7 +29,7 @@ watch(period,()=>rows.reload());
 <template>
 <div class="space-y-4">
 <Card title="薪酬计算" subtitle="按员工逐行维护本月薪酬，关联社保、公积金和宿舍代扣后生成真实草稿工资单">
-  <div class="flex flex-wrap items-end gap-3"><label class="text-xs text-gray-500">期间<input v-model="period" type="month" class="mt-1 block rounded border border-gray-300 px-3 py-2 text-sm"/></label><span class="text-xs text-gray-400">没有社保或公积金月度记录的员工不能保存工资草稿</span></div>
+  <div class="flex flex-wrap items-end gap-3"><label class="text-xs text-gray-500">期间<input v-model="period" type="month" class="mt-1 block rounded border border-gray-300 px-3 py-2 text-sm"/></label><span class="text-xs text-gray-400">没有社保或公积金月度记录的员工不能保存工资草稿；已提交金额以工资单为准，未留存的社保分项显示为 —</span></div>
 </Card>
 <Card :title="period+' 薪酬明细'">
 <div v-if="rows.loading" class="py-8 text-center text-sm text-gray-500">正在加载薪酬明细...</div>

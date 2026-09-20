@@ -26,6 +26,7 @@ def _install_fake_frappe(monkeypatch):
 
     frappe.throw = throw
     frappe.whitelist = whitelist
+    frappe.utils = SimpleNamespace(today=lambda: "2026-09-20")
     frappe.db = SimpleNamespace(commit=lambda: None)
     monkeypatch.setitem(sys.modules, "frappe", frappe)
     return frappe
@@ -269,3 +270,18 @@ def test_list_employees_adds_household_classification(monkeypatch):
     assert [row["household_classification"] for row in rows] == [
         "深户", "非深户", "非深户", "非深户", "待完善"
     ]
+
+
+def test_future_departure_remains_active_until_effective_date(monkeypatch):
+    mod, frappe = _load_personnel_entry(monkeypatch)
+    assert mod._employment_status("2026-09-21") == "Active"
+    assert mod._employment_status("2026-09-20") == "Left"
+    assert mod._employment_status(None) == "Active"
+    captured = {}
+    class Doc:
+        name = "EMP-1"
+        def update(self, values): captured.update(values)
+        def save(self, **kwargs): pass
+    frappe.get_doc = lambda *a: Doc()
+    mod.save_employee(name="EMP-1", relieving_date="2099-12-31")
+    assert captured["status"] == "Active"

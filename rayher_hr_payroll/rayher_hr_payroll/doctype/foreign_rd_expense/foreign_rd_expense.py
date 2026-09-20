@@ -37,6 +37,10 @@ class ForeignRDExpense(Document):
                 frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5355\u65e5\u4e0d\u80fd\u8d85\u8fc7 8 \u5c0f\u65f6\u3002"))
 
     def _check_period_lock(self):
-        period = "".join(c for c in str(self.period or "") if c.isdigit())[:6]
-        if period and frappe.db.exists("RD Period Lock", {"period": period, "docstatus": 1, "lock_allocations": 1}):
-            frappe.throw(frappe._("\u4f1a\u8ba1\u671f\u95f4 {0} \u5df2\u5206\u644a\u9501\u5b9a\uff0c\u4e0d\u80fd\u4fee\u6539\u5883\u5916\u59d4\u6258\u7814\u53d1\u8d39\u7528\u3002").format(period))
+        periods = {"".join(c for c in str(self.period or "") if c.isdigit())[:6]}
+        before = self.get_doc_before_save()
+        if before is not None:
+            periods.add("".join(c for c in str(before.period or "") if c.isdigit())[:6])
+        for period in periods:
+            if period and frappe.db.exists("RD Period Lock", {"period": period, "docstatus": 1, "lock_allocations": 1}):
+                frappe.throw(frappe._("会计期间 {0} 已分摊锁定，不能修改境外委托研发费用。").format(period))

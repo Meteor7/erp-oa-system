@@ -45,3 +45,23 @@ def test_new_foreign_rd_expense_uses_one_deterministic_name_per_period(monkeypat
 
     assert doc.period == "202607"
     assert doc.name == "FRD-2026-07"
+
+
+def test_locked_foreign_period_cannot_be_moved_to_open_period(monkeypatch):
+    import pytest
+    mod = _load_foreign_rd_expense(monkeypatch)
+    doc = mod.ForeignRDExpense(period="202609")
+    doc.get_doc_before_save = lambda: SimpleNamespace(period="202608")
+    mod.frappe.db.exists = lambda dt, filters: filters["period"] == "202608"
+    with pytest.raises(RuleError, match="202608"):
+        doc._check_period_lock()
+
+
+def test_open_foreign_period_cannot_be_moved_to_locked_period(monkeypatch):
+    import pytest
+    mod = _load_foreign_rd_expense(monkeypatch)
+    doc = mod.ForeignRDExpense(period="202608")
+    doc.get_doc_before_save = lambda: SimpleNamespace(period="202607")
+    mod.frappe.db.exists = lambda dt, filters: filters["period"] == "202608"
+    with pytest.raises(RuleError, match="202608"):
+        doc._check_period_lock()

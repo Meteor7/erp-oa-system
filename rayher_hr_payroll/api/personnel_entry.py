@@ -1,4 +1,5 @@
 import frappe
+from datetime import date
 
 from rayher_hr_payroll.api._guards import is_hr_sensitive_hidden, require_rd_access
 from rayher_hr_payroll.department_structure import (
@@ -21,6 +22,17 @@ EMPLOYEE_FIELDS = [
     "degree_cn", "education_completion_type", "household_registration", "id_type_cn",
     "social_insurance_number", "housing_fund_number",
 ]
+
+
+def _employment_status(relieving_date):
+    if not relieving_date:
+        return "Active"
+    try:
+        effective = date.fromisoformat(str(relieving_date))
+    except ValueError:
+        frappe.throw("离职日期格式无效。")
+    current = date.fromisoformat(str(frappe.utils.today()))
+    return "Left" if effective <= current else "Active"
 
 
 @frappe.whitelist()
@@ -219,7 +231,7 @@ def save_employee(
             vals.pop(field, None)
     if "relieving_date" in vals:
         vals["relieving_date"] = vals["relieving_date"] or None
-        vals["status"] = "Left" if vals["relieving_date"] else "Active"
+        vals["status"] = _employment_status(vals["relieving_date"])
     if employee_name:
         vals["first_name"] = employee_name
     if not (set(frappe.get_roles()) & {"System Manager", "HR User", "HR Manager"}):
@@ -237,7 +249,7 @@ def save_employee(
         company_value = vals.pop("company")
         doc = frappe.get_doc({
             "doctype": "Employee", "company": company_value,
-            "status": "Left" if relieving_date else "Active", "relieving_date": relieving_date or None,
+            "status": _employment_status(relieving_date), "relieving_date": relieving_date or None,
             "employee_number": employee_number,
         "employee_name": employee_name, "first_name": employee_name,
             "gender": gender or "Male", "date_of_birth": _birth(id_card_number_cn) or "1990-01-01",

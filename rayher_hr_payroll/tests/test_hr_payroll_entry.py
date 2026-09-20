@@ -168,3 +168,23 @@ def test_social_record_prefers_current_company_import_batch(monkeypatch):
         "name": "SIR-1", "employee_total": 1020
     }
     assert not any(call[0] == "Employee Social Insurance" for call in calls)
+
+
+@pytest.mark.parametrize("managed,docstatus", [(1, 1), (0, 1), (0, 0)])
+def test_saved_salary_is_not_recalculated_from_changed_hr_data(monkeypatch, managed, docstatus):
+    module, _ = _load(monkeypatch)
+    def forbidden(*args, **kwargs): raise AssertionError("must not read current HR data")
+    for name in ("_social_record", "_monthly_record", "_working_days", "_assignment", "_accommodation"):
+        monkeypatch.setattr(module, name, forbidden)
+    slip = SimpleNamespace(name="SAL-SAVED", docstatus=docstatus, hr_spa_managed=managed,
+        net_pay=9000, total_deduction=1000, gross_pay=10000,
+        company="Historical Company", bank_account_no="historical-bank",
+        earnings=[SimpleNamespace(salary_component="基本工资", amount=10000)],
+        deductions=[SimpleNamespace(salary_component="社保个人", amount=1000)])
+    result = module._row({"name": "EMP-1", "company": "New company"}, "2026-08", None, None, slip)
+    assert result["net_pay"] == 9000
+    assert result["social_insurance"] == 1000
+    assert result["company"] == "Historical Company"
+    assert result["bank_ac_no"] == "historical-bank"
+    assert result["employee_pension"] is None
+    assert result["amount_source"] == "salary_slip"

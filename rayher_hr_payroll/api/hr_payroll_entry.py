@@ -244,7 +244,49 @@ def _accommodation(employee, period):
     return _money(sum(_as_float(row.get("personal_total_amount")) for row in rows))
 
 
+def _saved_payroll_row(employee, period, slip):
+    """Display the saved salary document without re-reading mutable HR inputs."""
+    def value(key, default=None):
+        return getattr(slip, key, default)
+    def components(table):
+        totals = {}
+        for line in value(table, []) or []:
+            key = getattr(line, "salary_component", None)
+            totals[key] = totals.get(key, 0) + _as_float(getattr(line, "amount", 0))
+        return totals
+    earnings, deductions = components("earnings"), components("deductions")
+    managed = bool(value("hr_spa_managed", 0))
+    inputs = {
+        "base_salary": value("hr_base_salary") if managed else None,
+        "salary_adjustment": value("hr_salary_adjustment") if managed else None,
+        "company_subsidy": earnings.get("公司补贴", 0), "bonus": earnings.get("奖金", 0),
+        "other_adjustment": earnings.get("其他收入", 0) - deductions.get("其他扣款", 0),
+        "income_tax": deductions.get("个税", 0), "advanced_paid": deductions.get("已发放", 0),
+    }
+    return {
+        "employee": employee["name"], "employee_name": value("employee_name"), "company": value("company"),
+        "department": value("department"), "designation": value("designation"),
+        "id_card_number_cn": value("hr_id_card_number_cn"), "gender": value("hr_gender"),
+        "expense_account_category": value("hr_expense_account_category"),
+        "date_of_joining": value("hr_date_of_joining"), "relieving_date": value("hr_relieving_date"),
+        "cell_number": value("hr_phone"), "bank_name": value("bank_name"), "bank_ac_no": value("bank_account_no"),
+        "period": period, "total_working_days": value("total_working_days"),
+        "payment_days": value("payment_days"), "working_days_source": "salary_slip", **inputs,
+        "adjusted_base": value("hr_adjusted_base") if managed else None,
+        "prorated_base": earnings.get("基本工资"), "payable_salary": value("gross_pay"),
+        # Older salary slips stored only the total social deduction, not its split.
+        "employee_pension": None, "employee_medical": None, "employee_unemployment": None,
+        "social_insurance": deductions.get("社保个人", 0), "housing_fund": deductions.get("公积金个人", 0),
+        "accommodation": deductions.get("宿舍扣款", 0), "total_deduction": value("total_deduction"),
+        "net_pay": value("net_pay"), "social_record_exists": True, "housing_record_exists": True,
+        "salary_slip": value("name"), "docstatus": int(value("docstatus", 0)), "managed": managed,
+        "amount_source": "salary_slip",
+    }
+
+
 def _row(employee, period, start, end, slip=None):
+    if slip and (int(slip.docstatus or 0) == 1 or not slip.hr_spa_managed):
+        return _saved_payroll_row(employee, period, slip)
     social = _social_record( employee["name"], period,
         ["name", "employee_pension", "employee_medical", "employee_unemployment", "employee_total"],
     )
