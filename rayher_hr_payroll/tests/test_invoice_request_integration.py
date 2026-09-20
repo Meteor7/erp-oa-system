@@ -1741,6 +1741,8 @@ def test_get_options_exposes_current_applicant_and_canonical_payment_types(monke
         "employee": "EMP-1",
         "employee_name": "Alice",
         "user": "alice@example.com",
+        "department": "研发部",
+        "supervisor": "Manager",
     }
 
 
