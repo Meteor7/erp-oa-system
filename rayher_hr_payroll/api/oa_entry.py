@@ -1,3 +1,4 @@
+from rayher_hr_payroll.procurement_mutation_guard import procurement_action
 from rayher_hr_payroll.position_access import position_users, current_supervisors, executive_names
 import json
 from contextlib import ExitStack
@@ -1225,6 +1226,7 @@ def _find_payment_plan_row(doc, row_name):
     return None
 
 
+@procurement_action
 def _sync_payment_plan_row(payment_doc, status):
     if getattr(payment_doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
         return None

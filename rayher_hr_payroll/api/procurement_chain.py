@@ -14,6 +14,7 @@ from frappe.utils import now_datetime
 
 from rayher_hr_payroll.api.material_progress import _ensure_all_rows
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
+from rayher_hr_payroll.procurement_mutation_guard import procurement_action
 
 PO_PAYMENT_PUSH_SOURCE = "PO付款下推"
 PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "Rayher Business Executive"}
@@ -179,8 +180,8 @@ def _new_material_serial():
     return f"MAT-{date.today().year}-{suffix}"
 
 
-def _source_line(request_name, line_name):
-    source = frappe.get_doc("OA Approval Request", request_name)
+def _source_line(request_name, line_name, source=None):
+    source = source or frappe.get_doc("OA Approval Request", request_name)
     line = next((row for row in (source.business_lines or []) if row.name == line_name), None)
     if not line:
         frappe.throw(f"找不到 OA {request_name} 的物料明细。")
@@ -190,18 +191,18 @@ def _source_line(request_name, line_name):
     return source, line
 
 
-def _allocated(source_request, source_line, doctype, qty_field="quantity"):
-    rows = frappe.get_all(
-        doctype, filters={"source_request": source_request, "source_line": source_line},
-        fields=[qty_field], limit_page_length=0,
+def _available(source_request, source_line, requested, *, current=False):
+    # Source OA rows serialize writers; a locking read also avoids an older
+    # REPEATABLE READ snapshot after waiting for another PR to commit.
+    rows = frappe.db.sql(
+        "SELECT l.quantity FROM `tabOA Procurement Request Line` l "
+        "JOIN `tabOA Procurement Request` p ON p.name=l.parent "
+        "WHERE l.source_request=%s AND l.source_line=%s "
+        "AND p.status != '已取消'" + (" FOR UPDATE" if current else ""),
+        (source_request, source_line), as_dict=True,
     )
-    return sum(_decimal(row.get(qty_field)) for row in rows)
-
-
-def _available(source_request, source_line, requested):
-    return max(Decimal("0"), _decimal(requested) - _allocated(
-        source_request, source_line, "OA Procurement Request Line"
-    ))
+    allocated = sum((_decimal(row.get("quantity")) for row in rows), Decimal("0"))
+    return max(Decimal("0"), _decimal(requested) - allocated)
 
 
 def _demand_approved(source):
@@ -623,11 +624,19 @@ def list_payment_work_items(limit=500):
     return sorted(result, key=lambda item: (priority.get(item["work_status"], 9), item["po"], item["installment_no"]))
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def create_pr(lines):
     _require_pmc()
     values = _json(lines, [])
     if not isinstance(values, list) or not values:
         frappe.throw("请选择至少一个物料生成 PR。")
+    if any(not isinstance(row, dict) or not _text(row.get("source_request"))
+           or not _text(row.get("source_line")) for row in values):
+        frappe.throw("物料来源格式无效。")
+    sources_locked = {
+        name: frappe.get_doc("OA Approval Request", name, for_update=True)
+        for name in sorted({_text(row.get("source_request")) for row in values})
+    }
     doc = frappe.new_doc("OA Procurement Request")
     doc.status = "待采购"
     doc.requested_by = frappe.session.user
@@ -639,12 +648,12 @@ def create_pr(lines):
         if key in seen:
             frappe.throw("同一 OA 物料不能在一张 PR 中重复选择。")
         seen.add(key)
-        source, line = _source_line(request_name, line_name)
+        source, line = _source_line(request_name, line_name, sources_locked[request_name])
         if not _demand_approved(source):
             frappe.throw(f"OA {request_name} 需求审批尚未完成，不能生成 PR。")
         requested = _decimal(line.quantity)
         quantity = _decimal(raw.get("quantity") or requested, "本次 PR 数量")
-        available = _available(request_name, line_name, requested)
+        available = _available(request_name, line_name, requested, current=True)
         if quantity <= 0 or quantity > available:
             frappe.throw(f"物料 {line.material_serial} 可提 PR 数量为 {available}。")
         doc.append("lines", {
@@ -673,6 +682,7 @@ def create_pr(lines):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def create_price_approval(lines):
     _require_purchase()
     values = _json(lines, [])
@@ -724,6 +734,7 @@ def create_price_approval(lines):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def save_supplier_comparison(price_approval, supplier, prices, payment_method=None,
                              currency="CNY", tax_rate=0, contract_entity=None,
                              is_recommended=0, note=None, original_supplier=None,
@@ -816,6 +827,7 @@ def save_supplier_comparison(price_approval, supplier, prices, payment_method=No
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def delete_supplier_comparison(price_approval, supplier):
     _require_purchase()
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
@@ -883,6 +895,7 @@ def _apply_supplier_selection(approval, supplier):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def select_supplier_comparison(price_approval, supplier):
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
     if approval.status != "待审批":
@@ -900,6 +913,7 @@ def select_supplier_comparison(price_approval, supplier):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def save_price_quote(price_approval, price_line, supplier, unit_price, delivery_date=None,
                      payment_method=None, currency="CNY", tax_rate=0, contract_entity=None,
                      is_recommended=0, note=None, quote_name=None):
@@ -960,6 +974,7 @@ def save_price_quote(price_approval, price_line, supplier, unit_price, delivery_
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def delete_price_quote(price_approval, price_line, quote_name):
     _require_purchase()
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
@@ -984,6 +999,7 @@ def delete_price_quote(price_approval, price_line, quote_name):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def select_price_quote(price_approval, price_line, quote_name):
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
     quote = frappe.get_doc("OA Price Approval Quote", _text(quote_name))
@@ -993,6 +1009,7 @@ def select_price_quote(price_approval, price_line, quote_name):
     return select_supplier_comparison(approval.name, quote.supplier)
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def update_price_approval_summary(name, summary):
     _require_purchase()
     doc = frappe.get_doc("OA Price Approval", _text(name))
@@ -1065,6 +1082,7 @@ def _reserve_released_pr_lines(approval):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def withdraw_price_approval(name, note=None):
     _require_purchase()
     doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
@@ -1083,6 +1101,7 @@ def withdraw_price_approval(name, note=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def cancel_price_approval(name, note=None):
     _require_purchase()
     doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
@@ -1098,6 +1117,7 @@ def cancel_price_approval(name, note=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def submit_price_approval(name):
     _require_purchase()
     doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
@@ -1125,6 +1145,7 @@ def submit_price_approval(name):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def approve_price_approval(name, note=None):
     if _user() != position_user("vice_manager") and "System Manager" not in _roles():
         frappe.throw("只有副总经理或系统管理员可以审批价格审批单。")
@@ -1155,6 +1176,7 @@ def approve_price_approval(name, note=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def generate_po_drafts(price_approval):
     _require_purchase_or_qingbo()
     approval = frappe.get_doc("OA Price Approval", _text(price_approval), for_update=True)
@@ -1254,9 +1276,10 @@ def generate_po_drafts(price_approval):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def update_po_delivery(name, lines=None):
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"草稿", "待采购确认"}:
         frappe.throw("只有 PO 草稿可以修改合同交期。")
     values = _json(lines, [])
@@ -1277,9 +1300,10 @@ def update_po_delivery(name, lines=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def confirm_po(name):
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"草稿", "待采购确认"}:
         frappe.throw("只有 PO 草稿可以确认。")
     if not po.supplier or not po.payment_method:
@@ -1297,6 +1321,7 @@ def confirm_po(name):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def save_po_contract_information(name, seal_user, contract_delivery_date=None,
                                  supplier_legal_name=None, credit_code=None,
                                  supplier_address=None, contract_contact=None,
@@ -1304,7 +1329,7 @@ def save_po_contract_information(name, seal_user, contract_delivery_date=None,
                                  contract_template=None):
     """Create the PO contract draft after procurement confirms the PO."""
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"待合同复核", "草稿", "待采购确认"}:
         frappe.throw("当前 PO 不在合同信息补充阶段。")
     seal_user = _text(seal_user)
@@ -1345,9 +1370,10 @@ def save_po_contract_information(name, seal_user, contract_delivery_date=None,
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def review_po_contract(name, note=None):
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.contract_status != "草稿待复核" or not po.contract_draft_content:
         frappe.throw("当前 PO 没有待复核的合同草稿。")
     po.contract_status = "待电子用印"
@@ -1361,9 +1387,10 @@ def review_po_contract(name, note=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def seal_po_contract(name, note=None):
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.contract_status != "待电子用印":
         frappe.throw("当前 PO 不在待电子用印状态。")
     seal_user = _text(getattr(po, "contract_seal_user", None))
@@ -1383,9 +1410,10 @@ def seal_po_contract(name, note=None):
     return _po_summary(po)
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def record_po_receipt(name, lines, arrival_date=None, file_ref=None, note=None):
     _require_production_receipt()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"供应商制作中", "到货验收中", "付款中"}:
         frappe.throw("PO 合同生效并进入供应商制作后，才能登记到货资料。")
     values = _json(lines, [])
@@ -1404,8 +1432,8 @@ def record_po_receipt(name, lines, arrival_date=None, file_ref=None, note=None):
         if next_quantity > _decimal(line.quantity):
             frappe.throw(f"物料 {line.material_serial} 累计到货不能超过 PO 数量 {line.quantity}。")
         line.received_quantity = float(next_quantity)
-        if line.inspection_status in ("", "未验收"):
-            line.inspection_status = "待验收"
+        # Prior inspection records remain as evidence; new stock is uninspected.
+        line.inspection_status = "待验收"
         changed += 1
         details.append({
             "line": line.name, "material_serial": _text(line.material_serial),
@@ -1422,9 +1450,10 @@ def record_po_receipt(name, lines, arrival_date=None, file_ref=None, note=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def record_po_inspection(name, lines, inspection_date=None, file_ref=None, note=None):
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"到货验收中", "供应商制作中"}:
         frappe.throw("当前 PO 不能登记验收。")
     values = _json(lines, [])
@@ -1457,6 +1486,7 @@ def record_po_inspection(name, lines, inspection_date=None, file_ref=None, note=
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def start_po_payment_approval(name, payment_plan_row):
     """Start the existing five-step payment route on a PO payment-plan row."""
     # Keep the historical endpoint aligned with the single PO -> payment OA
@@ -1464,10 +1494,11 @@ def start_po_payment_approval(name, payment_plan_row):
     return push_po_payment_request(name, payment_plan_row)
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def push_po_payment_request(name, payment_plan_row):
     """Create the visible 采购付款 OA from a PO payment-plan row."""
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if not _po_contract_ready(po):
         frappe.throw("PO 电子用印生效后才能下推采购付款。")
     row = _po_payment_plan_row(po, payment_plan_row)
@@ -1527,9 +1558,10 @@ def push_po_payment_request(name, payment_plan_row):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def approve_po_payment_step(name, payment_plan_row, note=None):
     _require_po_payment_actor()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     row = _po_payment_plan_row(po, payment_plan_row)
     if _text(row.approval_status) != "审批中":
         frappe.throw("该付款期次当前没有进行中的审批。")
@@ -1560,9 +1592,10 @@ def approve_po_payment_step(name, payment_plan_row, note=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def record_po_payment(name, amount, payment_plan_row=None, payment_reference=None):
     _require_po_payment_actor()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"付款中", "到货验收中", "供应商制作中"}:
         frappe.throw("当前 PO 不能登记付款。")
     if not payment_plan_row:
@@ -1596,9 +1629,10 @@ def record_po_payment(name, amount, payment_plan_row=None, payment_reference=Non
 
 
 @frappe.whitelist(methods=["POST"])
+@procurement_action
 def close_po(name):
     _require_purchase()
-    po = frappe.get_doc("OA Purchase Order", _text(name))
+    po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status == "已关闭":
         return _po_summary(po)
     if any(_decimal(line.received_quantity) < _decimal(line.quantity) for line in po.lines):
@@ -1621,6 +1655,7 @@ def close_po(name):
     frappe.db.commit()
     return _po_summary(po)
 
+@procurement_action
 def backfill_legacy_chain():
     """Fill selected quote and commercial fields for records created before this workflow revision."""
     for name in frappe.get_all("OA Price Approval", pluck="name", limit_page_length=0):
