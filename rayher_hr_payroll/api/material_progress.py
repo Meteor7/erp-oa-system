@@ -134,8 +134,10 @@ def _ensure_all_rows():
             frappe.log_error(frappe.get_traceback(), "物料进度看板同步失败：" + str(name))
 
 
-def _related_status(board, po_statuses=None):
+def _related_status(board, po_statuses=None, metrics=None):
     """Derive the material stage from linked PR, price approval, and PO documents."""
+    if metrics is not None and metrics["po_quantity"] + 0.000001 < float(board.quantity or 0):
+        return "PO处理中" if metrics["price_approval_quantity"] + 0.000001 >= float(board.quantity or 0) else "采购确认中"
     price_names = [item for item in _clean(getattr(board, "price_approval_numbers", "")).split(",") if item]
     po_names = [item for item in _clean(getattr(board, "po_numbers", "")).split(",") if item]
     if not po_names and _clean(getattr(board, "po_number", "")):
@@ -161,7 +163,7 @@ def _related_status(board, po_statuses=None):
     return "采购确认中"
 
 
-def _derived_status(board, source, po_statuses=None):
+def _derived_status(board, source, po_statuses=None, metrics=None):
     if _clean(getattr(board, "status", None)) == "已取消":
         return "已取消"
     workflow = _clean(getattr(source, "workflow_status", None))
@@ -169,9 +171,9 @@ def _derived_status(board, source, po_statuses=None):
         return workflow
     if workflow not in {"已完成", "已通过", "已审批", "已结束"}:
         if _clean(getattr(source, "business_status", None)).startswith("需求已批准"):
-            return _related_status(board, po_statuses)
+            return _related_status(board, po_statuses, metrics)
         return "OA审批中"
-    return _related_status(board, po_statuses)
+    return _related_status(board, po_statuses, metrics)
 
 def _payment_rows(source):
     return list(getattr(source, "payment_plan", []) or [])
@@ -268,7 +270,7 @@ def _chain_metrics(board):
 
 
 def _status_detail(board, source, metrics, approval_steps=None, po_statuses=None):
-    stage = _derived_status(board, source, po_statuses)
+    stage = _derived_status(board, source, po_statuses, metrics)
     if stage == "OA审批中":
         pending_rows = [row for row in (approval_steps or []) if _clean(row.status) not in {"已通过", "已完成"}]
         if approval_steps is None:
@@ -337,7 +339,7 @@ def _serialize(board, source=None, metrics=None, approval_steps=None, po_statuse
         "remarks": board.remarks or "",
         "record_status": board.status or "正常",
         "progress_override": "",
-        "progress_status": _derived_status(board, source, po_statuses),
+        "progress_status": _derived_status(board, source, po_statuses, metrics),
         "business_status": _clean(getattr(source, "business_status", None)),
         "arrival_status": _clean(getattr(source, "arrival_status", None)),
         "inspection_status": _clean(getattr(source, "inspection_status", None)),
@@ -385,7 +387,7 @@ def _batch_chain_context(boards):
         }
 
     metrics = {key: empty_metrics() for key in keys}
-    common_filters = {"source_request": ["in", source_names or ["__none__"]]}
+    common_filters = {"source_request": ["in", source_names or ["__none__"]], "source_line": ["in", sorted({key[1] for key in keys}) or ["__none__"]]}
     pr_lines = frappe.get_all(
         "OA Procurement Request Line", filters=common_filters,
         fields=["source_request", "source_line", "quantity", "remaining_quantity"], limit_page_length=0,

@@ -103,13 +103,17 @@ def _sql_current_step(actors, *, pending=False):
     ]
     if not checks:
         return "1=0"
+    unsigned = ""
+    if pending:
+        signed_checks = [check.replace("step.approvers", "step.approved_by") for check in checks]
+        unsigned = " AND NOT (" + " OR ".join(signed_checks) + ")"
     return (
         f"{table}.workflow_status IN ('待审批', '待办理') AND EXISTS ("
         "SELECT 1 FROM `tabOA Approval Step` step "
         f"WHERE step.parent = {table}.name "
         "AND step.parenttype = 'OA Approval Request' AND step.parentfield = 'steps' "
         f"AND step.step_index = {table}.current_step_index "
-        "AND (" + " OR ".join(checks) + "))"
+        "AND (" + " OR ".join(checks) + ")" + unsigned + ")"
     )
 
 

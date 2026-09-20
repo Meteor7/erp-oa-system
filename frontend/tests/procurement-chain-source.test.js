@@ -125,7 +125,7 @@ test('procurement payment workbench owns payment conditions, receipt, inspection
   assert.match(backend, /尚未全部到货，不能关闭/);
   assert.match(backend, /尚未全部验收通过，不能关闭/);
   assert.match(backend, /尚未完成付款，不能关闭/);
-  assert.match(backend, /只有生产主管演示员工241或系统管理员可以登记到货资料/);
+  assert.match(backend, /只有生产主管或系统管理员可以登记到货资料/);
   assert.match(backend, /PO 合同生效并进入供应商制作后，才能登记到货资料/);
   assert.match(paymentCenter, /activeItem\.can_record_receipt/);
   assert.match(paymentCenter, /activeItem\.can_record_inspection/);

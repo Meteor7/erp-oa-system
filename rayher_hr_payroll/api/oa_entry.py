@@ -1056,7 +1056,11 @@ def _can_act_on_current_step(doc, user=None):
     if doc.workflow_status not in ACTIVE_STATUSES:
         return False
     step = _current_step(doc)
-    return bool(step and (_matched_approvers(step, user) or _is_oa_override_user(user)))
+    if not step:
+        return False
+    matched = set(_matched_approvers(step, user))
+    already_signed = bool(matched & set(_parse_json_list(getattr(step, "approved_by", None))))
+    return bool((matched and not already_signed) or _is_oa_override_user(user))
 
 
 def _request_capabilities(doc, user=None):
@@ -2148,7 +2152,7 @@ def _submit_draft(doc):
         for line in doc.expense_lines:
             if not getattr(line, "issue_date", None) or _money(getattr(line, "amount", None)) <= 0:
                 frappe.throw("提交前必须填写每项费用的日期和正数金额。")
-            _expense_account_pair(getattr(line, "expense_account_level_1", None), getattr(line, "expense_account_level_2", None), required=True)
+            _expense_account_pair(getattr(line, "expense_account_level_1", None), getattr(line, "expense_account_level_2", None))
         _validate_expense_project_groups(doc)
         _validate_invoice_handling_submission(doc)
     elif doc.request_type == REQUEST_PROCUREMENT:
@@ -2543,6 +2547,36 @@ def _updated_invoice_source(existing, payload):
     source["description"] = source["expense_description"]
     source["no_invoice_reason"] = ""
     return source
+
+
+@frappe.whitelist(methods=["POST"])
+def update_manual_expense_draft(name, payload):
+    """Resume the original manual draft without replacing invoice-linked sources."""
+    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
+    values = _parse_json(payload, None)
+    if not isinstance(values, dict):
+        frappe.throw("草稿格式无效。")
+    editable = ("subject", "company", "doc_type", "urgency", "asset_category", "reason",
+                "payment_type", "payment_method", "bank_name", "payee_name", "branch", "account_no",
+                "no_invoice_reason", "invoice_handling_mode", "expected_invoice_date", "payment_source_kind", "source_request")
+    with invoice_service._transaction_lock("request", name):
+        doc = _load_request(name, current=True)
+        invoice_service._request_permission(doc, "edit", current=True)
+        if doc.request_type != REQUEST_EXPENSE_PAYMENT or doc.workflow_status != STATUS_DRAFT:
+            frappe.throw("只有费用申请草稿可以继续编辑。")
+        if any(_clean(getattr(row, "source_invoice", None)) for row in doc.expense_lines):
+            frappe.throw("发票生成的申请请在详情中编辑，不能替换发票明细。")
+        rows = _draft_source_rows(values.get("expense_lines", []))
+        if any(row.get("source_invoice") or row.get("source_consumption") for row in rows):
+            frappe.throw("手工草稿不能指定发票关联。")
+        replacement = _build_request_doc(REQUEST_EXPENSE_PAYMENT, submit=False,
+            expense_lines=rows, **{key: values.get(key, getattr(doc, key, None)) for key in editable})
+        for key in editable + ("asset_nature", "fixed_asset_category", "amount", "source_request_title", "source_request_amount"):
+            if hasattr(replacement, key):
+                setattr(doc, key, getattr(replacement, key))
+        _set_expense_lines(doc, [row.as_dict() if hasattr(row, "as_dict") else dict(row) for row in replacement.expense_lines])
+        _save_document(doc)
+        return _summarize_doc(doc)
 
 
 @frappe.whitelist(methods=["POST"])

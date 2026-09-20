@@ -1027,6 +1027,8 @@ def test_request_owner_or_employee_user_may_edit_but_approver_only_reads(env, mo
     env.add_batch(owner="uploader@example.com")
     request = _add_request(env, owner="owner@example.com", employee="EMP-APP")
     request.department = "Sales"
+    request.workflow_status = "待审批"
+    request.current_step_index = 1
     record = env.add_record(owner="uploader@example.com", request=request.name)
     original_get_value = env.db.get_value
 
@@ -1034,6 +1036,8 @@ def test_request_owner_or_employee_user_may_edit_but_approver_only_reads(env, mo
         if doctype == "Employee" and isinstance(filters, dict) and filters.get("user_id") in {"applicant@example.com", "manager@example.com"}:
             row = {"name": "EMP-APP" if filters.get("user_id") == "applicant@example.com" else "EMP-MGR", "employee_name": "Applicant", "department": "Sales"}
             return row if as_dict else row.get(fieldname)
+        if doctype == "OA Approval Step" and filters.get("parent") == request.name and filters.get("step_index") == 1:
+            return json.dumps(["manager@example.com"])
         return original_get_value(doctype, filters, fieldname, as_dict=as_dict, **kwargs)
 
     monkeypatch.setattr(env.db, "get_value", get_value)

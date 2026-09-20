@@ -189,16 +189,23 @@ const preview = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.preview_route',
   method: 'GET',
 });
+const minePage = ref(0);
+const pendingPage = ref(0);
+async function changeListPage(kind, delta) {
+  const value = kind === 'mine' ? minePage : pendingPage;
+  value.value += delta;
+  await (kind === 'mine' ? mine : pending).reload();
+}
 const mine = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.list_requests',
   method: 'GET',
-  makeParams: () => ({ view: 'mine', request_type: currentRequestType.value }),
+  makeParams: () => ({ view: 'mine', request_type: currentRequestType.value, limit: 50, offset: minePage.value * 50 }),
   auto: true,
 });
 const pending = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.list_requests',
   method: 'GET',
-  makeParams: () => ({ view: 'pending', request_type: currentRequestType.value }),
+  makeParams: () => ({ view: 'pending', request_type: currentRequestType.value, limit: 50, offset: pendingPage.value * 50 }),
   auto: true,
 });
 const leaveDetailLoader = createResource({
@@ -780,6 +787,8 @@ watch([() => leaveForm.from_date, () => leaveForm.to_date], () => {
   refreshAttendance(true);
 });
 watch(currentRequestType, () => {
+  minePage.value = 0;
+  pendingPage.value = 0;
   leaveDraftName.value = '';
   lastAutoHydratedDraft.value = '';
   leaveDetailLoader.data = null;
@@ -956,7 +965,7 @@ onBeforeUnmount(() => {
               </tr>
               <tr v-if='!(mine.data || []).length'><td colspan='5' class='py-6 text-center text-gray-400'>{{ T.empty }}</td></tr>
             </tbody>
-          </table>
+          </table><div class="flex items-center justify-end gap-3 p-3 text-xs"><button type="button" :disabled="minePage === 0 || mine.loading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeListPage('mine', -1)">上一页</button><span>第 {{ minePage + 1 }} 页 · 本页 {{ (mine.data || []).length }} 条</span><button type="button" :disabled="(mine.data || []).length < 50 || mine.loading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeListPage('mine', 1)">下一页</button></div>
         </div>
       </Card>
 
@@ -975,7 +984,7 @@ onBeforeUnmount(() => {
               </tr>
               <tr v-if='!(pending.data || []).length'><td colspan='6' class='py-6 text-center text-gray-400'>{{ T.empty }}</td></tr>
             </tbody>
-          </table>
+          </table><div class="flex items-center justify-end gap-3 p-3 text-xs"><button type="button" :disabled="pendingPage === 0 || pending.loading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeListPage('pending', -1)">上一页</button><span>第 {{ pendingPage + 1 }} 页 · 本页 {{ (pending.data || []).length }} 条</span><button type="button" :disabled="(pending.data || []).length < 50 || pending.loading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeListPage('pending', 1)">下一页</button></div>
         </div>
       </Card>
 
@@ -1225,7 +1234,7 @@ onBeforeUnmount(() => {
                 </tr>
                 <tr v-if='!(pending.data || []).length'><td colspan='4' class='text-center text-gray-400 py-6'>{{ T.empty }}</td></tr>
               </tbody>
-            </table>
+            </table><div class="flex items-center justify-end gap-3 p-3 text-xs"><button type="button" :disabled="pendingPage === 0 || pending.loading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeListPage('pending', -1)">上一页</button><span>第 {{ pendingPage + 1 }} 页 · 本页 {{ (pending.data || []).length }} 条</span><button type="button" :disabled="(pending.data || []).length < 50 || pending.loading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeListPage('pending', 1)">下一页</button></div>
           </div>
         </Card>
       </template>

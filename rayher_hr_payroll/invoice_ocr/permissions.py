@@ -61,7 +61,7 @@ def _request_row(request_name, *, current=False):
     return frappe.db.get_value(
         "OA Approval Request",
         request_name,
-        ["name", "owner", "employee", "department", "current_step_index"],
+        ["name", "owner", "employee", "department", "current_step_index", "workflow_status"],
         as_dict=True,
         **_locking_kwargs(current),
     )
@@ -106,6 +106,8 @@ def _request_access_context(request, user, *, current=False):
         _get(request_doc, "current_step_index"),
         current=current,
     )
+    if _get(request_doc, "workflow_status") not in {"待审批", "待办理"}:
+        approvers = set()
     return request_doc, identity, approvers
 
 
@@ -205,6 +207,7 @@ def _request_scope_sql(request_alias, user, roles, identity):
     clauses.append(
         "EXISTS (SELECT 1 FROM `tabOA Approval Step` step "
         f"WHERE step.parent = {request_alias}.name "
+        f"AND {request_alias}.workflow_status IN ('待审批', '待办理') "
         "AND step.parenttype = 'OA Approval Request' "
         "AND step.parentfield = 'steps' "
         f"AND step.step_index = {request_alias}.current_step_index "

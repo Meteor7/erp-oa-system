@@ -146,9 +146,12 @@ const materialLoader = createResource({ url: 'rayher_hr_payroll.api.procurement_
 const categorySaver = createResource({ url: 'rayher_hr_payroll.api.procurement_materials.save_category' });
 const materialSaver = createResource({ url: 'rayher_hr_payroll.api.procurement_materials.save_material' });
 const materialSuggestionLoader = createResource({ url: 'rayher_hr_payroll.api.procurement_materials.suggest_material', method: 'GET' });
-const mineLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'mine', request_type: config.value.requestType, limit: 100 }) });
-const pendingLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'pending', request_type: config.value.requestType, limit: 100 }) });
-const allLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'all', request_type: config.value.requestType, limit: 100 }) });
+const queuePage = ref(0);
+const queuePageSize = 50;
+const exactLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET' });
+const mineLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'mine', request_type: config.value.requestType, limit: queuePageSize, offset: queuePage.value * queuePageSize }) });
+const pendingLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'pending', request_type: config.value.requestType, limit: queuePageSize, offset: queuePage.value * queuePageSize }) });
+const allLoader = createResource({ url: 'rayher_hr_payroll.api.oa_entry.list_requests', method: 'GET', makeParams: () => ({ view: 'all', request_type: config.value.requestType, limit: queuePageSize, offset: queuePage.value * queuePageSize }) });
 const contractRegistrar = createResource({ url: 'rayher_hr_payroll.api.oa_entry.register_contract_delivery' });
 const arrivalRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.record_arrival' });
 const inspectionRecorder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.record_inspection' });
@@ -236,10 +239,10 @@ const selectedRequest = computed(() => {
   if (creatingNew.value) return null;
   const routeRequestName = String(route.params.name || '');
   if (routeRequestName) {
-    return requestRows.value.find((row) => row.name === routeRequestName) || null;
+    return requestRows.value.find((row) => row.name === routeRequestName) || (exactLoader.data?.[0]?.name === routeRequestName ? exactLoader.data[0] : null);
   }
   if (selectedRequestName.value) {
-    return requestRows.value.find((row) => row.name === selectedRequestName.value) || null;
+    return requestRows.value.find((row) => row.name === selectedRequestName.value) || (exactLoader.data?.[0]?.name === selectedRequestName.value ? exactLoader.data[0] : null);
   }
   return requestRows.value[0] || null;
 });
@@ -912,8 +915,22 @@ async function reloadRequestQueues() {
   if (hasGlobalQueueAccess()) await allLoader.reload();
   else await Promise.all([mineLoader.reload(), pendingLoader.reload()]);
 }
+async function changeQueuePage(delta) {
+  queuePage.value += delta;
+  selectedRequestName.value = '';
+  await reloadRequestQueues();
+}
+const queueHasMore = computed(() => hasGlobalQueueAccess() ? (allLoader.data || []).length === queuePageSize : (mineLoader.data || []).length === queuePageSize || (pendingLoader.data || []).length === queuePageSize);
+watch(() => String(route.params.name || route.query.request || selectedRequestName.value || ''), async (name) => {
+  if (name) {
+    try { await exactLoader.fetch({ view: 'all', request_type: config.value.requestType, name, limit: 1 }); }
+    catch (err) { error.value = normalizeServerError(err) || '无法加载申请详情'; }
+  }
+}, { immediate: true });
 async function reloadRequests() {
   const requests = [reloadRequestQueues()];
+  const name = String(route.params.name || route.query.request || selectedRequestName.value || '');
+  if (name) requests.push(exactLoader.fetch({ view: 'all', request_type: config.value.requestType, name, limit: 1 }));
   if (isPayment.value) requests.push(sourceLoader.reload());
   await Promise.all(requests);
 }
@@ -1172,6 +1189,7 @@ watch(() => optionLoader.data, async (options, previous) => {
   if (options && !previous) await reloadRequests();
 }, { immediate: true });
 watch(() => route.path, async () => {
+  queuePage.value = 0;
   hydratedDetailRequestName.value = '';
   resetRequestForm(); creatingNew.value = false; draftName.value = ''; selectedRequestName.value = ''; showCreateForm.value = false;
   documents.value = []; message.value = ''; error.value = '';
@@ -1340,7 +1358,7 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
           </div>
           <div v-if="isProcurement" class="border-b border-gray-200 bg-white px-3 py-3">
             <div class="mb-2 flex items-center justify-between gap-2">
-              <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">筛选审批状态</span>
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">筛选本页审批状态</span>
               <button type="button" class="text-[11px] font-medium text-gray-500 hover:text-gray-900" @click="pmcQueueFilter = 'all'">重置</button>
             </div>
             <div class="grid grid-cols-2 gap-1">
@@ -1390,6 +1408,7 @@ watch(() => [route.query.request, route.params.name], ([queryName, paramName]) =
               {{ requestRows.length ? '当前筛选暂无单据' : '暂无申请或待办' }}
             </div>
           </div>
+          <div class="flex flex-wrap items-center justify-between gap-2 border-t p-3 text-xs"><button type="button" :disabled="queuePage === 0 || requestRowsLoading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeQueuePage(-1)">上一页</button><span>第 {{ queuePage + 1 }} 页</span><button type="button" :disabled="!queueHasMore || requestRowsLoading" class="rounded border px-2 py-1 disabled:opacity-40" @click="changeQueuePage(1)">下一页</button></div>
         </aside>
 
         <article v-if="selectedRequest" class="order-1 min-w-0 bg-white xl:order-2">

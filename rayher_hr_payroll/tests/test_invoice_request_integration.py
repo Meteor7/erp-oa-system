@@ -69,6 +69,13 @@ def restore_service_frappe(monkeypatch):
     frappe_stub.session.user = "alice@example.com"
     frappe_stub.get_roles = lambda user=None: ["Employee"]
     frappe_stub.local = types.SimpleNamespace(site="test.localhost")
+    from rayher_hr_payroll import oa_organization
+    supervisors = lambda: {"演示员工150": "演示员工132", "演示员工109": "演示员工155", "演示员工155": "演示员工21"}
+    executives = lambda: {"演示员工21", "演示员工29"}
+    monkeypatch.setattr(oa_entry, "current_supervisors", supervisors)
+    monkeypatch.setattr(oa_organization, "current_supervisors", supervisors)
+    monkeypatch.setattr(oa_organization, "executive_names", executives)
+    monkeypatch.setattr(frappe_stub, "model", types.SimpleNamespace(naming=types.SimpleNamespace(make_autoname=lambda _: "MAT-00001")), raising=False)
 
 
 def _request(*, amount="100.00", reason="", line_key="11111111-1111-4111-8111-111111111111", difference_reason=""):
@@ -486,6 +493,10 @@ class RequestDB:
             return "Alice"
         return None
 
+    def exists(self, doctype, filters):
+        assert doctype == "Notification Log"
+        return False
+
     def commit(self):
         self.environment.commits += 1
         self.environment.committed.update(self.environment.pending)
@@ -648,7 +659,7 @@ def test_direct_create_submission_validates_before_workflow_transition(monkeypat
         oa_entry.create_request(
             oa_entry.REQUEST_EXPENSE_PAYMENT,
             submit=1,
-            expense_lines=[{"category": "办公费", "amount": 1, "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "有原因也不能绕过状态"}],
+            expense_lines=[{"category": "办公费", "issue_date": "2026-09-20", "amount": 1, "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "有原因也不能绕过状态"}],
             no_invoice_reason="有原因也不能绕过状态",
             invoice_handling_mode=oa_entry.INVOICE_MODE_AVAILABLE,
         )
@@ -758,7 +769,7 @@ def test_submit_request_uses_request_lock_current_read_and_server_validation(mon
             "department": "研发部",
             "supervisor": "",
             "asset_category": "其它",
-            "expense_lines": [Row(line_key="11111111-1111-4111-8111-111111111111", source_invoice=None, project_name="项目甲", expense_item="办公费", no_invoice_reason="纸质票据遗失", total_amount=1, amount=1, description="测试费用", invoice_difference_reason="")],
+            "expense_lines": [Row(line_key="11111111-1111-4111-8111-111111111111", source_invoice=None, project_name="项目甲", expense_item="办公费", no_invoice_reason="纸质票据遗失", total_amount=1, amount=1, issue_date="2026-09-20", description="测试费用", invoice_difference_reason="")],
             "steps": [],
             "no_invoice_reason": "纸质票据遗失",
             "invoice_handling_mode": oa_entry.INVOICE_MODE_NOT_REQUIRED,
@@ -925,7 +936,7 @@ def test_create_continues_with_current_request_returned_by_attach(monkeypatch, r
         oa_entry.REQUEST_EXPENSE_PAYMENT,
         subject="expense",
         submit=requested_submit,
-        expense_lines=[{"category": "office", "amount": "100.00", "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "测试无票"}],
+        expense_lines=[{"category": "office", "issue_date": "2026-09-20", "amount": "100.00", "project_name": "项目甲", "expense_item": "办公费", "description": "测试费用", "no_invoice_reason": "测试无票"}],
         invoice_batch="BATCH-1",
         invoice_handling_mode=oa_entry.INVOICE_MODE_AVAILABLE,
     )
@@ -1786,11 +1797,33 @@ def _install_report_requests(monkeypatch, docs):
         return True
 
     def get_all(doctype, filters=None, fields=None, order_by=None, limit_page_length=None):
+        if doctype == "Employee":
+            return [Row(name="EMP-1", employee_name="Alice")]
         assert doctype == "OA Approval Request"
         rows = [doc for doc in docs.values() if matches(doc, filters)]
         rows.sort(key=lambda doc: str(doc.modified), reverse=True)
         return [Row(name=doc.name) for doc in rows[: int(limit_page_length or len(rows))]]
 
+    # Execute the generated WHERE/ORDER/LIMIT in a SQL engine, not a Python
+    # implementation of the permission rule. MariaDB syntax is also checked by
+    # the live read-only acceptance run.
+    import sqlite3
+    import re
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.create_function("JSON_VALID", 1, lambda value: 1 if value else 0)
+    connection.create_function("JSON_CONTAINS", 2, lambda value, actor: int(json.loads(actor) in json.loads(value)))
+    fields = ["name", "request_type", "workflow_status", "owner", "employee", "purchaser_user", "modified", "current_step_index"]
+    connection.execute("CREATE TABLE `tabOA Approval Request` (" + ",".join(fields) + ")")
+    connection.execute("CREATE TABLE `tabOA Approval Step` (parent,parenttype,parentfield,step_index,approvers,approved_by)")
+    for doc in docs.values():
+        connection.execute("INSERT INTO `tabOA Approval Request` VALUES (?,?,?,?,?,?,?,?)", [getattr(doc, key, None) for key in fields])
+        for step in getattr(doc, "steps", []):
+            connection.execute("INSERT INTO `tabOA Approval Step` VALUES (?,?,?,?,?,?)", [doc.name, "OA Approval Request", "steps", step.step_index, step.approvers, getattr(step, "approved_by", "[]")])
+    def sql(query, values=None, as_dict=False):
+        query = re.sub(r"%\((\w+)\)s", r":\1", query)
+        return [Row(dict(row)) for row in connection.execute(query, values or {})]
+    monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(sql=sql, escape=lambda value: "'" + str(value).replace("'", "''") + "'", get_value=lambda *args, **kwargs: "Alice"), raising=False)
     monkeypatch.setattr(frappe_stub, "get_all", get_all, raising=False)
     monkeypatch.setattr(oa_entry, "_load_request", lambda name, current=False: docs[name])
     monkeypatch.setattr(
@@ -3197,6 +3230,7 @@ def test_leave_route_rejects_a_disabled_fixed_account(monkeypatch):
 
 
 def test_leave_submission_creates_non_blocking_copy_notifications(monkeypatch):
+    monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(exists=lambda *args: False), raising=False)
     inserted = []
 
     class Notification(dict):
@@ -3231,6 +3265,7 @@ def test_submitting_expense_requires_explicit_asset_category(monkeypatch):
         {
             "doctype": service.REQUEST_DOCTYPE,
             "name": "REQ-ASSET-REQUIRED",
+            "doc_type": "固定资产",
             "owner": "alice@example.com",
             "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
             "workflow_status": oa_entry.STATUS_DRAFT,
@@ -3389,6 +3424,7 @@ def test_zero_step_procurement_and_direct_purchase_are_rejected(monkeypatch):
             asset_category=oa_entry.OTHER_ASSET,
         )
         if request_type == oa_entry.REQUEST_PROCUREMENT:
+            doc.business_lines = [Row(item_name="测试物料", quantity=1, material_serial="MAT-TEST")]
             doc.procurement_scope = "非项目采购"
             doc.expected_delivery_date = "2026-09-10"
             doc.non_project_allocation_type = "非项目采购"
@@ -3595,8 +3631,40 @@ def test_procurement_quote_snapshot_is_json_serializable():
     assert json.loads(json.dumps(snapshot, ensure_ascii=False))["business_lines"][0] == {
         "item_name": "耗材", "specification": "TEST", "quantity": 2.0, "unit": "个",
         "unit_price": 125.0, "amount": 250.0, "remarks": "",
+        "material_code": "", "material_serial": "", "category_code": "", "category_path": "",
+        "product_desc": "", "brand": "", "product_name": "", "product_desc_en": "", "brand_en": "", "material_attr": "外购",
     }
 
 def test_rejection_notification_stamp_uses_actual_operation_time():
     assert oa_entry._event_stamp({"acted_on": "2026-08-24 17:29:37.281533"}) == "2026-08-24 17:29:37.281533"
     assert oa_entry._event_stamp({"timestamp": "new", "acted_on": "old"}) == "new"
+
+
+def test_pending_sql_finds_old_assigned_requests_before_pagination(monkeypatch):
+    docs = {}
+    for index in range(120):
+        doc = _report_request(f"REQ-{index:03d}", owner="bob@example.com", employee="EMP-2")
+        doc.workflow_status = oa_entry.STATUS_PENDING
+        doc.current_step_index = 1
+        doc.modified = f"2026-09-{index:03d}"
+        doc.steps = [Row(step_index=1, approvers=json.dumps(["alice@example.com" if index < 3 else "bob@example.com"]), approved_by="[]")]
+        docs[doc.name] = doc
+    _install_report_requests(monkeypatch, docs)
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc: {"name": doc.name})
+    first = oa_entry.list_requests(view="pending", limit=2)
+    second = oa_entry.list_requests(view="pending", limit=2, offset=2)
+    assert [row["name"] for row in first + second] == ["REQ-002", "REQ-001", "REQ-000"]
+
+
+def test_non_fixed_expense_clears_contradictory_fixed_category():
+    result = oa_entry._expense_classification("非固定资产", oa_entry.IT_ASSET, submitting=True)
+    assert result["asset_nature"] == "非固定资产"
+    assert result["asset_category"] == oa_entry.OTHER_ASSET
+    assert result["fixed_asset_category"] == ""
+
+
+def test_incomplete_draft_preserves_zero_amount_line():
+    rows, amount = oa_entry._normalize_expense_lines([{"project_name": "待补资料", "amount": 0}], keep_incomplete=True)
+    assert len(rows) == 1 and rows[0]["project_name"] == "待补资料" and amount == 0
+    with pytest.raises(ValidationError):
+        oa_entry._normalize_expense_lines([{"amount": -1}], keep_incomplete=True)

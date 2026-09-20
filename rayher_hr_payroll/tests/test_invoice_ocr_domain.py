@@ -108,7 +108,7 @@ def permissions_module(monkeypatch):
             "approver@example.com": {"full_name": "Approver User"},
         },
         requests={
-            "REQ-1": {"name": "REQ-1", "owner": "creator@example.com", "employee": "EMP-A", "department": "研发部", "current_step_index": 1},
+            "REQ-1": {"name": "REQ-1", "owner": "creator@example.com", "employee": "EMP-A", "department": "研发部", "current_step_index": 1, "workflow_status": "待审批"},
         },
         batches={
             "BATCH-1": {"name": "BATCH-1", "doctype": "OA Invoice Import Batch", "owner": "uploader@example.com", "request": "REQ-1"},
@@ -353,7 +353,7 @@ def test_submission_blockers_cover_all_unresolved_states_with_stable_deduplicati
         "存在状态异常发票",
     ]
 
-@pytest.mark.parametrize("role_user", ["admin@example.com", "finance@example.com", "hr@example.com", "hr-manager@example.com"])
+@pytest.mark.parametrize("role_user", ["admin@example.com", "finance@example.com", "executive@example.com"])
 def test_high_privilege_roles_can_read_invoice_records(permissions_module, role_user):
     permissions, frappe = permissions_module
     assert permissions.can_read_invoice(frappe.db.records["INV-1"], role_user) is True
@@ -365,10 +365,10 @@ def test_guest_is_always_denied(permissions_module):
     assert permissions.invoice_record_query("Guest") == "1=0"
 
 
-def test_record_owner_request_applicant_current_approver_and_department_manager_can_read(permissions_module):
+def test_record_owner_request_applicant_and_current_approver_can_read(permissions_module):
     permissions, frappe = permissions_module
     record = frappe.db.records["INV-1"]
-    for user in ("uploader@example.com", "alice@example.com", "approver@example.com", "manager@example.com"):
+    for user in ("uploader@example.com", "alice@example.com", "approver@example.com"):
         assert permissions.can_read_invoice(record, user) is True, user
     assert permissions.can_read_invoice(record, "ordinary-rd@example.com") is False
     assert permissions.can_read_invoice(record, "sales-manager@example.com") is False
@@ -380,7 +380,7 @@ def test_batch_inherits_request_scope_and_unlinked_documents_stay_owner_only(per
     linked = frappe.db.batches["BATCH-1"]
     assert permissions.can_read_invoice(linked, "uploader@example.com") is True
     assert permissions.can_read_invoice(linked, "alice@example.com") is True
-    assert permissions.can_read_invoice(linked, "manager@example.com") is True
+    assert permissions.can_read_invoice(linked, "manager@example.com") is False
     unlinked_batch = frappe.db.batches["BATCH-UNLINKED"]
     unlinked_record = frappe.db.records["INV-UNLINKED"]
     assert permissions.can_read_invoice(unlinked_batch, "uploader@example.com") is True
@@ -393,7 +393,7 @@ def test_record_uses_batch_request_when_direct_request_is_not_yet_copied(permiss
     permissions, frappe = permissions_module
     record = frappe.db.records["INV-BATCH-LINKED"]
     assert permissions.can_read_invoice(record, "alice@example.com") is True
-    assert permissions.can_read_invoice(record, "manager@example.com") is True
+    assert permissions.can_read_invoice(record, "manager@example.com") is False
     assert permissions.can_read_invoice(record, "sales-manager@example.com") is False
 
 
@@ -441,7 +441,7 @@ def test_query_conditions_are_role_aware_and_escape_every_dynamic_identity(permi
     assert "req.employee = 'EMP-A'" in sql
     assert "req.department = '研发部'" not in sql
     manager_sql = permissions.invoice_record_query("manager@example.com")
-    assert "req.department = '研发部'" in manager_sql
+    assert "req.department = '研发部'" not in manager_sql
     assert {"alice@example.com", "EMP-A", "Alice"}.issubset(set(frappe.db.escaped))
 
 
@@ -486,3 +486,16 @@ def test_restricted_gate_blocks_invoice_query_and_read(permissions_module, monke
     assert permissions.invoice_record_query("employee@example.com") == "1=0"
     assert permissions.can_read_invoice(record, "employee@example.com") is False
     assert permissions.invoice_record_query("Administrator") == ""
+
+@pytest.mark.parametrize("user", ["hr@example.com", "hr-manager@example.com", "manager@example.com"])
+def test_unassigned_role_does_not_grant_invoice_access(permissions_module, user):
+    permissions, frappe = permissions_module
+    assert not permissions.can_read_invoice(frappe.db.records["INV-1"], user)
+    assert permissions.invoice_record_query(user)
+
+@pytest.mark.parametrize("status", ["草稿", "已撤回", "已完成"])
+def test_inactive_node_does_not_grant_invoice_access(permissions_module, status):
+    permissions, frappe = permissions_module
+    frappe.db.requests["REQ-1"]["workflow_status"] = status
+    assert not permissions.can_read_invoice(frappe.db.records["INV-1"], "approver@example.com")
+    assert permissions.can_read_invoice(frappe.db.records["INV-1"], "alice@example.com")

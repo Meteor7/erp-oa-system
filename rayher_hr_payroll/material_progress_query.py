@@ -13,6 +13,12 @@ def stage_sql():
         WHEN r.workflow_status IN ('已拒绝','已撤回') THEN r.workflow_status
         WHEN r.workflow_status NOT IN ('已完成','已通过','已审批','已结束')
           AND COALESCE(r.business_status,'') NOT LIKE '需求已批准%%' THEN 'OA审批中'
+        WHEN COALESCE((SELECT SUM(pl.quantity) {PO_FROM}),0)+0.000001 < b.quantity THEN
+          CASE WHEN COALESCE((SELECT SUM(pal.quantity) FROM `tabOA Price Approval Line` pal
+            JOIN `tabOA Price Approval` pa ON pa.name=pal.parent
+            WHERE pal.source_request=b.source_request AND pal.source_line=b.source_line
+            AND pa.status!='已取消'),0)+0.000001 >= b.quantity THEN 'PO处理中'
+          ELSE '采购确认中' END
         WHEN {po_exists()} THEN CASE
           WHEN NOT {po_exists("po.status!='已关闭'")} THEN '已关闭'
           WHEN {po_exists("po.status IN ('草稿','待确认')")} THEN 'PO处理中'

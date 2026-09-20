@@ -47,6 +47,8 @@ const STATUS_COLUMNS = [
 const activeView = ref('invoices');
 const detailRequestName = ref('');
 const showRequestForm = ref(false);
+const editingDraft = ref('');
+const draftEditor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.update_manual_expense_draft' });
 const saving = ref(false);
 const actionNote = ref('');
 const message = ref('');
@@ -358,8 +360,20 @@ function resetForm() {
   applyDefaults();
 }
 function openManualRequest() {
+  editingDraft.value = '';
   errorMessage.value = '';
   resetForm();
+  showRequestForm.value = true;
+}
+function editManualDraft(row) {
+  resetForm();
+  editingDraft.value = row.name;
+  for (const key of Object.keys(requestForm)) requestForm[key] = row[key] || '';
+  requestForm.doc_type = String(row.doc_type || '').startsWith('固定资产') ? '固定资产' : '非固定资产';
+  expenseLines.value = (row.expense_lines || []).map((line) => ({ ...blankLine(), ...line, total_amount: line.total_amount ?? line.amount ?? '' }));
+  if (!expenseLines.value.length) expenseLines.value = [blankLine()];
+  applyDefaults();
+  detailRequestName.value = '';
   showRequestForm.value = true;
 }
 function addLine() {
@@ -405,7 +419,7 @@ async function saveRequest(submit) {
   }
   saving.value = true;
   try {
-    const result = await creator.submit({
+    const payload = {
       request_type: REQUEST_TYPE,
       subject: requestForm.subject.trim() || valid[0]?.project_name || valid[0]?.invoice_category || '费用付款/报销',
       department: requestForm.department,
@@ -433,7 +447,14 @@ async function saveRequest(submit) {
       expected_invoice_date: requestForm.expected_invoice_date || '',
       payment_source_kind: requestForm.source_request ? '关联购买申请' : '无事前申请',
       source_request: requestForm.source_request || '',
-    });
+    };
+    let result;
+    if (editingDraft.value) {
+      result = await draftEditor.submit({ name: editingDraft.value, payload: JSON.stringify({ ...payload, expense_lines: JSON.parse(payload.expense_lines) }) });
+      if (submit) await draftSubmitter.submit({ name: result.name, no_invoice_reason: requestForm.no_invoice_reason });
+    } else {
+      result = await creator.submit(payload);
+    }
     showRequestForm.value = false;
     activeView.value = 'board';
     await reload();
@@ -650,7 +671,7 @@ async function submitAddSign() {
   }
 }
 watch(() => options.data, applyDefaults, { immediate: true });
-watch(() => requestForm.doc_type, () => { requestForm.asset_category = ''; });
+watch(() => requestForm.doc_type, () => { if (!isFixedAsset.value) requestForm.asset_category = ''; }, { flush: 'sync' });
 watch(selectedRequest, hydrateDraftSources, { immediate: true });
 watch(() => requestForm.invoice_handling_mode, (mode) => {
   if (mode === '已有发票') {
@@ -725,7 +746,7 @@ watch(() => requestForm.invoice_handling_mode, (mode) => {
     <div v-if="showRequestForm" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4" @click.self="showRequestForm = false">
       <div role="dialog" aria-modal="true" class="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded bg-white shadow-xl">
         <header class="flex items-center justify-between border-b bg-gray-50 px-5 py-4">
-          <div><h3 class="font-semibold">新建付款/报销单</h3><p class="mt-1 text-xs text-gray-500">审批流保持一致，发票方式按本次业务实际情况选择。</p></div>
+          <div><h3 class="font-semibold">{{ editingDraft ? '编辑付款/报销草稿' : '新建付款/报销单' }}</h3><p class="mt-1 text-xs text-gray-500">审批流保持一致，发票方式按本次业务实际情况选择。</p></div>
           <button title="关闭" @click="showRequestForm = false"><FeatherIcon name="x" class="h-5 w-5" /></button>
         </header>
         <div class="flex-1 space-y-5 overflow-y-auto p-5">
@@ -949,6 +970,7 @@ watch(() => requestForm.invoice_handling_mode, (mode) => {
             <Button v-if="canWithdrawInvoicePush" variant="subtle" :loading="saving" @click="withdrawPushedInvoices(selectedRequest)">撤回下推</Button>
             <Button v-if="selectedRequest.can_supplement_invoices" variant="subtle" @click="showInvoiceSupplement = true"><FeatherIcon name="upload-cloud" class="h-4 w-4" />补录发票</Button>
             <Button v-if="selectedRequest.can_verify_invoices" variant="subtle" :loading="saving" @click="verifyInvoices(selectedRequest)"><FeatherIcon name="check-circle" class="h-4 w-4" />确认已核验</Button>
+            <Button v-if="isDraftDetail && !selectedRequest.from_invoice_push && !(selectedRequest.expense_lines || []).some(line => line.source_invoice)" variant="subtle" @click="editManualDraft(selectedRequest)">继续编辑草稿</Button>
             <Button v-if="selectedRequest.kanban_status === 'draft'" variant="solid" :loading="saving" @click="submitDraft(selectedRequest)">&#x63D0;&#x4EA4;&#x5BA1;&#x6279;</Button>
             <Button v-if="selectedRequest.can_edit_expense_items" variant="subtle" :loading="saving" @click="saveFinanceClassification">&#x4FDD;&#x5B58;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
             <Button v-if="selectedRequest.can_add_sign" variant="subtle" @click="openAddSign"><FeatherIcon name="user-plus" class="h-4 w-4" />&#x52A0;&#x7B7E;</Button>

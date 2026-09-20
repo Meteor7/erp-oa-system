@@ -178,6 +178,8 @@ def test_approval_center_identity_climbs_past_accountless_excel_supervisor(monke
     from rayher_hr_payroll import oa_organization
     monkeypatch.setattr(oa_organization, "current_supervisors", lambda: {"演示员工109": "演示员工155", "演示员工155": "演示员工21"})
     monkeypatch.setattr(oa_organization, "executive_names", lambda: {"演示员工21", "演示员工29"})
+    monkeypatch.setattr(approval_center, "current_supervisors", oa_organization.current_supervisors)
+    monkeypatch.setattr(approval_center, "executive_names", oa_organization.executive_names)
     monkeypatch.setattr(
         approval_center,
         "_enabled_employee_user",
