@@ -14,6 +14,7 @@ declare module 'vue' {
     InvoicePreviewDrawer: typeof import('./src/components/invoice/InvoicePreviewDrawer.vue')['default']
     InvoiceRecognitionPanel: typeof import('./src/components/invoice/InvoiceRecognitionPanel.vue')['default']
     InvoiceUploadWorkbench: typeof import('./src/components/invoice/InvoiceUploadWorkbench.vue')['default']
+    MaterialExecutionProgress: typeof import('./src/components/MaterialExecutionProgress.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }
