@@ -6,6 +6,7 @@ import json
 from datetime import date, timedelta
 
 import frappe
+from rayher_hr_payroll.procurement_mutation_guard import procurement_action
 from frappe.utils.password import update_password
 from frappe.utils.file_manager import save_file
 
@@ -66,6 +67,7 @@ def _orphan_progress_names():
     }
 
 
+@procurement_action
 def cleanup(dry_run=True):
     """Delete old acceptance chains and material-progress rows with no source OA."""
     sources = _source_names()
@@ -515,6 +517,7 @@ def _blocked(results, case, action, expected):
     frappe.throw(f"条件验收失败：{case} 未被系统拦截")
 
 
+@procurement_action
 def run_payment_condition_acceptance():
     """Exercise payment gates against a real seeded 30/70 PO.
 
@@ -631,6 +634,7 @@ def run_payment_condition_acceptance():
         frappe.set_user(original)
 
 
+@procurement_action
 def seed(reset_passwords=True):
     """Rebuild two real, forward-generated chains at every manual test node."""
     cleanup_result = cleanup(dry_run=False)

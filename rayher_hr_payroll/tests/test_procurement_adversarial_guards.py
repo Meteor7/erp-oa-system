@@ -61,3 +61,11 @@ def test_pr_uses_current_allocation_after_source_lock(monkeypatch):
     monkeypatch.setattr(pc, "_require_pmc", lambda: None)
     with pytest.raises(ValueError, match="可提 PR 数量为 3"):
         inspect.unwrap(pc.create_pr)([{"source_request": "OA1", "source_line": "L1", "quantity": 7}])
+
+
+def test_shared_child_protects_only_procurement_parents(monkeypatch):
+    from rayher_hr_payroll import procurement_mutation_guard as guard
+    monkeypatch.setattr(guard, "frappe", NS(throw=fail, PermissionError=PermissionError))
+    with pytest.raises(ValueError):
+        guard.require_procurement_child_action(NS(parenttype="OA Purchase Order"))
+    guard.require_procurement_child_action(NS(parenttype="OA Approval Request"))
