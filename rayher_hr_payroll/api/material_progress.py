@@ -37,7 +37,7 @@ def _clean(value):
 
 def can_access_board(user=None):
     user = _clean(user or frappe.session.user).lower()
-    return user in position_users("pmc", "procurement_manager", "vice_manager") or "System Manager" in set(frappe.get_roles(user))
+    return user == "administrator" or "System Manager" in set(frappe.get_roles(user)) or user in position_users("pmc", "procurement_manager", "vice_manager")
 
 
 def _board_user(user=None):
@@ -207,21 +207,17 @@ def _payment_summary(source):
     return status, requests
 
 
+def _active_lines(doctype, parenttype, filters, fields):
+    candidates = frappe.get_all(doctype, filters=filters, pluck="parent", limit_page_length=0)
+    parents = frappe.get_all(parenttype, filters={"name": ["in", sorted(set(candidates)) or ["__none__"]], "status": ["!=", "已取消"]}, pluck="name", limit_page_length=0)
+    return frappe.get_all(doctype, filters={**filters, "parent": ["in", parents or ["__none__"]]}, fields=fields, limit_page_length=0)
+
+
 def _chain_metrics(board):
     filters = {"source_request": board.source_request, "source_line": board.source_line}
-    pr_lines = frappe.get_all(
-        "OA Procurement Request Line", filters=filters,
-        fields=["parent", "quantity", "remaining_quantity", "po_quantity"], limit_page_length=0,
-    )
-    active_price_approvals = frappe.get_all(
-        "OA Price Approval", filters={"status": ["not in", ["已取消"]]},
-        pluck="name", limit_page_length=0,
-    )
-    price_filters = {**filters, "parent": ["in", active_price_approvals or ["__none__"]]}
-    price_lines = frappe.get_all(
-        "OA Price Approval Line", filters=price_filters,
-        fields=["parent", "quantity"], limit_page_length=0,
-    )
+    pr_lines = _active_lines("OA Procurement Request Line", "OA Procurement Request", filters,
+        ["parent", "quantity", "remaining_quantity", "po_quantity"])
+    price_lines = _active_lines("OA Price Approval Line", "OA Price Approval", filters, ["parent", "quantity"])
     po_lines = frappe.get_all(
         "OA Purchase Order Line", filters=filters,
         fields=["parent", "quantity", "received_quantity", "inspection_status", "contract_delivery_date"],
@@ -388,19 +384,10 @@ def _batch_chain_context(boards):
 
     metrics = {key: empty_metrics() for key in keys}
     common_filters = {"source_request": ["in", source_names or ["__none__"]], "source_line": ["in", sorted({key[1] for key in keys}) or ["__none__"]]}
-    pr_lines = frappe.get_all(
-        "OA Procurement Request Line", filters=common_filters,
-        fields=["source_request", "source_line", "quantity", "remaining_quantity"], limit_page_length=0,
-    )
-    candidate_prices = frappe.get_all("OA Price Approval Line", filters=common_filters, pluck="parent", limit_page_length=0)
-    active_price_approvals = frappe.get_all(
-        "OA Price Approval", filters={"name": ["in", list(set(candidate_prices)) or ["__none__"]], "status": ["not in", ["已取消"]]}, pluck="name", limit_page_length=0,
-    )
-    price_lines = frappe.get_all(
-        "OA Price Approval Line",
-        filters={**common_filters, "parent": ["in", active_price_approvals or ["__none__"]]},
-        fields=["source_request", "source_line", "quantity"], limit_page_length=0,
-    )
+    pr_lines = _active_lines("OA Procurement Request Line", "OA Procurement Request", common_filters,
+        ["source_request", "source_line", "quantity", "remaining_quantity"])
+    price_lines = _active_lines("OA Price Approval Line", "OA Price Approval", common_filters,
+        ["source_request", "source_line", "quantity"])
     po_lines = frappe.get_all(
         "OA Purchase Order Line", filters=common_filters,
         fields=["source_request", "source_line", "parent", "quantity", "received_quantity", "inspection_status", "contract_delivery_date"],

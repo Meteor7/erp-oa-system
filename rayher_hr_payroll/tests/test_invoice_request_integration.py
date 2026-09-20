@@ -75,6 +75,7 @@ def restore_service_frappe(monkeypatch):
     monkeypatch.setattr(oa_entry, "current_supervisors", supervisors)
     monkeypatch.setattr(oa_organization, "current_supervisors", supervisors)
     monkeypatch.setattr(oa_organization, "executive_names", executives)
+    monkeypatch.setattr(oa_entry, "executive_names", executives)
     monkeypatch.setattr(frappe_stub, "model", types.SimpleNamespace(naming=types.SimpleNamespace(make_autoname=lambda _: "MAT-00001")), raising=False)
 
 
@@ -1822,7 +1823,7 @@ def _install_report_requests(monkeypatch, docs):
             connection.execute("INSERT INTO `tabOA Approval Step` VALUES (?,?,?,?,?,?)", [doc.name, "OA Approval Request", "steps", step.step_index, step.approvers, getattr(step, "approved_by", "[]")])
     def sql(query, values=None, as_dict=False):
         query = re.sub(r"%\((\w+)\)s", r":\1", query)
-        return [Row(dict(row)) for row in connection.execute(query, values or {})]
+        return [Row(dict(row)) for row in connection.execute(query.replace("%s", "?"), values or {})]
     monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(sql=sql, escape=lambda value: "'" + str(value).replace("'", "''") + "'", get_value=lambda *args, **kwargs: "Alice"), raising=False)
     monkeypatch.setattr(frappe_stub, "get_all", get_all, raising=False)
     monkeypatch.setattr(oa_entry, "_load_request", lambda name, current=False: docs[name])
@@ -3368,7 +3369,7 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
         "project": "PRJ-1",
         "project_owner": "owner@example.com",
         "project_owner_name": "项目主管",
-        "business_lines": [Row(item_name="芯片", quantity=2, amount=20)],
+        "business_lines": [Row(item_name="芯片", quantity=2, amount=20, material_code="01.01.01", specification="TEST", brand="TEST", unit="个")],
         "steps": [],
         "operation_log": "[]",
     })
@@ -3424,7 +3425,7 @@ def test_zero_step_procurement_and_direct_purchase_are_rejected(monkeypatch):
             asset_category=oa_entry.OTHER_ASSET,
         )
         if request_type == oa_entry.REQUEST_PROCUREMENT:
-            doc.business_lines = [Row(item_name="测试物料", quantity=1, material_serial="MAT-TEST")]
+            doc.business_lines = [Row(item_name="测试物料", quantity=1, material_serial="MAT-TEST", material_code="01.01.01", specification="TEST", brand="TEST", unit="个")]
             doc.procurement_scope = "非项目采购"
             doc.expected_delivery_date = "2026-09-10"
             doc.non_project_allocation_type = "非项目采购"
@@ -3668,3 +3669,33 @@ def test_incomplete_draft_preserves_zero_amount_line():
     assert len(rows) == 1 and rows[0]["project_name"] == "待补资料" and amount == 0
     with pytest.raises(ValidationError):
         oa_entry._normalize_expense_lines([{"amount": -1}], keep_incomplete=True)
+
+
+def test_signed_cosigner_is_not_pending_but_can_still_read(monkeypatch):
+    doc = _report_request("REQ-SIGNED", owner="bob@example.com", employee="EMP-2")
+    doc.workflow_status = oa_entry.STATUS_PENDING
+    doc.current_step_index = 1
+    doc.steps = [Row(step_index=1, approvers=json.dumps(["alice@example.com", "bob@example.com"]), approved_by=json.dumps(["alice@example.com"]))]
+    _install_report_requests(monkeypatch, {doc.name: doc})
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda doc: {"name": doc.name})
+    assert oa_entry.list_requests(view="pending") == []
+    assert oa_entry.list_requests(view="all") == [{"name": doc.name}]
+
+
+def test_resume_manual_draft_preserves_identity_and_incomplete_fields(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(environment, {"doctype": service.REQUEST_DOCTYPE, "name": "REQ-DRAFT", "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT,
+        "workflow_status": oa_entry.STATUS_DRAFT, "owner": "alice@example.com", "employee": "EMP-1", "expense_lines": [], "steps": []})
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *args, **kwargs: nullcontext())
+    permissions = []
+    monkeypatch.setattr(service, "_request_permission", lambda current, action, **kwargs: permissions.append((current.name, action)))
+    oa_entry.update_manual_expense_draft(doc.name, {"subject": "继续补填", "doc_type": "固定资产", "expense_lines": [{"project_name": "项目甲", "amount": 0}]})
+    assert permissions == [("REQ-DRAFT", "edit")]
+    assert doc.name == "REQ-DRAFT" and doc.owner == "alice@example.com" and doc.employee == "EMP-1"
+    assert doc.subject == "继续补填" and doc.asset_category == "" and doc.expense_lines[0].amount == 0
+    with pytest.raises(ValidationError, match="资产类型"):
+        oa_entry._submit_draft(doc)
+    doc.workflow_status = oa_entry.STATUS_PENDING
+    with pytest.raises(ValidationError, match="草稿"):
+        oa_entry.update_manual_expense_draft(doc.name, {})
