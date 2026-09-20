@@ -154,10 +154,22 @@ if ($localDirty.Trim()) {
 }
 
 $dockerSourceDirty = @()
+$syncedGeneratedDeclaration = $false
 foreach ($line in ($dockerDirty -split "`n")) {
     $item = $line.Trim()
     if (-not $item) { continue }
     if ($item -match "public/frontend/|www/rayher\.html$") { continue }
+    # unplugin-vue-components updates this tracked declaration during a build.
+    # Accept it only after its exact bytes have been committed locally.
+    if ($item -eq "M frontend/components.d.ts") {
+        $targetBlob = (& git -C $script:RepoRoot rev-parse ($localSha + ":frontend/components.d.ts")).Trim()
+        $dockerBlob = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "hash-object", "--no-filters", "frontend/components.d.ts")
+        if ($targetBlob -eq $dockerBlob) {
+            $syncedGeneratedDeclaration = $true
+            Write-Host "generated component declaration is already preserved in the local target commit"
+            continue
+        }
+    }
     $dockerSourceDirty += $item
 }
 if ($dockerSourceDirty.Count -gt 0) {
@@ -222,6 +234,15 @@ if ($dockerSha -ne $localSha) {
         $bundle = Get-PlainCopy $bundle
         Invoke-Docker -Cmd @("cp", $bundle, ($Container + ":/tmp/rayher-deploy.bundle"))
         Invoke-Docker -Cmd @("exec", "-w", $AppPath, $Container, "git", "fetch", "/tmp/rayher-deploy.bundle", ($deployRef + ":refs/remotes/local-deploy/HEAD"))
+    }
+
+    if ($syncedGeneratedDeclaration) {
+        # Recheck after transfer; staging the already-committed target bytes lets
+        # checkout carry the generated file forward without discarding a change.
+        $currentBlob = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "hash-object", "--no-filters", "frontend/components.d.ts")
+        $incomingBlob = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", ($localSha + ":frontend/components.d.ts"))
+        if ($currentBlob -ne $incomingBlob) { throw "generated declaration changed during deployment; stopping" }
+        Invoke-Docker -Cmd @("exec", "-w", $AppPath, $Container, "git", "add", "--", "frontend/components.d.ts")
     }
 
     Write-Host ("checking out {0} into the Docker volume Git worktree..." -f $localShort)

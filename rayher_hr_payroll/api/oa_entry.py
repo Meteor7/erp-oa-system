@@ -2282,6 +2282,8 @@ def get_options():
             "employee": context.get("employee"),
             "employee_name": context.get("employee_name") or "",
             "user": frappe.session.user,
+            "department": context.get("department") or "",
+            "supervisor": context.get("supervisor") or "",
         },
         "can_manage_expense": bool(roles & FINANCE_ROLES),
         "can_see_all": bool(roles & PRIVILEGED_ROLES),
