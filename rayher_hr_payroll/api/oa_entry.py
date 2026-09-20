@@ -2569,7 +2569,7 @@ def update_manual_expense_draft(name, payload):
         rows = _draft_source_rows(values.get("expense_lines", []))
         if any(row.get("source_invoice") or row.get("source_consumption") for row in rows):
             frappe.throw("手工草稿不能指定发票关联。")
-        replacement = _build_request_doc(REQUEST_EXPENSE_PAYMENT, submit=False,
+        replacement = _build_request_doc(request_type=REQUEST_EXPENSE_PAYMENT, submit=False,
             expense_lines=rows, **{key: values.get(key, getattr(doc, key, None)) for key in editable})
         for key in editable + ("asset_nature", "fixed_asset_category", "amount", "approved_amount_snapshot", "source_modified"):
             if hasattr(replacement, key):
