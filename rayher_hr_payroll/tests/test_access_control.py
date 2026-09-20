@@ -43,7 +43,7 @@ def test_install_calls_ensure_access_control():
 def test_install_backfills_project_owner_accounts():
     import inspect
     import rayher_hr_payroll.install as install
-    src = inspect.getsource(install.after_install)
+    src = inspect.getsource(install._sync_app)
     assert "backfill_project_owner_accounts" in src
 
 
