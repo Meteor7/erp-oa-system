@@ -1859,7 +1859,7 @@ def _set_expense_lines(doc, rows):
         doc.append("expense_lines", row)
 
 
-def _build_request_doc(
+def _prepare_request_doc(
     *,
     request_type,
     subject=None,
@@ -1962,8 +1962,13 @@ def _build_request_doc(
     )
     _append_steps(doc, steps)
     _set_expense_lines(doc, lines)
+    return doc
+
+
+def _build_request_doc(**values):
+    doc = _prepare_request_doc(**values)
     _insert_document(doc)
-    if submit and doc.request_type != REQUEST_PROCUREMENT_PAYMENT:
+    if values.get("submit", True) and doc.request_type != REQUEST_PROCUREMENT_PAYMENT:
         _notify_copied_users(doc)
     return doc
 
@@ -2571,7 +2576,7 @@ def update_manual_expense_draft(name, payload):
         rows = _draft_source_rows(values.get("expense_lines", []))
         if any(row.get("source_invoice") or row.get("source_consumption") for row in rows):
             frappe.throw("手工草稿不能指定发票关联。")
-        replacement = _build_request_doc(request_type=REQUEST_EXPENSE_PAYMENT, submit=False,
+        replacement = _prepare_request_doc(request_type=REQUEST_EXPENSE_PAYMENT, submit=False,
             expense_lines=rows, **{key: values.get(key, getattr(doc, key, None)) for key in editable})
         for key in editable + ("asset_nature", "fixed_asset_category", "amount", "approved_amount_snapshot", "source_modified"):
             if hasattr(replacement, key):
@@ -2657,7 +2662,7 @@ FINANCE_AUDIT_LABEL_PREFIX = "\u8d22\u52a1\u5ba1\u6838"
 
 
 def _is_finance_audit_step(step):
-    return bool(step and getattr(step, "mode", None) == "approve" and _clean(getattr(step, "label", None)).startswith(FINANCE_AUDIT_LABEL_PREFIX))
+    return bool(step and getattr(step, "mode", None) == "approve" and _clean(getattr(step, "label", None)).startswith(("出纳审核", FINANCE_AUDIT_LABEL_PREFIX)))
 
 
 def _classification_ready(doc):
@@ -4094,7 +4099,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
             frappe.throw(frappe._("\u5f53\u524d\u7533\u8bf7\u4e0d\u5728\u53ef\u5904\u7406\u72b6\u6001\u3002"))
         matched = _matched_approvers(step)
         is_override = _is_oa_override_user()
-        if not matched and not is_override:
+        if not _can_act_on_current_step(doc):
             frappe.throw(frappe._("\u5f53\u524d\u8282\u70b9\u4e0d\u5c5e\u4e8e\u4f60\u5904\u7406\u3002"))
         acting_as_override = bool(is_override and not matched)
         actor = _clean(frappe.session.user)
@@ -4992,7 +4997,7 @@ def add_sign_request(name, approver, position, opinion):
         step = _current_step(doc)
         if not step or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("The request is not at an active approval step."))
-        if not _matched_approvers(step):
+        if not _matched_approvers(step) or not _can_act_on_current_step(doc):
             frappe.throw(frappe._("Only the current approver may add an approver."))
         resolved = _resolve_add_sign_approver(approver)
         actor_names = _actor_names()

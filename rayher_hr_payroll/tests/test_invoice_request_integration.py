@@ -3701,3 +3701,59 @@ def test_resume_manual_draft_preserves_identity_and_incomplete_fields(monkeypatc
     doc.workflow_status = oa_entry.STATUS_PENDING
     with pytest.raises(ValidationError, match="草稿"):
         oa_entry.update_manual_expense_draft(doc.name, {})
+
+
+def test_resuming_manual_draft_does_not_insert_another_document(monkeypatch):
+    from contextlib import nullcontext
+    env = _install_request_environment(monkeypatch)
+    doc = RequestDocument(env, {"doctype": service.REQUEST_DOCTYPE, "name": "REQ-ORIGINAL",
+        "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT, "workflow_status": oa_entry.STATUS_DRAFT,
+        "owner": "alice@example.com", "employee": "EMP-1", "expense_lines": [], "steps": []})
+    env.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *a, **kw: nullcontext())
+    monkeypatch.setattr(service, "_request_permission", lambda *a, **kw: None)
+    oa_entry.update_manual_expense_draft(doc.name, {"subject": "resume", "doc_type": "非固定资产", "expense_lines": []})
+    assert env.inserted == []
+    assert [d.name for d in env.saved] == ["REQ-ORIGINAL"]
+
+
+@pytest.mark.parametrize("action", ["approve", "reject", "add_sign"])
+def test_signed_cosigner_cannot_act_again(monkeypatch, action):
+    from contextlib import nullcontext
+    env = _install_request_environment(monkeypatch)
+    steps = [_workflow_step(1, "step-1", "first", oa_entry.STATUS_APPROVED, "finance@example.com"),
+             _workflow_step(2, "step-2", "cosign", oa_entry.STATUS_PENDING, "alice@example.com")]
+    steps[1].mode = "all"
+    steps[1].approvers = json.dumps(["alice@example.com", "bob@example.com"])
+    steps[1].approved_by = json.dumps(["alice@example.com"])
+    doc = _dynamic_workflow_doc(steps, 2)
+    doc.doctype = service.REQUEST_DOCTYPE
+    object.__setattr__(doc, "environment", env)
+    env.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *a, **kw: nullcontext())
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"alice@example.com"})
+    with pytest.raises(Exception, match="当前节点|Only the current approver"):
+        if action == "add_sign":
+            oa_entry.add_sign_request(doc.name, "carol@example.com", "after", "opinion")
+        else:
+            oa_entry.action_request(doc.name, action, "repeat", "step-1")
+    assert env.saved == []
+    assert doc.current_step_index == 2
+
+
+def test_real_cashier_route_requires_classification(monkeypatch):
+    from rayher_hr_payroll.oa_approval import build_expense_payment_route
+    route = build_expense_payment_route("研发部", "", supervisor_decision="skip", roles=_procurement_role_snapshots())
+    first = Row(route[0]); first.step_index = 1
+    first.approvers = json.dumps(first.approvers); first.approved_by = "[]"
+    doc = _request()
+    doc.expense_lines[0].expense_account_level_1 = ""
+    doc.expense_lines[0].expense_account_level_2 = ""
+    doc.workflow_status = oa_entry.STATUS_PENDING; doc.current_step_index = 1; doc.steps = [first]
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Accounts User"])
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda step, user=None: ["alice@example.com"])
+    caps = oa_entry._request_capabilities(doc)
+    assert caps["can_edit_expense_items"] is True
+    assert caps["can_approve"] is False
+    with pytest.raises(Exception, match="费用科目"):
+        oa_entry._validate_finance_classification(doc, first)
