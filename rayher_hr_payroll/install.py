@@ -110,9 +110,19 @@ def ensure_default_rayher_app():
 
 
 def after_install():
+    _sync_app(bootstrap_organization=True)
+
+
+def after_migrate():
+    # Existing personnel records are the current source of truth.
+    _sync_app(bootstrap_organization=False)
+
+
+def _sync_app(*, bootstrap_organization):
     ensure_default_rayher_app()
     create_custom_fields(CUSTOM_FIELDS, update=True)
-    sync_organization_master_data()
+    if bootstrap_organization:
+        sync_organization_master_data()
     backfill_timesheet_detail_project_codes()
     backfill_rd_project_keys()
     ensure_access_control()  # create roles/profile FIRST so grants below can target them

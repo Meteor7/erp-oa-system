@@ -115,23 +115,24 @@ def _create_missing_employees(frappe, employees):
 
 
 def sync_effective_leaver_statuses(today=None):
+    """Apply the dates maintained by HR, preserving rehires and current assignments."""
     import frappe
 
-    current_date = date.fromisoformat(str(today)) if today else date.today()
-    employees = _employee_index(frappe)
+    current_date = str(today or frappe.utils.today())
+    rows = frappe.get_all(
+        "Employee", filters={"status": "Active", "relieving_date": ["<=", current_date]},
+        fields=["name"], order_by="name", limit_page_length=0,
+    )
     updates = []
-    for employee_name, leaving_date in EFFECTIVE_LEAVING_DATES.items():
-        row = employees.get(employee_name)
-        if not row:
+    for row in rows:
+        doc = frappe.get_doc("Employee", row.name, for_update=True)
+        if (doc.status != "Active" or not doc.relieving_date
+                or str(doc.relieving_date) > current_date):
             continue
-        target_status = "Left" if date.fromisoformat(leaving_date) <= current_date else "Active"
-        frappe.db.set_value(
-            "Employee",
-            row.get("name"),
-            {"status": target_status, "relieving_date": leaving_date},
-            update_modified=False,
-        )
-        updates.append({"employee_name": employee_name, "status": target_status})
+        doc.status = "Left"
+        # Use save so the linked login is disabled by the normal lifecycle hook.
+        doc.save(ignore_permissions=True)
+        updates.append({"employee_name": doc.employee_name, "status": doc.status})
     return updates
 
 

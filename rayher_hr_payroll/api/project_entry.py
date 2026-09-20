@@ -454,6 +454,10 @@ def backfill_project_owner_accounts():
 
 def ensure_default_projects():
     for item in DEFAULT_RAYHER_PROJECTS:
+        # Seed missing projects only; migrations must preserve live status/stage/dates.
+        if (frappe.db.exists("Project", item["project_code"])
+                or frappe.db.exists("Project", {"rd_project_code": item["project_code"]})):
+            continue
         _save_project_doc(**item)
     frappe.db.commit()
     return len(DEFAULT_RAYHER_PROJECTS)

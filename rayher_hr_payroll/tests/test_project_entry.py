@@ -544,3 +544,18 @@ def test_all_project_access_can_download_another_owners_report(monkeypatch):
     mod.download_project_report("RD04", "project_initiation_report")
 
     assert frappe.local.response.filecontent == b"%PDF-report"
+
+
+def test_default_project_seed_preserves_existing_business_state(monkeypatch):
+    mod, frappe = _load_project_entry(monkeypatch)
+    monkeypatch.setattr(mod, "DEFAULT_RAYHER_PROJECTS", [
+        {"project_code": "EXISTING", "project_name": "Existing"},
+        {"project_code": "RENAMED", "project_name": "Renamed"},
+        {"project_code": "NEW", "project_name": "New"},
+    ])
+    frappe.db.exists = lambda dt, key: key == "EXISTING" or key == {"rd_project_code": "RENAMED"}
+    frappe.db.commit = lambda: None
+    created = []
+    monkeypatch.setattr(mod, "_save_project_doc", lambda **values: created.append(values["project_code"]))
+    mod.ensure_default_projects()
+    assert created == ["NEW"]

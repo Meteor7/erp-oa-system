@@ -84,7 +84,7 @@ def test_custom_fields_sync_on_install_and_migrate():
     from rayher_hr_payroll import hooks
 
     assert hooks.after_install == "rayher_hr_payroll.install.after_install"
-    assert hooks.after_migrate == "rayher_hr_payroll.install.after_install"
+    assert hooks.after_migrate == "rayher_hr_payroll.install.after_migrate"
 
 
 def test_project_document_links_are_repaired_after_custom_field_sync():

@@ -22,7 +22,7 @@ required_apps = ["erpnext", "hrms"]
 before_install = "rayher_hr_payroll.install.ensure_link_targets"
 before_migrate = "rayher_hr_payroll.install.ensure_link_targets"
 after_install = "rayher_hr_payroll.install.after_install"
-after_migrate = "rayher_hr_payroll.install.after_install"
+after_migrate = "rayher_hr_payroll.install.after_migrate"
 
 fixtures = [
     # Ship the DB-stored R&D Query Reports so the SPA's report pages work on a fresh install.
