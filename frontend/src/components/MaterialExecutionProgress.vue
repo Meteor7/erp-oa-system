@@ -14,7 +14,7 @@ async function load() {
   if (!opened.value || !props.request) return;
   loading.value = true; error.value = ''; data.value = null;
   try {
-    const result = await loader.fetch({ request: props.request, source_line: props.sourceLine || undefined, limit: 20, offset: page.value * 20 });
+    const result = await loader.fetch({ request: props.request, ...(props.sourceLine ? { source_line: props.sourceLine } : {}), limit: 20, offset: page.value * 20 });
     if (current === version) data.value = result;
   } catch (err) { if (current === version) error.value = err?.messages?.[0] || err?.message || '物料执行进度加载失败'; }
   finally { if (current === version) loading.value = false; }
