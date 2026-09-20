@@ -1845,6 +1845,7 @@ def test_list_requests_includes_completed_procurement_for_purchaser(monkeypatch)
     )
     doc.request_type = oa_entry.REQUEST_PROCUREMENT
     doc.purchaser_user = "alice@example.com"
+    doc.business_status = ""
     doc.workflow_status = oa_entry.STATUS_COMPLETED
     docs = {doc.name: doc}
     _install_report_requests(monkeypatch, docs)
@@ -3393,17 +3394,16 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
     result = oa_entry.submit_request("PROC-1")
     assert result["workflow_status"] == oa_entry.STATUS_PENDING
     assert result["business_status"] == "待审批"
-    assert result["current_step_label"] == "PMC：演示员工178"
+    assert result["current_step_label"] == "直属主管：直属领导、项目主管：项目主管（会签）"
     assert [row.label for row in doc.steps] == [
+        "直属主管：直属领导、项目主管：项目主管（会签）",
         "PMC：演示员工178",
-        "直属主管：直属领导",
-        "项目主管：项目主管",
         "需求终审：副总经理：演示员工21",
-        "采购询价/录入价格",
-        "价格审批：副总经理：演示员工21",
     ]
+    assert doc.steps[0].mode == "all"
+    assert set(json.loads(doc.steps[0].approvers)) == {"boss@example.com", "owner@example.com"}
     assert json.loads(doc.operation_log)[-1]["action"] == "提交申请"
-    assert assignment_syncs == [("PROC-1", "PMC：演示员工178")]
+    assert assignment_syncs == [("PROC-1", "直属主管：直属领导、项目主管：项目主管（会签）")]
 
 
 def test_zero_step_procurement_and_direct_purchase_are_rejected(monkeypatch):
@@ -3689,7 +3689,7 @@ def test_resume_manual_draft_preserves_identity_and_incomplete_fields(monkeypatc
     environment.committed[doc.name] = doc
     monkeypatch.setattr(service, "_transaction_lock", lambda *args, **kwargs: nullcontext())
     permissions = []
-    monkeypatch.setattr(service, "_request_permission", lambda current, action, **kwargs: permissions.append((current.name, action)))
+    monkeypatch.setattr(service, "_request_permission", lambda document, action, **kwargs: permissions.append((document.name, action)))
     oa_entry.update_manual_expense_draft(doc.name, {"subject": "继续补填", "doc_type": "固定资产", "expense_lines": [{"project_name": "项目甲", "amount": 0}]})
     assert permissions == [("REQ-DRAFT", "edit")]
     assert doc.name == "REQ-DRAFT" and doc.owner == "alice@example.com" and doc.employee == "EMP-1"

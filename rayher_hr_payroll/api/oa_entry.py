@@ -2571,7 +2571,7 @@ def update_manual_expense_draft(name, payload):
             frappe.throw("手工草稿不能指定发票关联。")
         replacement = _build_request_doc(REQUEST_EXPENSE_PAYMENT, submit=False,
             expense_lines=rows, **{key: values.get(key, getattr(doc, key, None)) for key in editable})
-        for key in editable + ("asset_nature", "fixed_asset_category", "amount", "source_request_title", "source_request_amount"):
+        for key in editable + ("asset_nature", "fixed_asset_category", "amount", "approved_amount_snapshot", "source_modified"):
             if hasattr(replacement, key):
                 setattr(doc, key, getattr(replacement, key))
         _set_expense_lines(doc, [row.as_dict() if hasattr(row, "as_dict") else dict(row) for row in replacement.expense_lines])
