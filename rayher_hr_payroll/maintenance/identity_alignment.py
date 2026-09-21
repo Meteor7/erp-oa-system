@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import frappe
 
-MANIFEST = Path(__file__).with_name("identity_alignment_manifest.json")
+MANIFEST_NAME = "identity_alignment_manifest.json"
 BUSINESS_PREFIXES = (
     "Accommodation", "Timesheet", "RD ", "OA ", "Project", "Expense",
     "Salary", "Payroll", "Leave", "GL Entry", "Payment", "File", "Contact",
@@ -67,8 +67,25 @@ def normalize(value, mapping):
     return value
 
 
+def manifest_path(name):
+    """Reviewed rosters hold personal data, so they are kept outside the repository.
+
+    Looked up in RAYHER_ALIGNMENT_MANIFEST_DIR, otherwise in the site's
+    private/alignment_manifests folder.
+    """
+    folder = os.environ.get("RAYHER_ALIGNMENT_MANIFEST_DIR") or frappe.get_site_path(
+        "private", "alignment_manifests"
+    )
+    path = Path(folder) / name
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{name} not found in {folder}; place the reviewed manifest there before running this step"
+        )
+    return path
+
+
 def load_manifest():
-    result = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    result = json.loads(manifest_path(MANIFEST_NAME).read_text(encoding="utf-8"))
     people = result["people"]
     for field in ("name", "employee_name", "target_user"):
         values = [p[field] for p in people]

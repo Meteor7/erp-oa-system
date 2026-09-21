@@ -17,3 +17,7 @@ dist/
 # TipRay 透明加密损坏产物
 *.IPGSD
 *%TSD-Header*
+
+# Reviewed rosters and HR-supplied values contain personal data; keep them outside the repository.
+rayher_hr_payroll/maintenance/*_alignment_manifest.json
+household_registration_backfill.json

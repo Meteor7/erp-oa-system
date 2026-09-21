@@ -7,7 +7,7 @@ def apply(backup, rehearsal=False):
  import frappe
  frappe.only_for("System Manager")
  frappe.flags.in_test=True  # Run new Role Profile updates synchronously, no queued jobs.
- from rayher_hr_payroll.maintenance.identity_alignment import business_snapshot,digest,verify_backup
+ from rayher_hr_payroll.maintenance.identity_alignment import business_snapshot,digest,manifest_path,verify_backup
  from rayher_hr_payroll.oa_role_resolver import ROLE_SPECS,resolve_role
  from rayher_hr_payroll.position_handover import sync_roles,independent_roles
  verify_backup(backup,expected_database=frappe.conf.db_name)
@@ -18,7 +18,7 @@ def apply(backup, rehearsal=False):
  before=business()
  before_users=frappe.db.sql("SELECT * FROM tabUser ORDER BY name",as_dict=True)
  before_employees=frappe.db.sql("SELECT * FROM tabEmployee ORDER BY name",as_dict=True)
- source=json.loads(Path(__file__).with_name("designation_alignment_manifest.json").read_text(encoding="utf-8"))
+ source=json.loads(manifest_path("designation_alignment_manifest.json").read_text(encoding="utf-8"))
  changes=[]
  before_auth=digest(frappe.db.sql("SELECT * FROM __Auth ORDER BY doctype,name,fieldname",as_dict=True))
  profiles={

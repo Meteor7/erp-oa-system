@@ -14,6 +14,16 @@ def module(monkeypatch):
     spec.loader.exec_module(mod)
     return mod
 
+def test_manifest_is_read_from_the_configured_private_folder(module, monkeypatch, tmp_path):
+    (tmp_path / "identity_alignment_manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("RAYHER_ALIGNMENT_MANIFEST_DIR", str(tmp_path))
+    assert module.manifest_path("identity_alignment_manifest.json") == tmp_path / "identity_alignment_manifest.json"
+
+def test_missing_manifest_names_the_expected_location(module, monkeypatch, tmp_path):
+    monkeypatch.setenv("RAYHER_ALIGNMENT_MANIFEST_DIR", str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="identity_alignment_manifest.json"):
+        module.manifest_path("identity_alignment_manifest.json")
+
 def person(name="Alice", ident="HR-EMP-90001", user="person003@staff.example.invalid"):
     return {"employee_name": name, "name": ident, "target_user": user,
             "status": "Active", "roles": ["Employee"]}
