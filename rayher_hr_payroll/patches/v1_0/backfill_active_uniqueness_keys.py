@@ -17,6 +17,10 @@ def execute():
         )
         if duplicates:
             frappe.throw(f"{doctype} 存在重复有效记录，需核对后重试迁移：" + "; ".join(str(row.value) for row in duplicates))
+    # patches.txt runs before normal schema sync on Frappe v15. Load these
+    # DocTypes explicitly before addressing the new columns.
+    for name in ("rd_expense_import", "accommodation_occupancy"):
+        frappe.reload_doc("rayher_hr_payroll", "doctype", name, force=True)
     for doctype, source, target, condition in specifications:
         frappe.db.sql(
             f"UPDATE `tab{doctype}` SET `{target}` = "
