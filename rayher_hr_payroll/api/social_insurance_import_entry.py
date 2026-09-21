@@ -3,6 +3,7 @@ import hashlib
 from decimal import Decimal
 
 import frappe
+from rayher_hr_payroll.social_import_mutation_guard import social_import_action
 
 from rayher_hr_payroll.api._guards import require_rd_access
 from rayher_hr_payroll.social_insurance_import import (
@@ -207,6 +208,7 @@ def get_social_workbench(period, company=None, batch=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@social_import_action
 def upload_social_workbook(filename, content_base64, period=None, company=None):
     require_rd_access(ROLES)
     filename = str(filename or "").strip()
@@ -277,6 +279,7 @@ def upload_social_workbook(filename, content_base64, period=None, company=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@social_import_action
 def activate_social_batch(batch):
     require_rd_access(ROLES)
     doc = frappe.get_doc("Social Insurance Import Batch", batch)
@@ -303,6 +306,7 @@ def activate_social_batch(batch):
 
 
 @frappe.whitelist(methods=["POST"])
+@social_import_action
 def confirm_social_row(row, employee=None, remark=""):
     require_rd_access(ROLES)
     doc = frappe.get_doc("Social Insurance Import Row", row)
@@ -359,6 +363,7 @@ def confirm_social_row(row, employee=None, remark=""):
     return get_social_workbench(doc.period, None, doc.batch)
 
 @frappe.whitelist(methods=["POST"])
+@social_import_action
 def ignore_social_row(row, remark=""):
     require_rd_access(ROLES)
     doc = frappe.get_doc("Social Insurance Import Row", row)
@@ -381,6 +386,7 @@ def ignore_social_row(row, remark=""):
 
 
 @frappe.whitelist(methods=["POST"])
+@social_import_action
 def cancel_social_batch(batch, remark=""):
     require_rd_access(ROLES)
     doc = frappe.get_doc("Social Insurance Import Batch", batch)
@@ -400,6 +406,7 @@ def cancel_social_batch(batch, remark=""):
 
 
 @frappe.whitelist(methods=["POST"])
+@social_import_action
 def reconcile_pending_batch(batch):
     require_rd_access(ROLES)
     batch_doc = frappe.get_doc("Social Insurance Import Batch", batch)

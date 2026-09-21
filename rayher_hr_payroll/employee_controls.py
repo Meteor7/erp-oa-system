@@ -49,15 +49,18 @@ def validate_employee_rd_lock(doc, method=None):
 
     if doc.is_new() or not doc.has_value_changed("rd_personnel_type"):
         return
-    # rd_personnel_type enters the allocation ONLY as a membership filter
-    # (in RD_PERSONNEL_TYPES); a change only alters a locked period's inputs if it
-    # crosses the in-set<->out-set boundary. Same-side changes (e.g. 全时研发 ->
-    # 研发辅助, or 非研发 -> "") cannot change allocation membership, so skip them.
-    rd_set = {"全时研发", "非全时研发", "研发辅助"}
+    # Full-time staff use the full salary when no non-R&D denominator is
+    # available; the other R&D categories do not. Preserve both membership
+    # and that calculation policy for locked periods.
+    def allocation_policy(value):
+        if value == "全时研发":
+            return "full_time"
+        if value in {"非全时研发", "研发辅助"}:
+            return "partial_time"
+        return "non_rd"
+
     before = doc.get_doc_before_save()
-    old_in = (before.get("rd_personnel_type") if before else None) in rd_set
-    new_in = (doc.get("rd_personnel_type") or None) in rd_set
-    if old_in == new_in:
+    if allocation_policy(before.get("rd_personnel_type") if before else None) == allocation_policy(doc.get("rd_personnel_type")):
         return
     blocked = []
     for lk in frappe.get_all(

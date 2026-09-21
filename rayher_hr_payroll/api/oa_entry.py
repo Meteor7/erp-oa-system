@@ -2073,7 +2073,7 @@ def _validate_procurement_plan_payment(doc):
     po_name = _clean(getattr(doc, "source_purchase_order", None))
     po_row_name = _clean(getattr(doc, "source_po_payment_plan_row", None))
     if po_name and po_row_name:
-        po = frappe.get_doc("OA Purchase Order", po_name)
+        po = frappe.get_doc("OA Purchase Order", po_name, for_update=True)
         if getattr(po, "contract_status", None) != "已生效":
             frappe.throw(frappe._("来源采购合同尚未生效。"))
         row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
@@ -2085,6 +2085,8 @@ def _validate_procurement_plan_payment(doc):
             frappe.throw(frappe._("采购付款金额必须与 PO 付款计划期次一致。"))
         if _clean(getattr(row, "payment_stage", None)) != _clean(getattr(doc, "payment_stage", None)):
             frappe.throw(frappe._("采购付款阶段必须与 PO 付款计划期次一致。"))
+        from rayher_hr_payroll.api.procurement_chain import _require_po_payment_ready
+        _require_po_payment_ready(po, row)
         return _clean(getattr(row, "payment_stage", None))
     source = frappe.get_doc("OA Approval Request", _clean(getattr(doc, "source_request", None)))
     if getattr(source, "contract_status", None) != "已生效":
@@ -2114,9 +2116,13 @@ def _validate_procurement_payment_release(doc):
     po_name = _clean(getattr(doc, "source_purchase_order", None))
     po_row_name = _clean(getattr(doc, "source_po_payment_plan_row", None))
     if po_name and po_row_name:
-        po = frappe.get_doc("OA Purchase Order", po_name)
+        po = frappe.get_doc("OA Purchase Order", po_name, for_update=True)
         row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
-        if row and _clean(getattr(row, "invoice_requirement", None)) == "付款前提供" and "发票" not in _request_business_document_types(doc.name):
+        if not row:
+            frappe.throw("来源 PO 付款计划期次不存在。")
+        from rayher_hr_payroll.api.procurement_chain import _require_po_payment_ready
+        _require_po_payment_ready(po, row)
+        if _clean(getattr(row, "invoice_requirement", None)) == "付款前提供" and "发票" not in _request_business_document_types(doc.name):
             frappe.throw(frappe._("该 PO 付款计划要求付款前提供发票，请上传发票后再确认付款。"))
         return
     source_name = _clean(getattr(doc, "source_request", None))

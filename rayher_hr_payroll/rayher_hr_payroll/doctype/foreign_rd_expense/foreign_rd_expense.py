@@ -1,3 +1,6 @@
+from datetime import date
+import math
+
 import frappe
 from frappe.model.document import Document
 
@@ -26,15 +29,40 @@ class ForeignRDExpense(Document):
         normalize_period_fields(self, throw=frappe.throw, translate=frappe._)
 
     def _check_amounts(self):
-        if (self.total_amount or 0) < 0:
-            frappe.throw(frappe._("\u5883\u5916\u59d4\u6258\u7814\u53d1\u8d39\u7528\u603b\u91d1\u989d\u4e0d\u80fd\u4e3a\u8d1f\u6570\u3002"))
+        def number(value, label):
+            try:
+                result = float(value or 0)
+            except (ValueError, TypeError, OverflowError):
+                frappe.throw(f"{label}格式无效。")
+            if not math.isfinite(result) or result < 0:
+                frappe.throw(f"{label}必须为非负有限数值。")
+            return result
+
+        number(self.total_amount, "境外委托研发费用总金额")
         for line in self.lines or []:
-            if not line.work_date or not line.activity_type or not line.project_code or not line.project_name:
-                frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5fc5\u987b\u586b\u5199\u65e5\u671f\u3001\u6d3b\u52a8\u7c7b\u578b\u3001\u9879\u76ee\u4ee3\u7801\u548c\u9879\u76ee\u540d\u79f0\u3002"))
-            if (line.hours or 0) < 0 or (line.allocated_amount or 0) < 0:
-                frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u548c\u5206\u644a\u91d1\u989d\u4e0d\u80fd\u4e3a\u8d1f\u6570\u3002"))
-            if (line.hours or 0) > 8:
-                frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5355\u65e5\u4e0d\u80fd\u8d85\u8fc7 8 \u5c0f\u65f6\u3002"))
+            if not line.work_date or not line.project_code or not line.project_name:
+                frappe.throw("境外工时必须填写日期、项目代码和项目名称。")
+            try:
+                work_day = date.fromisoformat(str(line.work_date)[:10])
+            except (ValueError, TypeError):
+                frappe.throw("境外工时日期无效。")
+            if (work_day.year, work_day.month) != (int(self.year), int(self.month)):
+                frappe.throw("境外工时日期必须在当前会计期间内。")
+            days = number(getattr(line, "occurrence_days", None), "境外发生天数")
+            number(line.allocated_amount, "境外分摊金额")
+            if days > 0:
+                # Monthly rows represent aggregated days, not one workday.
+                line.occurrence_days = round(days, 5)
+                line.hours = round(line.occurrence_days * 8, 2)
+                if line.hours <= 0:
+                    frappe.throw("境外发生天数须对应至少0.01小时。")
+            else:
+                # Legacy daily rows have a NULL/zero occurrence_days column.
+                if not line.activity_type:
+                    frappe.throw("境外日工时必须填写活动类型。")
+                hours = number(line.hours, "境外工时")
+                if hours > 8:
+                    frappe.throw("境外工时单日不能超过 8 小时。")
 
     def _check_period_lock(self):
         periods = {"".join(c for c in str(self.period or "") if c.isdigit())[:6]}

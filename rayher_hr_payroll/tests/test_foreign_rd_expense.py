@@ -65,3 +65,35 @@ def test_open_foreign_period_cannot_be_moved_to_locked_period(monkeypatch):
     mod.frappe.db.exists = lambda dt, filters: filters["period"] == "202608"
     with pytest.raises(RuleError, match="202608"):
         doc._check_period_lock()
+
+
+def test_monthly_row_without_activity_derives_hours_and_accepts_multiple_days(monkeypatch):
+    mod = _load_foreign_rd_expense(monkeypatch)
+    line = SimpleNamespace(work_date="2026-07-01", project_code="P1", project_name="Project", activity_type="", occurrence_days=2.5, hours=999, allocated_amount=0)
+    doc = mod.ForeignRDExpense(year=2026, month=7, total_amount=0, lines=[line])
+    doc._check_amounts()
+    assert line.hours == 20
+
+
+def test_legacy_daily_row_still_requires_activity_and_daily_limit(monkeypatch):
+    import pytest
+    mod = _load_foreign_rd_expense(monkeypatch)
+    line = SimpleNamespace(work_date="2026-07-01", project_code="P1", project_name="Project", activity_type="", occurrence_days=0, hours=9, allocated_amount=0)
+    doc = mod.ForeignRDExpense(year=2026, month=7, total_amount=0, lines=[line])
+    with pytest.raises(RuleError, match="活动类型"): doc._check_amounts()
+    line.activity_type = "R&D"
+    with pytest.raises(RuleError, match="8 小时"): doc._check_amounts()
+    line.hours = 8
+    doc._check_amounts()
+    line.work_date = "2026-08-01"
+    with pytest.raises(RuleError, match="期间"): doc._check_amounts()
+
+
+def test_monthly_row_rejects_nonfinite_or_negative_days(monkeypatch):
+    import pytest
+    mod = _load_foreign_rd_expense(monkeypatch)
+    line = SimpleNamespace(work_date="2026-07-01", project_code="P1", project_name="Project", activity_type="", occurrence_days=0, hours=8, allocated_amount=0)
+    doc = mod.ForeignRDExpense(year=2026, month=7, total_amount=0, lines=[line])
+    for days in (-1, float("nan"), float("inf")):
+        line.occurrence_days = days
+        with pytest.raises(RuleError): doc._check_amounts()

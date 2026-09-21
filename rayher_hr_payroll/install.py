@@ -5,7 +5,6 @@ from rayher_hr_payroll.rd_expense_accounts import DEFAULT_PATHS, ensure_paths
 from rayher_hr_payroll.access_control import ensure_access_control
 from rayher_hr_payroll.approval_config import ensure_notifications, ensure_workflow_masters
 from rayher_hr_payroll.oa_role_resolver import bootstrap_pmc, bootstrap_procurement_manager
-from rayher_hr_payroll.organization_master_data import sync_organization_master_data
 from rayher_hr_payroll.api.timesheet_entry import ensure_rd_activity_types
 from rayher_hr_payroll.api.project_entry import (
     backfill_project_owner_accounts,
@@ -110,30 +109,36 @@ def ensure_default_rayher_app():
 
 
 def after_install():
-    _sync_app(bootstrap_organization=True)
+    _sync_app()
 
 
 def after_migrate():
     # Existing personnel records are the current source of truth.
-    _sync_app(bootstrap_organization=False)
+    _sync_app()
 
 
-def _sync_app(*, bootstrap_organization):
+def _sync_app():
+    import frappe
     ensure_default_rayher_app()
     create_custom_fields(CUSTOM_FIELDS, update=True)
-    if bootstrap_organization:
-        sync_organization_master_data()
     backfill_timesheet_detail_project_codes()
     backfill_rd_project_keys()
     ensure_access_control()  # create roles/profile FIRST so grants below can target them
     ensure_workflow_masters()
     _ensure_spa_perms()
     ensure_rd_activity_types()
-    ensure_default_projects()
+    if frappe.db.exists("Company"):
+        ensure_default_projects()
     ensure_paths(DEFAULT_PATHS, created_from="系统初始化")
     backfill_project_owner_accounts()
-    bootstrap_pmc()
-    bootstrap_procurement_manager()
+    # A clean site is installed before its company, employees and role holders
+    # are configured. Missing positions grant no access; they are not fake users.
+    from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError
+    for bootstrap in (bootstrap_pmc, bootstrap_procurement_manager):
+        try:
+            bootstrap()
+        except ApprovalRoleResolutionError as exc:
+            frappe.logger("rayher_setup").warning("审批岗位尚未配置，相关业务操作将拒绝提交：%s", exc)
     relink_project_documents()
     ensure_notifications()
     ensure_hidden_workspaces()

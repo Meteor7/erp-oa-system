@@ -115,7 +115,10 @@ def _create_fulfillment_record(po, record_type, record_date, details, file_ref, 
         "evidence_file": file_doc.file_url, "original_filename": filename,
         "file_sha256": hashlib.sha256(content).hexdigest(), "note": _text(note),
     }).insert(ignore_permissions=True)
-    store.link_file(file_doc, record, "Administrator")
+    frappe.db.set_value("File", file_doc.name, {
+        "attached_to_doctype": record.doctype, "attached_to_name": record.name,
+        "attached_to_field": "evidence_file", "owner": "Administrator",
+    }, update_modified=False)
     return record
 
 
@@ -506,19 +509,16 @@ def list_purchase_orders(status=None, limit=200):
     return [_po_summary(frappe.get_doc("OA Purchase Order", row.name)) for row in names]
 
 
-def _payment_work_item(po, row):
-    contract_ready = _po_contract_ready(po)
+def _po_payment_blockers(po, row, *, records=None):
+    """One eligibility rule for the workbench, submission and payment release."""
     lines = list(getattr(po, "lines", []) or [])
-    all_received = bool(lines) and all(
-        _decimal(line.received_quantity) >= _decimal(line.quantity) for line in lines
-    )
-    all_inspected = bool(lines) and all(
-        _text(line.inspection_status) == "已通过" for line in lines
-    )
+    all_received = bool(lines) and all(_decimal(line.received_quantity) >= _decimal(line.quantity) for line in lines)
+    all_inspected = bool(lines) and all(_text(line.inspection_status) == "已通过" for line in lines)
+    records = _fulfillment_records(po.name) if records is None else records
+    has_receipt_evidence = any(record.get("record_type") == "到货" for record in records)
+    has_inspection_evidence = any(record.get("record_type") == "验收" for record in records)
+    contract_ready = _po_contract_ready(po)
     trigger = _text(getattr(row, "trigger_condition", None))
-    fulfillment_records = _fulfillment_records(po.name)
-    has_receipt_evidence = any(record.get("record_type") == "到货" for record in fulfillment_records)
-    has_inspection_evidence = any(record.get("record_type") == "验收" for record in fulfillment_records)
     blockers = []
     if not contract_ready:
         blockers.append("PO 合同尚未生效")
@@ -533,6 +533,28 @@ def _payment_work_item(po, row):
             blockers.append("本期要求验收通过")
         if all_inspected and not has_inspection_evidence:
             blockers.append("缺少验收资料")
+
+    return blockers
+
+
+def _require_po_payment_ready(po, row):
+    blockers = _po_payment_blockers(po, row)
+    if blockers:
+        frappe.throw("；".join(blockers))
+
+
+def _payment_work_item(po, row):
+    contract_ready = _po_contract_ready(po)
+    lines = list(getattr(po, "lines", []) or [])
+    all_received = bool(lines) and all(
+        _decimal(line.received_quantity) >= _decimal(line.quantity) for line in lines
+    )
+    all_inspected = bool(lines) and all(
+        _text(line.inspection_status) == "已通过" for line in lines
+    )
+    trigger = _text(getattr(row, "trigger_condition", None))
+    fulfillment_records = _fulfillment_records(po.name)
+    blockers = _po_payment_blockers(po, row, records=fulfillment_records)
 
     payment_request = _text(getattr(row, "payment_request", None))
     payment_summary = {}
@@ -1504,16 +1526,7 @@ def push_po_payment_request(name, payment_plan_row):
     row = _po_payment_plan_row(po, payment_plan_row)
     if _text(row.status) not in {"待审批", "审批中"} or _text(row.payment_request):
         frappe.throw("该付款期次当前不可下推，或已经生成采购付款。")
-    trigger = _text(getattr(row, "trigger_condition", None))
-    records = _fulfillment_records(po.name)
-    if "到货" in trigger and not all(_decimal(line.received_quantity) >= _decimal(line.quantity) for line in (po.lines or [])):
-        frappe.throw("该付款期次要求全部到货后才能下推。")
-    if "到货" in trigger and not any(record.get("record_type") == "到货" for record in records):
-        frappe.throw("该付款期次要求先上传并登记到货资料。")
-    if "验收" in trigger and not all(_text(line.inspection_status) == "已通过" for line in (po.lines or [])):
-        frappe.throw("该付款期次要求验收通过后才能下推。")
-    if "验收" in trigger and not any(record.get("record_type") == "验收" for record in records):
-        frappe.throw("该付款期次要求先上传并登记验收资料。")
+    _require_po_payment_ready(po, row)
     source_request = next((_text(line.source_request) for line in po.lines if _text(line.source_request)), "")
     from rayher_hr_payroll.approval_center import save_draft
     from rayher_hr_payroll.api.oa_entry import _save_document, _submit_draft, _sync_assignments_after_save
@@ -1603,6 +1616,7 @@ def record_po_payment(name, amount, payment_plan_row=None, payment_reference=Non
     row = _po_payment_plan_row(po, payment_plan_row)
     if _text(row.approval_status) != "已通过" or _text(row.status) not in {"审批通过", "部分付款"}:
         frappe.throw("该付款期次尚未完成付款审批。")
+    _require_po_payment_ready(po, row)
     paid = _decimal(amount, "本次付款金额")
     if paid <= 0:
         frappe.throw("本次付款金额必须大于零。")

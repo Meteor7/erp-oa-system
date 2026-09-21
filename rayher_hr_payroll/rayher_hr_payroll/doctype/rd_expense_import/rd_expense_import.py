@@ -14,6 +14,7 @@ class RDExpenseImport(Document):
 
     def validate(self):
         self._normalize_period()
+        self.active_period_key = self.period if int(self.docstatus or 0) < 2 else None
         self._ensure_hash()
         self._check_not_allocated()
         self._check_period_lock()
@@ -46,6 +47,9 @@ class RDExpenseImport(Document):
 
     def on_submit(self):
         self.db_set("status", "Imported")
+
+    def before_cancel(self):
+        self.active_period_key = None
 
     def on_cancel(self):
         self._check_period_lock()

@@ -20,3 +20,13 @@ def test_migration_never_changes_completed_history_and_is_idempotent():
     assert migration.build_step_migration("\u6f14\u793a\u5458\u5de510", ["\u6f14\u793a\u5458\u5de510"], "\u5df2\u901a\u8fc7") is None
     assert migration.build_step_migration("\u6f14\u793a\u5458\u5de521", ["person046@staff.example.invalid"], "\u5f85\u5ba1\u6279") is None
     assert migration.build_step_migration("\u6f14\u793a\u5458\u5de529", ["person060@staff.example.invalid"], "\u5f85\u5ba1\u6279") is None
+
+
+def test_migration_never_looks_up_mutable_display_names(monkeypatch):
+    from types import SimpleNamespace
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Display names must not resolve approval identities")
+    monkeypatch.setattr(migration.frappe, "db", SimpleNamespace(get_value=forbidden))
+    assert migration._resolve_user("review-user-alias") == "review-user-alias"
+    assert migration._resolve_user("actual@example.com") == "actual@example.com"
+    assert migration._resolve_user(migration.YE) == migration.YE_USER

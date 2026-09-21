@@ -74,20 +74,10 @@ def build_step_migration(label, approvers, status):
 
 
 def _resolve_user(value):
+    # Never infer account identity from mutable profile or employee names.
+    # The explicit historical map above is reviewed migration data.
     candidate = str(value or "").strip()
-    if not candidate or "@" in candidate:
-        return candidate
-    user = frappe.db.get_value("User", {"full_name": candidate, "enabled": 1}, "name")
-    if user:
-        return str(user)
-    employee_user = frappe.db.get_value(
-        "Employee", {"employee_name": candidate, "status": "Active"}, "user_id"
-    )
-    if employee_user and frappe.db.get_value(
-        "User", {"name": employee_user, "enabled": 1}, "name"
-    ):
-        return str(employee_user)
-    return candidate
+    return LEGACY_USER_MAP.get(candidate, candidate)
 
 
 def execute(dry_run=False):
@@ -135,5 +125,7 @@ def execute(dry_run=False):
         if changed:
             report["changed_requests"] += 1
             if not dry_run:
-                doc.save(ignore_permissions=True)
+                from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
+                with authorized_oa_action():
+                    doc.save(ignore_permissions=True)
     return report

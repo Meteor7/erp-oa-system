@@ -18,3 +18,5 @@ rayher_hr_payroll.patches.v1_0.normalize_contract_entity_name
 rayher_hr_payroll.patches.v1_0.normalize_contract_entity_name_v2
 rayher_hr_payroll.patches.v1_0.isolate_accommodation_occupancy_series
 rayher_hr_payroll.patches.v1_0.index_oa_progress_queries
+rayher_hr_payroll.patches.v1_0.repair_po_fulfillment_file_links
+rayher_hr_payroll.patches.v1_0.backfill_active_uniqueness_keys

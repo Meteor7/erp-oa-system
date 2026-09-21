@@ -146,7 +146,7 @@ def test_working_days_falls_back_to_employment_calendar_when_holiday_list_is_mis
 
     assert result == (31.0, 11.0, "calendar_fallback")
 
-def test_social_record_prefers_current_company_import_batch(monkeypatch):
+def test_social_record_uses_employee_company_on_mixed_company_batch(monkeypatch):
     module, frappe = _load(monkeypatch)
     calls = []
 
@@ -155,10 +155,11 @@ def test_social_record_prefers_current_company_import_batch(monkeypatch):
         if doctype == "Employee":
             return "示例研发中心"
         if doctype == "Social Insurance Import Batch":
-            assert filters == {"company": "示例研发中心", "period": "2026-07", "is_current": 1}
+            assert filters == {"period": "2026-07", "is_current": 1}
             return "SIB-1"
         if doctype == "Social Insurance Import Row":
             assert filters["batch"] == "SIB-1"
+            assert filters["company"] == "示例研发中心"
             assert filters["status"] == ["in", ["Matched", "Confirmed Difference"]]
             return {"name": "SIR-1", "employee_total": 1020}
         raise AssertionError(doctype)

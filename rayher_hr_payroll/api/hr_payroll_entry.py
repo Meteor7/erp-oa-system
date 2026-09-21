@@ -176,15 +176,16 @@ def _social_record(employee, period, fields):
     company = frappe.db.get_value("Employee", employee, "company")
     batch = None
     if company:
+        # A current upload covers multiple companies; ownership is on each row.
         batch = frappe.db.get_value(
             "Social Insurance Import Batch",
-            {"company": company, "period": period, "is_current": 1},
+            {"period": period, "is_current": 1},
             "name",
         )
     if batch:
         row = frappe.db.get_value(
             "Social Insurance Import Row",
-            {"batch": batch, "employee": employee, "status": ["in", ["Matched", "Confirmed Difference"]]},
+            {"batch": batch, "employee": employee, "company": company, "status": ["in", ["Matched", "Confirmed Difference"]]},
             fields,
             as_dict=True,
         )

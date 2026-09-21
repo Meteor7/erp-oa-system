@@ -21,7 +21,7 @@
    "fieldname": "occurrence_days",
    "label": "Occurrence Days",
    "fieldtype": "Float",
-   "precision": "2",
+   "precision": "5",
    "in_list_view": 1
   },
   {

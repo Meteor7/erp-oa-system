@@ -80,6 +80,7 @@ website_route_rules = [
 ]
 
 permission_query_conditions = {
+    "OA PO Fulfillment Record": "rayher_hr_payroll.procurement_permissions.fulfillment_query",
     "OA Approval Request": "rayher_hr_payroll.oa_access.oa_request_query",
     "OA Business Document": "rayher_hr_payroll.business_documents.business_document_query",
     "Expense Claim": "rayher_hr_payroll.request_visibility.expense_claim_query",
@@ -93,6 +94,7 @@ permission_query_conditions = {
 }
 
 has_permission = {
+    "OA PO Fulfillment Record": "rayher_hr_payroll.procurement_permissions.fulfillment_has_permission",
     "OA Approval Request": "rayher_hr_payroll.oa_access.oa_request_has_permission",
     "OA Business Document": "rayher_hr_payroll.business_documents.business_document_has_permission",
     "Expense Claim": "rayher_hr_payroll.request_visibility.expense_claim_has_permission",

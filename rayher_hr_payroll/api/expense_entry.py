@@ -138,7 +138,12 @@ def _create_import(period, year, month, rows):
         "month": month,
         "items": rows,
     })
-    doc.insert(ignore_permissions=True)
+    try:
+        doc.insert(ignore_permissions=True)
+    except frappe.UniqueValidationError as exc:
+        if "active_period_key" not in str(exc):
+            raise
+        frappe.throw("本期间已被另一个操作保存，请刷新后在现有费用导入单上继续编辑。")
     return doc
 
 

@@ -285,7 +285,7 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
         prepared_row = {"project": project, "project_code": project_code, "project_name": project_name, "project_stage": stage, "stage_label": STAGE_LABELS.get(stage, STAGE_LABELS["unknown"]), "work_date": work_day.isoformat(), "activity_type": activity_type, "hours": float(hours), "description": description}
         if is_monthly:
             prepared_row["foreign_entity"] = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
-            prepared_row["occurrence_days"] = round(occurrence_days, 2)
+            prepared_row["occurrence_days"] = round(occurrence_days, 5)
         prepared.append(prepared_row)
 
     total_hours = sum(row["hours"] for row in prepared)

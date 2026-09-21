@@ -48,15 +48,8 @@ def validate_expense_import(doc: Any, method: str | None = None) -> None:
         throw=frappe.throw,
         translate=frappe._,
     )
-    # One import per period (sequential, ERPNext-style validate enforcement): reject a SECOND
-    # non-cancelled (draft OR submitted) import for the period. This stops the two-drafts state
-    # from being reached in normal use, so the concurrent double-submit race now requires a
-    # concurrent double-CREATE instead. The SPA keeps a single draft per period (and locks an
-    # allocated period), so this never blocks normal use; re-import after cancelling is allowed
-    # (cancelled = docstatus 2). RESIDUAL (narrow, no safe in-env fix): a true concurrent double-
-    # CREATE is still possible without a DB uniqueness guarantee -- a partial unique on submitted
-    # rows is unsupported in MariaDB, so fully closing it needs a period-registry/sentinel table
-    # plus a migration, tracked separately.
+    # Keep the friendly early error; the derived unique active_period_key on
+    # RD Expense Import also arbitrates concurrent inserts at the database.
     period = getattr(doc, 'period', None)
     if period:
         other = frappe.db.exists('RD Expense Import', {

@@ -69,3 +69,33 @@ def test_shared_child_protects_only_procurement_parents(monkeypatch):
     with pytest.raises(ValueError):
         guard.require_procurement_child_action(NS(parenttype="OA Purchase Order"))
     guard.require_procurement_child_action(NS(parenttype="OA Approval Request"))
+
+
+@pytest.mark.parametrize("received,inspection,records,blocked", [
+    (1, "已通过", [{"record_type": "验收"}], True),
+    (10, "待验收", [{"record_type": "到货"}], True),
+    (10, "已通过", [], True),
+    (10, "已通过", [{"record_type": "验收"}], False),
+])
+def test_inspection_installment_cannot_release_before_full_receipt(monkeypatch, received, inspection, records, blocked):
+    from rayher_hr_payroll.api import procurement_chain as pc
+    po = NS(name="PO1", status="到货验收中", contract_status="已生效", lines=[NS(quantity=10, received_quantity=received, inspection_status=inspection)])
+    row = NS(trigger_condition="验收通过")
+    monkeypatch.setattr(pc, "_fulfillment_records", lambda name: records)
+    monkeypatch.setattr(pc.frappe, "throw", fail)
+    if blocked:
+        with pytest.raises(ValueError): pc._require_po_payment_ready(po, row)
+    else:
+        pc._require_po_payment_ready(po, row)
+
+
+def test_direct_push_stops_before_draft_creation_for_partial_receipt(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain as pc
+    row = NS(name="PLAN1", status="待审批", payment_request="", trigger_condition="验收通过")
+    po = NS(name="PO1", status="到货验收中", contract_status="已生效", payment_plan=[row], lines=[NS(quantity=10, received_quantity=1, inspection_status="已通过")])
+    monkeypatch.setattr(pc, "_require_purchase", lambda: None)
+    monkeypatch.setattr(pc, "_fulfillment_records", lambda name: [{"record_type": "验收"}])
+    monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: po)
+    monkeypatch.setattr(pc.frappe, "throw", fail)
+    with pytest.raises(ValueError, match="全部到货"):
+        inspect.unwrap(pc.push_po_payment_request)("PO1", "PLAN1")
