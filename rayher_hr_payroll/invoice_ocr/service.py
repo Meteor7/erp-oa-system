@@ -172,6 +172,37 @@ def _lock_key(category: str, *parts) -> str:
     return f"invoice:{_site_scope()}:{safe_category}:{digest}"
 
 
+class _DatabaseTransactionLock:
+    """MariaDB connection-owned mutex, held through commit/rollback callbacks.
+
+    Unlike a Redis lease, connection loss releases it on the database server.
+    A long-running transaction cannot silently outlive its mutual exclusion.
+    Hash the site-qualified key to stay within the 64-byte MySQL name limit.
+    """
+
+    def __init__(self, key):
+        self.name = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        self.db = frappe.db
+        self.connection = None
+
+    def acquire(self, *, blocking=True, blocking_timeout=15):
+        rows = self.db.sql("SELECT GET_LOCK(%s, %s)", (self.name, blocking_timeout if blocking else 0))
+        if not rows or rows[0][0] != 1:
+            return False
+        self.connection = self.db._conn
+        return True
+
+    def release(self):
+        # Never reconnect merely to unlock, or release a replacement connection's
+        # lock. Closing the original connection already releases its named locks.
+        if self.connection is None or self.db._conn is not self.connection:
+            return
+        rows = self.db.sql("SELECT RELEASE_LOCK(%s)", (self.name,))
+        if not rows or rows[0][0] != 1:
+            raise RuntimeError("Transaction lock is no longer owned")
+        self.connection = None
+
+
 def _release_transaction_lock(key, state):
     if state.get("released"):
         return
@@ -184,7 +215,7 @@ def _release_transaction_lock(key, state):
         logger = getattr(frappe, "log_error", None)
         if callable(logger):
             try:
-                logger("Invoice OCR lock lease expired", "Invoice OCR lock release")
+                logger("Database transaction lock release failed", "Invoice OCR lock release")
             except Exception:
                 pass
 
@@ -200,7 +231,9 @@ def _transaction_lock(category: str, *parts, timeout=600, blocking_timeout=15):
     if key in held:
         yield held[key]["lock"]
         return
-    lock = frappe.cache().lock(key, timeout=timeout, blocking_timeout=blocking_timeout)
+    # timeout remains accepted for existing internal callers; transaction locks
+    # no longer expire while a live database transaction is still using them.
+    lock = _DatabaseTransactionLock(key)
     if not lock.acquire(blocking=True, blocking_timeout=blocking_timeout):
         _throw("发票正在被其他操作处理，请稍后重试。")
     state = {"lock": lock, "released": False}

@@ -120,7 +120,7 @@ def permissions_module(monkeypatch):
             "INV-UNLINKED": {"name": "INV-UNLINKED", "doctype": "OA Invoice Record", "owner": "uploader@example.com", "request": "", "batch": "BATCH-UNLINKED"},
         },
         steps={
-            ("REQ-1", 1): {"approvers": json.dumps(["Current Approver"], ensure_ascii=False)},
+            ("REQ-1", 1): {"approvers": json.dumps(["approver@example.com"], ensure_ascii=False)},
         },
     )
     frappe = types.ModuleType("frappe")
@@ -184,7 +184,7 @@ def test_if_owner_docperm_would_block_a_nonowner_before_hooks_can_authorize(perm
         ("uploader@example.com", "`tabOA Invoice Record`.owner = 'uploader@example.com'"),
         ("alice@example.com", "req.employee = 'EMP-A'"),
         ("creator@example.com", "req.owner = 'creator@example.com'"),
-        ("approver@example.com", "JSON_QUOTE('Current Approver')"),
+        ("approver@example.com", "JSON_QUOTE('approver@example.com')"),
     ],
 )
 def test_employee_record_relationships_survive_frappe_direct_and_query_composition(
@@ -442,7 +442,8 @@ def test_query_conditions_are_role_aware_and_escape_every_dynamic_identity(permi
     assert "req.department = '研发部'" not in sql
     manager_sql = permissions.invoice_record_query("manager@example.com")
     assert "req.department = '研发部'" not in manager_sql
-    assert {"alice@example.com", "EMP-A", "Alice"}.issubset(set(frappe.db.escaped))
+    assert {"alice@example.com", "EMP-A"}.issubset(set(frappe.db.escaped))
+    assert "Alice" not in frappe.db.escaped
 
 
 def test_query_condition_escapes_quote_in_user_and_does_not_emit_log_owner_clause(permissions_module):
@@ -499,3 +500,13 @@ def test_inactive_node_does_not_grant_invoice_access(permissions_module, status)
     frappe.db.requests["REQ-1"]["workflow_status"] = status
     assert not permissions.can_read_invoice(frappe.db.records["INV-1"], "approver@example.com")
     assert permissions.can_read_invoice(frappe.db.records["INV-1"], "alice@example.com")
+
+
+def test_spoofed_names_do_not_grant_invoice_or_view_log_access(permissions_module):
+    permissions, frappe = permissions_module
+    frappe.db.users["ordinary-rd@example.com"] = {"full_name": "approver@example.com"}
+    frappe.db.employees["EMP-R"]["employee_name"] = "approver@example.com"
+    assert permissions._identity("ordinary-rd@example.com")["actors"] == {"ordinary-rd@example.com"}
+    assert not permissions.can_read_invoice(frappe.db.records["INV-1"], "ordinary-rd@example.com")
+    assert not permissions.can_read_invoice({"doctype": "OA Invoice View Log", "invoice_record": "INV-1"}, "ordinary-rd@example.com")
+    assert "approver@example.com" not in permissions.invoice_record_query("ordinary-rd@example.com")

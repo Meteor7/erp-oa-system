@@ -3757,3 +3757,81 @@ def test_real_cashier_route_requires_classification(monkeypatch):
     assert caps["can_approve"] is False
     with pytest.raises(Exception, match="费用科目"):
         oa_entry._validate_finance_classification(doc, first)
+
+
+@pytest.mark.parametrize("spoof_field", ["full_name", "employee_name", "employee"])
+def test_editable_identity_cannot_impersonate_approver(monkeypatch, spoof_field):
+    victim = "finance@example.com"
+    monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(get_value=lambda *a, **k: victim), raising=False)
+    monkeypatch.setattr(oa_entry, "_employee_context", lambda user=None: {
+        "employee": victim if spoof_field == "employee" else "EMP-1",
+        "employee_name": victim if spoof_field == "employee_name" else "Alice",
+    })
+    step = Row(step_index=1, approvers=json.dumps([victim]), approved_by="[]")
+    doc = Row(workflow_status=oa_entry.STATUS_PENDING, current_step_index=1, steps=[step])
+    assert oa_entry._actor_names() == {"alice@example.com"}
+    assert oa_entry._matched_approvers(step) == []
+    assert oa_entry._can_act_on_current_step(doc) is False
+    assert oa_entry._can_act_on_current_step(doc, victim) is True
+
+
+@pytest.mark.parametrize("label", ["forged", "x" * 200])
+def test_draft_discards_client_derived_expense_item(label):
+    rows, total = oa_entry._normalize_expense_lines([{
+        "expense_account_level_1": "差旅费", "expense_account_level_2": "住宿费",
+        "expense_item": label, "category": label, "amount": 10,
+    }], keep_incomplete=True)
+    assert rows[0]["expense_item"] == "差旅费 / 住宿费"
+    assert rows[0]["category"] == "差旅费 / 住宿费"
+    assert total == 10
+
+
+def test_partial_draft_keeps_valid_parent_but_no_derived_label():
+    rows, _ = oa_entry._normalize_expense_lines([{
+        "expense_account_level_1": "差旅费", "expense_item": "forged", "amount": 0,
+    }], keep_incomplete=True)
+    assert rows[0]["expense_account_level_1"] == "差旅费"
+    assert rows[0]["expense_item"] == ""
+    with pytest.raises(ValidationError):
+        oa_entry._normalize_expense_lines([{
+            "expense_account_level_1": "fake", "amount": 0,
+        }], keep_incomplete=True)
+
+
+def test_submit_rewrites_legacy_draft_classification(monkeypatch):
+    environment = _install_request_environment(monkeypatch)
+    doc = RequestDocument(environment, {
+        "doctype": service.REQUEST_DOCTYPE, "name": "REQ-LEGACY-DRAFT",
+        "request_type": oa_entry.REQUEST_EXPENSE_PAYMENT, "workflow_status": oa_entry.STATUS_DRAFT,
+        "doc_type": "非固定资产", "employee": "EMP-1", "operation_log": "[]", "steps": [],
+        "expense_lines": [Row(issue_date="2026-09-21", amount=10,
+            expense_account_level_1="差旅费", expense_account_level_2="住宿费",
+            expense_item="forged", category="forged", project_name="项目甲")],
+    })
+    # These checks concern project/invoice fixtures, not the account normalization
+    # being exercised. Runtime integration separately covers the full submit API.
+    monkeypatch.setattr(oa_entry, "_validate_expense_project_groups", lambda doc: None)
+    monkeypatch.setattr(oa_entry, "_validate_invoice_handling_submission", lambda doc: None)
+    monkeypatch.setattr(oa_entry, "_route_context", lambda **kwargs: {
+        "department": "研发部", "supervisor": "", "asset_category": oa_entry.OTHER_ASSET,
+    })
+    oa_entry._submit_draft(doc)
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+    assert doc.expense_lines[0].expense_item == "差旅费 / 住宿费"
+    assert doc.expense_lines[0].category == "差旅费 / 住宿费"
+
+
+def test_route_resolution_does_not_use_self_editable_user_full_name(monkeypatch):
+    calls = []
+    def get_value(doctype, filters, field, **kwargs):
+        calls.append((doctype, filters, field))
+        if doctype == "User" and filters.get("full_name"):
+            return "attacker@example.com"
+        if doctype == "Employee" and filters.get("employee_name") == "Supervisor":
+            return "supervisor@example.com"
+        if doctype == "User" and filters.get("name") == "supervisor@example.com":
+            return "supervisor@example.com"
+        return None
+    monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(get_value=get_value), raising=False)
+    assert oa_entry._resolve_route_approver("Supervisor") == "supervisor@example.com"
+    assert not any(dt == "User" and "full_name" in filters for dt, filters, field in calls)

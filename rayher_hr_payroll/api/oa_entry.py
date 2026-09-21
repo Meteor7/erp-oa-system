@@ -1,3 +1,4 @@
+from rayher_hr_payroll.approval_identity import approval_actor_ids
 from rayher_hr_payroll.procurement_mutation_guard import procurement_action
 from rayher_hr_payroll.position_access import position_users, current_supervisors, executive_names
 import json
@@ -741,11 +742,6 @@ def _resolve_route_approver(value):
         return ""
     if "@" in candidate:
         return candidate.lower()
-    user = frappe.db.get_value(
-        "User", {"full_name": candidate, "enabled": 1}, "name"
-    )
-    if user:
-        return str(user)
     for filters in (
         {"employee_name": candidate, "status": "Active"},
         {"name": candidate, "status": "Active"},
@@ -1022,16 +1018,8 @@ def _serialize_consumption(doc):
 
 
 def _actor_names(user=None):
-    user = user or frappe.session.user
-    names = {user}
-    full_name = frappe.db.get_value("User", user, "full_name")
-    if full_name:
-        names.add(full_name)
-    ctx = _employee_context(user)
-    for key in ("employee", "employee_name"):
-        if ctx.get(key):
-            names.add(ctx[key])
-    return {str(name).strip() for name in names if str(name or "").strip()}
+    return approval_actor_ids(user if user is not None else frappe.session.user)
+
 
 
 def _is_oa_override_user(user=None):
@@ -1816,11 +1804,9 @@ def _normalize_expense_lines(expense_lines, fallback_amount=0, fallback_subject=
         project_name = _clean(row.get("project_name"))
         account_level_1 = _clean(row.get("expense_account_level_1"))
         account_level_2 = _clean(row.get("expense_account_level_2"))
-        expense_item = _clean(row.get("expense_item"))
-        if (account_level_1 or account_level_2) and not keep_incomplete:
-            account_level_1, account_level_2, expense_item = _expense_account_pair(
-                account_level_1, account_level_2, required=True
-            )
+        account_level_1, account_level_2, expense_item = _expense_account_pair(
+            account_level_1, account_level_2, allow_incomplete=keep_incomplete
+        )
         description = _clean(row.get("expense_description") or row.get("description") or row.get("desc"))
         issue_date = row.get("issue_date") or row.get("start_date") or row.get("expense_date")
         category = invoice_category or expense_item or _clean(row.get("category")) or project_name or REQUEST_EXPENSE_PAYMENT
@@ -2159,7 +2145,14 @@ def _submit_draft(doc):
         for line in doc.expense_lines:
             if not getattr(line, "issue_date", None) or _money(getattr(line, "amount", None)) <= 0:
                 frappe.throw("提交前必须填写每项费用的日期和正数金额。")
-            _expense_account_pair(getattr(line, "expense_account_level_1", None), getattr(line, "expense_account_level_2", None))
+            level_1, level_2, display = _expense_account_pair(
+                getattr(line, "expense_account_level_1", None),
+                getattr(line, "expense_account_level_2", None),
+            )
+            line.expense_account_level_1 = level_1
+            line.expense_account_level_2 = level_2
+            line.expense_item = display
+            line.category = _clean(getattr(line, "invoice_category", None)) or display or REQUEST_EXPENSE_PAYMENT
         _validate_expense_project_groups(doc)
         _validate_invoice_handling_submission(doc)
     elif doc.request_type == REQUEST_PROCUREMENT:
@@ -2475,11 +2468,15 @@ def _draft_source_rows(source_lines):
     return rows
 
 
-def _expense_account_pair(level_1, level_2, *, required=False):
+def _expense_account_pair(level_1, level_2, *, required=False, allow_incomplete=False):
     level_1 = _clean(level_1)
     level_2 = _clean(level_2)
     if not required and not level_1 and not level_2:
         return "", "", ""
+    if allow_incomplete and level_1 and not level_2:
+        options = {row["level_1"]: row["level_2"] for row in account_options()}
+        if options.get(level_1):
+            return level_1, "", ""
     try:
         return normalize_account_pair(level_1, level_2)
     except ValueError as error:

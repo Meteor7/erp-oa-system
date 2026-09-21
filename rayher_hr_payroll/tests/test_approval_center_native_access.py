@@ -225,3 +225,17 @@ def test_future_node_does_not_grant_read_access(access, monkeypatch):
     assert module.oa_request_has_permission(doc, "read", "alice@example.com") is None
     doc["workflow_status"] = "已撤回"
     assert module.oa_request_has_permission(doc, "read", "alice@example.com") is False
+
+
+def test_profile_name_cannot_inject_list_or_detail_approver(access):
+    module, frappe = access
+    victim = "victim@example.com"
+    frappe.db.get_value = lambda *a, **k: victim
+    frappe.get_all = lambda *a, **k: [{"name": "EMP-A", "employee_name": victim}]
+    actors = module._actor_names("alice@example.com")
+    assert actors == {"alice@example.com"}
+    assert victim not in module.oa_request_query("alice@example.com")
+    doc = {"request_type": module.REQUEST_EXPENSE_PAYMENT, "owner": "bob@example.com",
+           "employee": "EMP-B", "workflow_status": "待审批", "current_step_index": 1,
+           "steps": [{"step_index": 1, "approvers": '["victim@example.com"]'}]}
+    assert module.oa_request_has_permission(doc, "read", "alice@example.com") is False

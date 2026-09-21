@@ -83,3 +83,21 @@ def test_partial_closed_po_cannot_close_whole_original_material(modules, po_qty,
     db.execute("INSERT INTO `tabOA Price Approval Line` VALUES ('PRICE-1','OA','LINE',?)", (price_qty,))
     db.execute("INSERT INTO `tabOA Price Approval` VALUES ('PRICE-1','已通过')")
     assert db.execute("SELECT " + stage_sql().replace("%%", "%") + " " + FROM_SQL).fetchone()[0] == expected
+
+
+def test_material_inspection_uses_its_own_batches_not_whole_oa(modules, monkeypatch):
+    _, progress, _ = modules
+    class Record(types.SimpleNamespace):
+        def __getattr__(self, key):
+            return ""
+    board = Record(name="BOARD-1", source_request="OA-1", source_line="LINE-1", quantity=10)
+    source = Record(name="OA-1", inspection_status="验收通过", workflow_status="已完成")
+    metrics = dict(pr_quantity=10, pr_remaining_quantity=0, price_approval_quantity=10,
+                   po_quantity=10, received_quantity=4, contract_delivery_date="",
+                   inspection_status="待验收", paid_amount=0, po_total_amount=100, payment_status="未付款")
+    monkeypatch.setattr(progress, "_payment_summary", lambda doc: ("未付款", []))
+    monkeypatch.setattr(progress, "_status_detail", lambda *args: "")
+    monkeypatch.setattr(progress, "_source_approval_trail", lambda *args: [])
+    row = progress._serialize(board, source, metrics, [], {})
+    assert row["inspection_status"] == "待验收"
+    assert row["received_quantity"] == 4

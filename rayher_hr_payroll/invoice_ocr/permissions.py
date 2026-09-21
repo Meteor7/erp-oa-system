@@ -4,6 +4,8 @@ import json
 
 import frappe
 
+from rayher_hr_payroll.approval_identity import approval_actor_ids
+
 from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 
@@ -40,13 +42,7 @@ def _identity(user, *, current=False):
         **_locking_kwargs(current),
     )
     employee = dict(row) if row else {}
-    full_name = frappe.db.get_value(
-        "User", user, "full_name", **_locking_kwargs(current)
-    )
-    actors = {user}
-    for value in (employee.get("name"), employee.get("employee_name"), full_name):
-        if str(value or "").strip():
-            actors.add(str(value).strip())
+    actors = approval_actor_ids(user)
     return {
         "employee": employee.get("name"),
         "employee_name": employee.get("employee_name"),

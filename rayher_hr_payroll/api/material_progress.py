@@ -338,7 +338,6 @@ def _serialize(board, source=None, metrics=None, approval_steps=None, po_statuse
         "progress_status": _derived_status(board, source, po_statuses, metrics),
         "business_status": _clean(getattr(source, "business_status", None)),
         "arrival_status": _clean(getattr(source, "arrival_status", None)),
-        "inspection_status": _clean(getattr(source, "inspection_status", None)),
         "workflow_status": _clean(getattr(source, "workflow_status", None)),
         "payment_status": payment_status,
         "payment_requests": payments,

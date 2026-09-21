@@ -262,6 +262,7 @@ class Environment:
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     environment = Environment(tmp_path)
+    monkeypatch.setattr(service, "_DatabaseTransactionLock", lambda key: LeaseLock(environment, key, {"timeout": 10**12}))
     frappe_stub_module.session.user = "alice@example.com"
     frappe_stub_module.db = environment.db
     frappe_stub_module.get_doc = environment.get_doc
@@ -1321,15 +1322,16 @@ def test_transaction_lock_is_site_prefixed_and_released_only_after_commit(env):
     assert key not in env.active_locks
 
 
-def test_transaction_lock_releases_on_rollback_and_expired_lease_can_be_recovered(env):
+def test_transaction_lock_does_not_expire_before_rollback(env):
     frappe_stub_module.local.site = "site-one"
     with service._transaction_lock("record", "INV-1", timeout=600):
         key = service._lock_key("record", "INV-1")
         assert key in env.active_locks
     env.clock = 601
     second = env.cache().lock(key, timeout=600, blocking_timeout=1)
-    assert second.acquire(blocking=True, blocking_timeout=1) is True
+    assert second.acquire(blocking=True, blocking_timeout=1) is False
     env.db.rollback()
+    assert second.acquire(blocking=True, blocking_timeout=1) is True
     assert service._lock_key("record", "INV-1") not in getattr(frappe_stub_module.local, "invoice_transaction_locks", {})
 
 
@@ -2666,7 +2668,6 @@ def test_shared_request_preview_and_edit_use_one_current_permission_lock_order(e
     expected = [
         service.REQUEST_DOCTYPE,
         "Employee",
-        "User",
         "OA Approval Step",
     ]
     assert (preview_order, edit_order) == (expected, expected)

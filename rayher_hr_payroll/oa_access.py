@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from rayher_hr_payroll.approval_identity import approval_actor_ids
+
 import frappe
 
 from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES, REQUEST_OVERTIME, REQUEST_COMP_TIME
@@ -73,17 +75,8 @@ def _active_identity(user):
 
 
 def _actor_names(user, identity=None):
-    identity = identity if identity is not None else _active_identity(user)
-    names = {str(user or "").strip()}
-    full_name = frappe.db.get_value("User", user, "full_name")
-    if full_name:
-        names.add(str(full_name).strip())
-    if identity:
-        names.update(
-            str(identity.get(key) or "").strip()
-            for key in ("employee", "employee_name")
-        )
-    return {name for name in names if name}
+    return approval_actor_ids(user)
+
 
 
 def _sql_type_scope(allowed_types):
