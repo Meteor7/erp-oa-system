@@ -17,6 +17,9 @@ REQUEST_ROUTES = {
     "购买申请": "/planck-semicon/approval/direct-purchase",
     "采购付款": "/planck-semicon/approval/procurement-payment",
     "费用付款申请": "/planck-semicon/approval/reimbursement",
+    "出差申请": "/planck-semicon/approval/travel",
+    "报销单": "/planck-semicon/approval/claim",
+    "付款单": "/planck-semicon/approval/payment",
 }
 
 

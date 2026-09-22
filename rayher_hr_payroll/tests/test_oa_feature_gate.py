@@ -48,6 +48,9 @@ def test_switches_are_independent_and_reversible(gate):
         "procurement_application": True,
         "direct_purchase_application": True,
         "procurement_payment": True,
+        "travel_application": False,
+        "reimbursement_request": False,
+        "payment_request": False,
     }
 
 
@@ -70,7 +73,13 @@ def test_denial_query_and_document_permissions(gate):
 
 def test_open_switch_defers_to_existing_permissions(gate):
     module, frappe = gate
-    assert module.oa_request_query("employee@example.com") == ""
+    query = module.oa_request_query("employee@example.com")
+    # Existing request types stay open; only the new opt-in types are filtered out.
+    for request_type in (module.REQUEST_LEAVE, module.REQUEST_EXPENSE_PAYMENT, module.REQUEST_PROCUREMENT,
+                         module.REQUEST_DIRECT_PURCHASE, module.REQUEST_PROCUREMENT_PAYMENT):
+        assert request_type in query
+    for request_type in module.OPT_IN_REQUEST_TYPES:
+        assert request_type not in query
     assert module.oa_request_has_permission(
         {"request_type": module.REQUEST_LEAVE}, user="employee@example.com"
     ) is None

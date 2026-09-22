@@ -4,8 +4,11 @@ from rayher_hr_payroll.identity_accounts import account_user
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_LEAVE,
+    REQUEST_PAYMENT,
     REQUEST_PROCUREMENT,
     REQUEST_PROCUREMENT_PAYMENT,
+    REQUEST_REIMBURSEMENT,
+    REQUEST_TRAVEL,
 )
 
 REQUEST_EXPENSE_PAYMENT = "费用付款申请"
@@ -493,6 +496,28 @@ def build_route(
             applicant_user=applicant_user,
             upper_supervisor=upper_supervisor,
             upper_supervisor_user=upper_supervisor_user,
+            roles=roles,
+        )
+    if request_type == REQUEST_TRAVEL:
+        # 出差申请与购买申请的"其他购买"路线相同：直属主管 → 副总经理。
+        return build_direct_purchase_route(
+            purchase_method="其他购买",
+            supervisor=supervisor,
+            supervisor_user=supervisor_user,
+            supervisor_decision=supervisor_decision,
+            applicant_user=applicant_user,
+            upper_supervisor=upper_supervisor,
+            upper_supervisor_user=upper_supervisor_user,
+            roles=roles,
+        )
+    if request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+        # 报销单、付款单沿用现有费用付款申请的审批路线。
+        return build_expense_payment_route(
+            department=department,
+            supervisor=supervisor,
+            supervisor_user=supervisor_user,
+            supervisor_decision=supervisor_decision,
+            asset_category=asset_category,
             roles=roles,
         )
     if request_type == REQUEST_PROCUREMENT_PAYMENT:

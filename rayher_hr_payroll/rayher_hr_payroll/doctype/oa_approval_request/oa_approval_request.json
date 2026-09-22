@@ -81,6 +81,10 @@
     "paid_on",
     "expense_lines",
     "reason",
+    "travel_destination",
+    "travel_start_date",
+    "travel_end_date",
+    "travel_days",
     "operation_log",
     "current_step_index",
     "current_step_label",
@@ -128,7 +132,7 @@
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Request Type",
-      "options": "请假申请\n费用付款申请\n采购申请\n购买申请\n采购付款\n加班申请\n调休申请",
+      "options": "请假申请\n费用付款申请\n采购申请\n购买申请\n采购付款\n加班申请\n调休申请\n出差申请\n报销单\n付款单",
       "reqd": 1
     },
     {
@@ -578,6 +582,31 @@
       "fieldname": "reason",
       "fieldtype": "Small Text",
       "label": "Reason"
+    },
+    {
+      "fieldname": "travel_destination",
+      "fieldtype": "Data",
+      "label": "出差地点",
+      "depends_on": "eval:doc.request_type=='出差申请'"
+    },
+    {
+      "fieldname": "travel_start_date",
+      "fieldtype": "Date",
+      "label": "出发日期",
+      "depends_on": "eval:doc.request_type=='出差申请'"
+    },
+    {
+      "fieldname": "travel_end_date",
+      "fieldtype": "Date",
+      "label": "返回日期",
+      "depends_on": "eval:doc.request_type=='出差申请'"
+    },
+    {
+      "fieldname": "travel_days",
+      "fieldtype": "Int",
+      "label": "出差天数",
+      "read_only": 1,
+      "depends_on": "eval:doc.request_type=='出差申请'"
     },
     {
       "fieldname": "operation_log",

@@ -60,6 +60,7 @@ SERVER_OWNED_FIELDS = {
     "inspection_failure_reason",
     "exception_direction",
     "followup_status",
+    "travel_days",
 }
 DRAFT_ONLY_BUSINESS_FIELDS = {
     "from_date", "to_date", "leave_type",
@@ -71,6 +72,7 @@ DRAFT_ONLY_BUSINESS_FIELDS = {
     "expected_arrival_date", "prepayment_risk_note", "source_request",
     "business_lines",
     "direct_purchase_lines",
+    "travel_destination", "travel_start_date", "travel_end_date",
 }
 
 NEW_DOCUMENT_ALLOWED_VALUES = {

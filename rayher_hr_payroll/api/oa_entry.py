@@ -64,7 +64,9 @@ from rayher_hr_payroll.oa_organization import (
     resolve_top_executive,
 )
 
-REQUEST_TYPES = [REQUEST_OVERTIME, REQUEST_COMP_TIME, REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT]
+from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_TRAVEL  # noqa: E402
+
+REQUEST_TYPES = [REQUEST_OVERTIME, REQUEST_COMP_TIME, REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT, REQUEST_TRAVEL, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT]
 ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, PRODUCTION_ASSET, OTHER_ASSET]
 EXPENSE_FIXED_CATEGORY_BY_ASSET = {
     ADMIN_ASSET: "办公家具、工具及器具",
@@ -138,6 +140,18 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
         )
     elif request_type == REQUEST_PROCUREMENT_PAYMENT:
         keys = ["vice_manager", "finance_accountant", "finance_manager", "finance_auditor", "general_manager"]
+    elif request_type == REQUEST_TRAVEL:
+        keys = ["vice_manager", "general_manager"]
+    elif request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+        keys = ["finance_auditor", "finance_manager", "general_manager"]
+        if "财务" not in _clean(department):
+            keys.append("vice_manager")
+        if asset_category == ADMIN_ASSET:
+            keys.append("hr_manager")
+        elif asset_category == IT_ASSET:
+            keys.append("it_asset_owner")
+        elif asset_category == PRODUCTION_ASSET:
+            keys.append("production_asset_owner")
     else:
         keys = []
     try:
@@ -1623,6 +1637,10 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "project_groups": _group_expense_sources(expense_lines),
         "steps": [_serialize_doc_step(row) for row in doc.steps],
         "pmc_change_version": getattr(doc, "pmc_change_version", None) or 0,
+        "travel_destination": getattr(doc, "travel_destination", None) or "",
+        "travel_start_date": getattr(doc, "travel_start_date", None),
+        "travel_end_date": getattr(doc, "travel_end_date", None),
+        "travel_days": getattr(doc, "travel_days", None) or 0,
         "creation": doc.creation,
         "modified": doc.modified,
     }
@@ -2188,6 +2206,16 @@ def _submit_draft(doc):
         else:
             doc.prepayment_percentage = 0
             doc.has_balance_payment = 1 if Decimal(str(doc.amount or 0)) < balance["available_amount"] else 0
+    if doc.request_type == REQUEST_TRAVEL:
+        from rayher_hr_payroll.travel_requests import TravelRequestError, normalize_travel
+        try:
+            travel = normalize_travel({
+                field: getattr(doc, field, None)
+                for field in ("subject", "travel_destination", "travel_start_date", "travel_end_date", "reason", "project")
+            })
+        except TravelRequestError as exc:
+            frappe.throw(str(exc))
+        doc.travel_days = travel["travel_days"]
     ctx = _route_context(
         department=getattr(doc, "department", None),
         supervisor=getattr(doc, "supervisor", None),

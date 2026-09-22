@@ -6,9 +6,13 @@ from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES, REQUEST_OVER
 
 from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT, REQUEST_LEAVE
 from rayher_hr_payroll.oa_document_types import (
+    OPT_IN_REQUEST_TYPES,
     REQUEST_DIRECT_PURCHASE,
+    REQUEST_PAYMENT,
     REQUEST_PROCUREMENT,
     REQUEST_PROCUREMENT_PAYMENT,
+    REQUEST_REIMBURSEMENT,
+    REQUEST_TRAVEL,
 )
 
 ADMIN_USERS = {"Administrator", "admin@staff.example.invalid"}
@@ -21,6 +25,11 @@ FEATURE_CONFIG_BY_REQUEST_TYPE = {
     REQUEST_PROCUREMENT: "procurement_application_admin_only",
     REQUEST_DIRECT_PURCHASE: "direct_purchase_application_admin_only",
     REQUEST_PROCUREMENT_PAYMENT: "procurement_payment_admin_only",
+    # Opt-in types: closed to everyone but the admin accounts until the site
+    # config key is set to a truthy value.
+    REQUEST_TRAVEL: "travel_application_enabled",
+    REQUEST_REIMBURSEMENT: "reimbursement_request_enabled",
+    REQUEST_PAYMENT: "payment_request_enabled",
 }
 BOOT_FLAG_BY_REQUEST_TYPE = {
     REQUEST_OVERTIME: "overtime_approval",
@@ -30,6 +39,9 @@ BOOT_FLAG_BY_REQUEST_TYPE = {
     REQUEST_PROCUREMENT: "procurement_application",
     REQUEST_DIRECT_PURCHASE: "direct_purchase_application",
     REQUEST_PROCUREMENT_PAYMENT: "procurement_payment",
+    REQUEST_TRAVEL: "travel_application",
+    REQUEST_REIMBURSEMENT: "reimbursement_request",
+    REQUEST_PAYMENT: "payment_request",
 }
 
 
@@ -50,6 +62,8 @@ def is_admin_only(request_type):
     conf = getattr(frappe, "conf", {}) or {}
     key = _feature_key(request_type)
     value = conf.get(key, 0) if hasattr(conf, "get") else getattr(conf, key, 0)
+    if request_type in OPT_IN_REQUEST_TYPES:
+        return not _truthy(value)
     return _truthy(value)
 
 
