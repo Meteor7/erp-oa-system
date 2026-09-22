@@ -149,6 +149,18 @@ class FrappeLedgerStore:
         return frappe.utils.now_datetime()
 
 
+class WorkflowLedgerStore(FrappeLedgerStore):
+    """Store for release / pay / reverse calls made by the approval workflow.
+
+    修复（2026-09-22）：这些操作由当前节点的审批人或出纳发起，调用方已校验其有权处理
+    该节点；再按会话用户校验"能否使用来源申请"会把直属主管的驳回拦下
+    （"无权使用该来源申请"），额度也就无法释放。
+    """
+
+    def can_use_source(self, source):
+        return True
+
+
 def _store(store):
     return store or FrappeLedgerStore()
 

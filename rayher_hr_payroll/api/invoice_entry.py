@@ -31,11 +31,12 @@ def create_batch():
 
 
 @frappe.whitelist(methods=["POST"])
-def attach_batch(batch, request):
+def attach_batch(batch, request, difference_note=None):
     _authenticated()
     return service.attach_batch_to_existing_request(
         _bounded(batch, "批次标识", 140),
         _bounded(request, "报销单标识", 140),
+        _bounded(difference_note, "差异说明", 1000, required=False),
     )
 
 

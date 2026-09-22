@@ -28,14 +28,8 @@ PAYMENT_PERSONAL = "支付个人"
 PAYMENT_CORPORATE = "对公支付"
 
 
-class _TrustedLedgerStore(approval_amount_ledger.FrappeLedgerStore):
-    """本模块在每次记账前已校验申请归属和当前操作人，台账不再按会话用户重复判断。
-
-    否则直属主管驳回、出纳付款这类非申请人操作会被台账的"无权使用来源申请"拦下。
-    """
-
-    def can_use_source(self, source):
-        return True
+# 本模块在每次记账前已校验申请归属和当前操作人。
+_TrustedLedgerStore = approval_amount_ledger.WorkflowLedgerStore
 
 
 def _ledger(operation, *args, **kwargs):

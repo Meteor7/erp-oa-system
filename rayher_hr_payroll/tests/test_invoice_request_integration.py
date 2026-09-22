@@ -312,6 +312,8 @@ def _attach_environment(monkeypatch, *, batch_owner="alice@example.com", batch_r
         return docs[(doctype, name)]
 
     def record_rows(doctype, *, filters=None, fields=None, **_kwargs):
+        if doctype == service.RECORD_DOCTYPE and filters == {"request": request.name}:
+            return [record for record in records.values() if record.request == request.name]
         if doctype == service.RECORD_DOCTYPE:
             assert filters == {"batch": "BATCH-1"}
             return [
@@ -384,6 +386,7 @@ def test_paid_deferred_request_accepts_confirmed_supplement_batch(monkeypatch):
     request.invoice_handling_mode = oa_entry.INVOICE_MODE_PENDING
     request.invoice_followup_status = oa_entry.INVOICE_FOLLOWUP_PENDING
     request.operation_log = "[]"
+    request.amount = Decimal("200.00")
     monkeypatch.setattr(service.invoice_permissions, "can_edit_request", lambda *_args, **_kwargs: True)
 
     result = service.attach_batch_to_request(batch.name, request)
@@ -395,6 +398,24 @@ def test_paid_deferred_request_accepts_confirmed_supplement_batch(monkeypatch):
     assert {record.request for record in records.values()} == {request.name}
     assert lock_order[:2] == [("request", request.name), ("batch", batch.name)]
     assert request in saves
+
+
+def test_supplement_with_an_amount_gap_needs_a_difference_note(monkeypatch):
+    batch, request, records, _lock_order, saves = _attach_environment(monkeypatch)
+    request.workflow_status = oa_entry.STATUS_PAID
+    request.invoice_handling_mode = oa_entry.INVOICE_MODE_PENDING
+    request.invoice_followup_status = oa_entry.INVOICE_FOLLOWUP_PENDING
+    request.operation_log = "[]"
+    request.amount = Decimal("199.97")
+    monkeypatch.setattr(service.invoice_permissions, "can_edit_request", lambda *_args, **_kwargs: True)
+
+    with pytest.raises(ValidationError, match="相差超过 0.02 元"):
+        service.attach_batch_to_request(batch.name, request)
+    assert not batch.request and saves == []
+
+    service.attach_batch_to_request(batch.name, request, "另一张发票下月开具")
+    assert request.invoice_difference_note == "另一张发票下月开具"
+    assert "另一张发票下月开具" in json.loads(request.operation_log)[-1]["note"]
 
 
 def test_paid_deferred_request_rejects_unconfirmed_supplement_batch(monkeypatch):

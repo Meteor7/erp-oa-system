@@ -262,8 +262,9 @@ export function withdrawInvoicePush(invoiceNames, note = '', options) {
   }, options);
 }
 
-export function attachInvoiceBatch(batch, request, options) {
-  return invoiceApi('attach_batch', { batch, request }, options);
+export function attachInvoiceBatch(batch, request, options, differenceNote = '') {
+  const note = String(differenceNote || '').trim();
+  return invoiceApi('attach_batch', note ? { batch, request, difference_note: note } : { batch, request }, options);
 }
 
 export async function uploadInvoiceFile(file, batch, { signal } = {}) {

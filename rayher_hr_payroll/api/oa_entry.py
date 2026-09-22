@@ -2084,7 +2084,12 @@ def _validate_invoice_handling_submission(doc):
             frappe.throw(frappe._("已上传发票时请选择已有发票。"))
         if not reason:
             frappe.throw(frappe._("暂未取得发票时必须填写原因。"))
-        expected = _report_date(getattr(doc, "expected_invoice_date", None), "预计取得发票日期")
+        expected_value = getattr(doc, "expected_invoice_date", None)
+        # 修复（2026-09-22）：草稿从数据库读出的是日期对象，原来只接受字符串，
+        # 先保存再提交的"暂未取得发票"草稿会报"预计取得发票日期格式无效"。
+        if isinstance(expected_value, date):
+            expected_value = expected_value.isoformat()
+        expected = _report_date(expected_value, "预计取得发票日期")
         if not expected:
             frappe.throw(frappe._("暂未取得发票时必须填写预计取得发票日期。"))
         doc.expected_invoice_date = expected
@@ -2931,34 +2936,59 @@ def _release_expense_payment_reservation(doc, note=""):
     if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
         return None
     revision = _procurement_payment_revision(doc)
+    # 修复（2026-09-22）：驳回人可能是直属主管等非申请人，改用工作流台账存储，见 WorkflowLedgerStore。
     return _run_approval_amount_operation(
         approval_amount_ledger.release_all_reserved,
         _clean(doc.source_request), doc.name,
         "expense-release:{0}:{1}".format(doc.name, revision),
         note=note or "购买申请付款退回释放占用",
+        store=approval_amount_ledger.WorkflowLedgerStore(),
     )
+
+
+def _expense_payment_round(doc):
+    """第几次付款：每撤回一次付款加一。"""
+    return 1 + sum(1 for event in _operation_events(doc) if event.get("action") == "撤回付款")
+
+
+def _round_key(base, round_no):
+    # 第一次付款沿用原来的幂等键，已有台账记录不受影响。
+    return base if round_no == 1 else "{0}:{1}".format(base, round_no)
 
 
 def _mark_expense_payment_paid(doc):
     if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
         return None
+    # 修复（2026-09-22）：原来的键固定为 expense-pay:<单号>，财务撤回付款后再付款会被当成
+    # 重复请求直接跳过，单据显示已付款但台账没有记账。现在键里带上付款轮次。
     return _run_approval_amount_operation(
         approval_amount_ledger.mark_paid,
         _clean(doc.source_request), doc.name,
-        "expense-pay:{0}".format(doc.name),
+        _round_key("expense-pay:{0}".format(doc.name), _expense_payment_round(doc)),
         note="购买申请付款确认付款",
+        store=approval_amount_ledger.WorkflowLedgerStore(),
     )
 
 
 def _reverse_expense_payment_paid(doc, note=""):
     if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT or not _clean(getattr(doc, "source_request", None)):
         return None
-    return _run_approval_amount_operation(
+    round_no = _expense_payment_round(doc)
+    result = _run_approval_amount_operation(
         approval_amount_ledger.reverse,
         _clean(doc.source_request), doc.name, _money(doc.amount),
-        "expense-reverse:{0}".format(doc.name),
+        _round_key("expense-reverse:{0}".format(doc.name), round_no),
         note=note or "撤回购买申请付款",
+        store=approval_amount_ledger.WorkflowLedgerStore(),
     )
+    # 修复（2026-09-22）：冲回已付后重新占用这笔金额，否则再次付款时台账没有可支付的占用。
+    return _run_approval_amount_operation(
+        approval_amount_ledger.reserve,
+        _clean(doc.source_request), doc.name,
+        "expense-rereserve:{0}:{1}".format(doc.name, round_no),
+        note="撤回付款后重新占用",
+        store=approval_amount_ledger.WorkflowLedgerStore(),
+    ) or result
 
 
 def _set_procurement_payment_paid_state(doc):
@@ -4810,6 +4840,8 @@ def withdraw_invoice_push(invoice_names, note=None):
                 frappe.throw(frappe._("\u5df2\u4ed8\u6b3e\u5355\u636e\u5fc5\u987b\u5148\u7531\u8d22\u52a1\u64a4\u56de\u4ed8\u6b3e\u3002"))
             if doc.workflow_status != STATUS_DRAFT:
                 _reset_request_to_draft(doc, note)
+                # 修复（2026-09-22）：退回草稿时同时释放对购买申请额度的占用，原来会一直占着。
+                _release_expense_payment_reservation(doc, note)
             selected = [record for record in records if _clean(record.request) == request_name]
             selected_keys = {_clean(record.expense_line_key) for record in selected}
             remaining = [

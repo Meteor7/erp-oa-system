@@ -1327,7 +1327,19 @@ def _append_request_invoice_event(request_doc, action, note=""):
     _set(request_doc, "operation_log", json.dumps(events[-OPERATION_LOG_LIMIT:], ensure_ascii=False, default=str))
 
 
-def attach_batch_to_request(batch_name, request_doc):
+def _supplement_invoice_total(request_name, batch_records):
+    names = {str(_get(record, "name") or "") for record in batch_records}
+    existing = [
+        row for row in _request_invoice_records(request_name, current=True)
+        if _get(row, "recognition_status") != "已排除" and str(_get(row, "name") or "") not in names
+    ]
+    total = Decimal("0.00")
+    for record in [*existing, *batch_records]:
+        total += _decimal_money(_record_money(record, "total_amount")) or Decimal("0.00")
+    return total
+
+
+def attach_batch_to_request(batch_name, request_doc, difference_note=None):
     batch_name = str(batch_name or "").strip()
     request_name = _request_name(request_doc)
     if not batch_name:
@@ -1385,6 +1397,13 @@ def attach_batch_to_request(batch_name, request_doc):
             blockers = submission_blockers(included, "")
             if blockers:
                 _throw("；".join(blockers))
+            # 修复（2026-09-22）：补录发票原来不核对金额。现在发票合计（含之前已补录的）与付款金额
+            # 相差超过 0.02 元时必须填写差异说明，说明记入单据和操作记录。
+            note = _bounded_note(difference_note, 1000)
+            invoice_total = _supplement_invoice_total(request_name, included)
+            amount = _decimal_money(_get(current_request, "amount")) or Decimal("0.00")
+            if abs(amount - invoice_total) > Decimal("0.02") and not note:
+                _throw(f"补录发票合计 {invoice_total} 元与付款金额 {amount} 元相差超过 0.02 元，请填写差异说明。")
         for record in records:
             _set(record, "request", request_name)
             _save(record)
@@ -1393,15 +1412,17 @@ def attach_batch_to_request(batch_name, request_doc):
         _apply_request_invoice_summary(current_request, save=False, current=True)
         if supplementing:
             _set(current_request, "invoice_followup_status", INVOICE_FOLLOWUP_RECEIVED)
-            _append_request_invoice_event(current_request, "补录发票", batch_name)
+            if note:
+                _set(current_request, "invoice_difference_note", note)
+            _append_request_invoice_event(current_request, "补录发票", batch_name + ("；差异说明：" + note if note else ""))
         _save(current_request)
         return current_request
 
 
 
-def attach_batch_to_existing_request(batch_name, request_name):
+def attach_batch_to_existing_request(batch_name, request_name, difference_note=None):
     request_name = str(request_name or "").strip()
-    attach_batch_to_request(batch_name, {"name": request_name})
+    attach_batch_to_request(batch_name, {"name": request_name}, difference_note)
     return {"name": str(batch_name or "").strip(), "request": request_name}
 
 

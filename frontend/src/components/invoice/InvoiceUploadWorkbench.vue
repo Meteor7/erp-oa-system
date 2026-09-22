@@ -407,7 +407,15 @@ async function supplementTargetRequest() {
   busy.value = true;
   errorMessage.value = '';
   try {
-    await attachInvoiceBatch(batches[0], props.targetRequest.name);
+    try {
+      await attachInvoiceBatch(batches[0], props.targetRequest.name);
+    } catch (error) {
+      // 发票合计与付款金额相差超过 0.02 元时，后台要求填写差异说明后再补录。
+      if (!String(error?.message || '').includes('差异说明')) throw error;
+      const note = (window.prompt(`${cleanError(error, '补录发票失败')}\n请填写差异说明：`) || '').trim();
+      if (!note) throw error;
+      await attachInvoiceBatch(batches[0], props.targetRequest.name, undefined, note);
+    }
     checkedNames.value = [];
     message.value = `发票已补录到 ${props.targetRequest.name}，当前状态为已收票。`;
     emit('supplemented', props.targetRequest.name);
