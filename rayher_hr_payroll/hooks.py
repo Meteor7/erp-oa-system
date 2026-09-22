@@ -111,6 +111,7 @@ scheduler_events = {
     "daily": [
         "rayher_hr_payroll.maintenance.invoice_ocr_cleanup.cleanup_orphan_invoice_batches",
         "rayher_hr_payroll.organization_master_data.sync_effective_leaver_statuses",
+        "rayher_hr_payroll.payment_invoice_reminders.send_payment_invoice_reminders",
     ],
 }
 

@@ -16,6 +16,7 @@ from frappe.utils import now_datetime
 
 from rayher_hr_payroll import approval_amount_ledger
 from rayher_hr_payroll import expense_claims as rules
+from rayher_hr_payroll import invoice_folder
 from rayher_hr_payroll.api import oa_entry
 from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access
@@ -620,6 +621,11 @@ def capabilities(doc):
             doc.request_type == REQUEST_PAYMENT and paid and business == rules.CLAIM_WAIT_VERIFY and finance
         ),
         "can_withdraw_claim_payment": bool(paid and finance),
+        "invoice_due_state": (
+            invoice_folder.due_state(doc.expected_invoice_date, date.today())
+            if doc.request_type == REQUEST_PAYMENT and followup == rules.FOLLOWUP_PENDING
+            else ""
+        ),
     }
 
 

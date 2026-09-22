@@ -20,5 +20,11 @@ def test_authenticated_guard_requires_expense_feature(monkeypatch):
 
     seen = []
     monkeypatch.setattr(module, "require_request_type_access", seen.append)
+    # Open when any invoice-using type (费用付款申请 / 报销单 / 付款单) is open.
+    monkeypatch.setattr(module.invoice_permissions, "invoice_feature_open", lambda user=None: True)
+    module._authenticated()
+    assert seen == []
+    # All closed: fall back to the standard "not open" error of the legacy type.
+    monkeypatch.setattr(module.invoice_permissions, "invoice_feature_open", lambda user=None: False)
     module._authenticated()
     assert seen == [module.REQUEST_EXPENSE_PAYMENT]
