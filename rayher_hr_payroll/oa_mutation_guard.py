@@ -61,6 +61,7 @@ SERVER_OWNED_FIELDS = {
     "exception_direction",
     "followup_status",
     "travel_days",
+    "invoice_difference_note",
 }
 DRAFT_ONLY_BUSINESS_FIELDS = {
     "from_date", "to_date", "leave_type",

@@ -10,6 +10,7 @@
     "source_invoice",
     "invoice_category",
     "project_name",
+    "claim_project",
     "expense_account_level_1",
     "expense_account_level_2",
     "expense_item",
@@ -54,6 +55,12 @@
       "fieldname": "project_name",
       "fieldtype": "Small Text",
       "label": "Project Name"
+    },
+    {
+      "fieldname": "claim_project",
+      "fieldtype": "Link",
+      "options": "Project",
+      "label": "所属项目"
     },
     {
       "fieldname": "expense_account_level_1",

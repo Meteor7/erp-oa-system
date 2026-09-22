@@ -70,6 +70,7 @@
     "invoice_followup_status",
     "expected_invoice_date",
     "no_invoice_reason",
+    "invoice_difference_note",
     "payment_section",
     "payment_type",
     "payment_method",
@@ -426,7 +427,7 @@
       "fieldname": "payment_source_kind",
       "fieldtype": "Select",
       "label": "Payment Source Kind",
-      "options": "\n关联 PO\n关联采购申请\n关联购买申请\n无事前申请"
+      "options": "\n关联 PO\n关联采购申请\n关联购买申请\n无事前申请\n关联出差申请"
     },
     {
       "fieldname": "source_request",
@@ -477,7 +478,7 @@
       "fieldname": "source_type",
       "fieldtype": "Select",
       "label": "Source Type",
-      "options": "手工新建\n消费明细下推\n发票下推\nPO付款下推",
+      "options": "手工新建\n消费明细下推\n发票下推\nPO付款下推\n申请下推",
       "default": "手工新建",
       "read_only": 1
     },
@@ -523,6 +524,13 @@
       "fieldname": "no_invoice_reason",
       "fieldtype": "Small Text",
       "label": "No Invoice Reason"
+    },
+    {
+      "fieldname": "invoice_difference_note",
+      "fieldtype": "Small Text",
+      "label": "发票差异说明",
+      "read_only": 1,
+      "depends_on": "eval:doc.request_type=='付款单'"
     },
     {
       "fieldname": "payment_section",

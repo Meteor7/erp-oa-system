@@ -7,16 +7,19 @@ import frappe
 from rayher_hr_payroll.oa_approval import REQUEST_EXPENSE_PAYMENT
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
+    REQUEST_PAYMENT,
     REQUEST_PROCUREMENT,
     REQUEST_PROCUREMENT_PAYMENT,
+    REQUEST_REIMBURSEMENT,
 )
 
 
 CENT = Decimal("0.01")
 SOURCE_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}
-EXPECTED_PAYMENT_TYPE = {
-    REQUEST_PROCUREMENT: REQUEST_PROCUREMENT_PAYMENT,
-    REQUEST_DIRECT_PURCHASE: REQUEST_EXPENSE_PAYMENT,
+EXPECTED_PAYMENT_TYPES = {
+    REQUEST_PROCUREMENT: {REQUEST_PROCUREMENT_PAYMENT},
+    # 购买申请可以由旧的费用付款申请，或新的报销单 / 付款单付款。
+    REQUEST_DIRECT_PURCHASE: {REQUEST_EXPENSE_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT},
 }
 COMPLETED_STATUS = "已完成"
 
@@ -164,8 +167,8 @@ def _validate_source(source, store):
 
 
 def _validate_payment(source, payment):
-    expected = EXPECTED_PAYMENT_TYPE[_get(source, "request_type")]
-    if _get(payment, "request_type") != expected:
+    expected = EXPECTED_PAYMENT_TYPES[_get(source, "request_type")]
+    if _get(payment, "request_type") not in expected:
         raise ApprovalAmountError("付款类型与来源申请不匹配")
     if not _name(payment):
         raise ApprovalAmountError("付款申请不存在")

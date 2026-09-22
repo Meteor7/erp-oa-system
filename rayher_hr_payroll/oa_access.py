@@ -45,6 +45,8 @@ PROCUREMENT_APPLICATION_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}
 PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "Rayher Business Executive"}
 GLOBAL_READ_ROLES = {"System Manager", "Rayher Business Executive"}
 PAYMENT_REQUEST_TYPES = {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}
+# 报销单、付款单：财务只看提交后的单据，草稿只有申请人自己能看。
+CLAIM_REQUEST_TYPES = {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}
 ACTIVE_STATUSES = {"待审批", "待办理"}
 DRAFT_STATUS = "草稿"
 READ_PTYPES = {None, "read", "select", "report", "export", "print", "email"}
@@ -129,6 +131,10 @@ def _sql_row_scope(user, roles, identity, actors):
         clauses.append(procurement)
     if "Accounts User" in roles:
         clauses.append(_sql_type_scope(PAYMENT_REQUEST_TYPES))
+        clauses.append(
+            "(" + _sql_type_scope(CLAIM_REQUEST_TYPES)
+            + f" AND {table}.workflow_status != " + frappe.db.escape(DRAFT_STATUS) + ")"
+        )
     clauses.append("(" + _sql_current_step(actors) + ")")
     return "(" + " OR ".join(clauses) + ")"
 
@@ -200,6 +206,12 @@ def _can_read(doc, user, roles, identity):
     if request_type in PROCUREMENT_REQUEST_TYPES and roles & PROCUREMENT_GLOBAL_ROLES:
         return True
     if request_type in PAYMENT_REQUEST_TYPES and "Accounts User" in roles:
+        return True
+    if (
+        request_type in CLAIM_REQUEST_TYPES
+        and "Accounts User" in roles
+        and _get(doc, "workflow_status") != DRAFT_STATUS
+    ):
         return True
     if _is_owner(doc, user, identity):
         return True

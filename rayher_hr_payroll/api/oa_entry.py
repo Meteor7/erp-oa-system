@@ -1594,6 +1594,10 @@ def _summarize_doc(doc, authorized_expense_lines=None):
             or (
                 doc.request_type != REQUEST_PROCUREMENT
                 and doc.workflow_status not in {STATUS_DRAFT, STATUS_PAID}
+                and not (
+                    doc.request_type in {REQUEST_DIRECT_PURCHASE, REQUEST_TRAVEL}
+                    and doc.workflow_status == STATUS_COMPLETED
+                )
             )
         ) and invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user),
         "can_withdraw_payment": doc.workflow_status == STATUS_PAID and _is_finance_user(),
@@ -1641,9 +1645,17 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "travel_start_date": getattr(doc, "travel_start_date", None),
         "travel_end_date": getattr(doc, "travel_end_date", None),
         "travel_days": getattr(doc, "travel_days", None) or 0,
+        **_claim_summary(doc),
         "creation": doc.creation,
         "modified": doc.modified,
     }
+
+
+def _claim_summary(doc):
+    if getattr(doc, "request_type", None) not in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+        return {}
+    from rayher_hr_payroll.api import expense_claim_entry
+    return expense_claim_entry.capabilities(doc)
 
 
 def _load_request(name, *, current=False):
@@ -1706,9 +1718,11 @@ def _advance_after_step(doc, step):
             doc.business_status = "待付款"
         elif doc.request_type in ATTENDANCE_TYPES:
             doc.business_status = "已完成"
+        elif doc.request_type == REQUEST_TRAVEL:
+            doc.business_status = "已通过"
         return
     doc.workflow_status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
-    if doc.request_type == REQUEST_EXPENSE_PAYMENT and next_step.mode == "handle":
+    if doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT} and next_step.mode == "handle":
         doc.business_status = "待付款"
     elif doc.request_type == REQUEST_PROCUREMENT:
         if _clean(getattr(next_step, "label", None)) == "采购询价/录入价格":
@@ -2188,6 +2202,9 @@ def _submit_draft(doc):
             validate_procurement_submission(doc)
         except ProcurementWorkflowError as exc:
             frappe.throw(str(exc))
+    elif doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+        from rayher_hr_payroll.api import expense_claim_entry
+        expense_claim_entry.validate_submit(doc)
     elif doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
         balance = approval_amount_ledger.source_balance(doc.source_request)
         doc.source_paid_amount = balance["paid_amount"]
@@ -2699,7 +2716,7 @@ def _is_finance_audit_step(step):
 
 
 def _classification_ready(doc):
-    if getattr(doc, "request_type", None) != REQUEST_EXPENSE_PAYMENT:
+    if getattr(doc, "request_type", None) not in {REQUEST_EXPENSE_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
         return True
     for line in list(getattr(doc, "expense_lines", []) or []):
         try:
@@ -2977,6 +2994,9 @@ def submit_request(name, no_invoice_reason=None):
         _submit_draft(doc)
         _reserve_procurement_payment(doc)
         _reserve_expense_payment(doc)
+        if doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+            from rayher_hr_payroll.api import expense_claim_entry
+            expense_claim_entry.reserve(doc)
         _save_document(doc)
         _sync_assignments_after_save(doc)
         if doc.request_type != REQUEST_PROCUREMENT_PAYMENT:
@@ -4151,6 +4171,9 @@ def action_request(name, action="approve", note=None, reject_target=None):
                 _release_procurement_payment_reservation(doc, note)
             if doc.request_type == REQUEST_EXPENSE_PAYMENT and doc.workflow_status == STATUS_DRAFT:
                 _release_expense_payment_reservation(doc, note)
+            if doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT} and doc.workflow_status == STATUS_DRAFT:
+                from rayher_hr_payroll.api import expense_claim_entry
+                expense_claim_entry.release(doc, note)
             _save_document(doc)
             _sync_assignments_after_save(doc)
             if _clean(reject_target) == "applicant":
@@ -4192,7 +4215,10 @@ def action_request(name, action="approve", note=None, reject_target=None):
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
         contract_delivery_confirmed = _finalize_contract_delivery_if_complete(doc, step)
-        if step.mode == "handle" and doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}:
+        if step.mode == "handle" and doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+            from rayher_hr_payroll.api import expense_claim_entry
+            expense_claim_entry.mark_paid(doc, actor, from_status, note, step)
+        elif step.mode == "handle" and doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}:
             if doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
                 _mark_procurement_payment_paid(doc)
                 _set_procurement_payment_paid_state(doc)
@@ -4694,6 +4720,8 @@ def withdraw_request(name, note=None):
         invoice_service._request_permission(doc, "edit", current=True)
         if doc.workflow_status == STATUS_PAID:
             frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
+        if doc.request_type in {REQUEST_DIRECT_PURCHASE, REQUEST_TRAVEL} and doc.workflow_status == STATUS_COMPLETED:
+            frappe.throw(frappe._("已通过的申请不能撤回。"))
         if doc.request_type == REQUEST_PROCUREMENT:
             if doc.workflow_status not in ACTIVE_STATUSES:
                 frappe.throw(frappe._("采购申请仅可在需求审批期间撤回；进入询价、价格审批或采购执行后不可撤回。"))
@@ -4708,6 +4736,9 @@ def withdraw_request(name, note=None):
         _reset_request_to_draft(doc, note)
         _release_procurement_payment_reservation(doc, note)
         _release_expense_payment_reservation(doc, note)
+        if doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+            from rayher_hr_payroll.api import expense_claim_entry
+            expense_claim_entry.release(doc, note)
         _save_document(doc)
         _sync_assignments_after_save(doc)
         return _summarize_doc(doc)
@@ -4773,6 +4804,8 @@ def withdraw_invoice_push(invoice_names, note=None):
         for request_name in request_names:
             doc = _load_request(request_name, current=True)
             invoice_service._request_permission(doc, "edit", current=True)
+            if doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
+                frappe.throw(frappe._("报销单、付款单的发票请在单据中移除。"))
             if doc.workflow_status == STATUS_PAID:
                 frappe.throw(frappe._("\u5df2\u4ed8\u6b3e\u5355\u636e\u5fc5\u987b\u5148\u7531\u8d22\u52a1\u64a4\u56de\u4ed8\u6b3e\u3002"))
             if doc.workflow_status != STATUS_DRAFT:
