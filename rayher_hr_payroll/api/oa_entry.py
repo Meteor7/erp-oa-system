@@ -1627,12 +1627,13 @@ def _load_request(name, *, current=False):
 
 
 def legacy_expense_closed():
-    """报销单或付款单在站点配置里启用后，就不再新建旧的费用付款申请。
+    """报销单和付款单都在站点配置里启用后，才不再新建旧的费用付款申请。
 
-    在途的旧单据照常审批、付款、补票；把配置关掉即可回到旧入口。
+    修复（2026-09-23）：原来只开其中一个就关闭旧入口，另一类付款就没有地方提交了。
+    在途的旧单据照常审批、付款、补票，被驳回的旧草稿也能继续修改；把配置关掉即可回到旧入口。
     """
     from rayher_hr_payroll.oa_feature_gate import is_admin_only
-    return not (is_admin_only(REQUEST_REIMBURSEMENT) and is_admin_only(REQUEST_PAYMENT))
+    return not is_admin_only(REQUEST_REIMBURSEMENT) and not is_admin_only(REQUEST_PAYMENT)
 
 
 def _require_legacy_expense_entry():
@@ -1870,8 +1871,6 @@ def _prepare_request_doc(
 ):
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
-    if request_type == REQUEST_EXPENSE_PAYMENT:
-        _require_legacy_expense_entry()
     ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
     if request_type == REQUEST_EXPENSE_PAYMENT:
         classification = _expense_classification(doc_type, asset_category, submitting=submit)
@@ -2368,6 +2367,14 @@ def create_request(
 ):
     if request_type == REQUEST_PROCUREMENT_PAYMENT:
         frappe.throw(frappe._("采购付款必须由 PO 付款计划下推生成，不能单独新建。"))
+    if request_type in (REQUEST_TRAVEL, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT):
+        # 修复（2026-09-23）：这三类单据有各自的草稿接口（travel_entry / expense_claim_entry），
+        # 关联申请的校验和购买申请额度的占用都在那里；从这个通用接口新建并提交会绕过额度占用，
+        # 超额的单据能审批通过，到出纳付款时才报错。
+        frappe.throw(frappe._("出差申请、报销单、付款单请在各自的页面新建。"))
+    if request_type == REQUEST_EXPENSE_PAYMENT:
+        # 旧的费用付款申请停用后不能再新建；在途单据和被驳回的旧草稿不受影响。
+        _require_legacy_expense_entry()
     require_request_type_access(request_type)
     requested_submit = _to_bool(submit)
     batch_name = _bounded_optional_text(invoice_batch, "发票批次", 140)

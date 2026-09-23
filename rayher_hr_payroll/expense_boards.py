@@ -35,6 +35,8 @@ STUCK_DAYS = 3
 STALE_DAYS = 30
 TREND_MONTHS = 6
 TRIP_LOOKBACK_DAYS = 30
+# 采购付款的验收状态见 procurement_workflow.INSPECTION_STATUSES；除"验收通过"外都还要跟进。
+PENDING_INSPECTION = ("未验收", "待验收", "验收不合格")
 
 
 def money(value):
@@ -329,7 +331,8 @@ def procurement_board(rows, *, today):
             "payment_count": len(payments),
             "month_paid_amount": float(sum((money(_get(row, "amount")) for row in paid if month_key(_get(row, "paid_on")) == month), ZERO)),
             "pending_arrival": sum(1 for row in paid if str(_get(row, "arrival_status") or "") in ("未到货", "部分到货")),
-            "pending_inspection": sum(1 for row in paid if str(_get(row, "inspection_status") or "") in ("未验收", "验收中")),
+            # 修复（2026-09-23）："验收中"不是有效状态，待验收、验收不合格原来都没算进去。
+            "pending_inspection": sum(1 for row in paid if str(_get(row, "inspection_status") or "") in PENDING_INSPECTION),
             "pending_writeoff": sum(1 for row in paid if str(_get(row, "prepayment_writeoff_status") or "") == "待核销"),
         },
         "applications_by_status": totals_by(applications, "business_status", "approved_amount"),

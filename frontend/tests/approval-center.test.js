@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { APPROVAL_CENTER_ROUTES, isApprovalRouteEnabled } from "../src/lib/approvalCenter.js";
+import { APPROVAL_CENTER_ROUTES, isApprovalMenuVisible, isApprovalRouteEnabled } from "../src/lib/approvalCenter.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -27,22 +27,34 @@ test("approval center defines every business flow and the two dashboards", () =>
   ]);
 });
 
-test("the legacy 付款/报销 page and the old boards retire once the new flow is on", () => {
+test("the legacy 付款/报销 page and the old boards leave the menu only once both new types are on", () => {
   const legacy = { expense_reimbursement: true, procurement_application: true, procurement_payment: true };
-  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", legacy), true);
-  assert.equal(isApprovalRouteEnabled("/approval/purchase", legacy), true);
-  assert.equal(isApprovalRouteEnabled("/approval/request-dashboard", legacy), true);
-  assert.equal(isApprovalRouteEnabled("/approval/payment-dashboard", legacy), true);
-  const migrated = { ...legacy, reimbursement_request: true };
-  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", migrated), false);
-  assert.equal(isApprovalRouteEnabled("/approval/corporate-payment", migrated), false);
-  assert.equal(isApprovalRouteEnabled("/approval/purchase", migrated), false);
-  assert.equal(isApprovalRouteEnabled("/approval/request-dashboard", migrated), false);
-  assert.equal(isApprovalRouteEnabled("/approval/payment-dashboard", migrated), false);
-  assert.equal(isApprovalRouteEnabled("/approval/claim", migrated), true);
-  assert.equal(isApprovalRouteEnabled("/approval/expense-request-board", migrated), true);
-  // turning the new types off again brings the legacy pages back
-  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", legacy), true);
+  const menu = (path, access) => isApprovalMenuVisible(path, access);
+  assert.equal(menu("/approval/reimbursement", legacy), true);
+  assert.equal(menu("/approval/purchase", legacy), true);
+  assert.equal(menu("/approval/request-dashboard", legacy), true);
+  assert.equal(menu("/approval/payment-dashboard", legacy), true);
+  assert.equal(menu("/approval/expense-request-board", legacy), false);
+  // only 报销单 on: the legacy page stays so payments to suppliers still have a place
+  const half = { ...legacy, reimbursement_request: true };
+  assert.equal(menu("/approval/reimbursement", half), true);
+  assert.equal(menu("/approval/claim", half), true);
+  assert.equal(menu("/approval/payment", half), false);
+  // only 出差申请 on: one 申请看板 in the menu, not two
+  const travel = { ...legacy, travel_application: true };
+  assert.equal(menu("/approval/request-dashboard", travel), true);
+  assert.equal(menu("/approval/expense-request-board", travel), false);
+  const migrated = { ...legacy, reimbursement_request: true, payment_request: true };
+  for (const path of ["/approval/reimbursement", "/approval/corporate-payment", "/approval/purchase", "/approval/request-dashboard", "/approval/payment-dashboard"]) {
+    assert.equal(menu(path, migrated), false, path);
+  }
+  assert.equal(menu("/approval/claim", migrated), true);
+  assert.equal(menu("/approval/expense-request-board", migrated), true);
+  // the legacy pages still open from a to-do or notification link: in-flight legacy documents must finish
+  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", migrated), true);
+  assert.equal(isApprovalRouteEnabled("/approval/request-dashboard", migrated), true);
+  // turning the new types off again brings the legacy pages back into the menu
+  assert.equal(menu("/approval/reimbursement", legacy), true);
 });
 
 test("closed procurement routes require explicit server boot flags", () => {

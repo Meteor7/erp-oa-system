@@ -153,7 +153,9 @@ def _po_rows(months):
     start, end = month_range(months)
     names = frappe.get_all("OA Purchase Order",
                            filters={"status": ["not in", PO_DEAD_STATUS],
-                                    "creation": ["between", [start, frappe.utils.add_days(end, 1)]]},
+                                    # 修复（2026-09-23）：日期上限对时间字段本来就取到当天 23:59:59，
+                                    # 再加一天会把下月 1 日的数据也算进本月（下月再算一次）。
+                                    "creation": ["between", [start, end]]},
                            pluck="name")
     if not names:
         return []
@@ -176,7 +178,7 @@ def _expense_rows(months):
     requests = frappe.get_all("OA Approval Request",
                               filters={"request_type": ["in", list(COST_REQUEST_TYPES)],
                                        "workflow_status": "已付款",
-                                       "paid_on": ["between", [start, frappe.utils.add_days(end, 1)]]},
+                                       "paid_on": ["between", [start, end]]},
                               fields=["name", "project", "department"], limit_page_length=0)
     if not requests:
         return []

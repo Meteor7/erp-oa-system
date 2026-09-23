@@ -128,7 +128,7 @@ watch(() => route.query.request, load);
 onMounted(async () => {
   await load();
   try {
-    projects.value = ((await callApi('oa_entry.list_approval_center_projects', {}, { method: 'GET' })) || []).map((row) => row.name || row);
+    projects.value = ((await callApi('expense_claim_entry.list_claim_projects', { request_type: '出差申请' }, { method: 'GET' })) || []).map((row) => row.name || row);
   } catch {
     projects.value = [];
   }

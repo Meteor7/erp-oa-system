@@ -67,9 +67,51 @@ def test_job_sends_each_reminder_once(monkeypatch):
         {"name": "PAY-3", "owner": "li@example.com", "employee": "EMP-2", "subject": "z", "request_type": "付款单", "expected_invoice_date": date(2026, 10, 30)},
     ]
     monkeypatch.setattr(reminders, "pending_payments", lambda: rows)
+    monkeypatch.setattr(reminders, "_payment_request_open", lambda: True)
     store = Store()
     assert reminders.send_payment_invoice_reminders(TODAY, store=store) == 2
     assert reminders.send_payment_invoice_reminders(TODAY, store=store) == 0
     assert reminders.send_payment_invoice_reminders(date(2026, 9, 23), store=store) == 1  # PAY-2 overdue again
     assert [row["for_user"] for row in store.sent] == ["wang@example.com", "li@example.com", "li@example.com"]
     assert store.sent[0]["link"].endswith("?request=PAY-1")
+
+
+def test_job_sends_nothing_while_payment_requests_are_closed(monkeypatch):
+    rows = [{"name": "PAY-1", "owner": "wang@example.com", "employee": "EMP-1", "subject": "x", "request_type": "付款单", "expected_invoice_date": date(2026, 9, 20)}]
+    monkeypatch.setattr(reminders, "pending_payments", lambda: rows)
+    monkeypatch.setattr(reminders, "_payment_request_open", lambda: False)
+    store = Store()
+    assert reminders.send_payment_invoice_reminders(TODAY, store=store) == 0
+    assert store.sent == []
+
+
+def test_one_failing_reminder_does_not_stop_the_others(monkeypatch):
+    rows = [
+        {"name": "PAY-1", "owner": "broken@example.com", "employee": "EMP-1", "subject": "x", "request_type": "付款单", "expected_invoice_date": date(2026, 9, 20)},
+        {"name": "PAY-2", "owner": "li@example.com", "employee": "EMP-2", "subject": "y", "request_type": "付款单", "expected_invoice_date": date(2026, 9, 20)},
+    ]
+
+    class BrokenStore(Store):
+        def create_notification(self, **values):
+            if values["for_user"] == "broken@example.com":
+                raise RuntimeError("insert failed")
+            super().create_notification(**values)
+
+    failures = []
+    monkeypatch.setattr(reminders, "pending_payments", lambda: rows)
+    monkeypatch.setattr(reminders, "_payment_request_open", lambda: True)
+    monkeypatch.setattr(reminders, "_log_failure", failures.append)
+    store = BrokenStore()
+    assert reminders.send_payment_invoice_reminders(TODAY, store=store) == 1
+    assert failures == ["PAY-1"]
+    assert [row["for_user"] for row in store.sent] == ["li@example.com"]
+
+
+def test_folder_status_sql_mirrors_the_python_mapping():
+    sql = folder.status_case_sql(lambda value: "'" + value + "'")
+    assert sql.startswith("CASE WHEN `recognition_status` = '已确认' AND IFNULL(`request`, '') <> '' THEN '已使用'")
+    assert "WHEN `recognition_status` = '已确认' THEN '可用'" in sql
+    assert "WHEN IFNULL(`recognition_status`, '') = '' THEN '识别中'" in sql
+    for source, target in folder._BY_RECOGNITION.items():
+        assert f"WHEN `recognition_status` = '{source}' THEN '{target}'" in sql
+    assert sql.endswith("ELSE '识别失败' END")

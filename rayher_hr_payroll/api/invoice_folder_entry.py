@@ -11,6 +11,7 @@ from rayher_hr_payroll.invoice_ocr import permissions as invoice_permissions
 from rayher_hr_payroll.invoice_ocr import service
 
 LIST_LIMIT = 500
+PAGE_SIZE = 100
 FIELDS = [
     "name", "batch", "recognition_status", "invoice_category", "project_name", "issue_date",
     "invoice_number", "amount_before_tax", "tax_amount", "total_amount", "expense_description",
@@ -52,24 +53,55 @@ def _serialize(row, requests, owners=None):
     return item
 
 
+def _wanted_statuses(status, statuses, include_excluded):
+    wanted = [part.strip() for part in str(statuses or "").split(",") if part.strip()]
+    if str(status or "").strip():
+        wanted.append(str(status).strip())
+    if any(item not in folder.FOLDER_STATUSES for item in wanted):
+        frappe.throw("发票夹状态无效。")
+    if wanted:
+        return list(dict.fromkeys(wanted))
+    show_excluded = str(include_excluded or "").strip().lower() in {"1", "true", "yes"}
+    return [item for item in folder.FOLDER_STATUSES if show_excluded or item != folder.FOLDER_EXCLUDED]
+
+
+def _page(limit, offset):
+    try:
+        return max(1, min(int(limit or PAGE_SIZE), LIST_LIMIT)), max(0, int(offset or 0))
+    except (TypeError, ValueError):
+        frappe.throw("分页参数格式无效。")
+
+
 @frappe.whitelist()
-def list_invoice_folder(status=None, include_excluded=0, view="mine"):
-    """本人发票夹：每张发票的发票夹状态，以及被哪张单据使用。财务可以看全部发票（view="all"）。"""
+def list_invoice_folder(status=None, include_excluded=0, view="mine", statuses=None, limit=PAGE_SIZE, offset=0):
+    """本人发票夹：每张发票的发票夹状态，以及被哪张单据使用。财务可以看全部发票（view="all"）。
+
+    修复（2026-09-23）：原来先取最近修改的 500 张再在 Python 里筛选和计数，发票多了以后
+    旧发票（包括可用、疑似重复的）会从各个页签里消失，数量也不对。现在按发票夹状态在
+    数据库里筛选、计数和分页；statuses 是逗号分隔的发票夹状态。
+    """
     user = _require_access()
     finance_view = str(view or "mine").strip() == "all"
     if finance_view:
         roles = set(frappe.get_roles(user) or [])
         if user != "Administrator" and not roles & service.FINANCE_ROLES:
             frappe.throw("只有财务可以查看全部发票。", frappe.PermissionError)
-    status = str(status or "").strip()
-    if status and status not in folder.FOLDER_STATUSES:
-        frappe.throw("发票夹状态无效。")
-    rows = frappe.get_all(
-        service.RECORD_DOCTYPE,
-        filters={} if finance_view else {"owner": user},
-        fields=FIELDS,
-        order_by="modified desc",
-        limit_page_length=LIST_LIMIT,
+    wanted = _wanted_statuses(status, statuses, include_excluded)
+    limit, offset = _page(limit, offset)
+    table = f"`tab{service.RECORD_DOCTYPE}`"
+    case = folder.status_case_sql(frappe.db.escape)
+    scope = "1 = 1" if finance_view else "`owner` = %(owner)s"
+    counts = {name: 0 for name in folder.FOLDER_STATUSES}
+    for row in frappe.db.sql(
+        f"SELECT {case} AS folder_status, COUNT(*) AS n FROM {table} WHERE {scope} GROUP BY folder_status",
+        {"owner": user}, as_dict=True,
+    ):
+        counts[row["folder_status"]] = int(row["n"] or 0)
+    columns = ", ".join(f"`{field}`" for field in FIELDS)
+    rows = frappe.db.sql(
+        f"SELECT {columns} FROM {table} WHERE {scope} AND ({case}) IN %(wanted)s"
+        " ORDER BY `modified` DESC, `name` DESC LIMIT %(limit)s OFFSET %(offset)s",
+        {"owner": user, "wanted": tuple(wanted), "limit": limit, "offset": offset}, as_dict=True,
     )
     requests = _requests(row.get("request") for row in rows)
     owners = None
@@ -80,16 +112,7 @@ def list_invoice_folder(status=None, include_excluded=0, view="mine"):
                                       fields=["name", "full_name"], limit_page_length=0)
         }
     items = [_serialize(row, requests, owners) for row in rows]
-    counts = {name: 0 for name in folder.FOLDER_STATUSES}
-    for item in items:
-        counts[item["folder_status"]] += 1
-    show_excluded = str(include_excluded or "").strip().lower() in {"1", "true", "yes"} or status == folder.FOLDER_EXCLUDED
-    visible = [
-        item for item in items
-        if (not status or item["folder_status"] == status)
-        and (show_excluded or item["folder_status"] != folder.FOLDER_EXCLUDED)
-    ]
-    return {"invoices": visible, "counts": counts}
+    return {"invoices": items, "counts": counts, "total": sum(counts[name] for name in wanted)}
 
 
 @frappe.whitelist()

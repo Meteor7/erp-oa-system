@@ -35,27 +35,49 @@ def pending_payments():
     )
 
 
+def _payment_request_open():
+    from rayher_hr_payroll.oa_feature_gate import is_admin_only
+    return not is_admin_only(REQUEST_PAYMENT)
+
+
+def _log_failure(name):
+    frappe.log_error(title="付款单补票提醒发送失败", message=f"{name}\n{frappe.get_traceback()}")
+
+
+def _remind(row, today, store):
+    kind, suffix = folder.reminder(row.get("expected_invoice_date"), today)
+    if not kind:
+        return 0
+    user = _applicant_user(row)
+    if not user:
+        return 0
+    key = f"invoice-due:{row['name']}:{suffix}"
+    if store.notification_exists(for_user=user, document_name=row["name"], key=key):
+        return 0
+    store.create_notification(
+        for_user=user,
+        document_name=row["name"],
+        subject=f"付款单补票{kind}：{row['name']} [{key}]",
+        content=folder.reminder_text(kind, row["name"], row.get("expected_invoice_date"), today),
+        link=_request_link(frappe._dict(row)),
+    )
+    return 1
+
+
 def send_payment_invoice_reminders(today=None, *, store=None):
-    """Return the number of reminders sent."""
+    """Return the number of reminders sent.
+
+    修复（2026-09-23）：付款单功能没开放时不发提醒；某一张单据出错只记录错误日志，
+    不再让当天所有提醒都发不出去。
+    """
+    if not _payment_request_open():
+        return 0
     today = getdate(today or nowdate())
     store = store or FrappeAssignmentStore()
     sent = 0
     for row in pending_payments():
-        kind, suffix = folder.reminder(row.get("expected_invoice_date"), today)
-        if not kind:
-            continue
-        user = _applicant_user(row)
-        if not user:
-            continue
-        key = f"invoice-due:{row['name']}:{suffix}"
-        if store.notification_exists(for_user=user, document_name=row["name"], key=key):
-            continue
-        store.create_notification(
-            for_user=user,
-            document_name=row["name"],
-            subject=f"付款单补票{kind}：{row['name']} [{key}]",
-            content=folder.reminder_text(kind, row["name"], row.get("expected_invoice_date"), today),
-            link=_request_link(frappe._dict(row)),
-        )
-        sent += 1
+        try:
+            sent += _remind(row, today, store)
+        except Exception:
+            _log_failure(row.get("name"))
     return sent

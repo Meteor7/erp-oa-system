@@ -112,3 +112,22 @@ export function filterFolder(invoices = [], tab = 'list') {
 export function editableByOwner(invoice, finance = false) {
   return !finance && String(invoice?.folder_status || '').trim() === '待确认';
 }
+
+// ---------------------------------------------------------------- 服务端筛选（修复 2026-09-23）
+// 列表按页签在服务端筛选、分页；页签上的数量用服务端按状态统计的结果，不受条数上限影响。
+const LISTED = ['识别中', '待确认', '可用', '已使用', '疑似重复', '识别失败'];
+export const TAB_STATUSES = Object.freeze({
+  list: LISTED, allinv: LISTED, todo: WAITING, ok: ['可用'], used: ['已使用'], dup: ['疑似重复'],
+});
+
+export function tabStatuses(tab) {
+  return TAB_STATUSES[tab] || TAB_STATUSES.list;
+}
+
+export function folderTabsFromCounts(counts = {}, finance = false) {
+  const count = (tab) => tabStatuses(tab).reduce((total, status) => total + Number(counts[status] || 0), 0);
+  const keys = finance
+    ? [['dup', '疑似重复待处理'], ['allinv', '全部发票']]
+    : [['list', '全部'], ['todo', '待确认'], ['ok', '可用'], ['used', '已使用'], ['dup', '疑似重复']];
+  return keys.map(([key, label]) => ({ key, label, count: count(key) }));
+}

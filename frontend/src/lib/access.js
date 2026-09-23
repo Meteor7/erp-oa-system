@@ -1,5 +1,5 @@
 import { displayUser } from './displayBrand.js';
-import { isApprovalRouteEnabled } from './approvalCenter.js';
+import { isApprovalMenuVisible, isApprovalRouteEnabled } from './approvalCenter.js';
 // Role-aware page access for the SPA nav + route gating.
 // Expense/allocation stay finance-only; HR pages stay HR-only.
 // Employees and department supervisors can use the R&D timesheet entry and approval pages.
@@ -14,6 +14,9 @@ const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
 // 看板：财务和管理层看全公司，部门主管看本部门，普通员工不开放（服务端同样限制）。
 const BOARD = ['System Manager', 'Accounts User', 'Rayher Business Executive', 'Department Manager'];
+// 岗位也能看全公司看板（与服务端 expense_boards.SCOPE_ALL_POSITIONS 一致），比如没有看板角色的副总。
+const BOARD_POSITIONS = ['finance_manager', 'finance_auditor', 'vice_manager', 'general_manager'];
+const BOARD_PATHS = new Set(['/approval/expense-request-board', '/approval/expense-payment-board']);
 const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/travel', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment', '/approval/expense-request-board', '/approval/expense-payment-board', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 // Temporary test-account restriction. Remove the account from this set to restore
@@ -125,8 +128,16 @@ export function canSee(path) {
   const normalizedPath = accessPath(path);
   if (!hasEnabledFeature(normalizedPath)) return false;
   if (normalizedPath === '/approval/material-progress') return canSeeMaterialProgress();
+  if (BOARD_PATHS.has(normalizedPath) && holdsPosition(...BOARD_POSITIONS)) return true;
   const need = PAGE_ROLES[normalizedPath] || MANAGE;
   return myRoles().some((role) => need.includes(role));
+}
+
+// 菜单入口：能打开，且新旧两套里当前该显示的那一套。
+export function inMenu(path) {
+  if (!canSee(path)) return false;
+  const access = (typeof window !== 'undefined' && window.oa_access) || {};
+  return isApprovalMenuVisible(accessPath(path), access);
 }
 
 export function canAdministerProjects() {
@@ -141,7 +152,7 @@ export function canEditTimesheetEntry() {
 }
 
 export function firstVisiblePath() {
-  return ROUTE_ORDER.find((path) => canSee(path)) || '/dashboard';
+  return ROUTE_ORDER.find((path) => inMenu(path)) || '/dashboard';
 }
 
 export function roleLabel() {

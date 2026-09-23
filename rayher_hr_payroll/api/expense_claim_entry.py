@@ -18,7 +18,7 @@ from rayher_hr_payroll import approval_amount_ledger
 from rayher_hr_payroll import expense_claims as rules
 from rayher_hr_payroll import invoice_folder
 from rayher_hr_payroll.api import oa_entry
-from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT
+from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access
 
 invoice_service = oa_entry.invoice_service
@@ -666,6 +666,37 @@ def _locked_claim(name, request_type=None):
         frappe.throw("这张单据不是" + (request_type or "报销单或付款单") + "。")
     require_request_type_access(doc.request_type)
     return doc
+
+
+@frappe.whitelist()
+def list_verify_queue():
+    """财务：所有等待核验发票的付款单。
+
+    修复（2026-09-23）：原来"待我处理"里的待核验取自"全部"列表，只看最近修改的 50 张，
+    更早的待核验付款单会从待办里消失。
+    """
+    require_request_type_access(REQUEST_PAYMENT)
+    oa_entry._require_finance_user()
+    names = frappe.get_all(
+        "OA Approval Request",
+        filters={"request_type": REQUEST_PAYMENT, "workflow_status": oa_entry.STATUS_PAID,
+                 "business_status": rules.CLAIM_WAIT_VERIFY},
+        pluck="name", order_by="modified asc", limit_page_length=200,
+    )
+    return [oa_entry._summarize_doc(oa_entry._load_request(name)) for name in names]
+
+
+@frappe.whitelist()
+def list_claim_projects(request_type):
+    """报销、付款、出差选择"所属项目"用的项目列表。
+
+    修复（2026-09-23）：原来借用采购申请的项目接口，采购申请没开放时整张表单都加载失败。
+    """
+    if request_type not in (*rules.CLAIM_TYPES, REQUEST_TRAVEL):
+        frappe.throw("只支持报销单、付款单和出差申请。")
+    require_request_type_access(request_type)
+    from rayher_hr_payroll.approval_center import FrappeApprovalCenterStore
+    return [row.name for row in FrappeApprovalCenterStore().list_projects(500)]
 
 
 @frappe.whitelist(methods=["POST"])

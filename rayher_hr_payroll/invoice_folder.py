@@ -42,6 +42,18 @@ def folder_status(recognition_status, request=None):
     return _BY_RECOGNITION.get(status, FOLDER_FAILED if status else FOLDER_RECOGNIZING)
 
 
+def status_case_sql(escape):
+    """SQL CASE giving the same 发票夹状态 as folder_status(); escape quotes a literal (frappe.db.escape)."""
+    confirmed = escape("已确认")
+    whens = [
+        f"WHEN `recognition_status` = {confirmed} AND IFNULL(`request`, '') <> '' THEN {escape(FOLDER_USED)}",
+        f"WHEN `recognition_status` = {confirmed} THEN {escape(FOLDER_AVAILABLE)}",
+        f"WHEN IFNULL(`recognition_status`, '') = '' THEN {escape(FOLDER_RECOGNIZING)}",
+    ]
+    whens += [f"WHEN `recognition_status` = {escape(source)} THEN {escape(target)}" for source, target in _BY_RECOGNITION.items()]
+    return "CASE " + " ".join(whens) + f" ELSE {escape(FOLDER_FAILED)} END"
+
+
 def _as_date(value):
     if isinstance(value, datetime):
         return value.date()

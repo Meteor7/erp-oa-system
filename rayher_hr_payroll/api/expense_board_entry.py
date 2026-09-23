@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 
 import frappe
 from frappe.utils import getdate, nowdate
@@ -29,7 +30,6 @@ ROW_FIELDS = [
     "travel_days", "current_step_label", "current_step_index", "arrival_status", "inspection_status",
     "prepayment_writeoff_status", "creation", "modified", "project",
 ]
-LIMIT = 2000
 REMINDER_KEY = re.compile(r"\[invoice-due:([^:\]]+):")
 
 
@@ -59,15 +59,19 @@ def _scope():
     return scope, department
 
 
-def _rows(request_types, scope, department):
+def _rows(request_types, scope, department, statuses=None):
+    """修复（2026-09-23）：原来只取最近修改的 2000 张，超过后合计会悄悄少算。现在只取看板
+    用得到的状态（审批中、已完成 / 已付款），不再截断。"""
     request_types = [request_type for request_type in request_types if can_access_request_type(request_type)]
     if not request_types:
         return []
     filters = {"request_type": ["in", request_types]}
+    if statuses:
+        filters["workflow_status"] = ["in", list(statuses)]
     if scope == "department" and department:
         filters["department"] = department
     return frappe.get_all("OA Approval Request", filters=filters, fields=ROW_FIELDS,
-                          order_by="modified desc", limit_page_length=LIMIT)
+                          order_by="modified desc", limit_page_length=0)
 
 
 def _decorate(rows, today):
@@ -91,14 +95,28 @@ def _decorate(rows, today):
 
 
 def _ledger_amounts(rows):
+    """修复（2026-09-23）：原来每张购买申请单独查一次台账，改为一次取出再按申请归集。"""
+    purchases = {}
     for row in rows:
         row.setdefault("reserved_amount", 0)
         row.setdefault("paid_amount", 0)
-        if row["request_type"] != REQUEST_DIRECT_PURCHASE or row["workflow_status"] != "已完成":
-            continue
+        if row["request_type"] == REQUEST_DIRECT_PURCHASE and row["workflow_status"] == "已完成":
+            purchases[row["name"]] = row
+    if not purchases:
+        return
+    events = defaultdict(list)
+    for event in frappe.get_all(
+        "OA Approval Amount Ledger",
+        filters={"source_request": ["in", list(purchases)]},
+        fields=["source_request", "linked_request", "event_type", "reserved_delta", "paid_delta", "idempotency_key"],
+        order_by="creation asc, name asc", limit_page_length=0,
+    ):
+        events[event["source_request"]].append(event)
+    for name, row in purchases.items():
         try:
-            balance = approval_amount_ledger.source_balance(row["name"], store=approval_amount_ledger.WorkflowLedgerStore())
+            balance = approval_amount_ledger._balance(row, events.get(name, []))
         except approval_amount_ledger.ApprovalAmountError:
+            row["ledger_error"] = True
             continue
         row["reserved_amount"] = float(balance["reserved_amount"])
         row["paid_amount"] = float(balance["paid_amount"])
@@ -144,7 +162,7 @@ def request_board():
     """申请看板：购买申请与出差申请。"""
     scope, department = _scope()
     today = getdate(nowdate())
-    rows = _decorate(_rows(boards.APPLICATION_TYPES, scope, department), today)
+    rows = _decorate(_rows(boards.APPLICATION_TYPES, scope, department, (*boards.ACTIVE_STATUSES, boards.COMPLETED)), today)
     _ledger_amounts(rows)
     _travel_claimed(rows)
     return _result(boards.request_board(rows, today=today), scope, department)
@@ -155,7 +173,7 @@ def payment_board():
     """付款看板：报销单与付款单，金额按实际付款日期计入月份。"""
     scope, department = _scope()
     today = getdate(nowdate())
-    rows = _decorate(_rows(boards.CLAIM_TYPES, scope, department), today)
+    rows = _decorate(_rows(boards.CLAIM_TYPES, scope, department, (*boards.ACTIVE_STATUSES, boards.PAID)), today)
     paid = [row["name"] for row in rows if row["workflow_status"] == "已付款"]
     lines = frappe.get_all(
         "OA Approval Expense Line",

@@ -215,11 +215,13 @@ export function isFinanceUser(roles = globalThis.window?.roles || []) {
   return (roles || []).some((role) => ['System Manager', 'Accounts User'].includes(role));
 }
 
+// 财务除了"待我处理 / 全部"，自己也要报销、付款，所以同样有"我的 / 新建"（修复 2026-09-23）。
 export function claimTabs(kind, finance = false, counts = {}) {
   const label = CLAIM_KINDS[kind]?.label || '';
+  const own = [{ key: 'list', label: `我的${label}`, count: counts.list }, { key: 'new', label: `新建${label}` }];
   return finance
-    ? [{ key: 'todo', label: '待我处理', count: counts.todo }, { key: 'all', label: `全部${label}`, count: counts.all }]
-    : [{ key: 'list', label: `我的${label}`, count: counts.list }, { key: 'new', label: `新建${label}` }];
+    ? [{ key: 'todo', label: '待我处理', count: counts.todo }, { key: 'all', label: `全部${label}`, count: counts.all }, ...own]
+    : own;
 }
 
 export const PILL_TONES = Object.freeze({

@@ -98,12 +98,18 @@ async function loadDocs() {
   loading.value = true;
   try {
     if (finance) {
-      const [pending, all] = await Promise.all([listFor('pending'), listFor('all')]);
-      const verify = (all || []).filter((doc) => doc.can_verify_claim_invoices);
-      const todo = [...(pending || []), ...verify.filter((doc) => !(pending || []).some((row) => row.name === doc.name))];
+      // 待核验的付款单单独取，不受"全部"只取最近 50 张的限制；财务自己也报销、付款，所以也取"我的"。
+      const [pending, all, verify, mine] = await Promise.all([
+        listFor('pending'),
+        listFor('all'),
+        isClaim.value ? [] : callApi('expense_claim_entry.list_verify_queue', {}, { method: 'GET' }),
+        listFor('mine'),
+      ]);
+      const todo = [...(pending || []), ...(verify || []).filter((doc) => !(pending || []).some((row) => row.name === doc.name))];
       counts.todo = todo.length;
       counts.all = (all || []).length;
-      docs.value = tab.value === 'todo' ? todo : (all || []);
+      counts.list = (mine || []).length;
+      docs.value = tab.value === 'todo' ? todo : tab.value === 'list' ? (mine || []) : (all || []);
     } else {
       const mine = await listFor('mine');
       counts.list = (mine || []).length;
@@ -114,6 +120,13 @@ async function loadDocs() {
     for (const doc of [...docs.value, ...(focusDoc.value ? [focusDoc.value] : [])]) {
       if (doc.can_edit_expense_items) accountDrafts[doc.name] = accountDraftFor(doc.expense_lines);
     }
+    // 修复（2026-09-23）：出纳在列表里直接选科目，科目表原来只在打开表单时才加载，
+    // 下拉框只有"请选择"，单据卡在出纳审核。有待填科目的单据时就取科目表。
+    const shown = [...docs.value, ...(focusDoc.value ? [focusDoc.value] : [])];
+    if (!accountTree.value.length && shown.some((doc) => doc.can_edit_expense_items)) {
+      const options = await callApi('oa_entry.get_options', {}, { method: 'GET' });
+      accountTree.value = options?.expense_account_tree || [];
+    }
   } catch (error) {
     flash('', String(error?.message || error));
   } finally {
@@ -121,20 +134,26 @@ async function loadDocs() {
   }
 }
 
+// 修复（2026-09-23）：原来五项数据一起取，任何一项失败其余全部作废（表单空白），
+// 现在各取各的：失败的那项用空值，并提示出错原因。
 async function loadLookups() {
-  const [defaultsResult, apps, invoices, options, projectRows] = await Promise.all([
-    callApi('expense_claim_entry.claim_defaults', { request_type: config.value.requestType }, { method: 'GET' }),
-    callApi('expense_claim_entry.list_linkable_applications', { request_type: config.value.requestType }, { method: 'GET' }),
-    callApi('expense_claim_entry.list_available_invoices', { request_type: config.value.requestType }, { method: 'GET' }),
+  const type = { request_type: config.value.requestType };
+  const results = await Promise.allSettled([
+    callApi('expense_claim_entry.claim_defaults', type, { method: 'GET' }),
+    callApi('expense_claim_entry.list_linkable_applications', type, { method: 'GET' }),
+    callApi('expense_claim_entry.list_available_invoices', type, { method: 'GET' }),
     callApi('oa_entry.get_options', {}, { method: 'GET' }),
-    callApi('oa_entry.list_approval_center_projects', {}, { method: 'GET' }),
+    callApi('expense_claim_entry.list_claim_projects', type, { method: 'GET' }),
   ]);
-  defaults.value = defaultsResult || defaults.value;
-  applications.value = apps || [];
-  availableInvoices.value = invoices || [];
+  const value = (index) => (results[index].status === 'fulfilled' ? results[index].value : null);
+  defaults.value = value(0) || defaults.value;
+  applications.value = value(1) || [];
+  availableInvoices.value = value(2) || [];
   Object.assign(lineProjects, withDefaultProjects(availableInvoices.value, lineProjects));
-  accountTree.value = options?.expense_account_tree || [];
-  projects.value = (projectRows || []).map((row) => row.name || row);
+  accountTree.value = value(3)?.expense_account_tree || accountTree.value;
+  projects.value = (value(4) || []).map((row) => row.name || row);
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed) flash('', `部分数据加载失败：${String(failed.reason?.message || failed.reason)}`);
 }
 
 // ---------------------------------------------------------------- form actions
@@ -152,9 +171,10 @@ async function openNew() {
 async function openDraft(doc) {
   resetForm();
   tab.value = 'new';
-  await loadLookups();
+  // 先记住草稿编号：即使某项数据加载失败，保存时也是更新这张草稿，不会另存一份。
   editingName.value = doc.name;
   lockedSource.value = Boolean(doc.source_locked);
+  await loadLookups();
   Object.assign(form, {
     source_request: doc.source_request || '', subject: doc.subject || '', reason: doc.reason || '',
     urgency: doc.urgency || '一般', doc_type: doc.doc_type === '固定资产' ? '固定资产' : '非固定资产',
@@ -181,7 +201,16 @@ async function openDraft(doc) {
       issue_date: line.issue_date, total_amount: line.total_amount, expense_description: line.expense_description,
     }));
     // 付款单的发票挂在单据上（不对应明细行），重新打开草稿时要把已选的发票带回来，否则保存会把它们解除。
-    const attached = (await callApi('invoice_entry.get_request_invoices', { request: doc.name }, { method: 'GET' })) || [];
+    let attached;
+    try {
+      attached = (await callApi('invoice_entry.get_request_invoices', { request: doc.name }, { method: 'GET' })) || [];
+    } catch (error) {
+      // 取不到已选的发票就不能打开编辑：保存会把这些发票从草稿上解除。
+      resetForm();
+      tab.value = 'list';
+      flash('', `草稿的发票加载失败，请稍后再试：${String(error?.message || error)}`);
+      return;
+    }
     pickedInvoices.value = attached.filter((row) => row.recognition_status === '已确认');
     availableInvoices.value = [...pickedInvoices.value, ...availableInvoices.value.filter((row) => !pickedInvoices.value.some((item) => item.name === row.name))];
     invoiceMode.value = pickedInvoices.value.length ? 'has' : 'pending';
@@ -194,6 +223,7 @@ async function pushFrom(source) {
   }), `已从申请 ${source} 生成${config.value.label}单草稿，关联申请已锁定`);
   router.replace({ path: route.path, query: {} });
   if (draft) await openDraft(draft);
+  else await loadDocs();
 }
 
 function togglePicked(invoice) {
@@ -222,7 +252,7 @@ async function save({ submit = false } = {}) {
   }, (doc) => (submit ? `${config.value.label}单 ${doc.name} 已提交审批` : `草稿 ${doc.name} 已保存`));
   if (saved && submit) {
     resetForm();
-    tab.value = finance ? 'all' : 'list';
+    tab.value = 'list';
     await loadDocs();
   }
 }
@@ -300,7 +330,7 @@ onMounted(async () => {
     await pushFrom(String(route.query.source));
     return;
   }
-  if (route.query.tab === 'new' && !finance) {
+  if (route.query.tab === 'new') {
     await openNew();
     return;
   }
@@ -575,12 +605,13 @@ onMounted(async () => {
           </div>
 
           <div class="actions">
-            <button v-if="doc.can_approve" type="button" class="btn pri" :disabled="busy" @click="approve(doc)">{{ doc.current_step_mode === 'handle' ? '确认付款' : '同意' }}</button>
+            <!-- 出纳审核：科目没填完时后端 can_approve 为 false，但出纳正是要在这里填科目再同意（先保存科目再同意）。 -->
+            <button v-if="doc.can_approve || doc.can_edit_expense_items" type="button" class="btn pri" :disabled="busy" @click="approve(doc)">{{ doc.current_step_mode === 'handle' ? '确认付款' : '同意' }}</button>
             <button v-if="doc.can_reject" type="button" class="btn" :disabled="busy" @click="reject(doc)">驳回</button>
             <button v-if="doc.can_verify_claim_invoices" type="button" class="btn pri" :disabled="busy" @click="verify(doc)">核验通过</button>
             <button v-if="doc.can_verify_claim_invoices" type="button" class="btn" :disabled="busy" @click="returnInvoices(doc)">退回补票</button>
             <button v-if="doc.can_supplement_claim_invoices && supplement.doc !== doc.name" type="button" class="btn pri" :disabled="busy" @click="openSupplement(doc)">补录发票</button>
-            <button v-if="doc.workflow_status === '草稿' && !finance" type="button" class="btn" :disabled="busy" @click="openDraft(doc)">继续编辑</button>
+            <button v-if="doc.workflow_status === '草稿' && (!finance || tab === 'list')" type="button" class="btn" :disabled="busy" @click="openDraft(doc)">继续编辑</button>
             <button v-if="doc.can_withdraw" type="button" class="btn" :disabled="busy" @click="withdraw(doc)">撤回</button>
             <button v-if="doc.can_withdraw_claim_payment" type="button" class="btn danger" :disabled="busy" @click="withdrawPayment(doc)">撤回付款</button>
           </div>

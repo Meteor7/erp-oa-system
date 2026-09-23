@@ -26,6 +26,8 @@ import {
   editableByOwner,
   filterFolder,
   folderTabs,
+  folderTabsFromCounts,
+  tabStatuses,
   canEditFields,
   canRetry,
   confirmBlockers,
@@ -35,7 +37,10 @@ import {
   tabsWithCounts,
   usedByText,
 } from "../src/lib/invoiceFolderView.js";
-import { canSee, firstVisiblePath } from "../src/lib/access.js";
+import { canSee, firstVisiblePath, inMenu } from "../src/lib/access.js";
+import { readFileSync } from "node:fs";
+
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const purchase = { name: "OA-1", request_type: "购买申请", subject: "打印纸", available_amount: 300 };
 const travel = { name: "OA-2", request_type: "出差申请", subject: "北京展会", travel_destination: "北京", travel_start_date: "2026-10-21" };
@@ -62,7 +67,9 @@ test("claim kinds map both ways and carry their route and flag", () => {
   assert.deepEqual([CLAIM_KINDS.payment.path, CLAIM_KINDS.payment.flag], ["/approval/payment", "payment_request"]);
   // 员工：我的 / 新建；财务：待我处理 / 全部（设计稿第 5 版），不再给所有人"我的 / 待我处理 / 全部可见"。
   assert.deepEqual(claimTabs("claim").map((tab) => tab.label), ["我的报销", "新建报销"]);
-  assert.deepEqual(claimTabs("payment", true, { todo: 2, all: 9 }).map((tab) => [tab.label, tab.count]), [["待我处理", 2], ["全部付款", 9]]);
+  // 财务：待我处理 / 全部，自己也要报销、付款，所以还有我的 / 新建
+  assert.deepEqual(claimTabs("payment", true, { todo: 2, all: 9, list: 1 }).map((tab) => [tab.label, tab.count]),
+    [["待我处理", 2], ["全部付款", 9], ["我的付款", 1], ["新建付款", undefined]]);
   assert.equal(claimTabs("claim").some((tab) => tab.label === "全部可见"), false);
 });
 
@@ -220,4 +227,41 @@ test("invoice folder tabs follow the design for employees and finance", () => {
   assert.equal(editableByOwner({ folder_status: "待确认" }), true);
   assert.equal(editableByOwner({ folder_status: "待确认" }, true), false);
   assert.equal(editableByOwner({ folder_status: "可用" }), false);
+});
+
+test("invoice folder tabs are counted by the server, not from the loaded page", () => {
+  const counts = { 识别中: 1, 待确认: 2, 可用: 700, 已使用: 3, 疑似重复: 4, 识别失败: 1, 已排除: 9 };
+  assert.deepEqual(folderTabsFromCounts(counts).map((tab) => [tab.key, tab.count]),
+    [["list", 711], ["todo", 4], ["ok", 700], ["used", 3], ["dup", 4]]);
+  assert.deepEqual(folderTabsFromCounts(counts, true).map((tab) => [tab.label, tab.count]), [["疑似重复待处理", 4], ["全部发票", 711]]);
+  assert.deepEqual(tabStatuses("todo"), ["待确认", "识别中", "识别失败"]);
+  assert.equal(tabStatuses("unknown").includes("已排除"), false);
+});
+
+test("boards open for the positions the server grants, and the menu shows one set of pages", () => {
+  const access = { reimbursement_request: true, payment_request: true, expense_reimbursement: true, procurement_application: true, procurement_payment: true };
+  globalThis.window = { roles: ["Employee"], oa_access: access, position_access: { vice_manager: true } };
+  assert.equal(canSee("/approval/expense-request-board"), true);
+  globalThis.window = { roles: ["Employee"], oa_access: access, position_access: {} };
+  assert.equal(canSee("/approval/expense-request-board"), false);
+  globalThis.window = { roles: ["Accounts User"], oa_access: access };
+  assert.equal(canSee("/approval/reimbursement"), true, "legacy page still opens for in-flight documents");
+  assert.equal(inMenu("/approval/reimbursement"), false);
+  assert.equal(inMenu("/approval/claim"), true);
+});
+
+test("review fixes 2026-09-23 stay wired into the pages", () => {
+  const workbench = read("../src/components/claim/ClaimWorkbench.vue");
+  assert.match(workbench, /v-if="doc\.can_approve \|\| doc\.can_edit_expense_items"/, "cashier can approve while filling accounts");
+  assert.match(workbench, /Promise\.allSettled/, "one failing lookup no longer blanks the form");
+  assert.match(workbench, /expense_claim_entry\.list_verify_queue/);
+  assert.match(workbench, /expense_claim_entry\.list_claim_projects/);
+  assert.doesNotMatch(workbench, /list_approval_center_projects/);
+  const folder = read("../src/pages/InvoiceFolder.vue");
+  assert.doesNotMatch(folder, /hydrate\(selected\.value\);\n\s*if \(poller\)/, "polling must not refill the form");
+  assert.match(folder, /statuses: tabStatuses\(tab\.value\)/);
+  assert.match(folder, /alive = false/);
+  const app = read("../src/App.vue");
+  assert.match(app, /inMenu\(child\.to\)/);
+  assert.doesNotMatch(read("../src/pages/TravelRequest.vue"), /list_approval_center_projects/);
 });

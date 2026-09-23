@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { FeatherIcon, createResource } from 'frappe-ui';
-import { canSee, currentUser, roleLabel } from './lib/access';
+import { canSee, currentUser, inMenu, roleLabel } from './lib/access';
 const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo-mark.png';
 
 const groups = [
@@ -102,8 +102,8 @@ watch(() => route.path, (path) => {
 const visibleGroups = computed(() =>
   groups
     .map((g) => ({ ...g, items: g.items
-      .map((n) => n.children ? ({ ...n, children: n.children.filter((child) => canSee(child.to)) }) : n)
-      .filter((n) => n.children ? n.children.length : canSee(n.to)) }))
+      .map((n) => n.children ? ({ ...n, children: n.children.filter((child) => inMenu(child.to)) }) : n)
+      .filter((n) => n.children ? n.children.length : inMenu(n.to)) }))
     .filter((g) => g.items.length)
 );
 const allowed = computed(() => canSee(route.path));

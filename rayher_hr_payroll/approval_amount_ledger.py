@@ -69,6 +69,15 @@ def _note(value):
 
 
 class FrappeLedgerStore:
+    # 修复（2026-09-23）：锁住来源申请后，金额流水也要用加锁读取。MariaDB 默认可重复读，
+    # 普通查询读的是本事务开始时的快照：两张付款同时提交时，后一张等到行锁后仍看不到
+    # 前一张刚提交的占用，两张都能通过额度检查，余额变成负数，这张购买申请之后的付款、
+    # 撤回、驳回全部报"金额流水余额不合法"。加锁读取总是读到最新已提交的数据。
+    def _locked(self):
+        if not hasattr(self, "_locked_sources"):
+            self._locked_sources = set()
+        return self._locked_sources
+
     def lock_source(self, source):
         name = _name(source)
         rows = frappe.db.sql(
@@ -82,6 +91,7 @@ class FrappeLedgerStore:
         )
         if len(rows) != 1:
             raise ApprovalAmountError("来源申请不存在")
+        self._locked().add(_name(rows[0]))
         return rows[0]
 
     def lock_payment(self, payment):
@@ -106,6 +116,17 @@ class FrappeLedgerStore:
         return frappe.get_doc("OA Approval Request", request)
 
     def events(self, source_name):
+        if source_name in self._locked():
+            return frappe.db.sql(
+                """SELECT source_request, linked_request, event_type,
+                          reserved_delta, paid_delta, idempotency_key
+                     FROM `tabOA Approval Amount Ledger`
+                    WHERE source_request = %s
+                    ORDER BY creation ASC, name ASC
+                    FOR UPDATE""",
+                (source_name,),
+                as_dict=True,
+            )
         return frappe.get_all(
             "OA Approval Amount Ledger",
             filters={"source_request": source_name},
@@ -118,7 +139,8 @@ class FrappeLedgerStore:
 
     def event_by_key(self, key):
         name = frappe.db.get_value(
-            "OA Approval Amount Ledger", {"idempotency_key": key}, "name"
+            "OA Approval Amount Ledger", {"idempotency_key": key}, "name",
+            for_update=bool(self._locked()),
         )
         return frappe.get_doc("OA Approval Amount Ledger", name) if name else None
 

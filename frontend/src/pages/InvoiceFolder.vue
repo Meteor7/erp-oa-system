@@ -1,11 +1,11 @@
 <script setup>
 // 发票夹：上传 → 识别 → 核对 → 确认。确认后的发票才能在报销、付款里选用；识别不全的字段可以对照原件补。
 // 财务在这里处理疑似重复。版式按已确认的设计稿第 5 版。
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import '../styles/expenseUi.css';
 import InvoicePreviewDrawer from '../components/invoice/InvoicePreviewDrawer.vue';
 import { callApi, isFinanceUser, money, pillClass } from '../lib/expenseClaims.js';
-import { confirmBlockers, editableByOwner, filterFolder, folderTabs, missingFields, stillRecognizing, usedByText } from '../lib/invoiceFolderView.js';
+import { confirmBlockers, editableByOwner, folderTabsFromCounts, missingFields, tabStatuses, usedByText } from '../lib/invoiceFolderView.js';
 import {
   confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice,
   updateInvoice, updateInvoiceExpenseContext, uploadInvoiceFiles, validateInvoiceFiles,
@@ -21,10 +21,14 @@ const busy = ref(false);
 const banner = reactive({ ok: '', err: '' });
 const previewOpen = ref(false);
 const fileInput = ref(null);
+const counts = ref({});
+const total = ref(0);
+const PAGE = 100;
 let poller = null;
+let alive = true;
 
-const tabs = computed(() => folderTabs(invoices.value, finance));
-const rows = computed(() => filterFolder(invoices.value, finance && tab.value === 'allinv' ? 'list' : tab.value));
+const tabs = computed(() => folderTabsFromCounts(counts.value, finance));
+const rows = computed(() => invoices.value);
 const selected = computed(() => rows.value.find((row) => row.name === selectedName.value) || rows.value[0] || null);
 const editable = computed(() => editableByOwner(selected.value, finance));
 const missing = computed(() => (selected.value && editable.value ? missingFields({ ...selected.value, ...edit }) : []));
@@ -46,15 +50,22 @@ function hydrate(invoice) {
   });
 }
 
-async function load() {
+async function load({ more = false } = {}) {
   loading.value = true;
   try {
-    const result = await callApi('invoice_folder_entry.list_invoice_folder', { view: finance ? 'all' : 'mine' }, { method: 'GET' });
-    invoices.value = result?.invoices || [];
-    hydrate(selected.value);
+    const result = await callApi('invoice_folder_entry.list_invoice_folder', {
+      view: finance ? 'all' : 'mine',
+      statuses: tabStatuses(tab.value).join(','),
+      // 刷新时把已经翻出来的几页一起取回，列表不会缩回第一页。
+      limit: more ? PAGE : Math.max(PAGE, invoices.value.length),
+      offset: more ? invoices.value.length : 0,
+    }, { method: 'GET' });
+    invoices.value = more ? [...invoices.value, ...(result?.invoices || [])] : (result?.invoices || []);
+    counts.value = result?.counts || {};
+    total.value = result?.total ?? invoices.value.length;
     if (poller) clearTimeout(poller);
-    // 识别是后台任务：还有识别中的发票就每 4 秒刷新一次。
-    if (stillRecognizing(invoices.value)) poller = setTimeout(load, 4000);
+    // 识别是后台任务：还有识别中的发票就每 4 秒刷新一次；离开页面后不再刷新。
+    if (alive && Number(counts.value['识别中'] || 0) > 0) poller = setTimeout(load, 4000);
   } catch (error) {
     flash('', String(error?.message || error));
   } finally {
@@ -64,8 +75,16 @@ async function load() {
 
 function select(invoice) {
   selectedName.value = invoice.name;
-  hydrate(invoice);
 }
+
+// 修复（2026-09-23）：只在换了一张发票、或这张发票的状态变了时才把识别结果填进表单。
+// 原来识别中每 4 秒刷新一次都会重填，把正在修改的内容冲掉；切换页签后表单是空的，
+// 点确认会把已保存的费用说明清空。
+watch(() => (selected.value ? `${selected.value.name}|${selected.value.folder_status}` : ''), () => hydrate(selected.value), { immediate: true });
+watch(tab, () => {
+  selectedName.value = '';
+  load();
+});
 
 async function run(action, okText) {
   busy.value = true;
@@ -94,8 +113,8 @@ async function upload(event) {
     const results = await uploadInvoiceFiles(files, batch.name);
     const failed = results.filter((result) => result.error);
     flash(`已上传 ${results.length - failed.length} 张发票，正在识别`, failed.length ? `${failed.length} 个文件上传失败：${failed[0].error}` : '');
-    tab.value = 'todo';
-    await load();
+    if (tab.value === 'todo') await load();
+    else tab.value = 'todo';
   } catch (error) {
     flash('', String(error?.message || error));
   } finally {
@@ -126,6 +145,7 @@ async function confirm() {
     await saveEdits();
     const result = await confirmInvoice(selected.value.name);
     if (result?.conflict?.code === 'duplicate') {
+      await load();
       throw new Error(`发票号码、开票日期和金额与 ${result.conflict.duplicate_of} 相同，已标为疑似重复，等待财务处理`);
     }
     return result;
@@ -153,7 +173,10 @@ async function retry() {
 }
 
 onMounted(load);
-onBeforeUnmount(() => { if (poller) clearTimeout(poller); });
+onBeforeUnmount(() => {
+  alive = false;
+  if (poller) clearTimeout(poller);
+});
 </script>
 
 <template>
@@ -169,7 +192,7 @@ onBeforeUnmount(() => { if (poller) clearTimeout(poller); });
       </label>
     </div>
     <div class="tabs" role="tablist">
-      <button v-for="item in tabs" :key="item.key" role="tab" :aria-selected="tab === item.key" @click="tab = item.key; selectedName = ''; hydrate(null)">
+      <button v-for="item in tabs" :key="item.key" role="tab" :aria-selected="tab === item.key" @click="tab = item.key">
         {{ item.label }}<span class="c">{{ item.count }}</span>
       </button>
     </div>
@@ -191,6 +214,11 @@ onBeforeUnmount(() => { if (poller) clearTimeout(poller); });
                 <td><span :class="pillClass(invoice.folder_status)">{{ invoice.folder_status }}</span></td>
               </tr>
               <tr v-if="!rows.length"><td :colspan="finance ? 5 : 4" class="empty">{{ loading ? '正在加载…' : '这里没有发票' }}</td></tr>
+              <tr v-if="rows.length && rows.length < total">
+                <td :colspan="finance ? 5 : 4" class="empty">
+                  <button type="button" class="btn sm" :disabled="loading" @click="load({ more: true })">加载更多（还有 {{ total - rows.length }} 张）</button>
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>

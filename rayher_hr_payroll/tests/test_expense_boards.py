@@ -205,3 +205,12 @@ def test_recent_months_crosses_the_year_boundary():
     assert boards.recent_months(date(2026, 2, 15), 4) == ["2025-11", "2025-12", "2026-01", "2026-02"]
     assert boards.month_key("2026-09-23 10:00:00") == "2026-09"
     assert boards.trip_status("2026-09-24", "2026-09-25", TODAY) == "未出发"
+
+
+def test_every_inspection_status_except_passed_is_pending():
+    rows = [
+        {"name": f"PP{index}", "request_type": "采购付款", "workflow_status": "已付款", "amount": 1, "paid_on": "2026-09-05",
+         "inspection_status": status}
+        for index, status in enumerate(["未验收", "待验收", "验收不合格", "验收通过", ""])
+    ]
+    assert boards.procurement_board(rows, today=TODAY)["summary"]["pending_inspection"] == 3
