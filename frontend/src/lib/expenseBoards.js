@@ -1,83 +1,85 @@
-// 看板前端逻辑：三个页签、卡片口径、趋势条的比例与逾期着色。
-export const BOARD_TABS = Object.freeze([
-  { key: 'request', label: '申请看板', path: '/approval/expense-request-board', method: 'expense_board_entry.request_board', hint: '购买申请与出差申请；采购申请在采购看板。' },
-  { key: 'payment', label: '付款看板', path: '/approval/expense-payment-board', method: 'expense_board_entry.payment_board', hint: '报销单与付款单，金额按实际付款日期计入月份。' },
-  { key: 'procurement', label: '采购看板', path: '/approval/expense-payment-board', method: 'expense_board_entry.procurement_board', hint: '采购申请与采购付款单独统计：到货、验收、预付款核销。' },
-]);
+// 申请看板 / 付款看板的前端口径：指标卡、堆叠柱状图几何、横条图比例、跳转。
+import { money } from './expenseClaims.js';
 
-export function tabFor(path, query = {}) {
-  const wanted = String(query.tab || '').trim();
-  if (BOARD_TABS.some((tab) => tab.key === wanted)) return wanted;
-  return path === '/approval/expense-request-board' ? 'request' : 'payment';
-}
+const yuan = (value) => `¥ ${money(value)}`;
 
-export function requestCards(data = {}) {
-  const summary = data.summary || {};
+export function requestKpis(data = {}) {
+  const s = data.summary || {};
   return [
-    { key: 'approved_amount', label: '已批准金额', value: summary.approved_amount || 0, money: true },
-    { key: 'unpaid_amount', label: '已批准未付出', value: summary.unpaid_amount || 0, money: true, tone: 'amber' },
-    { key: 'reserved_amount', label: '已占用（在途单据）', value: summary.reserved_amount || 0, money: true },
-    { key: 'paid_amount', label: '已付款', value: summary.paid_amount || 0, money: true, tone: 'emerald' },
-    { key: 'stale', label: `超过 ${data.stale_days || 30} 天未执行`, value: (data.stale_applications || []).length },
-    { key: 'stuck', label: `审批卡点（等待 ${data.stuck_days || 3} 天以上）`, value: (data.stuck_approvals || []).filter((row) => row.overdue).length, tone: 'red' },
+    { key: 'month', label: '本月通过的购买申请', value: yuan(s.month_approved_amount), sub: `${s.month_approved_count || 0} 张` },
+    { key: 'unpaid', label: '已批准未付出的额度', value: yuan(s.unpaid_amount), sub: '已通过但还没付出去的钱', tone: '#E57A00' },
+    { key: 'pending', label: '审批中', value: `${s.pending_count || 0} 张`, sub: `最久已等 ${s.longest_wait_days || 0} 天`, tone: (s.longest_wait_days || 0) > 3 ? '#DC2626' : '' },
+    { key: 'trip', label: '出差中 / 本月出差', value: `${s.on_trip_count || 0} 人 / ${s.month_trip_count || 0} 次`, sub: '按出发、返回日期' },
   ];
 }
 
-export function paymentCards(data = {}) {
-  const summary = data.summary || {};
+export function paymentKpis(data = {}) {
+  const s = data.summary || {};
   return [
-    { key: 'reimbursement_paid', label: `本月已付·报销（${summary.month || ''}）`, value: summary.reimbursement_paid || 0, money: true },
-    { key: 'payment_paid', label: '本月已付·付款', value: summary.payment_paid || 0, money: true },
-    { key: 'paid_total', label: '本月已付合计', value: summary.paid_total || 0, money: true, tone: 'emerald' },
-    { key: 'cashier_pending', label: '出纳待办', value: summary.cashier_pending || 0, tone: 'amber' },
-    { key: 'invoice_pending', label: '待补票', value: summary.invoice_pending || 0 },
-    { key: 'invoice_overdue', label: '补票逾期', value: summary.invoice_overdue || 0, tone: 'red' },
+    { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期' },
+    { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付' },
+    { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#E57A00' },
+    { key: 'inv', label: '待补票', value: yuan(s.invoice_pending_amount), sub: `${s.invoice_pending_count || 0} 张，逾期 ${s.invoice_overdue_count || 0} 张`, tone: (s.invoice_overdue_count || 0) ? '#DC2626' : '' },
   ];
 }
 
-export function procurementCards(data = {}) {
-  const summary = data.summary || {};
+export function procurementKpis(data = {}, part = 'request') {
+  const s = data.summary || {};
+  if (part === 'request') {
+    return [
+      { key: 'count', label: '采购申请', value: `${s.application_count || 0} 张`, sub: `审批中 ${s.application_pending || 0} 张` },
+      { key: 'amount', label: '采购申请金额', value: yuan(s.application_amount), sub: '批准金额，未批准的按申请金额' },
+    ];
+  }
   return [
-    { key: 'application_count', label: '采购申请', value: summary.application_count || 0 },
-    { key: 'application_amount', label: '采购申请金额', value: summary.application_amount || 0, money: true },
-    { key: 'payment_count', label: '采购付款', value: summary.payment_count || 0 },
-    { key: 'paid_amount', label: '采购已付款', value: summary.paid_amount || 0, money: true, tone: 'emerald' },
-    { key: 'pending_arrival', label: '待到货', value: summary.pending_arrival || 0, tone: 'amber' },
-    { key: 'pending_inspection', label: '待验收', value: summary.pending_inspection || 0, tone: 'amber' },
-    { key: 'pending_writeoff', label: '待预付款核销', value: summary.pending_writeoff || 0, tone: 'red' },
+    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `采购付款共 ${s.payment_count || 0} 张` },
+    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#E57A00' : '' },
+    { key: 'inspect', label: '待验收', value: `${s.pending_inspection || 0} 张`, sub: '已付款未验收' },
+    { key: 'writeoff', label: '待预付款核销', value: `${s.pending_writeoff || 0} 张`, sub: '100% 预付款', tone: (s.pending_writeoff || 0) ? '#DC2626' : '' },
   ];
 }
 
-export function cardTone(tone) {
-  return {
-    amber: 'border-amber-200 bg-amber-50',
-    red: 'border-red-200 bg-red-50',
-    emerald: 'border-emerald-200 bg-emerald-50',
-  }[tone] || 'bg-gray-50';
+// 横条图：按同组最大值给宽度百分比。
+export function hbarRows(rows = []) {
+  const max = Math.max(1, ...rows.map((row) => Number(row[1] || 0)));
+  return rows.map(([label, value]) => ({ label, value: Number(value || 0), width: (Number(value || 0) / max) * 100 }));
 }
 
-// 趋势条按同组最大值缩放，最小给 2% 让非零月份看得见。
-export function trendBars(trend = []) {
-  const max = trend.reduce((peak, row) => Math.max(peak, Number(row.reimbursement || 0) + Number(row.payment || 0)), 0);
-  return trend.map((row) => {
+// 近 6 个月堆叠柱状图（报销在下、付款在上），刻度以万元为单位向上取整。
+export function stackedChart(trend = [], { width = 560, height = 190, pad = 34, bar = 46 } = {}) {
+  const totals = trend.map((row) => Number(row.reimbursement || 0) + Number(row.payment || 0));
+  const peak = Math.max(0, ...totals);
+  const step = peak > 50000 ? 20000 : peak > 20000 ? 10000 : peak > 5000 ? 2000 : peak > 1000 ? 500 : 100;
+  const max = Math.max(step, Math.ceil(peak / step) * step);
+  const count = Math.max(1, trend.length);
+  const gap = count > 1 ? (width - pad * 2 - bar * count) / (count - 1) : 0;
+  const y = (value) => height - 24 - (value / max) * (height - 44);
+  const ticks = [];
+  for (let value = 0; value <= max; value += step) ticks.push({ value, y: y(value), label: value >= 10000 ? `${value / 10000}万` : String(value) });
+  const bars = trend.map((row, index) => {
     const reimbursement = Number(row.reimbursement || 0);
     const payment = Number(row.payment || 0);
-    const scale = (value) => (max <= 0 || value <= 0 ? 0 : Math.max(2, Math.round((value / max) * 100)));
-    return { ...row, total: reimbursement + payment, reimbursementHeight: scale(reimbursement), paymentHeight: scale(payment) };
+    const x = pad + index * (bar + gap);
+    return {
+      month: row.month, x, width: bar, reimbursement, payment, total: reimbursement + payment,
+      reimbursementY: y(reimbursement), reimbursementHeight: y(0) - y(reimbursement),
+      paymentY: y(reimbursement + payment), paymentHeight: y(reimbursement) - y(reimbursement + payment),
+      labelY: y(reimbursement + payment) - 5, label: `${Number(row.month.slice(5))}月`,
+    };
   });
+  return { width, height, pad, ticks, bars, baseline: y(0) };
 }
 
-export function overdueTone(days) {
-  const value = Number(days || 0);
-  if (value > 7) return 'text-red-700 font-medium';
-  if (value > 0) return 'text-orange-700';
-  return 'text-gray-600';
+export function shortMoney(value) {
+  const number = Number(value || 0);
+  if (number >= 10000) return `${(number / 10000).toFixed(1)}万`;
+  return money(number);
 }
 
 export function dueText(row = {}) {
-  if (Number(row.overdue_days || 0) > 0) return `已逾期 ${row.overdue_days} 天`;
-  if (Number(row.days_left || 0) === 0) return '今天到期';
-  return `${row.days_left} 天后到期`;
+  if (Number(row.overdue_days || 0) > 0) return { text: `逾期 ${row.overdue_days} 天`, tone: 'p-red' };
+  if (Number(row.days_left || 0) === 0) return { text: '今天到期', tone: 'p-sun' };
+  return { text: `${row.days_left} 天后到期`, tone: 'p-sun' };
 }
 
 export function boardRoute(requestType) {
@@ -88,5 +90,11 @@ export function boardRoute(requestType) {
     付款单: '/approval/payment',
     采购申请: '/approval/procurement',
     采购付款: '/approval/procurement-payment',
-  }[String(requestType || '').trim()] || '/approval/request-dashboard';
+  }[String(requestType || '').trim()] || '/dashboard';
+}
+
+export function scopeText(data = {}) {
+  if (data.scope === 'department') return `范围：本部门（${data.department || ''}）`;
+  if (data.scope === 'all') return '范围：全公司';
+  return '';
 }

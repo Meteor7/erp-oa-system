@@ -66,7 +66,8 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /InvoiceFolder\.vue/);
   assert.match(source, /ClaimCenter\.vue/);
   assert.match(source, /PaymentRequestCenter\.vue/);
-  assert.match(source, /ExpenseBoards\.vue/);
+  assert.match(source, /RequestBoard\.vue/);
+  assert.match(source, /PaymentBoard\.vue/);
 });
 
 test("procurement pages save and submit through the real workflow engine", () => {

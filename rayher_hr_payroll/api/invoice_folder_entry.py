@@ -41,8 +41,11 @@ def _requests(names):
     return {row["name"]: row for row in rows}
 
 
-def _serialize(row, requests):
+def _serialize(row, requests, owners=None):
     item = {key: row.get(key) for key in FIELDS if key != "owner"}
+    if owners is not None:
+        item["owner"] = row.get("owner")
+        item["owner_name"] = owners.get(row.get("owner")) or row.get("owner")
     item["folder_status"] = folder.folder_status(row.get("recognition_status"), row.get("request"))
     linked = requests.get(row.get("request") or "")
     item["used_by"] = dict(linked) if linked else None
@@ -50,21 +53,33 @@ def _serialize(row, requests):
 
 
 @frappe.whitelist()
-def list_invoice_folder(status=None, include_excluded=0):
-    """本人发票夹：每张发票的发票夹状态，以及被哪张单据使用。"""
+def list_invoice_folder(status=None, include_excluded=0, view="mine"):
+    """本人发票夹：每张发票的发票夹状态，以及被哪张单据使用。财务可以看全部发票（view="all"）。"""
     user = _require_access()
+    finance_view = str(view or "mine").strip() == "all"
+    if finance_view:
+        roles = set(frappe.get_roles(user) or [])
+        if user != "Administrator" and not roles & service.FINANCE_ROLES:
+            frappe.throw("只有财务可以查看全部发票。", frappe.PermissionError)
     status = str(status or "").strip()
     if status and status not in folder.FOLDER_STATUSES:
         frappe.throw("发票夹状态无效。")
     rows = frappe.get_all(
         service.RECORD_DOCTYPE,
-        filters={"owner": user},
+        filters={} if finance_view else {"owner": user},
         fields=FIELDS,
         order_by="modified desc",
         limit_page_length=LIST_LIMIT,
     )
     requests = _requests(row.get("request") for row in rows)
-    items = [_serialize(row, requests) for row in rows]
+    owners = None
+    if finance_view:
+        owners = {
+            row["name"]: row["full_name"]
+            for row in frappe.get_all("User", filters={"name": ["in", sorted({row.get("owner") for row in rows if row.get("owner")}) or [""]]},
+                                      fields=["name", "full_name"], limit_page_length=0)
+        }
+    items = [_serialize(row, requests, owners) for row in rows]
     counts = {name: 0 for name in folder.FOLDER_STATUSES}
     for item in items:
         counts[item["folder_status"]] += 1

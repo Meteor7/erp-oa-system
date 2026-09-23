@@ -1,23 +1,27 @@
 <script setup>
-// 出差申请：只审批"该不该去"，不填金额。审批通过后可以在报销、付款里关联它。
+// 出差申请：只批该不该去，不设金额；报销、付款关联它即可。版式按已确认的设计稿第 5 版。
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { callApi, statusTone } from '../lib/expenseClaims.js';
+import '../styles/expenseUi.css';
+import { callApi, displayStatus, pillClass, stepChips } from '../lib/expenseClaims.js';
 
 const route = useRoute();
 const router = useRouter();
-const tab = ref('mine');
+const tab = ref('list');
 const rows = ref([]);
 const selected = ref(null);
 const projects = ref([]);
 const loading = ref(false);
 const busy = ref(false);
-const errorMessage = ref('');
-const message = ref('');
-const editorOpen = ref(false);
+const banner = reactive({ ok: '', err: '' });
 const editingName = ref('');
+const form = reactive({});
 
-const form = reactive({ subject: '', travel_destination: '', travel_start_date: '', travel_end_date: '', reason: '', project: '' });
+function resetForm() {
+  Object.assign(form, { subject: '', travel_destination: '', travel_start_date: '', travel_end_date: '', reason: '', project: '' });
+  editingName.value = '';
+}
+resetForm();
 
 const days = computed(() => {
   const start = Date.parse(form.travel_start_date);
@@ -30,100 +34,97 @@ const blockers = computed(() => {
   if (!form.subject.trim()) messages.push('请填写主题');
   if (!form.travel_destination.trim()) messages.push('请填写出差地点');
   if (!form.travel_start_date || !form.travel_end_date) messages.push('请填写出发和返回日期');
-  else if (days.value <= 0) messages.push('返回日期不能早于出发日期');
+  else if (!days.value) messages.push('返回日期不能早于出发日期');
   if (!form.reason.trim()) messages.push('请填写出差事由');
   return messages;
 });
 
-function fail(error) {
-  errorMessage.value = String(error?.message || error || '操作失败');
+function flash(ok = '', err = '') {
+  banner.ok = ok;
+  banner.err = err;
 }
 
-async function run(action) {
+async function run(action, okText) {
   busy.value = true;
-  errorMessage.value = '';
-  message.value = '';
+  flash();
   try {
     const result = await action();
-    await load(selected.value?.name || '');
+    if (okText) flash(typeof okText === 'function' ? okText(result) : okText);
+    await load();
     return result;
   } catch (error) {
-    fail(error);
+    flash('', String(error?.message || error || '操作失败'));
     return null;
   } finally {
     busy.value = false;
   }
 }
 
-async function loadOne(name) {
-  const found = await callApi('oa_entry.list_requests', { view: 'all', name, limit: 1 }, { method: 'GET' });
-  return (found || [])[0] || null;
-}
+const loadOne = async (name) => ((await callApi('oa_entry.list_requests', { view: 'all', name, limit: 1 }, { method: 'GET' })) || [])[0] || null;
 
-async function load(selectName = '') {
+async function load() {
   loading.value = true;
   try {
-    rows.value = await callApi('oa_entry.list_requests', { view: tab.value, request_type: '出差申请', limit: 100 }, { method: 'GET' }) || [];
-    const wanted = selectName || selected.value?.name || String(route.query.request || '');
+    rows.value = await callApi('oa_entry.list_requests', { view: 'mine', request_type: '出差申请', limit: 100 }, { method: 'GET' }) || [];
+    const wanted = String(route.query.request || '') || selected.value?.name || '';
     selected.value = wanted ? await loadOne(wanted) : null;
   } catch (error) {
-    fail(error);
+    flash('', String(error?.message || error));
   } finally {
     loading.value = false;
   }
 }
 
 function openNew() {
-  Object.assign(form, { subject: '', travel_destination: '', travel_start_date: '', travel_end_date: '', reason: '', project: '' });
-  editingName.value = '';
-  editorOpen.value = true;
+  resetForm();
+  tab.value = 'new';
 }
 
-async function openDraft(row) {
-  const doc = await loadOne(row.name);
-  if (!doc) return;
+function openDraft(row) {
+  resetForm();
   Object.assign(form, {
-    subject: doc.subject || '', travel_destination: doc.travel_destination || '',
-    travel_start_date: doc.travel_start_date || '', travel_end_date: doc.travel_end_date || '',
-    reason: doc.reason || '', project: doc.project || '',
+    subject: row.subject || '', travel_destination: row.travel_destination || '',
+    travel_start_date: row.travel_start_date || '', travel_end_date: row.travel_end_date || '',
+    reason: row.reason || '', project: row.project || '',
   });
-  editingName.value = doc.name;
-  editorOpen.value = true;
+  editingName.value = row.name;
+  tab.value = 'new';
 }
 
-async function save({ thenSubmit = false } = {}) {
+async function save({ submit = false } = {}) {
   const saved = await run(async () => {
     const doc = await callApi('travel_entry.save_travel_draft', { payload: JSON.stringify({ ...form }), name: editingName.value || undefined });
     editingName.value = doc.name;
-    if (thenSubmit) await callApi('oa_entry.submit_request', { name: doc.name });
+    if (submit) await callApi('oa_entry.submit_request', { name: doc.name });
     return doc;
-  });
-  if (saved) {
-    message.value = thenSubmit ? `出差申请 ${saved.name} 已提交` : `草稿 ${saved.name} 已保存`;
-    if (thenSubmit) editorOpen.value = false;
-    await load(saved.name);
+  }, (doc) => (submit ? `出差申请 ${doc.name} 已提交审批` : `草稿 ${doc.name} 已保存`));
+  if (saved && submit) {
+    resetForm();
+    tab.value = 'list';
   }
 }
 
-async function select(row) {
-  selected.value = await loadOne(row.name);
-  router.replace({ path: route.path, query: { ...route.query, request: row.name } });
+function select(row) {
+  router.replace({ path: route.path, query: { request: row.name } });
 }
 
 async function act(action) {
   const note = action === 'reject' ? (window.prompt('请填写驳回原因') || '').trim() : '';
   if (action === 'reject' && !note) return;
-  await run(() => callApi('oa_entry.action_request', { name: selected.value.name, action, note, reject_target: action === 'reject' ? 'applicant' : undefined }));
-  message.value = action === 'reject' ? '已驳回给申请人' : '已同意';
+  await run(() => callApi('oa_entry.action_request', { name: selected.value.name, action, note, reject_target: action === 'reject' ? 'applicant' : undefined }),
+    action === 'reject' ? '已驳回给申请人' : '已同意');
 }
 
-async function withdraw() {
+async function withdraw(row) {
   const note = (window.prompt('请填写撤回原因（可选）') || '').trim();
-  await run(() => callApi('oa_entry.withdraw_request', { name: selected.value.name, note }));
-  message.value = '已撤回，单据回到草稿';
+  await run(() => callApi('oa_entry.withdraw_request', { name: row.name, note }), '已撤回为草稿');
 }
 
-watch(tab, () => load(''));
+function push(row, kind) {
+  router.push({ path: kind === 'claim' ? '/approval/claim' : '/approval/payment', query: { source: row.name } });
+}
+
+watch(() => route.query.request, load);
 onMounted(async () => {
   await load();
   try {
@@ -135,90 +136,101 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <section class="rounded-lg border bg-white p-5 shadow-sm">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 class="text-xl font-semibold">出差申请</h1>
-          <p class="mt-1 text-sm text-gray-500">只审批行程，不填金额；审批通过后报销和付款可以关联它。路线：直属主管 → 副总经理。</p>
-        </div>
-        <button type="button" class="rounded bg-gray-900 px-3 py-1.5 text-sm text-white" :disabled="busy" @click="openNew">新建出差申请</button>
+  <div class="xp">
+    <div class="ph">
+      <div>
+        <h3>出差申请</h3>
+        <div class="muted">只批该不该去，不设金额；报销、付款关联它即可。审批路线：直属主管 → 副总经理。</div>
       </div>
-      <div class="mt-4 flex gap-2">
-        <button v-for="item in [{ key: 'mine', label: '我的申请' }, { key: 'pending', label: '待我处理' }, { key: 'all', label: '全部可见' }]" :key="item.key"
-          type="button" class="rounded px-3 py-1.5 text-sm" :class="tab === item.key ? 'bg-gray-900 text-white' : 'border'" @click="tab = item.key">{{ item.label }}</button>
-      </div>
-      <p v-if="errorMessage" class="mt-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{{ errorMessage }}</p>
-      <p v-if="message" class="mt-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{{ message }}</p>
-    </section>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" :aria-selected="tab === 'list'" @click="tab = 'list'">我的出差申请<span class="c">{{ rows.length }}</span></button>
+      <button role="tab" :aria-selected="tab === 'new'" @click="openNew">新建出差申请</button>
+    </div>
+    <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
+    <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
 
-    <section v-if="editorOpen" class="rounded-lg border bg-white p-5 shadow-sm">
-      <div class="flex items-center justify-between">
-        <h2 class="font-semibold">{{ editingName ? `编辑草稿 ${editingName}` : '新建出差申请' }}</h2>
-        <button type="button" class="text-sm text-gray-500 underline" @click="editorOpen = false">关闭</button>
-      </div>
-      <div class="mt-4 grid gap-3 md:grid-cols-2">
-        <label class="text-sm">主题<input v-model="form.subject" class="mt-1 w-full rounded border px-2 py-1.5" /></label>
-        <label class="text-sm">出差地点<input v-model="form.travel_destination" class="mt-1 w-full rounded border px-2 py-1.5" /></label>
-        <label class="text-sm">出发日期<input v-model="form.travel_start_date" type="date" class="mt-1 w-full rounded border px-2 py-1.5" /></label>
-        <label class="text-sm">返回日期<input v-model="form.travel_end_date" type="date" class="mt-1 w-full rounded border px-2 py-1.5" /></label>
-        <label class="text-sm">所属项目
-          <select v-model="form.project" class="mt-1 w-full rounded border px-2 py-1.5">
-            <option value="">非项目</option>
-            <option v-for="project in projects" :key="project" :value="project">{{ project }}</option>
-          </select>
-        </label>
-        <div class="text-sm">出差天数<div class="mt-1 rounded border bg-gray-50 px-2 py-1.5">{{ days || '-' }}</div></div>
-        <label class="text-sm md:col-span-2">出差事由<textarea v-model="form.reason" rows="2" class="mt-1 w-full rounded border px-2 py-1.5"></textarea></label>
-      </div>
-      <div class="mt-4 flex justify-end gap-2 border-t pt-3">
-        <button type="button" class="rounded border px-3 py-1.5 text-sm" :disabled="busy" @click="save()">保存草稿</button>
-        <button type="button" class="rounded bg-gray-900 px-3 py-1.5 text-sm text-white disabled:opacity-50" :disabled="busy || blockers.length" @click="save({ thenSubmit: true })">提交</button>
-      </div>
-      <ul v-if="blockers.length" class="mt-2 list-disc pl-5 text-sm text-amber-700"><li v-for="item in blockers" :key="item">{{ item }}</li></ul>
-    </section>
-
-    <section class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div class="rounded-lg border bg-white p-4 shadow-sm">
-        <p v-if="loading" class="py-8 text-center text-sm text-gray-500">正在加载…</p>
-        <table v-else class="min-w-full text-sm">
-          <thead><tr class="border-b text-left text-gray-500"><th class="p-2">单号</th><th class="p-2">主题</th><th class="p-2">行程</th><th class="p-2">状态</th></tr></thead>
-          <tbody>
-            <tr v-for="row in rows" :key="row.name" class="cursor-pointer border-b hover:bg-gray-50" :class="{ 'bg-gray-50': selected?.name === row.name }" @click="select(row)">
-              <td class="p-2 font-medium text-blue-700">{{ row.name }}</td>
-              <td class="p-2">{{ row.subject }}</td>
-              <td class="p-2">{{ row.travel_destination }} · {{ row.travel_start_date }} → {{ row.travel_end_date }}（{{ row.travel_days }} 天）</td>
-              <td class="p-2"><span class="rounded px-2 py-0.5 text-xs" :class="statusTone(row.business_status || row.workflow_status)">{{ row.business_status || row.workflow_status }}</span></td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="!loading && !rows.length" class="py-10 text-center text-gray-400">暂无出差申请。</p>
-      </div>
-
-      <div v-if="selected" class="rounded-lg border bg-white p-5 shadow-sm">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <h2 class="font-semibold">{{ selected.name }} · {{ selected.subject }}</h2>
-            <p class="mt-1 text-sm text-gray-500">{{ selected.employee_name }} · {{ selected.travel_destination }} · {{ selected.travel_start_date }} → {{ selected.travel_end_date }}（{{ selected.travel_days }} 天）</p>
-            <p class="mt-1 text-sm text-gray-500">所属项目 {{ selected.project || '非项目' }} · 当前节点 {{ selected.current_step_label || '-' }}</p>
+    <template v-if="tab === 'new'">
+      <div class="panel">
+        <div class="pt">{{ editingName ? `编辑草稿 ${editingName}` : '出差信息' }}</div>
+        <div class="form">
+          <div class="f"><label>主题<b>*</b></label><input v-model="form.subject" placeholder="如：上海客户拜访" /></div>
+          <div class="f"><label>出差地点<b>*</b></label><input v-model="form.travel_destination" /></div>
+          <div class="f"><label>出发日期<b>*</b></label><input v-model="form.travel_start_date" type="date" /></div>
+          <div class="f"><label>返回日期<b>*</b></label><input v-model="form.travel_end_date" type="date" /></div>
+          <div class="f"><label>天数</label><input :value="days ? days + ' 天' : ''" readonly /><div class="h">按出发、返回日期自动计算</div></div>
+          <div class="f">
+            <label>所属项目</label>
+            <select v-model="form.project"><option value="">非项目</option><option v-for="project in projects" :key="project" :value="project">{{ project }}</option></select>
           </div>
-          <span class="rounded px-2 py-0.5 text-xs" :class="statusTone(selected.business_status || selected.workflow_status)">{{ selected.business_status || selected.workflow_status }}</span>
-        </div>
-        <p class="mt-3 whitespace-pre-line text-sm">{{ selected.reason }}</p>
-        <ol class="mt-4 space-y-1 text-sm">
-          <li v-for="step in selected.steps || []" :key="step.step_index" class="flex justify-between border-b py-1">
-            <span>{{ step.step_index }}. {{ step.label }}</span>
-            <span class="text-gray-500">{{ step.status }}<span v-if="step.action_by"> · {{ step.action_by }}</span></span>
-          </li>
-        </ol>
-        <div class="mt-4 flex flex-wrap gap-2 border-t pt-3">
-          <button v-if="selected.workflow_status === '草稿'" type="button" class="rounded border px-3 py-1.5 text-sm" :disabled="busy" @click="openDraft(selected)">编辑草稿</button>
-          <button v-if="selected.can_approve" type="button" class="rounded bg-gray-900 px-3 py-1.5 text-sm text-white" :disabled="busy" @click="act('approve')">同意</button>
-          <button v-if="selected.can_reject" type="button" class="rounded border px-3 py-1.5 text-sm" :disabled="busy" @click="act('reject')">驳回</button>
-          <button v-if="selected.can_withdraw" type="button" class="rounded border px-3 py-1.5 text-sm" :disabled="busy" @click="withdraw">撤回</button>
+          <div class="f s2"><label>出差事由<b>*</b></label><textarea v-model="form.reason"></textarea></div>
         </div>
       </div>
-      <div v-else class="rounded-lg border bg-white p-10 text-center text-sm text-gray-400 shadow-sm">在左侧选择一张申请查看明细。</div>
-    </section>
+      <div v-if="blockers.length" class="err" role="alert">{{ blockers.join('；') }}</div>
+      <div class="actions">
+        <button type="button" class="btn pri" :disabled="busy || blockers.length > 0" @click="save({ submit: true })">提交审批</button>
+        <button type="button" class="btn" :disabled="busy" @click="save()">保存草稿</button>
+        <button type="button" class="btn" :disabled="busy" @click="tab = 'list'; resetForm()">取消</button>
+      </div>
+    </template>
+
+    <template v-else>
+      <div v-if="selected && !rows.some((row) => row.name === selected.name)" class="panel focus">
+        <div class="pt"><span><span class="num">{{ selected.name }}</span> <span :class="pillClass(displayStatus(selected))">{{ displayStatus(selected) }}</span> <span class="muted">{{ selected.subject }}</span></span></div>
+        <div class="kv">
+          <div><span>出差人</span>{{ selected.employee_name }}</div>
+          <div><span>地点</span>{{ selected.travel_destination }}</div>
+          <div><span>日期</span>{{ selected.travel_start_date }} ~ {{ selected.travel_end_date }}（{{ selected.travel_days }} 天）</div>
+          <div><span>所属项目</span>{{ selected.project || '非项目' }}</div>
+        </div>
+        <h4>出差事由</h4><div style="white-space:pre-line">{{ selected.reason }}</div>
+        <h4>审批进度</h4><div class="steps"><span v-for="step in stepChips(selected)" :key="step.key" :class="step.state">{{ step.label }}</span></div>
+        <div class="actions">
+          <button v-if="selected.can_approve" type="button" class="btn pri" :disabled="busy" @click="act('approve')">同意</button>
+          <button v-if="selected.can_reject" type="button" class="btn" :disabled="busy" @click="act('reject')">驳回</button>
+        </div>
+      </div>
+
+      <div class="panel flush">
+        <div class="tbl">
+          <table>
+            <thead><tr><th>单号 / 主题</th><th>地点</th><th>日期</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="row in rows" :key="row.name" class="row-sel" :class="{ on: selected?.name === row.name }" @click="select(row)">
+                <td><div class="num" style="font-weight:600">{{ row.name }}</div><div class="muted">{{ row.subject }}</div></td>
+                <td>{{ row.travel_destination }}</td>
+                <td class="num">{{ row.travel_start_date }} ~ {{ row.travel_end_date }}<div class="muted">{{ row.travel_days }} 天</div></td>
+                <td><span :class="pillClass(displayStatus(row))">{{ displayStatus(row) }}</span></td>
+                <td @click.stop>
+                  <template v-if="row.workflow_status === '已完成'">
+                    <button type="button" class="btn sm" @click="push(row, 'claim')">下推报销</button>
+                    <button type="button" class="btn sm" style="margin-left:4px" @click="push(row, 'payment')">下推付款</button>
+                  </template>
+                  <button v-else-if="row.workflow_status === '草稿'" type="button" class="btn sm" @click="openDraft(row)">继续编辑</button>
+                  <button v-else-if="row.can_withdraw" type="button" class="btn sm" @click="withdraw(row)">撤回</button>
+                </td>
+              </tr>
+              <tr v-if="!loading && !rows.length"><td colspan="5" class="empty">还没有出差申请，点"新建出差申请"</td></tr>
+              <tr v-if="loading"><td colspan="5" class="empty">正在加载…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div v-if="selected && rows.some((row) => row.name === selected.name)" class="panel">
+        <div class="pt"><span><span class="num">{{ selected.name }}</span> <span class="muted">{{ selected.subject }}</span></span></div>
+        <div class="kv">
+          <div><span>地点</span>{{ selected.travel_destination }}</div>
+          <div><span>日期</span>{{ selected.travel_start_date }} ~ {{ selected.travel_end_date }}（{{ selected.travel_days }} 天）</div>
+          <div><span>所属项目</span>{{ selected.project || '非项目' }}</div>
+        </div>
+        <h4>出差事由</h4><div style="white-space:pre-line">{{ selected.reason }}</div>
+        <h4>审批进度</h4><div class="steps"><span v-for="step in stepChips(selected)" :key="step.key" :class="step.state">{{ step.label }}</span></div>
+        <div class="actions">
+          <button v-if="selected.can_approve" type="button" class="btn pri" :disabled="busy" @click="act('approve')">同意</button>
+          <button v-if="selected.can_reject" type="button" class="btn" :disabled="busy" @click="act('reject')">驳回</button>
+        </div>
+      </div>
+    </template>
   </div>
 </template>

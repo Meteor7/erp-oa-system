@@ -208,10 +208,73 @@ export function withDefaultProjects(invoices, projects = {}) {
   return result;
 }
 
-export function claimTabs(kind) {
-  return [
-    { key: 'mine', label: kind === 'claim' ? '我的报销' : '我的付款' },
-    { key: 'pending', label: '待我处理' },
-    { key: 'all', label: '全部可见' },
-  ];
+// ---------------------------------------------------------------- 页面结构（按已确认的设计稿第 5 版）
+
+// 财务（出纳、会计）看"待我处理 / 全部"，其他人看"我的 / 新建"；审批人从待办或通知直接打开单据。
+export function isFinanceUser(roles = globalThis.window?.roles || []) {
+  return (roles || []).some((role) => ['System Manager', 'Accounts User'].includes(role));
+}
+
+export function claimTabs(kind, finance = false, counts = {}) {
+  const label = CLAIM_KINDS[kind]?.label || '';
+  return finance
+    ? [{ key: 'todo', label: '待我处理', count: counts.todo }, { key: 'all', label: `全部${label}`, count: counts.all }]
+    : [{ key: 'list', label: `我的${label}`, count: counts.list }, { key: 'new', label: `新建${label}` }];
+}
+
+export const PILL_TONES = Object.freeze({
+  草稿: 'p-gray', 已撤回: 'p-gray', 已使用: 'p-gray', 已排除: 'p-gray', 未出发: 'p-gray',
+  待审批: 'p-cobalt', 审批中: 'p-cobalt', 待核验: 'p-cobalt', 识别中: 'p-cobalt', 出差中: 'p-cobalt',
+  待付款: 'p-sun', 待办理: 'p-sun', 部分付款: 'p-sun', 待确认: 'p-sun',
+  '已付款·待补票': 'p-brand',
+  已完结: 'p-jade', 已付款: 'p-jade', 已通过: 'p-jade', 已完成: 'p-jade', 可用: 'p-jade', 已返回: 'p-jade',
+  已拒绝: 'p-red', 疑似重复: 'p-red', 识别失败: 'p-red', 逾期: 'p-red',
+});
+
+export function pillClass(status) {
+  return `pill ${PILL_TONES[String(status || '').trim()] || 'p-gray'}`;
+}
+
+// 单据对外显示的状态：审批中的统一叫"审批中"，其余用业务状态。
+export function displayStatus(doc = {}) {
+  if (doc.workflow_status === '草稿') return '草稿';
+  if (doc.workflow_status === '待审批') return '审批中';
+  if (doc.workflow_status === '已拒绝') return '已拒绝';
+  return doc.business_status || doc.workflow_status || '';
+}
+
+// 审批进度小圆点：已过 d、当前 c、驳回 x。
+export function stepChips(doc = {}) {
+  const current = Number(doc.current_step_index || 0);
+  const active = ['待审批', '待办理'].includes(doc.workflow_status);
+  return (doc.steps || []).map((step) => {
+    const index = Number(step.step_index || 0);
+    let state = '';
+    if (['已通过', '已办理'].includes(step.status)) state = 'd';
+    else if (step.status === '已拒绝') state = 'x';
+    else if (active && index === current) state = 'c';
+    return { label: String(step.label || ''), state, key: `${index}-${step.label}` };
+  });
+}
+
+export function sourceTypeLabel(doc = {}) {
+  if (doc.payment_source_kind === '关联出差申请') return '出差申请';
+  if (doc.payment_source_kind === '关联购买申请') return '购买申请';
+  return '';
+}
+
+// 关联申请的额度条：购买申请看已付 + 在途占用；出差申请不限金额。
+export function quotaOf(application) {
+  if (!application) return null;
+  if (application.request_type !== '购买申请') return { capped: false, text: '出差申请不限金额' };
+  const approved = Number(application.approved_amount || 0);
+  const used = Number(application.paid_amount || 0) + Number(application.reserved_amount || 0);
+  const pct = approved > 0 ? Math.min(100, Math.round((used / approved) * 100)) : 0;
+  return { capped: true, pct, remaining: Number(application.available_amount || 0), text: `剩余 ${money(application.available_amount)} 元` };
+}
+
+export function maskAccount(value) {
+  const text = String(value || '').replace(/\s+/g, '');
+  if (text.length <= 8) return text;
+  return `${text.slice(0, 4)} **** ${text.slice(-4)}`;
 }

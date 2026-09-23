@@ -483,6 +483,32 @@ def list_linkable_applications(request_type):
 
 
 @frappe.whitelist()
+def claim_defaults(request_type):
+    """新建报销单 / 付款单表单的默认值；报销的收款信息取员工档案。"""
+    _require_claim_type(request_type)
+    ctx = oa_entry._employee_context()
+    payee = {}
+    if ctx.get("employee"):
+        values = frappe.db.get_value(
+            "Employee", ctx["employee"], ["employee_name", "bank_name", "bank_ac_no"], as_dict=True
+        ) or {}
+        payee = {
+            "payee_name": values.get("employee_name") or ctx.get("employee_name") or "",
+            "bank_name": values.get("bank_name") or "",
+            "account_no": values.get("bank_ac_no") or "",
+        }
+    return {
+        "companies": oa_entry.COMPANIES,
+        "urgencies": oa_entry.URGENCY,
+        "payment_methods": oa_entry.PAYMENT_METHODS,
+        "asset_categories": oa_entry.ASSET_CATEGORIES,
+        "payee": payee,
+        "employee_name": ctx.get("employee_name") or "",
+        "department": ctx.get("department") or "",
+    }
+
+
+@frappe.whitelist()
 def list_available_invoices(request_type=REQUEST_REIMBURSEMENT):
     """本人已确认、还没被任何单据使用的发票。"""
     _require_claim_type(request_type)

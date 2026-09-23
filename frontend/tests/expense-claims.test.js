@@ -8,6 +8,12 @@ import {
   claimDraftPayload,
   claimKind,
   claimTabs,
+  displayStatus,
+  isFinanceUser,
+  maskAccount,
+  pillClass,
+  quotaOf,
+  stepChips,
   money,
   overBudget,
   statusTone,
@@ -17,6 +23,9 @@ import {
 } from "../src/lib/expenseClaims.js";
 import {
   canConfirm,
+  editableByOwner,
+  filterFolder,
+  folderTabs,
   canEditFields,
   canRetry,
   confirmBlockers,
@@ -51,8 +60,10 @@ test("claim kinds map both ways and carry their route and flag", () => {
   assert.equal(claimKind("费用付款申请"), null);
   assert.deepEqual([CLAIM_KINDS.claim.path, CLAIM_KINDS.claim.flag], ["/approval/claim", "reimbursement_request"]);
   assert.deepEqual([CLAIM_KINDS.payment.path, CLAIM_KINDS.payment.flag], ["/approval/payment", "payment_request"]);
-  assert.deepEqual(claimTabs("claim").map((tab) => tab.label), ["我的报销", "待我处理", "全部可见"]);
-  assert.deepEqual(claimTabs("payment").map((tab) => tab.key), ["mine", "pending", "all"]);
+  // 员工：我的 / 新建；财务：待我处理 / 全部（设计稿第 5 版），不再给所有人"我的 / 待我处理 / 全部可见"。
+  assert.deepEqual(claimTabs("claim").map((tab) => tab.label), ["我的报销", "新建报销"]);
+  assert.deepEqual(claimTabs("payment", true, { todo: 2, all: 9 }).map((tab) => [tab.label, tab.count]), [["待我处理", 2], ["全部付款", 9]]);
+  assert.equal(claimTabs("claim").some((tab) => tab.label === "全部可见"), false);
 });
 
 test("amounts are summed in cents so 0.1 + 0.2 stays 0.30", () => {
@@ -173,4 +184,40 @@ test("the cashier's account draft is built from the document, however it was ope
 test("every selectable invoice starts as 非项目 but keeps a project already chosen", () => {
   assert.deepEqual(withDefaultProjects([{ name: "INV-1" }, { name: "INV-2" }], { "INV-2": "RD01" }), { "INV-1": "", "INV-2": "RD01" });
   assert.deepEqual(withDefaultProjects([], {}), {});
+});
+
+test("design helpers: status pills, progress steps, quota bar, masked accounts", () => {
+  assert.equal(isFinanceUser(["Employee"]), false);
+  assert.equal(isFinanceUser(["Employee", "Accounts User"]), true);
+  assert.equal(pillClass("已付款·待补票"), "pill p-brand");
+  assert.equal(pillClass("已完结"), "pill p-jade");
+  assert.equal(pillClass("随便"), "pill p-gray");
+  assert.equal(displayStatus({ workflow_status: "待审批", business_status: "待审批" }), "审批中");
+  assert.equal(displayStatus({ workflow_status: "待办理", business_status: "待付款" }), "待付款");
+  assert.equal(displayStatus({ workflow_status: "已付款", business_status: "待核验" }), "待核验");
+  const chips = stepChips({ workflow_status: "待审批", current_step_index: 2, steps: [
+    { step_index: 1, label: "出纳审核", status: "已通过" },
+    { step_index: 2, label: "直属主管：演示员工155", status: "待审批" },
+    { step_index: 3, label: "财务主管", status: "待流转" },
+  ] });
+  assert.deepEqual(chips.map((chip) => chip.state), ["d", "c", ""]);
+  assert.deepEqual(quotaOf({ request_type: "购买申请", approved_amount: 1000, paid_amount: 200, reserved_amount: 300, available_amount: 500 }),
+    { capped: true, pct: 50, remaining: 500, text: "剩余 500.00 元" });
+  assert.deepEqual(quotaOf({ request_type: "出差申请" }), { capped: false, text: "出差申请不限金额" });
+  assert.equal(maskAccount("6225 0000 1111 2222"), "6225 **** 2222");
+  assert.equal(maskAccount("1234"), "1234");
+});
+
+test("invoice folder tabs follow the design for employees and finance", () => {
+  const rows = [
+    { name: "A", folder_status: "可用" }, { name: "B", folder_status: "识别中" }, { name: "C", folder_status: "待确认" },
+    { name: "D", folder_status: "已使用" }, { name: "E", folder_status: "疑似重复" }, { name: "F", folder_status: "已排除" },
+  ];
+  assert.deepEqual(folderTabs(rows).map((tab) => [tab.label, tab.count]), [["全部", 6], ["待确认", 2], ["可用", 1], ["已使用", 1], ["疑似重复", 1]]);
+  assert.deepEqual(folderTabs(rows, true).map((tab) => [tab.label, tab.count]), [["疑似重复待处理", 1], ["全部发票", 6]]);
+  assert.deepEqual(filterFolder(rows, "todo").map((row) => row.name), ["B", "C"]);
+  assert.deepEqual(filterFolder(rows, "list").map((row) => row.name), ["A", "B", "C", "D", "E"]);
+  assert.equal(editableByOwner({ folder_status: "待确认" }), true);
+  assert.equal(editableByOwner({ folder_status: "待确认" }, true), false);
+  assert.equal(editableByOwner({ folder_status: "可用" }), false);
 });

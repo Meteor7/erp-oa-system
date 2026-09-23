@@ -11,7 +11,7 @@ def purchase(name, **overrides):
     row = {
         "name": name, "request_type": "购买申请", "subject": "打印纸", "employee_name": "王测试",
         "department": "研发部", "workflow_status": "已完成", "approved_amount": 1000, "amount": 1000,
-        "asset_classification": "非固定资产", "paid_amount": 0, "reserved_amount": 0,
+        "asset_nature": "非固定资产", "fixed_asset_category": "", "paid_amount": 0, "reserved_amount": 0,
         "waited_days": 0, "approved_on": date(2026, 9, 20), "current_step_label": "",
     }
     row.update(overrides)
@@ -24,7 +24,7 @@ def travel(name, **overrides):
         "department": "研发部", "workflow_status": "已完成", "travel_destination": "北京",
         "travel_start_date": "2026-09-20", "travel_end_date": "2026-09-25", "travel_days": 6,
         "paid_amount": 0, "reserved_amount": 0, "waited_days": 0, "approved_on": date(2026, 9, 19),
-        "approved_amount": 0, "amount": 0, "asset_classification": "非固定资产",
+        "approved_amount": 0, "amount": 0,
     }
     row.update(overrides)
     return row
@@ -33,15 +33,12 @@ def travel(name, **overrides):
 def claim(name, request_type="报销单", **overrides):
     row = {
         "name": name, "request_type": request_type, "subject": "办公用品", "employee_name": "王测试",
-        "department": "研发部", "workflow_status": "已付款", "amount": 100, "paid_on": "2026-09-10",
-        "urgency": "一般", "waited_days": 0, "invoice_followup_status": "已收票",
+        "department": "研发部", "workflow_status": "已付款", "business_status": "已完结", "amount": 100,
+        "paid_on": "2026-09-10", "urgency": "一般", "waited_days": 0, "invoice_followup_status": "已收票",
         "expected_invoice_date": None, "payee_name": "王测试",
     }
     row.update(overrides)
     return row
-
-
-# ---------------------------------------------------------------- scope
 
 
 @pytest.mark.parametrize("roles, positions, expected", [
@@ -59,132 +56,152 @@ def test_board_scope(roles, positions, expected):
     assert boards.board_scope(roles, positions) == expected
 
 
-# ---------------------------------------------------------------- request board
+# ---------------------------------------------------------------- 申请看板
 
 
-def test_request_board_sums_the_ledger_not_the_document_amount():
+def test_request_board_kpis_follow_the_design():
     rows = [
         purchase("P1", paid_amount=400, reserved_amount=100),
-        purchase("P2", approved_amount=500, paid_amount=0, approved_on=date(2026, 8, 1)),
-        purchase("P3", workflow_status="待审批", waited_days=5, current_step_label="副总经理"),
+        purchase("P2", approved_amount=500, approved_on=date(2026, 8, 1)),
+        purchase("P3", workflow_status="待审批", waited_days=5, current_step_label="副总经理", amount=300),
+        travel("T1"),
+        travel("T2", workflow_status="待审批", waited_days=1, current_step_label="直属主管"),
     ]
     result = boards.request_board(rows, today=TODAY)
-    assert result["summary"] == {
-        "approved_amount": 1500.0, "reserved_amount": 100.0, "paid_amount": 400.0,
-        "unpaid_amount": 1100.0, "application_count": 3,
-    }
-    # P2 has been approved for 53 days without a single payment; P1 已付过款，不算长期未执行
-    assert [row["name"] for row in result["stale_applications"]] == ["P2"]
-    assert result["stale_applications"][0]["idle_days"] == 53
-    assert [(row["name"], row["overdue"]) for row in result["stuck_approvals"]] == [("P3", True)]
+    summary = result["summary"]
+    assert (summary["month_approved_amount"], summary["month_approved_count"]) == (1000.0, 1)
+    # 已批准未付出 = 批准 - 已付 - 在途占用：P1 剩 500，P2 剩 500
+    assert summary["unpaid_amount"] == 1000.0
+    assert (summary["pending_count"], summary["longest_wait_days"]) == (2, 5)
+    assert (summary["on_trip_count"], summary["month_trip_count"]) == (1, 1)
+    assert "reserved_amount" not in summary, "设计稿去掉了单独的占用大数字"
 
 
-def test_request_board_flags_only_approvals_waiting_long_enough():
+def test_request_board_lists_purchase_execution_with_progress_and_stale_flag():
     rows = [
-        purchase("P1", workflow_status="待审批", waited_days=3),
-        purchase("P2", workflow_status="待办理", waited_days=1),
-        purchase("P3", workflow_status="已完成"),
+        purchase("P1", paid_amount=400, reserved_amount=100),
+        purchase("P2", approved_amount=500, approved_on=date(2026, 8, 1)),
+        purchase("P3", paid_amount=1000),
     ]
-    result = boards.request_board(rows, today=TODAY)
-    assert [(row["name"], row["overdue"]) for row in result["stuck_approvals"]] == [("P1", True), ("P2", False)]
+    applications = {row["name"]: row for row in boards.request_board(rows, today=TODAY)["applications"]}
+    assert applications["P1"]["progress"] == 50 and applications["P1"]["status"] == "部分付款"
+    assert applications["P1"]["remaining_amount"] == 500.0
+    assert applications["P2"]["stale"] is True and applications["P2"]["idle_days"] == 53
+    assert applications["P3"]["status"] == "已付款" and applications["P3"]["stale"] is False
+    assert [row["name"] for row in boards.request_board(rows, today=TODAY)["applications"]][0] == "P2"
 
 
-def test_request_board_reports_travel_in_progress_and_this_month():
+def test_request_board_flags_approvals_waiting_more_than_three_days():
+    rows = [
+        purchase("P1", workflow_status="待审批", waited_days=4, amount=200),
+        purchase("P2", workflow_status="待办理", waited_days=3, amount=100),
+        travel("T1", workflow_status="待审批", waited_days=9),
+    ]
+    pending = boards.request_board(rows, today=TODAY)["pending"]
+    assert [(row["name"], row["overdue"]) for row in pending] == [("T1", True), ("P1", True), ("P2", False)]
+    assert pending[0]["amount"] is None, "出差申请没有金额"
+
+
+def test_request_board_trips_have_status_and_claimed_amount():
     rows = [
         travel("T1", paid_amount=800),
-        travel("T2", travel_start_date="2026-09-01", travel_end_date="2026-09-03", paid_amount=200),
-        travel("T3", travel_start_date="2026-08-01", travel_end_date="2026-08-03", paid_amount=50),
-        travel("T4", workflow_status="待审批"),
+        travel("T2", travel_start_date="2026-10-05", travel_end_date="2026-10-06"),
+        travel("T3", travel_start_date="2026-09-01", travel_end_date="2026-09-03", paid_amount=200),
+        travel("T4", travel_start_date="2026-06-01", travel_end_date="2026-06-03"),
     ]
-    result = boards.request_board(rows, today=TODAY)
-    assert [row["name"] for row in result["travel"]["ongoing"]] == ["T1"]
-    assert sorted(row["name"] for row in result["travel"]["this_month"]) == ["T1", "T2"]
-    assert result["travel"]["claimed_amount"] == 1000.0
-    assert result["travel"]["ongoing"][0]["claimed_amount"] == 800.0
+    trips = {row["name"]: row for row in boards.request_board(rows, today=TODAY)["trips"]}
+    assert set(trips) == {"T1", "T2", "T3"}, "一个月前就回来的出差不再列出"
+    assert (trips["T1"]["status"], trips["T1"]["claimed_amount"]) == ("出差中", 800.0)
+    assert trips["T2"]["status"] == "未出发"
+    assert trips["T3"]["status"] == "已返回"
 
 
-def test_request_board_groups_assets_and_departments():
+def test_request_board_groups_departments_and_fixed_assets():
     rows = [
-        purchase("P1", asset_classification="固定资产-生产设备", approved_amount=2000),
-        purchase("P2", asset_classification="非固定资产", department="财务部", approved_amount=300),
-        travel("T1"),
+        purchase("P1", asset_nature="固定资产", fixed_asset_category="电子设备", approved_amount=2000),
+        purchase("P2", department="财务部", approved_amount=300),
     ]
     result = boards.request_board(rows, today=TODAY)
-    assert [(row["label"], row["amount"]) for row in result["by_asset"]] == [("固定资产-生产设备", 2000.0), ("非固定资产", 300.0)]
-    assert {row["label"]: row["count"] for row in result["by_department"]} == {"研发部": 2, "财务部": 1}
+    assert result["by_department"] == [["研发部", 2000.0], ["财务部", 300.0]]
+    assert result["fixed_by_category"] == [["电子设备", 2000.0]]
+    assert result["non_fixed_amount"] == 300.0
 
 
-# ---------------------------------------------------------------- payment board
+# ---------------------------------------------------------------- 付款看板
 
 
-def test_payment_board_counts_by_payment_date_and_splits_the_two_types():
+def test_payment_board_splits_this_month_by_type_and_payment_date():
     rows = [
         claim("C1", amount=100, paid_on="2026-09-10"),
         claim("C2", "付款单", amount=250, paid_on="2026-09-22", payee_name="供应商甲"),
         claim("C3", amount=999, paid_on="2026-08-31"),
-        claim("C4", workflow_status="待办理", amount=70, paid_on=None, urgency="加急"),
-        claim("C5", "付款单", workflow_status="待办理", amount=30, paid_on=None, waited_days=4),
     ]
     result = boards.payment_board(rows, today=TODAY)
-    assert result["summary"]["reimbursement_paid"] == 100.0
-    assert result["summary"]["payment_paid"] == 250.0
-    assert result["summary"]["paid_total"] == 350.0
-    assert result["summary"]["cashier_pending"] == 2
-    # 加急优先，其次等待久的
-    assert [row["name"] for row in result["cashier_queue"]] == ["C4", "C5"]
+    assert (result["summary"]["reimbursement_paid"], result["summary"]["payment_paid"]) == (100.0, 250.0)
     trend = {row["month"]: (row["reimbursement"], row["payment"]) for row in result["trend"]}
-    assert trend["2026-09"] == (100.0, 250.0)
-    assert trend["2026-08"] == (999.0, 0.0)
-    assert len(result["trend"]) == 6
-    assert [row["label"] for row in result["top_payees"]] == ["供应商甲"]
+    assert trend["2026-09"] == (100.0, 250.0) and trend["2026-08"] == (999.0, 0.0)
+    assert len(result["trend"]) == 6 and result["trend"][-1]["month"] == "2026-09"
+    assert result["top_payees"] == [["供应商甲", 250.0]]
 
 
-def test_payment_board_tracks_invoices_still_owed():
+def test_cashier_queue_has_payments_due_and_invoices_to_verify_urgent_first():
     rows = [
-        claim("C1", "付款单", workflow_status="已付款", invoice_followup_status="待收票", expected_invoice_date="2026-09-20", amount=500),
-        claim("C2", "付款单", workflow_status="已付款", invoice_followup_status="待收票", expected_invoice_date="2026-09-30", amount=200),
-        claim("C3", "付款单", workflow_status="已付款", invoice_followup_status="已核验", expected_invoice_date="2026-09-01"),
-        claim("C4", workflow_status="已付款", invoice_followup_status="待收票", expected_invoice_date="2026-09-01"),
+        claim("C1", workflow_status="待办理", business_status="待付款", paid_on=None, amount=70, waited_days=1),
+        claim("C2", "付款单", workflow_status="待办理", business_status="待付款", paid_on=None, amount=30, urgency="加急"),
+        claim("C3", "付款单", business_status="待核验", amount=40, waited_days=6),
+        claim("C4", workflow_status="待审批", business_status="待审批", paid_on=None),
     ]
     result = boards.payment_board(rows, today=TODAY)
-    assert [(row["name"], row["overdue_days"], row["days_left"]) for row in result["invoice_tracking"]] == [("C1", 3, 0), ("C2", 0, 7)]
-    assert result["summary"]["invoice_pending"] == 2
-    assert result["summary"]["invoice_overdue"] == 1
+    assert [(row["name"], row["status"]) for row in result["cashier_queue"]] == [("C2", "待付款"), ("C3", "待核验"), ("C1", "待付款")]
+    assert (result["summary"]["to_pay_amount"], result["summary"]["to_pay_count"], result["summary"]["to_pay_urgent"]) == (100.0, 2, 1)
 
 
-def test_payment_board_groups_accounts_only_for_paid_documents():
-    rows = [claim("C1", amount=100), claim("C2", workflow_status="待办理", paid_on=None, amount=500)]
+def test_invoice_tracking_counts_overdue_and_reminders():
+    rows = [
+        claim("C1", "付款单", business_status="已付款·待补票", invoice_followup_status="待收票", expected_invoice_date="2026-09-20", amount=500, payee_name="甲"),
+        claim("C2", "付款单", business_status="已付款·待补票", invoice_followup_status="待收票", expected_invoice_date="2026-09-30", amount=200),
+        claim("C3", "付款单", invoice_followup_status="已核验", expected_invoice_date="2026-09-01"),
+        claim("C4", "付款单", workflow_status="待审批", invoice_followup_status="待收票", expected_invoice_date="2026-09-01", paid_on=None),
+    ]
+    result = boards.payment_board(rows, today=TODAY, reminders={"C1": 4})
+    assert [(row["name"], row["overdue_days"], row["days_left"], row["reminders"]) for row in result["invoice_tracking"]] == [
+        ("C1", 3, 0, 4), ("C2", 0, 7, 0),
+    ]
+    assert result["invoice_tracking"][0]["payee_name"] == "甲"
+    summary = result["summary"]
+    assert (summary["invoice_pending_amount"], summary["invoice_pending_count"], summary["invoice_overdue_count"]) == (700.0, 2, 1)
+
+
+def test_account_and_department_bars_only_count_this_month():
+    rows = [claim("C1", amount=100), claim("C2", amount=500, paid_on="2026-08-02", department="财务部")]
     lines = [
         {"parent": "C1", "expense_account_level_1": "管理费用", "expense_account_level_2": "办公费", "total_amount": 60},
         {"parent": "C1", "expense_account_level_1": "管理费用", "expense_account_level_2": "办公费", "total_amount": 40},
         {"parent": "C2", "expense_account_level_1": "管理费用", "expense_account_level_2": "差旅费", "total_amount": 500},
     ]
     result = boards.payment_board(rows, lines, today=TODAY)
-    assert result["by_account"] == [{"level_1": "管理费用", "level_2": "办公费", "count": 2, "amount": 100.0}]
-    assert [row["label"] for row in result["by_department"]] == ["研发部"]
+    assert result["by_account"] == [["管理费用 / 办公费", 100.0]]
+    assert result["by_department"] == [["研发部", 100.0]]
 
 
-# ---------------------------------------------------------------- procurement board
+# ---------------------------------------------------------------- 采购页签
 
 
-def test_procurement_board_stays_separate_and_tracks_arrival():
+def test_procurement_numbers_stay_separate():
     rows = [
         {"name": "PR1", "request_type": "采购申请", "workflow_status": "已完成", "business_status": "需求已批准/待询价", "approved_amount": 5000, "amount": 5000},
-        {"name": "PP1", "request_type": "采购付款", "workflow_status": "已付款", "business_status": "待到货", "amount": 1500,
+        {"name": "PR2", "request_type": "采购申请", "workflow_status": "待审批", "business_status": "待审批", "approved_amount": None, "amount": 800},
+        {"name": "PP1", "request_type": "采购付款", "workflow_status": "已付款", "business_status": "待到货", "amount": 1500, "paid_on": "2026-09-05",
          "arrival_status": "未到货", "inspection_status": "未验收", "prepayment_writeoff_status": "待核销"},
-        {"name": "PP2", "request_type": "采购付款", "workflow_status": "待审批", "business_status": "待审批", "amount": 800,
-         "arrival_status": "未到货", "inspection_status": "未验收", "prepayment_writeoff_status": "无需核销"},
     ]
-    result = boards.procurement_board(rows, today=TODAY)
-    assert result["summary"] == {
-        "application_count": 1, "application_amount": 5000.0, "payment_count": 2, "paid_amount": 1500.0,
-        "pending_arrival": 1, "pending_inspection": 1, "pending_writeoff": 1,
+    summary = boards.procurement_board(rows, today=TODAY)["summary"]
+    assert summary == {
+        "application_count": 2, "application_pending": 1, "application_amount": 5800.0, "payment_count": 1,
+        "month_paid_amount": 1500.0, "pending_arrival": 1, "pending_inspection": 1, "pending_writeoff": 1,
     }
-    assert [row["label"] for row in result["applications_by_status"]] == ["需求已批准/待询价"]
-    assert {row["label"] for row in result["by_business_status"]} == {"待到货", "待审批"}
 
 
 def test_recent_months_crosses_the_year_boundary():
     assert boards.recent_months(date(2026, 2, 15), 4) == ["2025-11", "2025-12", "2026-01", "2026-02"]
     assert boards.month_key("2026-09-23 10:00:00") == "2026-09"
-    assert boards.month_key(None) == ""
+    assert boards.trip_status("2026-09-24", "2026-09-25", TODAY) == "未出发"

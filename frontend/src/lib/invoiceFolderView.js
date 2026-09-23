@@ -77,3 +77,38 @@ export function usedByText(invoice) {
   if (!used) return '';
   return [used.request_type, used.name, used.business_status || used.workflow_status].filter(Boolean).join(' · ');
 }
+
+// ---------------------------------------------------------------- 发票夹页签（按设计稿第 5 版）
+
+const WAITING = ['待确认', '识别中', '识别失败'];
+
+// 员工：全部 / 待确认（含识别中、识别失败）/ 可用 / 已使用 / 疑似重复；财务：疑似重复待处理 / 全部发票。
+export function folderTabs(invoices = [], finance = false) {
+  const count = (predicate) => invoices.filter(predicate).length;
+  if (finance) {
+    return [
+      { key: 'dup', label: '疑似重复待处理', count: count((row) => row.folder_status === '疑似重复') },
+      { key: 'allinv', label: '全部发票', count: invoices.length },
+    ];
+  }
+  return [
+    { key: 'list', label: '全部', count: invoices.length },
+    { key: 'todo', label: '待确认', count: count((row) => WAITING.includes(row.folder_status)) },
+    { key: 'ok', label: '可用', count: count((row) => row.folder_status === '可用') },
+    { key: 'used', label: '已使用', count: count((row) => row.folder_status === '已使用') },
+    { key: 'dup', label: '疑似重复', count: count((row) => row.folder_status === '疑似重复') },
+  ];
+}
+
+export function filterFolder(invoices = [], tab = 'list') {
+  if (tab === 'todo') return invoices.filter((row) => WAITING.includes(row.folder_status));
+  if (tab === 'ok') return invoices.filter((row) => row.folder_status === '可用');
+  if (tab === 'used') return invoices.filter((row) => row.folder_status === '已使用');
+  if (tab === 'dup') return invoices.filter((row) => row.folder_status === '疑似重复');
+  return invoices.filter((row) => row.folder_status !== '已排除');
+}
+
+// 员工能改识别结果的状态：待确认（含 OCR 没认全的）。识别失败先重新识别。
+export function editableByOwner(invoice, finance = false) {
+  return !finance && String(invoice?.folder_status || '').trim() === '待确认';
+}

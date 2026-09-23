@@ -1,8 +1,8 @@
-"""申请看板 / 付款看板 / 采购看板的统计口径。
+"""申请看板 / 付款看板 / 采购页签的统计口径（按已确认的设计稿第 5 版）。
 
-金额一律取金额台账和单据上的实际付款日期，不用单据修改时间。采购申请和采购付款单独一个
-看板，不和购买、报销、付款的数字混在一起。本模块不依赖 frappe，便于单元测试：调用方负责
-查询和权限，这里只做归集。
+金额一律取金额台账和单据上的实际付款日期，不用单据修改时间。采购申请和采购付款只在
+各自看板的"采购"页签里单独统计，不和购买、出差、报销、付款的数字混在一起。本模块不依赖
+frappe，便于单元测试：调用方负责查询和权限，这里只做归集。
 """
 from __future__ import annotations
 
@@ -19,12 +19,14 @@ from rayher_hr_payroll.oa_document_types import (
 )
 
 CENT = Decimal("0.01")
+ZERO = Decimal("0.00")
 APPLICATION_TYPES = (REQUEST_DIRECT_PURCHASE, REQUEST_TRAVEL)
 CLAIM_TYPES = (REQUEST_REIMBURSEMENT, REQUEST_PAYMENT)
 PROCUREMENT_TYPES = (REQUEST_PROCUREMENT, REQUEST_PROCUREMENT_PAYMENT)
 ACTIVE_STATUSES = ("待审批", "待办理")
 COMPLETED = "已完成"
 PAID = "已付款"
+WAIT_HANDLE = "待办理"
 # 看板范围：财务和管理层看全公司，部门主管只看本部门，普通员工不开放。
 SCOPE_ALL_ROLES = {"System Manager", "Accounts User", "Rayher Business Executive"}
 SCOPE_ALL_POSITIONS = {"finance_manager", "finance_auditor", "vice_manager", "general_manager"}
@@ -32,16 +34,17 @@ SCOPE_DEPARTMENT_ROLES = {"Department Manager"}
 STUCK_DAYS = 3
 STALE_DAYS = 30
 TREND_MONTHS = 6
+TRIP_LOOKBACK_DAYS = 30
 
 
 def money(value):
     try:
         return Decimal(str(value if value not in (None, "") else 0)).quantize(CENT, rounding=ROUND_HALF_UP)
     except (InvalidOperation, TypeError, ValueError):
-        return Decimal("0.00")
+        return ZERO
 
 
-def _float(value):
+def _f(value):
     return float(money(value))
 
 
@@ -83,7 +86,10 @@ def recent_months(today, count=TREND_MONTHS):
 
 def board_scope(roles=(), positions=()):
     roles = set(roles or ())
-    positions = {key for key, value in dict(positions or {}).items() if value} if isinstance(positions, dict) else set(positions or ())
+    if isinstance(positions, dict):
+        positions = {key for key, value in positions.items() if value}
+    else:
+        positions = set(positions or ())
     if roles & SCOPE_ALL_ROLES or positions & SCOPE_ALL_POSITIONS:
         return "all"
     if roles & SCOPE_DEPARTMENT_ROLES:
@@ -91,181 +97,243 @@ def board_scope(roles=(), positions=()):
     return "none"
 
 
-def _bucket(rows, key, amount_field):
+def totals_by(rows, key, amount_field):
+    """[(label, amount)] sorted by amount, for the horizontal bar charts."""
     buckets = {}
     for row in rows:
         label = str(_get(row, key) or "").strip() or "未填写"
-        item = buckets.setdefault(label, {"label": label, "count": 0, "amount": Decimal("0.00"), "names": []})
-        item["count"] += 1
-        item["amount"] += money(_get(row, amount_field))
-        item["names"].append(_get(row, "name"))
-    result = [{**item, "amount": float(item["amount"])} for item in buckets.values()]
-    result.sort(key=lambda item: (-item["amount"], item["label"]))
-    return result
+        buckets[label] = buckets.get(label, ZERO) + money(_get(row, amount_field))
+    return [[label, float(amount)] for label, amount in sorted(buckets.items(), key=lambda item: (-item[1], item[0]))]
+
+
+def _days(since, today):
+    since = as_date(since)
+    return max(0, (today - since).days) if since else 0
+
+
+def application_status(approved, paid):
+    approved, paid = money(approved), money(paid)
+    if paid <= 0:
+        return "待付款"
+    return "已付款" if paid >= approved else "部分付款"
+
+
+def trip_status(start, end, today):
+    start, end = as_date(start), as_date(end)
+    if start and start > today:
+        return "未出发"
+    if end and end >= today:
+        return "出差中"
+    return "已返回"
+
+
+# ---------------------------------------------------------------- 申请看板
 
 
 def request_board(rows, *, today, stuck_days=STUCK_DAYS, stale_days=STALE_DAYS):
-    """购买申请与出差申请。rows 需带 paid_amount / reserved_amount / waited_days / approved_on。"""
+    """rows: 购买申请与出差申请，需带 paid_amount / reserved_amount / waited_days / approved_on。"""
     purchases = [row for row in rows if _get(row, "request_type") == REQUEST_DIRECT_PURCHASE]
-    travels = [row for row in rows if _get(row, "request_type") == REQUEST_TRAVEL]
     approved = [row for row in purchases if _get(row, "workflow_status") == COMPLETED]
-    summary = {
-        "approved_amount": _float(sum((money(_get(row, "approved_amount")) for row in approved), Decimal("0.00"))),
-        "reserved_amount": _float(sum((money(_get(row, "reserved_amount")) for row in approved), Decimal("0.00"))),
-        "paid_amount": _float(sum((money(_get(row, "paid_amount")) for row in approved), Decimal("0.00"))),
-    }
-    # 已批准但还没付出去的额度：批准金额减已付，占用的部分也算没付出去。
-    summary["unpaid_amount"] = _float(
-        sum((money(_get(row, "approved_amount")) - money(_get(row, "paid_amount")) for row in approved), Decimal("0.00"))
-    )
-    summary["application_count"] = len(rows)
-    stale = [
-        {
-            "name": _get(row, "name"), "subject": _get(row, "subject"), "employee_name": _get(row, "employee_name"),
-            "department": _get(row, "department"), "approved_amount": _float(_get(row, "approved_amount")),
-            "idle_days": (today - as_date(_get(row, "approved_on"))).days if as_date(_get(row, "approved_on")) else None,
-        }
-        for row in approved
-        if money(_get(row, "paid_amount")) == 0
-        and as_date(_get(row, "approved_on")) is not None
-        and (today - as_date(_get(row, "approved_on"))).days >= stale_days
-    ]
-    stale.sort(key=lambda item: -(item["idle_days"] or 0))
-    stuck = [
-        {
+    month = today.strftime("%Y-%m")
+    this_month = [row for row in approved if month_key(_get(row, "approved_on")) == month]
+
+    applications = []
+    for row in approved:
+        amount, paid, reserved = money(_get(row, "approved_amount")), money(_get(row, "paid_amount")), money(_get(row, "reserved_amount"))
+        idle = _days(_get(row, "approved_on"), today)
+        used = paid + reserved
+        applications.append({
+            "name": _get(row, "name"), "request_type": REQUEST_DIRECT_PURCHASE, "subject": _get(row, "subject"),
+            "employee_name": _get(row, "employee_name"), "department": _get(row, "department"),
+            "approved_amount": float(amount), "paid_amount": float(paid), "reserved_amount": float(reserved),
+            "remaining_amount": float(max(ZERO, amount - used)),
+            "progress": min(100, round(float(used / amount * 100))) if amount > 0 else 0,
+            "status": application_status(amount, paid),
+            "idle_days": idle,
+            "stale": used == 0 and idle > stale_days,
+        })
+    applications.sort(key=lambda item: (not item["stale"], item["status"] == "已付款", -item["idle_days"]))
+
+    pending = []
+    for row in rows:
+        if _get(row, "workflow_status") not in ACTIVE_STATUSES:
+            continue
+        waited = int(_get(row, "waited_days") or 0)
+        is_purchase = _get(row, "request_type") == REQUEST_DIRECT_PURCHASE
+        pending.append({
             "name": _get(row, "name"), "request_type": _get(row, "request_type"), "subject": _get(row, "subject"),
             "employee_name": _get(row, "employee_name"), "department": _get(row, "department"),
-            "current_step_label": _get(row, "current_step_label"), "waited_days": int(_get(row, "waited_days") or 0),
-            "overdue": int(_get(row, "waited_days") or 0) >= stuck_days,
-        }
-        for row in rows if _get(row, "workflow_status") in ACTIVE_STATUSES
-    ]
-    stuck.sort(key=lambda item: -item["waited_days"])
-    ongoing = []
-    this_month = []
-    for row in travels:
-        if _get(row, "workflow_status") != COMPLETED:
+            "amount": _f(_get(row, "amount")) if is_purchase else None,
+            "current_step_label": _get(row, "current_step_label") or "",
+            "waited_days": waited, "overdue": waited > stuck_days,
+        })
+    pending.sort(key=lambda item: -item["waited_days"])
+
+    trips = []
+    for row in rows:
+        if _get(row, "request_type") != REQUEST_TRAVEL or _get(row, "workflow_status") != COMPLETED:
             continue
         start, end = as_date(_get(row, "travel_start_date")), as_date(_get(row, "travel_end_date"))
-        item = {
+        if not start or (end and (today - end).days > TRIP_LOOKBACK_DAYS):
+            continue
+        trips.append({
             "name": _get(row, "name"), "subject": _get(row, "subject"), "employee_name": _get(row, "employee_name"),
             "department": _get(row, "department"), "travel_destination": _get(row, "travel_destination"),
-            "travel_start_date": _get(row, "travel_start_date"), "travel_end_date": _get(row, "travel_end_date"),
+            "travel_start_date": start.isoformat(), "travel_end_date": end.isoformat() if end else "",
             "travel_days": int(_get(row, "travel_days") or 0),
-            # 每次出差已报销 / 已付款的金额，取关联单据的实际付款额。
-            "claimed_amount": _float(_get(row, "paid_amount")),
-        }
-        if start and end and start <= today <= end:
-            ongoing.append(item)
-        if start and start.strftime("%Y-%m") == today.strftime("%Y-%m"):
-            this_month.append(item)
+            "status": trip_status(start, end, today),
+            "claimed_amount": _f(_get(row, "paid_amount")),
+        })
+    trips.sort(key=lambda item: item["travel_start_date"], reverse=True)
+
+    fixed = [row for row in approved if _get(row, "asset_nature") == "固定资产"]
     return {
-        "summary": summary,
-        "stale_applications": stale,
-        "stuck_approvals": stuck,
-        "travel": {
-            "ongoing": ongoing,
-            "this_month": this_month,
-            "claimed_amount": _float(sum((money(item["claimed_amount"]) for item in this_month), Decimal("0.00"))),
+        "summary": {
+            "month": month,
+            "month_approved_amount": float(sum((money(_get(row, "approved_amount")) for row in this_month), ZERO)),
+            "month_approved_count": len(this_month),
+            # 已批准未付出 = 批准金额 - 已付 - 在途占用（设计稿口径，不再单独展示"占用"大数字）
+            "unpaid_amount": float(sum((money(item["remaining_amount"]) for item in applications), ZERO)),
+            "pending_count": len(pending),
+            "longest_wait_days": max((item["waited_days"] for item in pending), default=0),
+            "on_trip_count": sum(1 for trip in trips if trip["status"] == "出差中"),
+            "month_trip_count": sum(1 for trip in trips if trip["travel_start_date"][:7] == month),
+            "stale_count": sum(1 for item in applications if item["stale"]),
         },
-        "by_asset": _bucket([row for row in approved], "asset_classification", "approved_amount"),
-        "by_department": _bucket(approved + [row for row in travels if _get(row, "workflow_status") == COMPLETED], "department", "approved_amount"),
+        "applications": applications,
+        "pending": pending,
+        "trips": trips,
+        "by_department": totals_by(approved, "department", "approved_amount"),
+        "fixed_by_category": totals_by(fixed, "fixed_asset_category", "approved_amount"),
+        "non_fixed_amount": float(sum((money(_get(row, "approved_amount")) for row in approved if row not in fixed), ZERO)),
         "stuck_days": stuck_days,
         "stale_days": stale_days,
     }
 
 
-def payment_board(rows, lines=(), *, today, months=TREND_MONTHS):
-    """报销单与付款单。金额按实际付款日期（paid_on）计入月份。"""
+# ---------------------------------------------------------------- 付款看板
+
+
+def payment_board(rows, lines=(), *, today, reminders=None, months=TREND_MONTHS):
+    """rows: 报销单与付款单。金额按实际付款日期（paid_on）计入月份。"""
+    reminders = reminders or {}
+    month, year = today.strftime("%Y-%m"), today.year
     paid = [row for row in rows if _get(row, "workflow_status") == PAID and as_date(_get(row, "paid_on"))]
-    current = today.strftime("%Y-%m")
+    paid_this_month = [row for row in paid if month_key(_get(row, "paid_on")) == month]
+
     keys = recent_months(today, months)
-    trend = {key: {"month": key, REQUEST_REIMBURSEMENT: Decimal("0.00"), REQUEST_PAYMENT: Decimal("0.00")} for key in keys}
-    month_totals = {REQUEST_REIMBURSEMENT: Decimal("0.00"), REQUEST_PAYMENT: Decimal("0.00")}
+    trend = {key: {"month": key, "reimbursement": ZERO, "payment": ZERO} for key in keys}
     for row in paid:
         key = month_key(_get(row, "paid_on"))
-        kind = _get(row, "request_type")
-        if key in trend and kind in trend[key]:
-            trend[key][kind] += money(_get(row, "amount"))
-        if key == current and kind in month_totals:
-            month_totals[kind] += money(_get(row, "amount"))
-    cashier_queue = [
-        {
+        if key in trend:
+            field = "reimbursement" if _get(row, "request_type") == REQUEST_REIMBURSEMENT else "payment"
+            trend[key][field] += money(_get(row, "amount"))
+
+    queue = []
+    for row in rows:
+        if _get(row, "workflow_status") == WAIT_HANDLE:
+            status = "待付款"
+        elif _get(row, "request_type") == REQUEST_PAYMENT and _get(row, "business_status") == "待核验":
+            status = "待核验"
+        else:
+            continue
+        queue.append({
             "name": _get(row, "name"), "request_type": _get(row, "request_type"), "subject": _get(row, "subject"),
             "employee_name": _get(row, "employee_name"), "department": _get(row, "department"),
-            "amount": _float(_get(row, "amount")), "urgency": _get(row, "urgency") or "一般",
-            "waited_days": int(_get(row, "waited_days") or 0),
-        }
-        for row in rows
-        if _get(row, "workflow_status") == "待办理"
-    ]
-    # 加急优先，其次等待时间长的在前。
-    cashier_queue.sort(key=lambda item: (item["urgency"] != "加急", -item["waited_days"]))
+            "amount": _f(_get(row, "amount")), "urgency": _get(row, "urgency") or "一般",
+            "waited_days": int(_get(row, "waited_days") or 0), "status": status,
+        })
+    queue.sort(key=lambda item: (item["urgency"] != "加急", -item["waited_days"]))
+    to_pay = [item for item in queue if item["status"] == "待付款"]
+
     tracking = []
     for row in rows:
-        if _get(row, "request_type") != REQUEST_PAYMENT or _get(row, "invoice_followup_status") != "待收票":
+        if _get(row, "request_type") != REQUEST_PAYMENT or _get(row, "workflow_status") != PAID:
+            continue
+        if _get(row, "invoice_followup_status") != "待收票":
             continue
         expected = as_date(_get(row, "expected_invoice_date"))
-        overdue_days = (today - expected).days if expected and expected < today else 0
+        left = (expected - today).days if expected else None
         tracking.append({
             "name": _get(row, "name"), "subject": _get(row, "subject"), "employee_name": _get(row, "employee_name"),
-            "department": _get(row, "department"), "amount": _float(_get(row, "amount")),
-            "expected_invoice_date": _get(row, "expected_invoice_date"),
-            "overdue_days": overdue_days,
-            "days_left": (expected - today).days if expected and expected >= today else 0,
+            "department": _get(row, "department"), "payee_name": _get(row, "payee_name") or "",
+            "amount": _f(_get(row, "amount")), "expected_invoice_date": expected.isoformat() if expected else "",
+            "days_left": left if left is not None and left >= 0 else 0,
+            "overdue_days": -left if left is not None and left < 0 else 0,
+            "reminders": int(reminders.get(_get(row, "name"), 0)),
         })
-    tracking.sort(key=lambda item: (-item["overdue_days"], item["days_left"]))
-    paid_names = {_get(row, "name") for row in paid}
-    paid_lines = [line for line in lines if _get(line, "parent") in paid_names]
+    tracking.sort(key=lambda item: item["expected_invoice_date"] or "9999")
+
+    month_names = {_get(row, "name") for row in paid_this_month}
     accounts = {}
-    for line in paid_lines:
-        level_1 = str(_get(line, "expense_account_level_1") or "").strip() or "未填写"
-        level_2 = str(_get(line, "expense_account_level_2") or "").strip() or "未填写"
-        item = accounts.setdefault((level_1, level_2), {"level_1": level_1, "level_2": level_2, "count": 0, "amount": Decimal("0.00")})
-        item["count"] += 1
-        item["amount"] += money(_get(line, "total_amount"))
-    by_account = [{**item, "amount": float(item["amount"])} for item in accounts.values()]
-    by_account.sort(key=lambda item: (-item["amount"], item["level_1"], item["level_2"]))
-    payees = _bucket([row for row in paid if _get(row, "request_type") == REQUEST_PAYMENT], "payee_name", "amount")
+    for line in lines:
+        if _get(line, "parent") not in month_names:
+            continue
+        label = " / ".join(part for part in (
+            str(_get(line, "expense_account_level_1") or "").strip(),
+            str(_get(line, "expense_account_level_2") or "").strip(),
+        ) if part) or "未填写"
+        accounts[label] = accounts.get(label, ZERO) + money(_get(line, "total_amount"))
+
+    payees_this_year = [
+        row for row in paid
+        if _get(row, "request_type") == REQUEST_PAYMENT and as_date(_get(row, "paid_on")).year == year
+    ]
     return {
         "summary": {
-            "month": current,
-            "reimbursement_paid": float(month_totals[REQUEST_REIMBURSEMENT]),
-            "payment_paid": float(month_totals[REQUEST_PAYMENT]),
-            "paid_total": float(month_totals[REQUEST_REIMBURSEMENT] + month_totals[REQUEST_PAYMENT]),
-            "cashier_pending": len(cashier_queue),
-            "invoice_pending": len(tracking),
-            "invoice_overdue": sum(1 for item in tracking if item["overdue_days"] > 0),
+            "month": month,
+            "reimbursement_paid": float(sum((money(_get(row, "amount")) for row in paid_this_month if _get(row, "request_type") == REQUEST_REIMBURSEMENT), ZERO)),
+            "payment_paid": float(sum((money(_get(row, "amount")) for row in paid_this_month if _get(row, "request_type") == REQUEST_PAYMENT), ZERO)),
+            "to_pay_amount": float(sum((money(item["amount"]) for item in to_pay), ZERO)),
+            "to_pay_count": len(to_pay),
+            "to_pay_urgent": sum(1 for item in to_pay if item["urgency"] == "加急"),
+            "invoice_pending_amount": float(sum((money(item["amount"]) for item in tracking), ZERO)),
+            "invoice_pending_count": len(tracking),
+            "invoice_overdue_count": sum(1 for item in tracking if item["overdue_days"] > 0),
         },
-        "cashier_queue": cashier_queue,
+        "trend": [{"month": key, "reimbursement": float(trend[key]["reimbursement"]), "payment": float(trend[key]["payment"])} for key in keys],
+        "by_account": [[label, float(amount)] for label, amount in sorted(accounts.items(), key=lambda item: (-item[1], item[0]))],
+        "by_department": totals_by(paid_this_month, "department", "amount"),
+        "cashier_queue": queue,
         "invoice_tracking": tracking,
-        "trend": [
-            {"month": key, "reimbursement": float(trend[key][REQUEST_REIMBURSEMENT]), "payment": float(trend[key][REQUEST_PAYMENT])}
-            for key in keys
-        ],
-        "by_account": by_account,
-        "by_department": _bucket(paid, "department", "amount"),
-        "top_payees": payees[:5],
+        "top_payees": totals_by(payees_this_year, "payee_name", "amount")[:5],
     }
+
+
+# ---------------------------------------------------------------- 采购页签
 
 
 def procurement_board(rows, *, today):
     """采购申请与采购付款单独统计：到货、验收、预付款核销。"""
     applications = [row for row in rows if _get(row, "request_type") == REQUEST_PROCUREMENT]
     payments = [row for row in rows if _get(row, "request_type") == REQUEST_PROCUREMENT_PAYMENT]
-    paid_payments = [row for row in payments if _get(row, "workflow_status") == PAID]
+    paid = [row for row in payments if _get(row, "workflow_status") == PAID]
+    month = today.strftime("%Y-%m")
+
+    def row_of(row):
+        return {
+            "name": _get(row, "name"), "request_type": _get(row, "request_type"), "subject": _get(row, "subject"),
+            "employee_name": _get(row, "employee_name"), "department": _get(row, "department"),
+            "amount": _f(_get(row, "approved_amount") or _get(row, "amount")),
+            "workflow_status": _get(row, "workflow_status"), "business_status": _get(row, "business_status") or "",
+            "arrival_status": _get(row, "arrival_status") or "", "inspection_status": _get(row, "inspection_status") or "",
+            "prepayment_writeoff_status": _get(row, "prepayment_writeoff_status") or "",
+            "waited_days": int(_get(row, "waited_days") or 0),
+        }
+
     return {
         "summary": {
             "application_count": len(applications),
-            "application_amount": _float(sum((money(_get(row, "approved_amount")) or money(_get(row, "amount")) for row in applications), Decimal("0.00"))),
+            "application_pending": sum(1 for row in applications if _get(row, "workflow_status") in ACTIVE_STATUSES),
+            "application_amount": float(sum((money(_get(row, "approved_amount") or _get(row, "amount")) for row in applications), ZERO)),
             "payment_count": len(payments),
-            "paid_amount": _float(sum((money(_get(row, "amount")) for row in paid_payments), Decimal("0.00"))),
-            "pending_arrival": sum(1 for row in paid_payments if str(_get(row, "arrival_status") or "") in ("未到货", "部分到货")),
-            "pending_inspection": sum(1 for row in paid_payments if str(_get(row, "inspection_status") or "") in ("未验收", "验收中")),
-            "pending_writeoff": sum(1 for row in paid_payments if str(_get(row, "prepayment_writeoff_status") or "") == "待核销"),
+            "month_paid_amount": float(sum((money(_get(row, "amount")) for row in paid if month_key(_get(row, "paid_on")) == month), ZERO)),
+            "pending_arrival": sum(1 for row in paid if str(_get(row, "arrival_status") or "") in ("未到货", "部分到货")),
+            "pending_inspection": sum(1 for row in paid if str(_get(row, "inspection_status") or "") in ("未验收", "验收中")),
+            "pending_writeoff": sum(1 for row in paid if str(_get(row, "prepayment_writeoff_status") or "") == "待核销"),
         },
-        "by_business_status": _bucket(payments, "business_status", "amount"),
-        "by_arrival": _bucket(paid_payments, "arrival_status", "amount"),
-        "by_inspection": _bucket(paid_payments, "inspection_status", "amount"),
-        "applications_by_status": _bucket(applications, "business_status", "approved_amount"),
+        "applications_by_status": totals_by(applications, "business_status", "approved_amount"),
+        "payments_by_status": totals_by(payments, "business_status", "amount"),
+        "applications": [row_of(row) for row in applications][:200],
+        "payments": [row_of(row) for row in payments][:200],
     }
