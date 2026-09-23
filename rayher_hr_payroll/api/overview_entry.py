@@ -15,6 +15,8 @@ from rayher_hr_payroll.position_access import position_users
 NON_PROJECT = "__none__"
 NON_PROJECT_LABEL = "非项目"
 EXPENSE_REQUEST = "费用付款申请"
+# 首页成本同时取旧的费用付款申请和新的报销单、付款单。
+COST_REQUEST_TYPES = (EXPENSE_REQUEST, "报销单", "付款单")
 EXPENSE_DONE = ("已完成", "已付款")
 PO_DEAD_STATUS = ("已取消",)
 HOURS_PER_DAY = 8
@@ -170,23 +172,24 @@ def _po_rows(months):
 
 def _expense_rows(months):
     start, end = month_range(months)
+    # 按实际付款日期计入月份（原来按单据修改时间），未付款的单据不计入成本，和金额台账一致。
     requests = frappe.get_all("OA Approval Request",
-                              filters={"request_type": EXPENSE_REQUEST,
-                                       "workflow_status": ["in", EXPENSE_DONE],
-                                       "modified": ["between", [start, frappe.utils.add_days(end, 1)]]},
+                              filters={"request_type": ["in", list(COST_REQUEST_TYPES)],
+                                       "workflow_status": "已付款",
+                                       "paid_on": ["between", [start, frappe.utils.add_days(end, 1)]]},
                               fields=["name", "project", "department"], limit_page_length=0)
     if not requests:
         return []
     project_by_request = {row.name: row.project for row in requests}
     department_by_request = {row.name: row.department for row in requests}
-    return [{"project": line.project_name or project_by_request.get(line.parent),
+    return [{"project": line.claim_project or line.project_name or project_by_request.get(line.parent),
              "kind": "expense", "amount": line.total_amount or line.amount,
              "label": line.expense_account_level_2 or line.category or "其他报销",
              "department": department_by_request.get(line.parent) or ""}
             for line in frappe.get_all("OA Approval Expense Line",
                                        filters={"parent": ["in", list(project_by_request)]},
-                                       fields=["parent", "project_name", "total_amount", "amount",
-                                               "expense_account_level_2", "category"],
+                                       fields=["parent", "project_name", "claim_project", "total_amount",
+                                               "amount", "expense_account_level_2", "category"],
                                        limit_page_length=0)]
 
 
@@ -414,6 +417,9 @@ ROUTE_BY_TYPE = {
     "购买申请": "/approval/direct-purchase",
     "采购付款": "/approval/procurement-payment",
     "费用付款申请": "/approval/reimbursement",
+    "出差申请": "/approval/travel",
+    "报销单": "/approval/claim",
+    "付款单": "/approval/payment",
 }
 OVERDUE_DAYS = 3
 

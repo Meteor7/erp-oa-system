@@ -92,6 +92,9 @@ const typeMark = {
   '购买申请': { mark: '购', tone: 'bg-[#FFF4E6] text-[#E57A00]' },
   '采购付款': { mark: '付', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
   '费用付款申请': { mark: '报', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
+  '出差申请': { mark: '差', tone: 'bg-[#FFF4E6] text-[#E57A00]' },
+  '报销单': { mark: '报', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
+  '付款单': { mark: '付', tone: 'bg-[#E6F6F2] text-[#1FA58C]' },
   '价格审批': { mark: '价', tone: 'bg-[#FDEBEC] text-[#C9373D]' },
   '采购订单': { mark: '单', tone: 'bg-[#EEF2FD] text-[#3E63DD]' },
 };

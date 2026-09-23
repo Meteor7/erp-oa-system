@@ -41,6 +41,8 @@ const routes = [
   { path: '/approval/claim', component: () => import('./pages/ClaimCenter.vue') },
   { path: '/approval/payment', component: () => import('./pages/PaymentRequestCenter.vue') },
   { path: '/approval/payment-dashboard', component: () => import('./pages/ApprovalDashboard.vue') },
+  { path: '/approval/expense-request-board', component: () => import('./pages/ExpenseBoards.vue') },
+  { path: '/approval/expense-payment-board', component: () => import('./pages/ExpenseBoards.vue') },
   { path: '/approval/material-progress', component: () => import('./pages/MaterialProgress.vue') },
   { path: '/approval/purchase', component: approvalPage },
   { path: '/timesheet', component: () => import('./pages/Timesheet.vue') },

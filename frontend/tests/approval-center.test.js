@@ -22,6 +22,8 @@ test("approval center defines every business flow and the two dashboards", () =>
     "/approval/payment",
     "/approval/corporate-payment",
     "/approval/payment-dashboard",
+    "/approval/expense-request-board",
+    "/approval/expense-payment-board",
   ]);
 });
 
@@ -45,6 +47,7 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /InvoiceFolder\.vue/);
   assert.match(source, /ClaimCenter\.vue/);
   assert.match(source, /PaymentRequestCenter\.vue/);
+  assert.match(source, /ExpenseBoards\.vue/);
 });
 
 test("procurement pages save and submit through the real workflow engine", () => {

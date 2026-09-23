@@ -12,7 +12,9 @@ const TIME_MANAGE = ['System Manager', 'HR User', 'HR Manager', 'Department Mana
 const TIME_ENTRY = [...TIME_MANAGE, 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/travel', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
+// 看板：财务和管理层看全公司，部门主管看本部门，普通员工不开放（服务端同样限制）。
+const BOARD = ['System Manager', 'Accounts User', 'Rayher Business Executive', 'Department Manager'];
+const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/travel', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment', '/approval/expense-request-board', '/approval/expense-payment-board', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 // Temporary test-account restriction. Remove the account from this set to restore
 // the sensitive HR pages and fields without changing role assignments.
@@ -50,6 +52,8 @@ const PAGE_ROLES = {
   '/approval/payment': APPROVAL,
   '/approval/corporate-payment': APPROVAL,
   '/approval/payment-dashboard': APPROVAL,
+  '/approval/expense-request-board': BOARD,
+  '/approval/expense-payment-board': BOARD,
   '/approval/material-progress': [],
   '/approval/purchase': APPROVAL,
   '/timesheet': TIME_VIEW,
