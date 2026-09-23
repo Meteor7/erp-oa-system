@@ -134,7 +134,12 @@ test("draft payloads only send what the server accepts for that kind", () => {
 
 test("the cashier has to classify every line", () => {
   assert.deepEqual(accountBlockers([{ expense_account_level_1: "管理费用", expense_account_level_2: "办公费" }]), []);
-  assert.deepEqual(accountBlockers([{ expense_account_level_1: "管理费用", expense_account_level_2: "" }]), ["出纳需要为每行明细选择一、二级科目"]);
+  assert.deepEqual(accountBlockers([{ expense_account_level_1: "管理费用", expense_account_level_2: "" }]), ["出纳需要为每行明细选择科目（有二级科目的要选到二级）"]);
+  // 没有二级科目的一级科目（如办公费）只填一级即可，和服务端 normalize_account_pair 一致
+  const tree = [{ level_1: "差旅费", level_2: ["飞机票"] }, { level_1: "办公费", level_2: [] }];
+  assert.deepEqual(accountBlockers([{ expense_account_level_1: "办公费", expense_account_level_2: "" }], tree), []);
+  assert.equal(accountBlockers([{ expense_account_level_1: "差旅费", expense_account_level_2: "" }], tree).length, 1);
+  assert.equal(accountBlockers([{ expense_account_level_1: "", expense_account_level_2: "" }], tree).length, 1);
   assert.notEqual(statusTone("已付款·待补票"), statusTone("已完结"));
 });
 

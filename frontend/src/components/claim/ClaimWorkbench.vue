@@ -269,7 +269,7 @@ async function approve(doc) {
   await run(async () => {
     if (doc.can_edit_expense_items) {
       const lines = Object.entries(accountDrafts[doc.name] || {}).map(([line_key, value]) => ({ line_key, ...value }));
-      const problems = accountBlockers(lines);
+      const problems = accountBlockers(lines, accountTree.value);
       if (problems.length) throw new Error(problems[0]);
       await callApi('expense_claim_entry.save_claim_accounts', { name: doc.name, lines: JSON.stringify(lines) });
     }
@@ -556,8 +556,9 @@ onMounted(async () => {
                       </select>
                     </td>
                     <td>
-                      <select v-model="accountDrafts[doc.name][line.line_key].expense_account_level_2" class="cell" aria-label="二级科目">
-                        <option value="">请选择</option>
+                      <select v-model="accountDrafts[doc.name][line.line_key].expense_account_level_2" class="cell" aria-label="二级科目"
+                        :disabled="Boolean(accountDrafts[doc.name][line.line_key].expense_account_level_1) && !levelTwo(accountDrafts[doc.name][line.line_key].expense_account_level_1).length">
+                        <option value="">{{ accountDrafts[doc.name][line.line_key].expense_account_level_1 && !levelTwo(accountDrafts[doc.name][line.line_key].expense_account_level_1).length ? '无二级科目' : '请选择' }}</option>
                         <option v-for="item in levelTwo(accountDrafts[doc.name][line.line_key].expense_account_level_1)" :key="item" :value="item">{{ item }}</option>
                       </select>
                     </td>

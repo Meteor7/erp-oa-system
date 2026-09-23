@@ -184,9 +184,21 @@ export function submitBlockers(kind, form, { invoices = [], lines = [], applicat
   return messages;
 }
 
-export function accountBlockers(lines) {
-  return (lines || []).some((line) => !String(line.expense_account_level_1 || '').trim() || !String(line.expense_account_level_2 || '').trim())
-    ? ['出纳需要为每行明细选择一、二级科目']
+// 修复（2026-09-23 验收发现）：有的一级科目没有二级科目（如办公费、维修费），服务端允许只填一级；
+// 原来前端一律要求二级科目，出纳选这些科目时永远点不了同意。传入科目表时按科目表判断。
+export function hasLevelTwo(levelOne, tree = null) {
+  if (!Array.isArray(tree)) return true;
+  const item = tree.find((entry) => entry.level_1 === String(levelOne || '').trim());
+  return !item || (item.level_2 || []).length > 0;
+}
+
+export function accountBlockers(lines, tree = null) {
+  return (lines || []).some((line) => {
+    const levelOne = String(line.expense_account_level_1 || '').trim();
+    if (!levelOne) return true;
+    return hasLevelTwo(levelOne, tree) && !String(line.expense_account_level_2 || '').trim();
+  })
+    ? ['出纳需要为每行明细选择科目（有二级科目的要选到二级）']
     : [];
 }
 
