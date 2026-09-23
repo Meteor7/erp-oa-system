@@ -20,7 +20,7 @@ const groups = [
       { to: '/approval/travel', label: '出差申请' },
     ] },
     { to: '/approval/request-dashboard', step: '03', label: '申请看板' },
-    { to: '/approval/expense-request-board', step: '03', label: '申请看板（新）' },
+    { to: '/approval/expense-request-board', step: '03', label: '申请看板' },
     { step: '04', label: '付款申请', children: [
       { to: '/approval/procurement-payment', label: '采购付款' },
       { to: '/approval/reimbursement', label: '付款/报销' },
@@ -29,7 +29,7 @@ const groups = [
       { to: '/approval/payment', label: '付款' },
     ] },
     { to: '/approval/payment-dashboard', step: '05', label: '付款看板' },
-    { to: '/approval/expense-payment-board', step: '05', label: '付款看板（新）' },
+    { to: '/approval/expense-payment-board', step: '05', label: '付款看板' },
     { to: '/approval/material-progress', step: '06', label: '物料进度看板' },
   ] },
   { label: '人事中心', items: [

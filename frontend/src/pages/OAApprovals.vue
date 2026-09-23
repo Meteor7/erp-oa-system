@@ -70,10 +70,8 @@ const T = {
   actionFailed: '\u5904\u7406\u5931\u8d25',
   required: '\u8bf7\u586b\u5199\u5fc5\u586b\u9879',
   board: '\u4ed8\u6b3e/\u62a5\u9500\u5355\u770b\u677f',
-  consumption: '\u6d88\u8d39\u660e\u7ec6',
   pending: '\u5f85\u6211\u5904\u7406',
   flow: '\u5ba1\u6279\u6d41',
-  newConsumption: '\u65b0\u5efa\u6d88\u8d39\u660e\u7ec6',
   newManual: '\u624b\u5de5\u65b0\u5efa\u4ed8\u6b3e/\u62a5\u9500\u5355',
   invoiceName: '\u53d1\u7968/\u9644\u4ef6\u540d',
   addInvoice: '\u4e0a\u4f20\u53d1\u7968',
@@ -137,31 +135,6 @@ const manualForm = reactive({
   reason: '',
 });
 
-const consumptionForm = reactive({
-  title: '',
-  category: '',
-  amount: '',
-  expense_date: '',
-  department: '',
-  description: '',
-});
-const invoiceForm = reactive({ invoice_name: '', file_type: '', file_size: '' });
-const pushPayment = reactive({
-  subject: '',
-  company: '',
-  department: '',
-  supervisor: '',
-  doc_type: '',
-  urgency: '',
-  asset_category: ASSET_OTHER,
-  payment_type: '',
-  payment_method: '',
-  bank_name: '',
-  payee_name: '',
-  branch: '',
-  account_no: '',
-  reason: '',
-});
 
 const message = ref('');
 const errMsg = ref('');
@@ -176,8 +149,6 @@ const leaveDraftName = ref('');
 const lastAutoHydratedDraft = ref('');
 const returnedDraft = ref(null);
 let leaveRefreshTimer = null;
-const selectedConsumptionName = ref('');
-const pushSelection = ref([]);
 const filters = reactive({ keyword: '', department: '', category: '' });
 
 const options = createResource({
@@ -218,12 +189,6 @@ const purchaseRequests = createResource({
   makeParams: () => ({ view: 'all', request_type: REQUEST_EXPENSE_PAYMENT, limit: 100 }),
   auto: true,
 });
-const consumptionRows = createResource({
-  url: 'rayher_hr_payroll.api.oa_entry.list_consumption_details',
-  method: 'GET',
-  makeParams: () => ({ view: 'all', limit: 200 }),
-  auto: true,
-});
 const creator = createResource({ url: 'rayher_hr_payroll.api.oa_entry.create_request' });
 const leaveDraftUpdater = createResource({ url: 'rayher_hr_payroll.api.oa_entry.update_leave_draft' });
 const actor = createResource({ url: 'rayher_hr_payroll.api.oa_entry.action_request' });
@@ -239,9 +204,6 @@ let attendanceDaysLoading = false;
 let hydratingAttendance = false;
 const attendanceHours = computed(() => Math.round(leaveForm.attendance_days.reduce((total, day) => total + Number(day.hours || 0), 0) * 100) / 100);
 const paidMarker = createResource({ url: 'rayher_hr_payroll.api.oa_entry.mark_paid' });
-const consumptionSaver = createResource({ url: 'rayher_hr_payroll.api.oa_entry.save_consumption_detail' });
-const invoiceAdder = createResource({ url: 'rayher_hr_payroll.api.oa_entry.add_invoice' });
-const pusher = createResource({ url: 'rayher_hr_payroll.api.oa_entry.push_consumption_to_request' });
 
 const assetCategories = computed(() => options.data?.asset_categories || [ASSET_ADMIN, ASSET_IT, ASSET_OTHER]);
 const expenseCategories = computed(() => options.data?.expense_categories || []);
@@ -255,9 +217,6 @@ const routeSteps = computed(() => preview.data?.steps || []);
 const copiedTo = computed(() => preview.data?.copied_to || []);
 const requestRows = computed(() => purchaseRequests.data || []);
 const selectedRequest = computed(() => requestRows.value.find((row) => row.name === selectedRequestName.value) || requestRows.value[0]);
-const consumptionList = computed(() => consumptionRows.data || []);
-const selectedConsumption = computed(() => consumptionList.value.find((row) => row.name === selectedConsumptionName.value) || consumptionList.value[0]);
-const pushableConsumption = computed(() => consumptionList.value.filter((row) => row.status === '\u5f85\u4e0b\u63a8' || row.status === '\u5df2\u4e0a\u4f20\u53d1\u7968'));
 const leaveRows = computed(() => {
   const rows = [...(pending.data || []), ...(mine.data || [])];
   return [...new Map(rows.map((row) => [row.name, row])).values()];
@@ -342,10 +301,6 @@ function applyContext(context) {
   if (!manualForm.department && context.department) manualForm.department = context.department;
   if (!manualForm.supervisor && context.supervisor) manualForm.supervisor = context.supervisor;
   if (!manualForm.payee_name && context.employee_name) manualForm.payee_name = context.employee_name;
-  if (!consumptionForm.department && context.department) consumptionForm.department = context.department;
-  if (!pushPayment.department && context.department) pushPayment.department = context.department;
-  if (!pushPayment.supervisor && context.supervisor) pushPayment.supervisor = context.supervisor;
-  if (!pushPayment.payee_name && context.employee_name) pushPayment.payee_name = context.employee_name;
 }
 
 function applyDefaults() {
@@ -355,12 +310,6 @@ function applyDefaults() {
   manualForm.category ||= first(expenseCategories.value);
   manualForm.payment_type ||= first(paymentTypes.value);
   manualForm.payment_method ||= first(paymentMethods.value);
-  pushPayment.company ||= first(companies.value);
-  pushPayment.doc_type ||= first(docTypes.value);
-  pushPayment.urgency ||= first(urgencies.value);
-  pushPayment.payment_type ||= first(paymentTypes.value);
-  pushPayment.payment_method ||= first(paymentMethods.value);
-  consumptionForm.category ||= first(expenseCategories.value);
 }
 
 function previewPayload() {
@@ -372,9 +321,9 @@ function previewPayload() {
   }
   return {
     request_type: REQUEST_EXPENSE_PAYMENT,
-    department: manualForm.department || pushPayment.department,
-    supervisor: manualForm.supervisor || pushPayment.supervisor,
-    asset_category: manualForm.asset_category || pushPayment.asset_category || ASSET_OTHER,
+    department: manualForm.department,
+    supervisor: manualForm.supervisor,
+    asset_category: manualForm.asset_category || ASSET_OTHER,
   };
 }
 
@@ -388,7 +337,7 @@ async function previewRoute() {
 }
 
 async function reloadPurchase() {
-  await Promise.allSettled([purchaseRequests.reload(), pending.reload(), consumptionRows.reload(), previewRoute()]);
+  await Promise.allSettled([purchaseRequests.reload(), pending.reload(), previewRoute()]);
 }
 
 async function reloadLists() {
@@ -644,99 +593,6 @@ async function saveManual(submit = false) {
   }
 }
 
-async function saveConsumption() {
-  errMsg.value = '';
-  if (!consumptionForm.title || !consumptionForm.category || !consumptionForm.expense_date || Number(consumptionForm.amount || 0) <= 0) {
-    errMsg.value = T.required;
-    return;
-  }
-  try {
-    const row = await consumptionSaver.submit({ ...consumptionForm });
-    selectedConsumptionName.value = row.name;
-    Object.assign(consumptionForm, { title: '', amount: '', expense_date: '', description: '' });
-    applyDefaults();
-    applyContext(options.data?.context);
-    await consumptionRows.reload();
-  } catch (error) {
-    errMsg.value = serverMessage(error, T.saveFailed);
-  }
-}
-
-async function addInvoiceFromInput(event) {
-  const file = event.target.files?.[0];
-  event.target.value = '';
-  if (!file || !selectedConsumption.value) return;
-  invoiceForm.invoice_name = file.name;
-  invoiceForm.file_type = file.type || file.name.split('.').pop() || '';
-  invoiceForm.file_size = `${Math.round(file.size / 1024)}KB`;
-  await addInvoice();
-}
-
-async function addInvoice() {
-  if (!selectedConsumption.value || !invoiceForm.invoice_name.trim()) return;
-  try {
-    const row = await invoiceAdder.submit({
-      consumption: selectedConsumption.value.name,
-      invoice_name: invoiceForm.invoice_name.trim(),
-      file_type: invoiceForm.file_type,
-      file_size: invoiceForm.file_size,
-    });
-    selectedConsumptionName.value = row.name;
-    Object.assign(invoiceForm, { invoice_name: '', file_type: '', file_size: '' });
-    await consumptionRows.reload();
-  } catch (error) {
-    errMsg.value = serverMessage(error, T.saveFailed);
-  }
-}
-
-function togglePush(name) {
-  if (pushSelection.value.includes(name)) {
-    pushSelection.value = pushSelection.value.filter((item) => item !== name);
-  } else {
-    pushSelection.value = [...pushSelection.value, name];
-  }
-}
-
-function pushInfoPayload() {
-  return {
-    subject: pushPayment.subject,
-    company: pushPayment.company,
-    department: pushPayment.department,
-    supervisor: pushPayment.supervisor,
-    doc_type: pushPayment.doc_type,
-    urgency: pushPayment.urgency,
-    asset_category: pushPayment.asset_category,
-    payment_type: pushPayment.payment_type,
-    payment_method: pushPayment.payment_method,
-    bank_name: pushPayment.bank_name,
-    payee_name: pushPayment.payee_name,
-    branch: pushPayment.branch,
-    account_no: pushPayment.account_no,
-    reason: pushPayment.reason,
-  };
-}
-
-async function pushSelected(submit = false) {
-  errMsg.value = '';
-  if (!pushSelection.value.length) {
-    errMsg.value = T.selectPush;
-    return;
-  }
-  try {
-    const row = await pusher.submit({
-      consumption_names: JSON.stringify(pushSelection.value),
-      payment_info: JSON.stringify(pushInfoPayload()),
-      submit: submit ? 1 : 0,
-    });
-    selectedRequestName.value = row.name;
-    pushSelection.value = [];
-    purchaseTab.value = 'board';
-    await reloadPurchase();
-  } catch (error) {
-    errMsg.value = serverMessage(error, T.saveFailed);
-  }
-}
-
 async function submitDraft(row) {
   try {
     await draftSubmitter.submit({ name: row.name });
@@ -778,7 +634,7 @@ watch(() => options.data, () => {
   previewRoute();
 }, { immediate: true });
 watch(
-  [() => leaveForm.department, () => leaveForm.supervisor, () => manualForm.department, () => manualForm.supervisor, () => manualForm.asset_category, () => pushPayment.department, () => pushPayment.asset_category],
+  [() => leaveForm.department, () => leaveForm.supervisor, () => manualForm.department, () => manualForm.supervisor, () => manualForm.asset_category],
   () => previewRoute(),
   { immediate: false }
 );
@@ -796,9 +652,6 @@ watch(currentRequestType, () => {
   message.value = '';
   errMsg.value = '';
   reloadLists();
-});
-watch(consumptionList, (rows) => {
-  if (!selectedConsumptionName.value && rows.length) selectedConsumptionName.value = rows[0].name;
 });
 watch(requestRows, (rows) => {
   if (!selectedRequestName.value && rows.length) selectedRequestName.value = rows[0].name;
@@ -1012,7 +865,7 @@ onBeforeUnmount(() => {
 
     <template v-if='false'>
       <div class='flex flex-wrap items-center gap-2'>
-        <button v-for='tab in [{k:"board",l:T.board},{k:"consumption",l:T.consumption},{k:"pending",l:T.pending},{k:"flow",l:T.flow}]' :key='tab.k'
+        <button v-for='tab in [{k:"board",l:T.board},{k:"pending",l:T.pending},{k:"flow",l:T.flow}]' :key='tab.k'
           type='button'
           class='rounded border px-3 py-1.5 text-sm'
           :class="purchaseTab === tab.k ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
@@ -1097,7 +950,6 @@ onBeforeUnmount(() => {
                   <div class='mt-2 flex flex-wrap gap-1 text-[11px] text-gray-500'>
                     <span class='rounded bg-gray-100 px-1.5 py-0.5'>{{ row.department || '-' }}</span>
                     <span class='rounded bg-gray-100 px-1.5 py-0.5'>{{ row.employee_name || '-' }}</span>
-                    <span v-if='row.from_consumption' class='rounded bg-blue-50 px-1.5 py-0.5 text-blue-700'>{{ T.pushDown }}</span>
                   </div>
                 </button>
                 <div v-if='!rowsForStatus(column.key).length' class='py-8 text-center text-xs text-gray-400'>{{ T.empty }}</div>
@@ -1134,82 +986,6 @@ onBeforeUnmount(() => {
         </Card>
       </template>
 
-      <template v-if='purchaseTab === "consumption"'>
-        <div class='grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]'>
-          <Card :title='T.consumption'>
-            <div class='mb-4 rounded border border-gray-200 bg-gray-50 p-3'>
-              <div class='grid grid-cols-1 gap-3 md:grid-cols-5'>
-                <input v-model='consumptionForm.title' class='border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.subject' />
-                <select v-model='consumptionForm.category' class='border border-gray-300 rounded px-3 py-2 text-sm'><option v-for='item in expenseCategories' :key='item'>{{ item }}</option></select>
-                <input v-model='consumptionForm.amount' type='number' min='0' step='0.01' class='border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.amount' />
-                <input v-model='consumptionForm.expense_date' type='date' class='border border-gray-300 rounded px-3 py-2 text-sm' />
-                <select v-model='consumptionForm.department' class='border border-gray-300 rounded px-3 py-2 text-sm'><option v-for='item in departments' :key='item'>{{ item }}</option></select>
-              </div>
-              <div class='mt-3 flex gap-2'>
-                <input v-model='consumptionForm.description' class='flex-1 border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.description' />
-                <Button variant='solid' @click='saveConsumption'>{{ T.newConsumption }}</Button>
-              </div>
-            </div>
-
-            <div class='space-y-2'>
-              <div v-for='row in consumptionList' :key='row.name' class='flex items-center gap-3 rounded border border-gray-200 bg-white p-3'>
-                <input type='checkbox' :checked='pushSelection.includes(row.name)' :disabled='!pushableConsumption.some((item) => item.name === row.name)' @change='togglePush(row.name)' />
-                <button type='button' class='flex-1 text-left' @click='selectedConsumptionName = row.name'>
-                  <div class='font-medium text-gray-900'>{{ row.title }}</div>
-                  <div class='text-xs text-gray-500'>{{ row.expense_date }} / {{ row.department }} / {{ row.category }} / {{ row.invoice_count }} {{ T.addInvoice }}</div>
-                </button>
-                <div class='text-right'>
-                  <div class='font-semibold tabular-nums'>{{ fmtAmount(row.amount) }}</div>
-                  <div class='text-xs text-gray-500'>{{ row.status }}</div>
-                </div>
-              </div>
-              <div v-if='!consumptionList.length' class='py-10 text-center text-sm text-gray-400'>{{ T.empty }}</div>
-            </div>
-          </Card>
-
-          <div class='space-y-4'>
-            <Card :title='T.addInvoice'>
-              <template v-if='selectedConsumption'>
-                <div class='mb-3 text-sm'>
-                  <div class='font-medium'>{{ selectedConsumption.title }}</div>
-                  <div class='text-xs text-gray-500'>{{ selectedConsumption.status }} / {{ fmtAmount(selectedConsumption.amount) }}</div>
-                </div>
-                <div class='mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800'>{{ T.invoiceRestriction }}</div>
-                <div class='flex gap-2'>
-                  <input v-model='invoiceForm.invoice_name' class='min-w-0 flex-1 border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.invoiceName' />
-                  <input type='file' class='hidden' id='oa-invoice-file' accept='.pdf,.jpg,.jpeg,.png' @change='addInvoiceFromInput' />
-                  <label for='oa-invoice-file' class='rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50'>{{ T.addInvoice }}</label>
-                </div>
-                <div class='mt-2'>
-                  <Button variant='subtle' :disabled='!invoiceForm.invoice_name.trim()' @click='addInvoice'>{{ T.addInvoice }}</Button>
-                </div>
-                <div class='mt-4 space-y-2'>
-                  <div v-for='invoice in selectedConsumption.invoices || []' :key='invoice.invoice_name' class='rounded border border-gray-200 p-2 text-sm'>
-                    <div class='font-medium'>{{ invoice.invoice_name }}</div>
-                    <div class='text-xs text-gray-500'>{{ invoice.file_size || '-' }} / {{ invoice.invoice_status }}</div>
-                  </div>
-                  <div v-if='!(selectedConsumption.invoices || []).length' class='text-sm text-gray-400'>{{ T.empty }}</div>
-                </div>
-              </template>
-              <div v-else class='text-sm text-gray-400'>{{ T.empty }}</div>
-            </Card>
-
-            <Card :title='T.pushDown'>
-              <div class='space-y-2'>
-                <select v-model='pushPayment.company' class='w-full border border-gray-300 rounded px-3 py-2 text-sm'><option v-for='item in companies' :key='item'>{{ item }}</option></select>
-                <select v-model='pushPayment.department' class='w-full border border-gray-300 rounded px-3 py-2 text-sm'><option v-for='item in departments' :key='item'>{{ item }}</option></select>
-                <input v-model='pushPayment.subject' class='w-full border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.subject' />
-                <input v-model='pushPayment.payee_name' class='w-full border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.applicant' />
-                <input v-model='pushPayment.account_no' class='w-full border border-gray-300 rounded px-3 py-2 text-sm' :placeholder='T.paymentInfo' />
-              </div>
-              <div class='mt-3 flex gap-2'>
-                <Button variant='subtle' :disabled='!pushSelection.length' @click='pushSelected(false)'>{{ T.pushDown }}</Button>
-                <Button variant='solid' :disabled='!pushSelection.length' @click='pushSelected(true)'>{{ T.pushAndSubmit }}</Button>
-              </div>
-            </Card>
-          </div>
-        </div>
-      </template>
 
       <template v-if='purchaseTab === "pending"'>
         <Card :title='T.pendingTitle'>

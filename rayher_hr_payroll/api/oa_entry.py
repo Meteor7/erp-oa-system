@@ -100,16 +100,9 @@ PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager
 PROCUREMENT_PO_ROLES = PROCUREMENT_GLOBAL_ROLES | {"Accounts User", "Finance User"}
 
 SOURCE_MANUAL = "\u624b\u5de5\u65b0\u5efa"
-SOURCE_PUSH = "\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8"
 SOURCE_INVOICE_PUSH = "发票下推"
 OPERATION_LOG_LIMIT = 100
 REPORT_LIMIT = 1000
-
-CD_WAIT_UPLOAD = "\u5f85\u4e0a\u4f20"
-CD_UPLOADED = "\u5df2\u4e0a\u4f20\u53d1\u7968"
-CD_WAIT_PUSH = "\u5f85\u4e0b\u63a8"
-CD_PUSHED = "\u5df2\u4e0b\u63a8"
-CD_REJECTED = "\u5df2\u9a73\u56de"
 
 INVOICE_UPLOADED = "\u5df2\u4e0a\u4f20"
 INVOICE_VERIFIED = "\u5df2\u9a8c\u8bc1"
@@ -999,38 +992,6 @@ def _group_expense_sources(rows, invoices_by_key=None):
 
 
 
-def _serialize_invoice(row):
-    return {
-        "invoice_name": row.invoice_name,
-        "invoice_file": row.invoice_file,
-        "file_type": row.file_type,
-        "file_size": row.file_size,
-        "invoice_status": row.invoice_status,
-        "uploaded_on": row.uploaded_on,
-        "remark": row.remark,
-    }
-
-
-def _serialize_consumption(doc):
-    return {
-        "name": doc.name,
-        "title": doc.title,
-        "employee": doc.employee,
-        "employee_name": doc.employee_name,
-        "department": _display_department(doc.department),
-        "expense_date": doc.expense_date,
-        "category": doc.category,
-        "amount": doc.amount,
-        "description": doc.description,
-        "status": doc.status,
-        "linked_request": doc.linked_request,
-        "invoice_count": doc.invoice_count,
-        "invoices": [_serialize_invoice(row) for row in doc.invoices],
-        "creation": doc.creation,
-        "modified": doc.modified,
-    }
-
-
 def _actor_names(user=None):
     return approval_actor_ids(user if user is not None else frappe.session.user)
 
@@ -1457,7 +1418,6 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "asset_category": doc.asset_category,
         "source_type": getattr(doc, "source_type", None) or SOURCE_MANUAL,
         "source_summary": getattr(doc, "source_summary", None),
-        "from_consumption": (getattr(doc, "source_type", None) == SOURCE_PUSH),
         "from_invoice_push": (getattr(doc, "source_type", None) == SOURCE_INVOICE_PUSH),
         "payment_type": _display_payment_type(getattr(doc, "payment_type", None)),
         "payment_method": getattr(doc, "payment_method", None),
@@ -1666,21 +1626,18 @@ def _load_request(name, *, current=False):
     return frappe.get_doc("OA Approval Request", name)
 
 
-def _load_consumption(name):
-    if not name:
-        frappe.throw(frappe._("\u7f3a\u5c11\u6d88\u8d39\u660e\u7ec6\u7f16\u53f7\u3002"))
-    return frappe.get_doc("OA Consumption Detail", name)
+def legacy_expense_closed():
+    """报销单或付款单在站点配置里启用后，就不再新建旧的费用付款申请。
 
-def _require_consumption_write_access(doc):
-    user = frappe.session.user
-    if _is_finance_user(user):
-        return
-    if _clean(getattr(doc, "owner", None)) == _clean(user):
-        return
-    ctx = _employee_context(user)
-    if ctx.get("employee") and _clean(getattr(doc, "employee", None)) == _clean(ctx.get("employee")):
-        return
-    frappe.throw(frappe._("\u60a8\u65e0\u6743\u4fee\u6539\u8be5\u6d88\u8d39\u660e\u7ec6\u3002"))
+    在途的旧单据照常审批、付款、补票；把配置关掉即可回到旧入口。
+    """
+    from rayher_hr_payroll.oa_feature_gate import is_admin_only
+    return not (is_admin_only(REQUEST_REIMBURSEMENT) and is_admin_only(REQUEST_PAYMENT))
+
+
+def _require_legacy_expense_entry():
+    if legacy_expense_closed():
+        frappe.throw(frappe._("旧的费用付款申请已停用，请使用报销或付款。"))
 
 
 def _is_finance_user(user=None):
@@ -1913,6 +1870,8 @@ def _prepare_request_doc(
 ):
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
+    if request_type == REQUEST_EXPENSE_PAYMENT:
+        _require_legacy_expense_entry()
     ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
     if request_type == REQUEST_EXPENSE_PAYMENT:
         classification = _expense_classification(doc_type, asset_category, submitting=submit)
@@ -2267,19 +2226,6 @@ def _submit_draft(doc):
     _append_request_event(doc, "提交申请", old_status, doc.workflow_status)
 
 
-def _update_consumption_invoice_state(doc):
-    invoices = list(getattr(doc, "invoices", []) or [])
-    doc.invoice_count = len(invoices)
-    if doc.status == CD_PUSHED:
-        return
-    if any(row.invoice_status == INVOICE_DUPLICATE for row in invoices):
-        doc.status = CD_REJECTED
-    elif invoices:
-        doc.status = CD_WAIT_PUSH
-    else:
-        doc.status = CD_WAIT_UPLOAD
-
-
 def _is_procurement_global_reader(user=None, request_type=None):
     candidate = _clean(user or frappe.session.user)
     roles = set(frappe.get_roles(candidate) or [])
@@ -2301,19 +2247,6 @@ def _procurement_row_is_related(doc, user, context):
         )
         or _can_act_on_current_step(doc, user)
     )
-
-
-def _consumption_filters(view="mine", status=None):
-    roles = set(frappe.get_roles(frappe.session.user))
-    ctx = _employee_context()
-    filters = {}
-    if view == "all" and roles & PRIVILEGED_ROLES:
-        filters = {}
-    else:
-        filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
-    if status:
-        filters["status"] = status
-    return filters
 
 
 @frappe.whitelist()
@@ -4004,148 +3937,6 @@ def list_expense_approval_records(
     return {"records": records, "truncated": truncated}
 
 
-@frappe.whitelist()
-def list_consumption_details(view="mine", status=None, limit=100):
-    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
-    names = frappe.get_all(
-        "OA Consumption Detail",
-        filters=_consumption_filters(view=view, status=status),
-        fields=["name"],
-        order_by="modified desc",
-        limit_page_length=min(int(limit or 100), 300),
-    )
-    return [_serialize_consumption(_load_consumption(row.name)) for row in names]
-
-
-@frappe.whitelist(methods=["POST"])
-def save_consumption_detail(name=None, title=None, category=None, expense_date=None, amount=None, department=None, description=None):
-    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
-    if not _clean(title) or not _clean(category) or not expense_date or _money(amount) <= 0:
-        frappe.throw(frappe._("\u8bf7\u586b\u5199\u6d88\u8d39\u660e\u7ec6\u7684\u6807\u9898\u3001\u8d39\u7528\u9879\u76ee\u3001\u65e5\u671f\u548c\u91d1\u989d\u3002"))
-    ctx = _employee_context()
-    if name:
-        doc = _load_consumption(name)
-        _require_consumption_write_access(doc)
-        if doc.status == CD_PUSHED:
-            frappe.throw(frappe._("\u5df2\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u4e0d\u80fd\u4fee\u6539\u3002"))
-    else:
-        doc = frappe.get_doc({"doctype": "OA Consumption Detail"})
-        doc.employee = ctx.get("employee")
-        doc.employee_name = ctx.get("employee_name")
-    doc.title = _clean(title)
-    doc.category = _clean(category)
-    doc.expense_date = expense_date
-    doc.amount = _money(amount)
-    doc.department = _clean(department) or ctx.get("department")
-    doc.description = _clean(description)
-    _update_consumption_invoice_state(doc)
-    if name:
-        _save_document(doc)
-    else:
-        _insert_document(doc)
-    frappe.db.commit()
-    return _serialize_consumption(doc)
-
-
-@frappe.whitelist(methods=["POST"])
-def add_invoice(
-    consumption,
-    invoice_name,
-    invoice_file=None,
-    file_type=None,
-    file_size=None,
-    invoice_status=INVOICE_UPLOADED,
-    remark=None,
-):
-    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
-    doc = _load_consumption(consumption)
-    _require_consumption_write_access(doc)
-    if doc.status == CD_PUSHED:
-        frappe.throw(frappe._("\u5df2\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u4e0d\u80fd\u518d\u6dfb\u52a0\u53d1\u7968\u3002"))
-    if not _clean(invoice_name):
-        frappe.throw(frappe._("\u8bf7\u586b\u5199\u53d1\u7968\u540d\u79f0\u3002"))
-    doc.append(
-        "invoices",
-        {
-            "invoice_name": _clean(invoice_name),
-            "invoice_file": invoice_file,
-            "file_type": file_type or "",
-            "file_size": file_size or "",
-            "invoice_status": invoice_status or INVOICE_UPLOADED,
-            "uploaded_on": now_datetime(),
-            "remark": remark or "",
-        },
-    )
-    _update_consumption_invoice_state(doc)
-    _save_document(doc)
-    frappe.db.commit()
-    return _serialize_consumption(doc)
-
-
-@frappe.whitelist(methods=["POST"])
-def push_consumption_to_request(consumption_names, payment_info=None, submit=0):
-    require_request_type_access(REQUEST_EXPENSE_PAYMENT)
-    names = _parse_json(consumption_names, [])
-    if not names:
-        frappe.throw(frappe._("\u8bf7\u9009\u62e9\u8981\u4e0b\u63a8\u7684\u6d88\u8d39\u660e\u7ec6\u3002"))
-    docs = [_load_consumption(name) for name in names]
-    for doc in docs:
-        _require_consumption_write_access(doc)
-        if doc.status == CD_PUSHED:
-            frappe.throw(frappe._("\u6d88\u8d39\u660e\u7ec6 {0} \u5df2\u4e0b\u63a8\u3002").format(doc.name))
-        if not doc.invoices:
-            frappe.throw(frappe._("\u6d88\u8d39\u660e\u7ec6 {0} \u8bf7\u5148\u4e0a\u4f20\u53d1\u7968\u3002").format(doc.name))
-        if any(row.invoice_status == INVOICE_DUPLICATE for row in doc.invoices):
-            frappe.throw(frappe._("\u6d88\u8d39\u660e\u7ec6 {0} \u5b58\u5728\u91cd\u590d\u53d1\u7968\uff0c\u4e0d\u80fd\u4e0b\u63a8\u3002").format(doc.name))
-    info = _parse_json(payment_info, {}) or {}
-    first = docs[0]
-    expense_lines = [
-        {
-            "source_consumption": doc.name,
-            "expense_date": doc.expense_date,
-            "category": doc.category,
-            "amount": doc.amount,
-            "description": doc.description or doc.title,
-            "attachment_count": len(doc.invoices),
-            "invoice_status": INVOICE_CONFIRMED if all(row.invoice_status in {INVOICE_VERIFIED, INVOICE_CONFIRMED} for row in doc.invoices) else INVOICE_UPLOADED,
-        }
-        for doc in docs
-    ]
-    doc = _build_request_doc(
-        request_type=REQUEST_EXPENSE_PAYMENT,
-        subject=info.get("subject") or ("\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8-" + first.title),
-        department=info.get("department") or first.department,
-        supervisor=info.get("supervisor"),
-        asset_category=_required_asset_category(info.get("asset_category")),
-        amount=sum(_money(item["amount"]) for item in expense_lines),
-        reason=info.get("reason") or "\u7531 {0} \u6761\u6d88\u8d39\u660e\u7ec6\u4e0b\u63a8\u751f\u6210".format(len(docs)),
-        submit=False,
-        expense_lines=expense_lines,
-        company=info.get("company"),
-        doc_type=info.get("doc_type"),
-        urgency=info.get("urgency"),
-        payment_type=info.get("payment_type"),
-        payment_method=info.get("payment_method"),
-        bank_name=info.get("bank_name"),
-        payee_name=info.get("payee_name"),
-        branch=info.get("branch"),
-        account_no=info.get("account_no"),
-        source_type=SOURCE_PUSH,
-        source_summary="\u3001".join(doc.name for doc in docs),
-        no_invoice_reason="由旧消费明细附件下推",
-        invoice_handling_mode=INVOICE_MODE_NOT_REQUIRED,
-    )
-    if _to_bool(submit):
-        _submit_draft(doc)
-        _save_document(doc)
-        _sync_assignments_after_save(doc)
-    for cd in docs:
-        cd.status = CD_PUSHED
-        cd.linked_request = doc.name
-        cd.save(ignore_permissions=True)
-    return _summarize_doc(doc)
-
-
 def _event_stamp(event):
     event = event if isinstance(event, dict) else {}
     return _clean(event.get("timestamp") or event.get("acted_on"))
@@ -4670,6 +4461,8 @@ def _reset_request_to_draft(doc, note=""):
 @frappe.whitelist(methods=["POST"])
 def push_invoices_to_request(invoice_names, payment_info=None):
     require_request_type_access(REQUEST_EXPENSE_PAYMENT)
+    # 新流程下发票从发票夹进报销单，不再下推生成旧的费用付款申请。
+    _require_legacy_expense_entry()
     names = _invoice_names(invoice_names)
     info = _parse_json(payment_info, {}) or {}
     if not isinstance(info, dict):

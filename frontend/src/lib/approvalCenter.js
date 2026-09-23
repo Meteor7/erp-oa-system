@@ -13,12 +13,23 @@ export const APPROVAL_CENTER_ROUTES = Object.freeze({
   '/approval/payment': { flag: 'payment_request', label: '付款' },
   '/approval/corporate-payment': { flag: 'expense_reimbursement', label: '付款/报销（兼容地址）' },
   '/approval/payment-dashboard': { flag: 'procurement_payment', label: '付款看板' },
-  '/approval/expense-request-board': { flag: 'reimbursement_request', label: '申请看板（新）' },
-  '/approval/expense-payment-board': { flag: 'payment_request', label: '付款看板（新）' },
+  '/approval/expense-request-board': { flag: 'reimbursement_request', label: '申请看板' },
+  '/approval/expense-payment-board': { flag: 'payment_request', label: '付款看板' },
 });
 
+// 新流程（报销单 / 付款单）启用后，旧的付款/报销页面和旧看板从菜单里退出；
+// 把站点配置关掉就回到旧入口，单据本身都还在。
+export function newExpenseFlowEnabled(access = {}) {
+  return access.reimbursement_request === true || access.payment_request === true;
+}
+
 export function isApprovalRouteEnabled(path, access = {}) {
-  if (path === '/approval/purchase') return access.expense_reimbursement !== false;
+  if (path === '/approval/reimbursement' || path === '/approval/corporate-payment' || path === '/approval/purchase') {
+    return newExpenseFlowEnabled(access) ? false : access.expense_reimbursement !== false;
+  }
+  if (path === '/approval/request-dashboard' || path === '/approval/payment-dashboard') {
+    if (newExpenseFlowEnabled(access)) return false;
+  }
   // 发票夹服务于报销和付款，任一开放即可进入。
   if (path === '/approval/invoice-folder') return access.reimbursement_request === true || access.payment_request === true;
   // 新看板包含购买、出差、报销、付款和采购，任一新单据类型开放即可进入。

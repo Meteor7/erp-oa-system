@@ -23,7 +23,7 @@ const filters = reactive({
 
 const workflowStatuses = ['草稿', '待审批', '待办理', '已完成', '已拒绝', '已付款'];
 const paymentStatuses = ['已付款', '未付款'];
-const sourceTypes = ['发票下推', '手工新建', '消费明细下推'];
+const sourceTypes = ['发票下推', '手工新建'];
 
 const statistics = createResource({
   url: 'rayher_hr_payroll.api.oa_entry.get_expense_statistics',

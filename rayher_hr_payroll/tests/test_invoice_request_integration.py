@@ -2126,67 +2126,6 @@ def test_approval_records_merge_steps_and_operation_events_with_permissions(monk
 
 
 
-def test_legacy_consumption_write_access_is_row_scoped(monkeypatch):
-    monkeypatch.setattr(
-        oa_entry,
-        "_employee_context",
-        lambda user=None: {
-            "employee": "EMP-1",
-            "employee_name": "Alice",
-            "department": "\u7814\u53d1\u90e8",
-            "supervisor": "",
-        },
-    )
-    foreign = Row(name="CD-FOREIGN", owner="bob@example.com", employee="EMP-2")
-
-    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
-        oa_entry._require_consumption_write_access(foreign)
-
-    oa_entry._require_consumption_write_access(
-        Row(name="CD-OWNER", owner="alice@example.com", employee="EMP-2")
-    )
-    oa_entry._require_consumption_write_access(
-        Row(name="CD-EMPLOYEE", owner="bob@example.com", employee="EMP-1")
-    )
-
-    frappe_stub.get_roles = lambda user=None: ["Accounts User"]
-    oa_entry._require_consumption_write_access(foreign)
-
-
-def test_every_legacy_consumption_mutation_enforces_row_scope(monkeypatch):
-    monkeypatch.setattr(
-        oa_entry,
-        "_employee_context",
-        lambda user=None: {
-            "employee": "EMP-1",
-            "employee_name": "Alice",
-            "department": "\u7814\u53d1\u90e8",
-            "supervisor": "",
-        },
-    )
-    foreign = Row(
-        name="CD-FOREIGN",
-        owner="bob@example.com",
-        employee="EMP-2",
-        status=oa_entry.CD_WAIT_UPLOAD,
-        invoices=[],
-    )
-    monkeypatch.setattr(oa_entry, "_load_consumption", lambda _name: foreign)
-
-    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
-        oa_entry.save_consumption_detail(
-            name=foreign.name,
-            title="travel",
-            category="transport",
-            expense_date="2026-07-22",
-            amount=10,
-        )
-    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
-        oa_entry.add_invoice(foreign.name, "foreign.pdf")
-    with pytest.raises(ValidationError, match="\u65e0\u6743\u4fee\u6539"):
-        oa_entry.push_consumption_to_request([foreign.name])
-
-
 def test_expense_normalization_derives_blank_total_before_request_sum():
     rows, total = oa_entry._normalize_expense_lines(
         [

@@ -27,8 +27,27 @@ test("approval center defines every business flow and the two dashboards", () =>
   ]);
 });
 
+test("the legacy 付款/报销 page and the old boards retire once the new flow is on", () => {
+  const legacy = { expense_reimbursement: true, procurement_application: true, procurement_payment: true };
+  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", legacy), true);
+  assert.equal(isApprovalRouteEnabled("/approval/purchase", legacy), true);
+  assert.equal(isApprovalRouteEnabled("/approval/request-dashboard", legacy), true);
+  assert.equal(isApprovalRouteEnabled("/approval/payment-dashboard", legacy), true);
+  const migrated = { ...legacy, reimbursement_request: true };
+  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", migrated), false);
+  assert.equal(isApprovalRouteEnabled("/approval/corporate-payment", migrated), false);
+  assert.equal(isApprovalRouteEnabled("/approval/purchase", migrated), false);
+  assert.equal(isApprovalRouteEnabled("/approval/request-dashboard", migrated), false);
+  assert.equal(isApprovalRouteEnabled("/approval/payment-dashboard", migrated), false);
+  assert.equal(isApprovalRouteEnabled("/approval/claim", migrated), true);
+  assert.equal(isApprovalRouteEnabled("/approval/expense-request-board", migrated), true);
+  // turning the new types off again brings the legacy pages back
+  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", legacy), true);
+});
+
 test("closed procurement routes require explicit server boot flags", () => {
   assert.equal(isApprovalRouteEnabled("/approval/leave", { leave_approval: true }), true);
+  assert.equal(isApprovalRouteEnabled("/approval/reimbursement", {}), true);
   assert.equal(isApprovalRouteEnabled("/approval/procurement", {}), false);
   assert.equal(isApprovalRouteEnabled("/approval/procurement", { procurement_application: true }), true);
   assert.equal(isApprovalRouteEnabled("/approval/payment-dashboard", { procurement_payment: false }), false);
@@ -131,5 +150,14 @@ test("overtime and compensatory leave follow the leave access flag", () => {
   for (const route of ["/approval/overtime", "/approval/comp-time"]) {
     assert.equal(isApprovalRouteEnabled(route, { leave_approval: false }), false);
     assert.equal(isApprovalRouteEnabled(route, { leave_approval: true }), true);
+  }
+});
+
+test("the removed consumption push leaves no references behind in OA approvals", () => {
+  // 请假 / 加班 / 调休也用这个页面：残留的变量会让监听器报错、路线预览不刷新。
+  const source = read("../src/pages/OAApprovals.vue");
+  for (const name of ["pushPayment", "pushSelection", "consumptionRows", "consumptionForm", "selectedConsumption",
+    "push_consumption_to_request", "list_consumption_details", "save_consumption_detail"]) {
+    assert.ok(!source.includes(name), name);
   }
 });

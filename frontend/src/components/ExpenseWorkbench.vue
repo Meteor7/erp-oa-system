@@ -203,7 +203,6 @@ function rowsForStatus(status) {
 }
 function sourceLabel(row) {
   if (row.from_invoice_push) return '发票下推';
-  if (row.from_consumption) return '历史数据下推';
   return '手工新建';
 }
 function uniqueValues(values) {
