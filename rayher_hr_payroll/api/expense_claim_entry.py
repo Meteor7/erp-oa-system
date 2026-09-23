@@ -623,7 +623,8 @@ def capabilities(doc):
         "can_withdraw_claim_payment": bool(paid and finance),
         "invoice_due_state": (
             invoice_folder.due_state(doc.expected_invoice_date, date.today())
-            if doc.request_type == REQUEST_PAYMENT and followup == rules.FOLLOWUP_PENDING
+            # 补票期限从付款后才开始算，审批中的付款单不显示到期提示。
+            if doc.request_type == REQUEST_PAYMENT and paid and followup == rules.FOLLOWUP_PENDING
             else ""
         ),
     }

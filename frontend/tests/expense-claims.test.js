@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   CLAIM_KINDS,
   accountBlockers,
+  accountDraftFor,
   applicationLabel,
   claimDraftPayload,
   claimKind,
@@ -12,6 +13,7 @@ import {
   statusTone,
   submitBlockers,
   sumAmount,
+  withDefaultProjects,
 } from "../src/lib/expenseClaims.js";
 import {
   canConfirm,
@@ -154,4 +156,21 @@ test("the new pages appear only once their type is switched on", () => {
   assert.equal(canSee("/approval/claim"), true);
   assert.equal(canSee("/approval/invoice-folder"), true);
   assert.equal(firstVisiblePath(), "/dashboard");
+});
+
+test("the cashier's account draft is built from the document, however it was opened", () => {
+  assert.deepEqual(accountDraftFor([
+    { line_key: "L1", expense_account_level_1: "差旅费", expense_account_level_2: "飞机票" },
+    { line_key: "L2" },
+    { expense_account_level_1: "no key" },
+  ]), {
+    L1: { expense_account_level_1: "差旅费", expense_account_level_2: "飞机票" },
+    L2: { expense_account_level_1: "", expense_account_level_2: "" },
+  });
+  assert.deepEqual(accountDraftFor(undefined), {});
+});
+
+test("every selectable invoice starts as 非项目 but keeps a project already chosen", () => {
+  assert.deepEqual(withDefaultProjects([{ name: "INV-1" }, { name: "INV-2" }], { "INV-2": "RD01" }), { "INV-1": "", "INV-2": "RD01" });
+  assert.deepEqual(withDefaultProjects([], {}), {});
 });

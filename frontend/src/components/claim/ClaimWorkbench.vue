@@ -4,8 +4,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  CLAIM_KINDS, accountBlockers, applicationLabel, callApi, claimDraftPayload, claimTabs,
-  money, statusTone, submitBlockers, sumAmount,
+  CLAIM_KINDS, accountBlockers, accountDraftFor, applicationLabel, callApi, claimDraftPayload, claimTabs,
+  money, statusTone, submitBlockers, sumAmount, withDefaultProjects,
 } from '../../lib/expenseClaims.js';
 
 const props = defineProps({ kind: { type: String, required: true } });
@@ -95,6 +95,7 @@ async function loadLookups() {
     ]);
     applications.value = apps || [];
     availableInvoices.value = invoices || [];
+    Object.assign(lineProjects, withDefaultProjects(availableInvoices.value, lineProjects));
     accountOptions.value = options?.expense_account_tree || [];
     projects.value = (projectRows || []).map((row) => row.name || row);
   } catch (error) {
@@ -185,17 +186,16 @@ async function saveDraft({ thenSubmit = false } = {}) {
   }
 }
 
-async function select(row) {
-  selected.value = await loadOne(row.name);
+// 选中的单据一变（点列表、从通知链接打开、操作后刷新）就重建科目草稿和补票输入。
+watch(() => selected.value?.name + '|' + (selected.value?.modified || ''), () => {
   Object.keys(accountDraft).forEach((key) => delete accountDraft[key]);
-  (selected.value?.expense_lines || []).forEach((line) => {
-    accountDraft[line.line_key] = {
-      expense_account_level_1: line.expense_account_level_1 || '',
-      expense_account_level_2: line.expense_account_level_2 || '',
-    };
-  });
+  Object.assign(accountDraft, accountDraftFor(selected.value?.expense_lines));
   supplementPicked.value = [];
   supplementNote.value = '';
+});
+
+async function select(row) {
+  selected.value = await loadOne(row.name);
   router.replace({ path: route.path, query: { ...route.query, request: row.name } });
 }
 

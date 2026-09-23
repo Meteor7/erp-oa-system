@@ -190,6 +190,24 @@ export function accountBlockers(lines) {
     : [];
 }
 
+// 出纳填科目用的草稿：每行一份，取单据上已保存的科目。无论从列表点开还是从通知链接
+// 直接打开单据，都要用它初始化，否则科目下拉框不会出现。
+export function accountDraftFor(lines) {
+  return Object.fromEntries((lines || []).filter((line) => line?.line_key).map((line) => [line.line_key, {
+    expense_account_level_1: line.expense_account_level_1 || '',
+    expense_account_level_2: line.expense_account_level_2 || '',
+  }]));
+}
+
+// 每张可选发票的"所属项目"默认是空字符串，下拉框才会显示"非项目"而不是空白。
+export function withDefaultProjects(invoices, projects = {}) {
+  const result = { ...projects };
+  (invoices || []).forEach((invoice) => {
+    if (invoice?.name && result[invoice.name] === undefined) result[invoice.name] = '';
+  });
+  return result;
+}
+
 export function claimTabs(kind) {
   return [
     { key: 'mine', label: kind === 'claim' ? '我的报销' : '我的付款' },
