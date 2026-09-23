@@ -6,16 +6,20 @@ import { APPROVAL_CENTER_ROUTES, isApprovalRouteEnabled } from "../src/lib/appro
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("approval center defines the four business flows and two dashboards", () => {
+test("approval center defines every business flow and the two dashboards", () => {
   assert.deepEqual(Object.keys(APPROVAL_CENTER_ROUTES), [
     "/approval/leave",
     "/approval/overtime",
     "/approval/comp-time",
     "/approval/procurement",
     "/approval/direct-purchase",
+    "/approval/travel",
     "/approval/request-dashboard",
     "/approval/procurement-payment",
     "/approval/reimbursement",
+    "/approval/invoice-folder",
+    "/approval/claim",
+    "/approval/payment",
     "/approval/corporate-payment",
     "/approval/payment-dashboard",
   ]);
@@ -37,6 +41,10 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /PreRequestCenter\.vue/);
   assert.match(source, /PaymentCenter\.vue/);
   assert.match(source, /ApprovalDashboard\.vue/);
+  assert.match(source, /TravelRequest\.vue/);
+  assert.match(source, /InvoiceFolder\.vue/);
+  assert.match(source, /ClaimCenter\.vue/);
+  assert.match(source, /PaymentRequestCenter\.vue/);
 });
 
 test("procurement pages save and submit through the real workflow engine", () => {

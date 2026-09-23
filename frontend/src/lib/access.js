@@ -12,7 +12,7 @@ const TIME_MANAGE = ['System Manager', 'HR User', 'HR Manager', 'Department Mana
 const TIME_ENTRY = [...TIME_MANAGE, 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
-const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
+const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/travel', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 // Temporary test-account restriction. Remove the account from this set to restore
 // the sensitive HR pages and fields without changing role assignments.
@@ -41,9 +41,13 @@ const PAGE_ROLES = {
   '/approval/comp-time': APPROVAL,
   '/approval/procurement': APPROVAL,
   '/approval/direct-purchase': APPROVAL,
+  '/approval/travel': APPROVAL,
   '/approval/request-dashboard': APPROVAL,
   '/approval/procurement-payment': APPROVAL,
   '/approval/reimbursement': APPROVAL,
+  '/approval/invoice-folder': APPROVAL,
+  '/approval/claim': APPROVAL,
+  '/approval/payment': APPROVAL,
   '/approval/corporate-payment': APPROVAL,
   '/approval/payment-dashboard': APPROVAL,
   '/approval/material-progress': [],
