@@ -8,14 +8,18 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ClaimWorkbench: typeof import('./src/components/claim/ClaimWorkbench.vue')['default']
     ExpenseApprovalRecords: typeof import('./src/components/expense/ExpenseApprovalRecords.vue')['default']
     ExpenseStatistics: typeof import('./src/components/expense/ExpenseStatistics.vue')['default']
     ExpenseWorkbench: typeof import('./src/components/ExpenseWorkbench.vue')['default']
+    HBars: typeof import('./src/components/expense-ui/HBars.vue')['default']
     InvoicePreviewDrawer: typeof import('./src/components/invoice/InvoicePreviewDrawer.vue')['default']
     InvoiceRecognitionPanel: typeof import('./src/components/invoice/InvoiceRecognitionPanel.vue')['default']
     InvoiceUploadWorkbench: typeof import('./src/components/invoice/InvoiceUploadWorkbench.vue')['default']
     MaterialExecutionProgress: typeof import('./src/components/MaterialExecutionProgress.vue')['default']
+    ProcurementTab: typeof import('./src/components/expense-ui/ProcurementTab.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    StackedBars: typeof import('./src/components/expense-ui/StackedBars.vue')['default']
   }
 }
