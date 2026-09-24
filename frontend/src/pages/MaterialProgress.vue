@@ -3,6 +3,7 @@ import MaterialExecutionProgress from "../components/MaterialExecutionProgress.v
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { createResource, FeatherIcon } from 'frappe-ui';
 import { useRoute } from 'vue-router';
+import { canCreateProcurementPr } from '../lib/access';
 
 const columns = [
   { field: 'source_request', label: 'OA 单号', width: '116px' },
@@ -57,6 +58,7 @@ const sortField = ref('');
 const sortDirection = ref('asc');
 const columnFilters = ref({});
 const selectedForPr = ref(new Set());
+const canCreatePr = canCreateProcurementPr();
 const prQuantities = ref({});
 
 const loader = createResource({
@@ -379,7 +381,7 @@ async function cancelRow(row) {
       <div><div class="text-xs font-semibold tracking-wide text-slate-600">采购执行</div><h1 class="mt-1 text-xl font-semibold text-slate-900">物料进度查询</h1><p class="mt-1 text-sm text-gray-500">按物料查看 OA、PR、价格审批、PO 与履约状态。</p></div>
       <div class="flex items-center gap-2">
         <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50" :disabled="loader.loading" @click="refresh"><FeatherIcon name="refresh-cw" class="h-4 w-4" />刷新</button>
-        <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:bg-gray-400" :disabled="!selectedForPr.size || prCreator.loading" @click="createPrFromBoard"><FeatherIcon name="git-merge" class="h-4 w-4" />生成 PR<span v-if="selectedForPr.size" class="rounded-full bg-white/20 px-1.5">{{ selectedForPr.size }}</span></button>
+        <button v-if="canCreatePr" type="button" class="inline-flex items-center justify-center gap-2 rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:bg-gray-400" :disabled="!selectedForPr.size || prCreator.loading" @click="createPrFromBoard"><FeatherIcon name="git-merge" class="h-4 w-4" />生成 PR<span v-if="selectedForPr.size" class="rounded-full bg-white/20 px-1.5">{{ selectedForPr.size }}</span></button>
       </div>
     </div>
 

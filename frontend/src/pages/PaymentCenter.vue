@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { createResource, FeatherIcon } from 'frappe-ui';
 import { useRoute, useRouter } from 'vue-router';
 import PreRequestCenter from './PreRequestCenter.vue';
+import { canSeeProcurementPO } from '../lib/access';
 
 const route = useRoute();
 const router = useRouter();
@@ -12,7 +13,9 @@ const receive = createResource({ url: api + 'record_po_receipt', method: 'POST' 
 const inspect = createResource({ url: api + 'record_po_inspection', method: 'POST' });
 const push = createResource({ url: api + 'push_po_payment_request', method: 'POST' });
 
-const tab = ref(route.query.request ? 'approvals' : 'workbench');
+// 付款工作项需要 PO 查看权限（服务端 _require_po_view）；其他人（审批人、申请人）只用付款审批单页签。
+const canWork = canSeeProcurementPO();
+const tab = ref(route.query.request || !canWork ? 'approvals' : 'workbench');
 const selectedKey = ref('');
 const statusFilter = ref(String(route.query.status || '未完成'));
 const search = ref(String(route.query.po || ''));
@@ -73,7 +76,13 @@ async function uploadEvidence(event, kind) {
 }
 function selectItem(item) { selectedKey.value = item.key; initializeDrafts(item); }
 async function refresh(preferredKey = selectedKey.value) {
-  await loader.reload();
+  if (!canWork) return;
+  try {
+    await loader.reload();
+  } catch (err) {
+    fail(err, '付款工作项加载失败');
+    return;
+  }
   selectedKey.value = items.value.some((item) => item.key === preferredKey) ? preferredKey : (filteredItems.value[0]?.key || '');
   initializeDrafts(activeItem.value);
 }
@@ -132,7 +141,7 @@ onMounted(refresh);
       <button type="button" class="icon-button" title="刷新" @click="tab === 'workbench' && refresh()"><FeatherIcon name="refresh-cw" class="h-4 w-4" /></button>
     </header>
     <nav class="tabs">
-      <button type="button" :class="{ active: tab === 'workbench' }" @click="showWorkbench"><FeatherIcon name="trello" class="h-4 w-4" />付款工作项<span>{{ items.length }}</span></button>
+      <button v-if="canWork" type="button" :class="{ active: tab === 'workbench' }" @click="showWorkbench"><FeatherIcon name="trello" class="h-4 w-4" />付款工作项<span>{{ items.length }}</span></button>
       <button type="button" :class="{ active: tab === 'approvals' }" @click="tab = 'approvals'"><FeatherIcon name="check-square" class="h-4 w-4" />付款审批单</button>
     </nav>
     <template v-if="tab === 'workbench'">

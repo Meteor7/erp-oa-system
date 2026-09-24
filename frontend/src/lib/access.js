@@ -71,7 +71,8 @@ function myRoles() {
   return (typeof window !== 'undefined' && Array.isArray(window.roles)) ? window.roles : [];
 }
 
-const PROCUREMENT_PO_ROLES = [...FINANCE, 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'];
+// 与服务端 procurement_chain._require_po_view 一致（修复 2026-09-24，补上 Finance User）。
+const PROCUREMENT_PO_ROLES = [...FINANCE, 'Finance User', 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'];
 
 function holdsPosition(...keys) {
   const positions = (typeof window !== 'undefined' && window.position_access) || {};
@@ -94,6 +95,11 @@ export function canSeeProcurementPrice() {
 export function canSeeProcurementPO() {
   return canSeeProcurementPrice() || holdsPosition('production_asset_owner')
     || myRoles().some((role) => PROCUREMENT_PO_ROLES.includes(role));
+}
+
+// 生成 PR 只有 PMC 可以（服务端 procurement_chain._require_pmc），按钮也只给 PMC 看（修复 2026-09-24）。
+export function canCreateProcurementPr() {
+  return holdsPosition('pmc') || myRoles().includes('System Manager');
 }
 
 export function canEditProcurementPrice() {
