@@ -334,26 +334,42 @@ def _notification_link(document_type, document_name):
 
 
 def _notify(subject, content, document_type, document_name, source_requests=None):
+    """修复（2026-09-24，审查 R3-54，来自 #54）：采购、PMC、副总和采购经办人收到完整通知；
+    其他人（需求申请人、项目主管）只收到"采购进度有更新"和自己那张申请的物料，
+    不再看到供应商、报价、金额和别人申请的物料。"""
     source_requests = list(source_requests or [])
-    recipients = {position_user("pmc"), position_user("procurement_manager"), position_user("vice_manager")}
+    insiders = {_text(position_user(key)).lower() for key in ("pmc", "procurement_manager", "vice_manager")}
+    related = defaultdict(set)
     for request_name in source_requests:
         try:
             source = frappe.get_doc("OA Approval Request", request_name)
         except Exception:
             continue
-        for field in ("owner", "requester_user", "employee_user", "project_owner", "purchaser_user"):
+        purchaser = _text(getattr(source, "purchaser_user", None)).lower()
+        if purchaser and "@" in purchaser:
+            insiders.add(purchaser)
+        for field in ("owner", "requester_user", "employee_user", "project_owner"):
             value = _text(getattr(source, field, None)).lower()
             if value and "@" in value:
-                recipients.add(value)
-    recipients.discard(_user())
+                related[value].add(request_name)
+    insiders.discard("")
+    recipients = insiders | set(related)
+    recipients.discard(_user().lower())
     token = f"procurement-chain:{document_type}:{document_name}:{uuid4()}"
     detail = _linked_material_context(source_requests)
-    subject_detail = detail.replace("<br>", "；").replace("<strong>", "").replace("</strong>", "")
-    subject_text = f"{subject} · {subject_detail[:150]}"
-    full_content = f"{content}<br><br><strong>关联物料明细</strong><br>{detail}"
+
+    def message_for(recipient):
+        if recipient in insiders:
+            body, context = content, detail
+        else:
+            body, context = "采购进度有更新，请在物料进度中查看。", _linked_material_context(sorted(related[recipient]))
+        flat = context.replace("<br>", "；").replace("<strong>", "").replace("</strong>", "")
+        return f"{subject} · {flat[:150]}", f"{body}<br><br><strong>关联物料明细</strong><br>{context}"
+
     for recipient in recipients:
         if not frappe.db.exists("User", recipient):
             continue
+        subject_text, full_content = message_for(recipient)
         frappe.get_doc({
             "doctype": "Notification Log", "for_user": recipient, "type": "Alert",
             "document_type": document_type, "document_name": document_name,
