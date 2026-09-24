@@ -174,3 +174,13 @@ test("the removed consumption push leaves no references behind in OA approvals",
     assert.ok(!source.includes(name), name);
   }
 });
+
+test("procurement pages follow the server's rights (review fixes 2026-09-24)", () => {
+  const payment = read("../src/pages/PaymentCenter.vue");
+  assert.match(payment, /const canWork = canSeeProcurementPO\(\)/);
+  assert.match(payment, /v-if="canWork"/);
+  const board = read("../src/pages/MaterialProgress.vue");
+  assert.match(board, /v-if="canCreatePr"/);
+  const price = read("../src/pages/PriceApprovalWorkbench.vue");
+  assert.doesNotMatch(price, /<option>USD<\/option>/);
+});
