@@ -220,6 +220,8 @@ def test_finance_reads_submitted_claims_but_not_drafts(access, claim_type):
     assert "workflow_status != '草稿'" in query
 
 
-def test_finance_still_reads_legacy_payment_drafts(access):
+def test_finance_reads_legacy_payment_requests_only_once_submitted(access):
+    # 修复（2026-09-24）：费用付款申请草稿（含收款账户）也不再给财务看，和报销单、付款单一致。
     doc = {"request_type": "费用付款申请", "owner": "wang@example.com", "employee": "EMP-W", "workflow_status": "草稿", "steps": []}
-    assert access.oa_request_has_permission(doc, "read", "cashier@example.com") is None
+    assert access.oa_request_has_permission(doc, "read", "cashier@example.com") is False
+    assert access.oa_request_has_permission({**doc, "workflow_status": "待审批"}, "read", "cashier@example.com") is None

@@ -49,6 +49,8 @@ PAYMENT_REQUEST_TYPES = {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}
 CLAIM_REQUEST_TYPES = {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}
 ACTIVE_STATUSES = {"待审批", "待办理"}
 DRAFT_STATUS = "草稿"
+# 财务只能看已提交的这些类型（草稿里有收款账户，只给申请人自己看）。
+FINANCE_SUBMITTED_ONLY_TYPES = {REQUEST_EXPENSE_PAYMENT}
 READ_PTYPES = {None, "read", "select", "report", "export", "print", "email"}
 
 
@@ -130,9 +132,11 @@ def _sql_row_scope(user, roles, identity, actors):
     if roles & PROCUREMENT_GLOBAL_ROLES:
         clauses.append(procurement)
     if "Accounts User" in roles:
-        clauses.append(_sql_type_scope(PAYMENT_REQUEST_TYPES))
+        # 修复（2026-09-24，审查第三轮 Codex-A）：财务原来能看到别人未提交的费用付款申请草稿
+        # （含收款账户），现在和报销单、付款单一样只看已提交的。采购付款不变。
+        clauses.append(_sql_type_scope(PAYMENT_REQUEST_TYPES - FINANCE_SUBMITTED_ONLY_TYPES))
         clauses.append(
-            "(" + _sql_type_scope(CLAIM_REQUEST_TYPES)
+            "(" + _sql_type_scope(CLAIM_REQUEST_TYPES | FINANCE_SUBMITTED_ONLY_TYPES)
             + f" AND {table}.workflow_status != " + frappe.db.escape(DRAFT_STATUS) + ")"
         )
     clauses.append("(" + _sql_current_step(actors) + ")")
@@ -205,10 +209,10 @@ def _can_read(doc, user, roles, identity):
         return True
     if request_type in PROCUREMENT_REQUEST_TYPES and roles & PROCUREMENT_GLOBAL_ROLES:
         return True
-    if request_type in PAYMENT_REQUEST_TYPES and "Accounts User" in roles:
+    if request_type in PAYMENT_REQUEST_TYPES - FINANCE_SUBMITTED_ONLY_TYPES and "Accounts User" in roles:
         return True
     if (
-        request_type in CLAIM_REQUEST_TYPES
+        request_type in CLAIM_REQUEST_TYPES | FINANCE_SUBMITTED_ONLY_TYPES
         and "Accounts User" in roles
         and _get(doc, "workflow_status") != DRAFT_STATUS
     ):

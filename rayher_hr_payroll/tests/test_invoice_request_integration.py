@@ -1909,6 +1909,13 @@ def test_list_requests_supports_exact_name_without_bypassing_visibility(monkeypa
     result = oa_entry.list_requests(
         view="all", limit=1, request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, name="REQ-BOB"
     )
+    # 修复（2026-09-24）：财务不再看别人未提交的草稿；提交后照常能看。
+    assert result == []
+    docs["REQ-BOB"].workflow_status = oa_entry.STATUS_PENDING
+    _install_report_requests(monkeypatch, docs)
+    result = oa_entry.list_requests(
+        view="all", limit=1, request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, name="REQ-BOB"
+    )
     assert result == [{"name": "REQ-BOB"}]
 
 
@@ -3795,3 +3802,36 @@ def test_route_resolution_does_not_use_self_editable_user_full_name(monkeypatch)
     monkeypatch.setattr(frappe_stub, "db", types.SimpleNamespace(get_value=get_value), raising=False)
     assert oa_entry._resolve_route_approver("Supervisor") == "supervisor@example.com"
     assert not any(dt == "User" and "full_name" in filters for dt, filters, field in calls)
+
+
+def test_expense_reports_cannot_be_widened_by_the_employee_filter(monkeypatch):
+    """修复（2026-09-24，审查 P0-1 / R3-57-2）：员工和 HR 传 employee=别人 也只能看到本人；财务照常。"""
+    line = {
+        "line_key": "line-1", "source_invoice": "", "invoice_category": "", "project_name": "文具",
+        "expense_item": "交通费", "issue_date": "2026-07-14", "invoice_number": "",
+        "amount_before_tax": Decimal("10.00"), "tax_amount": Decimal("0"), "total_amount": Decimal("10.00"),
+        "amount": Decimal("10.00"),
+    }
+    step = {
+        "step_index": 1, "label": "财务审核", "mode": "approve", "approvers": json.dumps(["finance@example.com"]),
+        "status": oa_entry.STATUS_APPROVED, "approved_by": json.dumps(["finance@example.com"]),
+        "action_by": "finance@example.com", "acted_on": "2026-07-20 10:00:00", "note": "同意",
+    }
+    docs = {
+        "REQ-MINE": _report_request("REQ-MINE", workflow_status=oa_entry.STATUS_COMPLETED, expense_lines=[line], steps=[step]),
+        "REQ-BOB": _report_request("REQ-BOB", owner="bob@example.com", employee="EMP-2", employee_name="Bob",
+                                   workflow_status=oa_entry.STATUS_COMPLETED, expense_lines=[line], steps=[step]),
+    }
+    _install_report_requests(monkeypatch, docs)
+    for roles in (["Employee"], ["Employee", "HR Manager"], ["HR User"]):
+        monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None, roles=roles: roles)
+        for view in ("mine", "all"):
+            stats = oa_entry.get_expense_statistics(view=view, employee="EMP-2")
+            records = oa_entry.list_expense_approval_records(view=view, employee="EMP-2")
+            assert {row["request_name"] for row in stats["rows"]} <= {"REQ-MINE"}, (roles, view)
+            assert {row["request_name"] for row in records["records"]} <= {"REQ-MINE"}, (roles, view)
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Accounts User"])
+    stats = oa_entry.get_expense_statistics(view="all", employee="EMP-2")
+    records = oa_entry.list_expense_approval_records(view="all", employee="EMP-2")
+    assert {row["request_name"] for row in stats["rows"]} == {"REQ-BOB"}
+    assert {row["request_name"] for row in records["records"]} == {"REQ-BOB"}

@@ -86,6 +86,9 @@ STATUS_PAID = "\u5df2\u4ed8\u6b3e"
 STATUS_WITHDRAWN = "\u5df2\u64a4\u56de"
 ACTIVE_STATUSES = {STATUS_PENDING, STATUS_WAIT_HANDLE}
 PRIVILEGED_ROLES = {"System Manager", "HR Manager", "HR User", "Accounts User"}
+# 修复（2026-09-24，审查 R3-57-2，来自 #57）：报销统计和审批记录的"全部"只给财务和系统管理员。
+# 行级权限早已不给 HR 看付款单据，这里原来仍用 PRIVILEGED_ROLES，HR 能看到全部报销。
+EXPENSE_REPORT_ROLES = {"System Manager", "Accounts User"}
 FINANCE_ROLES = {"System Manager", "Accounts User"}
 # HR roles can manage HR data, but do not receive an unrestricted purchasing
 # register. Purchasing visibility remains ownership/assignment scoped unless the
@@ -3636,15 +3639,18 @@ def _expense_report_documents(
     report_limit = _bounded_report_limit(limit)
     roles = set(frappe.get_roles(frappe.session.user))
     ctx = _employee_context()
-    if view == "all" and roles & PRIVILEGED_ROLES:
+    all_view = view == "all" and bool(roles & EXPENSE_REPORT_ROLES)
+    if all_view:
         filters = {}
     else:
         filters = {"employee": ctx.get("employee")} if ctx.get("employee") else {"owner": frappe.session.user}
     filters["request_type"] = REQUEST_EXPENSE_PAYMENT
 
+    # 修复（2026-09-24，审查 P0-1，来自 #50）：原来"申请人"筛选会覆盖上面的本人范围，
+    # 任何员工传 employee=别人 就能看到别人的报销和审批意见。现在只有"全部"视图才按申请人筛选。
     for field, value, label in (
         ("department", department, "部门"),
-        ("employee", employee, "申请人"),
+        ("employee", employee if all_view else None, "申请人"),
         ("workflow_status", workflow_status, "审批状态"),
         ("source_type", source_type, "来源"),
     ):

@@ -239,3 +239,16 @@ def test_profile_name_cannot_inject_list_or_detail_approver(access):
            "employee": "EMP-B", "workflow_status": "待审批", "current_step_index": 1,
            "steps": [{"step_index": 1, "approvers": '["victim@example.com"]'}]}
     assert module.oa_request_has_permission(doc, "read", "alice@example.com") is False
+
+
+def test_finance_does_not_read_other_peoples_legacy_expense_drafts(access, monkeypatch):
+    """修复（2026-09-24，审查第三轮 Codex-A）：费用付款申请草稿里有收款账户，财务只看已提交的。"""
+    module, frappe = access
+    monkeypatch.setattr(module, "visible_request_types", lambda values, user=None: list(values))
+    frappe.get_roles = lambda user=None: ["Accounts User"]
+    draft = {"request_type": module.REQUEST_EXPENSE_PAYMENT, "owner": "bob@example.com", "employee": "EMP-B",
+             "workflow_status": "草稿", "steps": []}
+    assert module.oa_request_has_permission(draft, "read", "finance@example.com") is False
+    assert module.oa_request_has_permission({**draft, "workflow_status": "待审批"}, "read", "finance@example.com") is None
+    procurement_draft = {**draft, "request_type": module.REQUEST_PROCUREMENT_PAYMENT}
+    assert module.oa_request_has_permission(procurement_draft, "read", "finance@example.com") is None
