@@ -1564,6 +1564,7 @@ def _summarize_doc(doc, authorized_expense_lines=None):
             (
                 doc.request_type == REQUEST_PROCUREMENT
                 and doc.workflow_status in ACTIVE_STATUSES
+                and not _procurement_withdraw_blocker(doc)
             )
             or (
                 doc.request_type != REQUEST_PROCUREMENT
@@ -3109,6 +3110,59 @@ def modify_procurement_request(name, business_lines=None, expected_delivery_date
         return _summarize_doc(doc)
 
 
+CONTRACT_REGISTRATION_CLOSED = {"验收通过", "已关闭", "已取消"}
+CONTRACT_DELIVERY_REJECT_TARGET = "contract_delivery"
+
+
+def _current_contract_delivery_step(doc):
+    if getattr(doc, "workflow_status", None) not in ACTIVE_STATUSES:
+        return None
+    step = _current_step(doc)
+    return step if step is not None and _clean(getattr(step, "origin", None)) == "contract_delivery" else None
+
+
+def _reject_contract_delivery(doc, current_step, actor, reason):
+    """修复（2026-09-24，审查 R3-53-1，来自 #53）：合同交期确认节点驳回时只驳回本次登记的交期。
+
+    原来会退回申请人或更早的节点，已完成的采购申请回到草稿，而它的 PR、PO 和付款仍在执行。
+    现在本轮交期确认节点作废，采购申请保持已完成，恢复原交期和登记前的状态。
+    """
+    old_status = doc.workflow_status
+    for step in list(getattr(doc, "steps", []) or []):
+        if _clean(getattr(step, "origin", None)) != "contract_delivery":
+            continue
+        if step is current_step:
+            step.status = STATUS_REJECTED
+            step.action_by = actor
+            step.acted_on = now_datetime()
+            step.note = reason
+        elif getattr(step, "status", None) in {STATUS_PENDING, STATUS_WAIT_FLOW, STATUS_WAIT_HANDLE}:
+            step.status = STATUS_WITHDRAWN
+    registered = next((event for event in reversed(_operation_events(doc)) if event.get("action") == "登记延期合同交期"), {})
+    rejected_date = _clean(getattr(doc, "pending_contract_delivery_date", None))
+    doc.pending_contract_delivery_date = ""
+    doc.business_status = _clean(registered.get("from_status")) or ("采购执行中" if _clean(getattr(doc, "contract_delivery_date", None)) else "合同待登记")
+    doc.workflow_status = STATUS_COMPLETED
+    doc.current_step_label = ""
+    _append_request_event(doc, "驳回合同交期", old_status, doc.workflow_status, reason, {"rejected_contract_delivery_date": rejected_date})
+
+
+def _procurement_withdraw_blocker(doc):
+    """修复（2026-09-24，审查 X1-3）：进入合同交期确认或已有采购付款的采购申请不能撤回。
+
+    原来登记延期交期后单据回到审批中，申请人可以撤回、改明细，再生成重复的 PR / PO。
+    """
+    if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
+        return ""
+    if _clean(getattr(doc, "pending_contract_delivery_date", None)) or any(
+        _clean(getattr(step, "origin", None)) == "contract_delivery" for step in list(getattr(doc, "steps", []) or [])
+    ):
+        return "采购申请已进入合同交期确认，不能撤回；如需调整请由确认人驳回本次交期。"
+    if _procurement_has_payment_activity(doc):
+        return "采购申请已有采购付款，不能撤回。"
+    return ""
+
+
 def _require_contract_registration_access(doc):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
         frappe.throw(frappe._("只有采购申请可以登记合同交期。"))
@@ -3116,6 +3170,9 @@ def _require_contract_registration_access(doc):
         frappe.throw(frappe._("采购审批完成后才能登记合同交期。"))
     if _clean(getattr(doc, "business_status", None)) == "合同交期待确认":
         frappe.throw(frappe._("当前合同交期仍在确认中，不能重复登记。"))
+    if _clean(getattr(doc, "business_status", None)) in CONTRACT_REGISTRATION_CLOSED:
+        # 修复（2026-09-24，审查 R3-53 / #53）：已验收或已关闭的采购再登记交期会把状态改回采购执行中。
+        frappe.throw(frappe._("采购已验收或已关闭，不能再登记合同交期。"))
     user = _clean(getattr(frappe.session, "user", None))
     allowed = {_clean(getattr(doc, "owner", None)), _clean(getattr(doc, "purchaser_user", None))}
     roles = set(frappe.get_roles(user))
@@ -4578,6 +4635,9 @@ def withdraw_request(name, note=None):
         if doc.request_type == REQUEST_PROCUREMENT:
             if doc.workflow_status not in ACTIVE_STATUSES:
                 frappe.throw(frappe._("采购申请仅可在需求审批期间撤回；进入询价、价格审批或采购执行后不可撤回。"))
+            blocker = _procurement_withdraw_blocker(doc)
+            if blocker:
+                frappe.throw(frappe._(blocker))
             _reset_request_to_draft(doc, note)
             doc.business_status = STATUS_WITHDRAWN
             _release_procurement_payment_reservation(doc, note)
@@ -4736,6 +4796,8 @@ def _reset_approval_step(step, status=STATUS_WAIT_FLOW):
 
 
 def _eligible_rejection_targets(doc):
+    if _current_contract_delivery_step(doc) is not None:
+        return [{"target": CONTRACT_DELIVERY_REJECT_TARGET, "label": "驳回本次合同交期（恢复原交期）"}]
     current_index = int(getattr(doc, "current_step_index", 0) or 0)
     targets = [{"target": "applicant", "label": "\u7533\u8bf7\u4eba"}]
     completed = {STATUS_APPROVED, STATUS_HANDLED}
@@ -4752,6 +4814,9 @@ def _reject_to_target(doc, current_step, target, actor, note):
     if not reason:
         frappe.throw(frappe._("A rejection reason is required."))
     target = _clean(target)
+    if _current_contract_delivery_step(doc) is not None:
+        # 页面可能仍按"退回申请人"提交；交期确认节点一律只驳回本次交期。
+        return _reject_contract_delivery(doc, current_step, actor, reason)
     eligible = {item["target"]: item for item in _eligible_rejection_targets(doc)}
     if target not in eligible:
         frappe.throw(frappe._("The rejection target is invalid or no longer eligible."))
