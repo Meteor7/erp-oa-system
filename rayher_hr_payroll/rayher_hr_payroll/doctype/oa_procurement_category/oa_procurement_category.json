@@ -15,12 +15,13 @@
     {"fieldname":"sort_order","fieldtype":"Int","label":"Sort Order"}
   ],
   "index_web_pages_for_search": 0,
+  "modified": "2026-09-24 12:00:00.000000",
   "module": "Rayher HR Payroll",
   "name": "OA Procurement Category",
   "permissions": [
     {"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1},
     {"role":"Employee","read":1},
-    {"role":"Purchase User","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}
+    {"role":"Purchase User","read":1,"report":1,"export":1}
   ],
   "sort_field": "category_code",
   "sort_order": "ASC",

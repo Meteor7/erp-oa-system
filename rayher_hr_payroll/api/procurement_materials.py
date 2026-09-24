@@ -13,14 +13,29 @@ def _text(value):
     return str(value or "").strip()
 
 
-def _is_pmc_or_manager():
-    user = _text(frappe.session.user).lower()
+CATALOG_ROLES = {"Purchase User", "Purchase Manager"}
+
+
+def can_maintain_catalog(user=None):
+    """决定（2026-09-24）：物料库和物料分类只由 PMC 和采购维护（采购 = 采购经理岗位或采购角色）。
+
+    原来这里只认 PMC，采购角色只有在找不到 PMC 时才意外放行；而采购角色又能绕过这里，
+    通过 /api/resource 直接增删改物料（不做编号层级等校验）。现在统一走这里的接口。
+    """
+    user = _text(user or frappe.session.user).lower()
     if user in {"administrator", "admin@staff.example.invalid"}:
         return True
-    try:
-        return user == _text(resolve_role("pmc")["user"]).lower()
-    except Exception:
-        return "Purchase User" in set(frappe.get_roles(user) or [])
+    for key in ("pmc", "procurement_manager"):
+        try:
+            if user == _text(resolve_role(key)["user"]).lower():
+                return True
+        except Exception:
+            continue
+    return bool(set(frappe.get_roles(user) or []) & CATALOG_ROLES)
+
+
+def _is_pmc_or_manager():
+    return can_maintain_catalog()
 
 
 def _category_level(code):
@@ -124,7 +139,7 @@ def suggest_material(
 ):
     """Return duplicate evidence and a non-binding category suggestion for PMC review."""
     if not _is_pmc_or_manager():
-        frappe.throw("只有 PMC 可以生成物料重复/分类建议")
+        frappe.throw("只有 PMC 或采购可以生成物料重复/分类建议")
     values = {
         "item_name": _text(item_name),
         "specification": _text(specification),
@@ -213,7 +228,7 @@ def suggest_material(
 @frappe.whitelist(methods=["POST"])
 def save_category(category_code, category_name, parent_category=None, full_path=None, allow_request=1):
     if not _is_pmc_or_manager():
-        frappe.throw("只有 PMC 可以维护采购物料编号层级")
+        frappe.throw("只有 PMC 或采购可以维护采购物料编号层级")
     category_code = _validate_category_code(category_code)
     category_name = _text(category_name)
     if not category_name:
@@ -235,7 +250,7 @@ def save_category(category_code, category_name, parent_category=None, full_path=
 @frappe.whitelist(methods=["POST"])
 def save_material(material_code, category_code, material_name, specification, product_desc, brand, unit, **kwargs):
     if not _is_pmc_or_manager():
-        frappe.throw("只有 PMC 可以维护采购物料")
+        frappe.throw("只有 PMC 或采购可以维护采购物料")
     material_code = _text(material_code)
     category_code = _validate_category_code(category_code)
     if _category_level(category_code) < 3:

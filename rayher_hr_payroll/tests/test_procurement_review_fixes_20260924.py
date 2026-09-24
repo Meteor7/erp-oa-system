@@ -78,3 +78,15 @@ def test_notifications_for_requesters_hide_prices(monkeypatch):
     for requester, own, other in (("alice@example.com", "OA-1", "OA-2"), ("bob@example.com", "OA-2", "OA-1")):
         assert "999.00" not in by_user[requester]["email_content"] and "供应商" not in by_user[requester]["email_content"]
         assert own in by_user[requester]["email_content"] and other not in by_user[requester]["email_content"]
+
+
+def test_catalog_is_maintained_by_pmc_and_purchasing(monkeypatch):
+    materials = importlib.import_module("rayher_hr_payroll.api.procurement_materials")
+    holders = {"pmc": "pmc@example.com", "procurement_manager": "pm@example.com"}
+    monkeypatch.setattr(materials, "resolve_role", lambda key: {"user": holders[key]})
+    roles = {"buyer@example.com": ["Purchase User"], "hr@example.com": ["HR Manager"], "cfo@example.com": ["Accounts User"]}
+    monkeypatch.setattr(materials.frappe, "get_roles", lambda user=None: roles.get(user, []), raising=False)
+    for user in ("pmc@example.com", "pm@example.com", "buyer@example.com", "Administrator"):
+        assert materials.can_maintain_catalog(user), user
+    for user in ("hr@example.com", "cfo@example.com", "someone@example.com"):
+        assert not materials.can_maintain_catalog(user), user

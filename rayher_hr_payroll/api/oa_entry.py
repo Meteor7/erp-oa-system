@@ -2301,7 +2301,7 @@ def get_options():
             for request_type in PROCUREMENT_REQUEST_TYPES
         },
         "can_submit_procurement_for_others": _can_submit_procurement_for_others(),
-        "can_manage_procurement_catalog": _is_pmc_user(),
+        "can_manage_procurement_catalog": _can_maintain_procurement_catalog(),
     }
 
 
@@ -3030,6 +3030,11 @@ def _contract_copy_snapshot(doc):
         "supervisor": _step_snapshot(doc, "直属主管", "直属上级"),
         "project_owner": {"label": "项目主管", "user": _clean(getattr(doc, "project_owner", None))},
     }
+
+
+def _can_maintain_procurement_catalog():
+    from rayher_hr_payroll.api.procurement_materials import can_maintain_catalog
+    return can_maintain_catalog()
 
 
 def _is_pmc_user(user=None):
