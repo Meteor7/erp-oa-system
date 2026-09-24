@@ -4058,6 +4058,16 @@ def _validate_procurement_material_codes(doc, step):
                 "第{0}项物料编号尚未补全，PMC不能通过；请先绑定正式物料编号后再提交。"
             ).format("、".join(missing))
         )
+    # 修复（2026-09-24，审查 R3-54，来自 #54）：原来只检查填没填，任意字符串都能通过；
+    # 现在编号必须是物料库里启用的物料。
+    rows = list(getattr(doc, "business_lines", []) or [])
+    codes = sorted({_clean(getattr(row, "material_code", None)) for row in rows})
+    active = set(frappe.get_all("OA Procurement Material", filters={"name": ["in", codes], "is_active": 1}, pluck="name")) if codes else set()
+    unknown = [str(index) for index, row in enumerate(rows, start=1) if _clean(getattr(row, "material_code", None)) not in active]
+    if unknown:
+        frappe.throw(
+            frappe._("第{0}项物料编号不在物料库中或已停用，PMC不能通过；请改为物料库里启用的物料编号。").format("、".join(unknown))
+        )
 
 
 @frappe.whitelist(methods=["POST"])

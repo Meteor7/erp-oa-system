@@ -51,3 +51,30 @@ def test_new_procurement_fields_are_server_owned():
     for field in ("payment_plan", "source_purchase_order", "source_po_payment_plan_row", "source_payment_plan_row",
                   "price_snapshot", "contract_bank_account", "contract_seal_user", "pmc_change_version"):
         assert field in guard.SERVER_OWNED_FIELDS, field
+
+
+def test_notifications_for_requesters_hide_prices(monkeypatch):
+    chain = importlib.import_module("rayher_hr_payroll.api.procurement_chain")
+    sources = {
+        "OA-1": _row(owner="alice@example.com", project_owner="", purchaser_user="buyer@example.com", requester_user="", employee_user=""),
+        "OA-2": _row(owner="bob@example.com", project_owner="", purchaser_user="", requester_user="", employee_user=""),
+    }
+    sent = []
+
+    class Doc(dict):
+        def insert(self, **kwargs):
+            sent.append(self)
+
+    monkeypatch.setattr(chain.frappe, "get_doc", lambda *args, **kwargs: sources[args[1]] if len(args) > 1 else Doc(args[0]), raising=False)
+    monkeypatch.setattr(chain.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True), raising=False)
+    monkeypatch.setattr(chain, "position_user", lambda key: {"pmc": "pmc@example.com", "procurement_manager": "pm@example.com", "vice_manager": "vp@example.com"}[key])
+    monkeypatch.setattr(chain, "_user", lambda: "pm@example.com")
+    monkeypatch.setattr(chain, "_linked_material_context", lambda names: "物料:" + ",".join(sorted(names)))
+    monkeypatch.setattr(chain, "_notification_link", lambda *args: "/x")
+    chain._notify("价格审批单待审批：PA-1", "金额 999.00，供应商 甲", "OA Price Approval", "PA-1", {"OA-1", "OA-2"})
+    by_user = {row["for_user"]: row for row in sent}
+    assert set(by_user) == {"pmc@example.com", "vp@example.com", "buyer@example.com", "alice@example.com", "bob@example.com"}
+    assert "999.00" in by_user["vp@example.com"]["email_content"] and "OA-2" in by_user["buyer@example.com"]["email_content"]
+    for requester, own, other in (("alice@example.com", "OA-1", "OA-2"), ("bob@example.com", "OA-2", "OA-1")):
+        assert "999.00" not in by_user[requester]["email_content"] and "供应商" not in by_user[requester]["email_content"]
+        assert own in by_user[requester]["email_content"] and other not in by_user[requester]["email_content"]
