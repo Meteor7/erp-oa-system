@@ -704,7 +704,7 @@ async function closeCurrentPo() {
                       <td v-for="(slot, index) in supplierSlots" :key="slot.slotKey + ':terms'" colspan="3">
                         <div class="supplier-footer-content">
                           <div v-if="canEditPrice && activeApproval.status === '草稿'" class="supplier-terms-inline">
-                            <select v-model="slot.currency" class="supplier-inline"><option>CNY</option><option>USD</option><option>EUR</option><option>JPY</option></select>
+                            <select v-model="slot.currency" class="supplier-inline" title="采购订单目前只支持人民币"><option>CNY</option></select>
                             <input v-model.number="slot.tax_rate" class="supplier-inline tax-input" type="number" min="0" max="100" step="0.01" placeholder="税率" />
                             <input v-model="slot.contract_entity" class="supplier-inline contract-input" placeholder="合同主体" />
                           </div>

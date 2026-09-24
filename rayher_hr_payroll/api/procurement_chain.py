@@ -178,6 +178,15 @@ def _require_purchase_or_qingbo():
         frappe.throw("只有采购、副总经理或系统管理员可以生成 PO。")
 
 
+def _require_cny(currency):
+    """决定（2026-09-24，审查 R3-54-1，来自 #54）：采购报价和订单暂时只用人民币。
+    原来可以选美元、欧元、日元，但付款和金额台账一律按人民币记账。外币合同先折算成人民币再录入。"""
+    value = _text(currency) or "CNY"
+    if value != "CNY":
+        frappe.throw("采购报价和订单目前只支持人民币（CNY），外币合同请先按合同折算成人民币再录入。")
+    return value
+
+
 def _new_material_serial():
     suffix = frappe.model.naming.make_autoname("MAT-.#####").split("-")[-1]
     return f"MAT-{date.today().year}-{suffix}"
@@ -822,7 +831,7 @@ def save_supplier_comparison(price_approval, supplier, prices, payment_method=No
             "supplier": supplier, "unit_price": float(unit_price),
             "total_price": float(unit_price * _decimal(line.quantity)),
             "delivery_date": raw.get("delivery_date") or None,
-            "payment_method": payment_method, "currency": _text(currency) or "CNY",
+            "payment_method": payment_method, "currency": _require_cny(currency),
             "tax_rate": float(rate), "contract_entity": _text(contract_entity),
             "is_recommended": recommended, "note": _text(note),
             "payment_plan_json": payment_plan_json,
@@ -970,7 +979,7 @@ def save_price_quote(price_approval, price_line, supplier, unit_price, delivery_
     quote.update({
         "supplier": supplier, "unit_price": float(price),
         "total_price": float(price * _decimal(line.quantity)), "delivery_date": delivery_date or None,
-        "payment_method": _text(payment_method), "currency": _text(currency) or "CNY",
+        "payment_method": _text(payment_method), "currency": _require_cny(currency),
         "tax_rate": float(rate), "contract_entity": _text(contract_entity),
         "is_recommended": recommended, "note": _text(note),
     })
@@ -1211,7 +1220,7 @@ def generate_po_drafts(price_approval):
             continue
         key = (
             _text(line.selected_supplier), _text(line.payment_method) or "未指定",
-            _text(line.selected_currency) or "CNY", str(_decimal(line.selected_tax_rate)),
+            _require_cny(line.selected_currency), str(_decimal(line.selected_tax_rate)),
             _text(line.selected_contract_entity) or "未指定",
         )
         groups[key].append(line)
