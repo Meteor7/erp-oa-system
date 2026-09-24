@@ -16,6 +16,8 @@ REFUND_EVIDENCE = "退款回单"
 ARRIVAL_EVIDENCE = {"送货单", "收料单", "入库单"}
 ACCEPTANCE_EVIDENCE = "验收资料"
 FOLLOWUP_STATUSES = {"催办中", "供应商退款中", "退货中", "换货中"}
+# 还能登记异常跟进的采购付款业务状态
+FOLLOWUP_OPEN_STATUSES = {"待到货", "部分到货", "预付款逾期", "催办中", "供应商退款中", "退货中", "换货中"}
 
 
 class ProcurementWorkflowError(ValueError):
@@ -223,6 +225,10 @@ def transition_business_state(doc, action, payload=None, evidence=None):
             raise ProcurementWorkflowError("预付款异常跟进必须填写说明")
         if _text(_get(doc, "payment_stage")) != "预付款":
             raise ProcurementWorkflowError("只有预付款可以登记异常跟进")
+        # 修复（2026-09-24，审查 R3-53，来自 #53）：已核销、已退款或已关闭的预付款不能再登记跟进，
+        # 原来可以改回"供应商退款中"，再确认退款把已付金额从台账里冲掉。
+        if business_status not in FOLLOWUP_OPEN_STATUSES or _text(_get(doc, "prepayment_writeoff_status")) == "已核销":
+            raise ProcurementWorkflowError("该预付款已核销、已退款或已关闭，不能再登记异常跟进")
         return {"business_status": status, "followup_status": status}
     if action == "complete_supplier_refund":
         if business_status not in {"供应商退款中", "退货中"}:

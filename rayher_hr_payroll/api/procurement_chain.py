@@ -178,6 +178,45 @@ def _require_purchase_or_qingbo():
         frappe.throw("只有采购、副总经理或系统管理员可以生成 PO。")
 
 
+def po_fulfilment_state(po):
+    """PO 明细的到货、验收情况，写到对应的已付款采购付款单上（修复 2026-09-24，审查 X1-7）。"""
+    lines = list(getattr(po, "lines", []) or [])
+    ordered = [_decimal(getattr(line, "quantity", 0)) for line in lines]
+    received = [_decimal(getattr(line, "received_quantity", 0)) for line in lines]
+    if lines and all(got >= want for got, want in zip(received, ordered)):
+        arrival = "全部到货"
+    elif any(got > 0 for got in received):
+        arrival = "部分到货"
+    else:
+        arrival = "未到货"
+    results = [_text(getattr(line, "inspection_status", None)) for line in lines]
+    if arrival == "全部到货" and all(result == "已通过" for result in results):
+        inspection = "验收通过"
+    elif any(result in {"不合格", "退货中", "换货中"} for result in results):
+        inspection = "验收不合格"
+    elif arrival != "未到货":
+        inspection = "待验收"
+    else:
+        inspection = "未验收"
+    if inspection == "验收通过":
+        business = "验收通过"
+    elif arrival == "全部到货":
+        business = "待验收"
+    elif arrival == "部分到货":
+        business = "部分到货"
+    else:
+        business = "待到货"
+    return {"arrival_status": arrival, "inspection_status": inspection, "business_status": business}
+
+
+def _sync_po_payment_fulfilment(po):
+    state = po_fulfilment_state(po)
+    for row in list(getattr(po, "payment_plan", []) or []):
+        name = _text(getattr(row, "payment_request", None))
+        if name and frappe.db.get_value("OA Approval Request", name, "workflow_status") == "已付款":
+            frappe.db.set_value("OA Approval Request", name, state, update_modified=False)
+
+
 def _require_cny(currency):
     """决定（2026-09-24，审查 R3-54-1，来自 #54）：采购报价和订单暂时只用人民币。
     原来可以选美元、欧元、日元，但付款和金额台账一律按人民币记账。外币合同先折算成人民币再录入。"""
@@ -1473,6 +1512,7 @@ def record_po_receipt(name, lines, arrival_date=None, file_ref=None, note=None):
     _create_fulfillment_record(po, "到货", arrival_date, details, file_ref, note)
     po.status = "到货验收中"
     po.save(ignore_permissions=True)
+    _sync_po_payment_fulfilment(po)
     _notify(f"PO 已登记到货：{po.name}",
             f"生产主管已登记 {changed} 项物料到货，请相关人员完成验收。",
             "OA Purchase Order", po.name, {row.source_request for row in po.lines})
@@ -1510,6 +1550,7 @@ def record_po_inspection(name, lines, inspection_date=None, file_ref=None, note=
     all_passed = all(_text(line.inspection_status) == "已通过" for line in po.lines)
     po.status = "付款中" if all_received and all_passed else "到货验收中"
     po.save(ignore_permissions=True)
+    _sync_po_payment_fulfilment(po)
     _notify(f"PO 验收结果已更新：{po.name}", f"验收结果已更新，当前状态：{po.status}。",
             "OA Purchase Order", po.name, {row.source_request for row in po.lines})
     frappe.db.commit()

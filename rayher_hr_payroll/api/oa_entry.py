@@ -2955,6 +2955,14 @@ def _reverse_expense_payment_paid(doc, note=""):
 def _set_procurement_payment_paid_state(doc):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
         return doc
+    po_name = _clean(getattr(doc, "source_purchase_order", None))
+    if po_name:
+        # 修复（2026-09-24，审查 X1-7）：PO 付款的到货和验收取自 PO 明细，不再停在下推时的"未到货/未验收"。
+        from rayher_hr_payroll.api.procurement_chain import po_fulfilment_state
+        for fieldname, value in po_fulfilment_state(frappe.get_doc("OA Purchase Order", po_name)).items():
+            setattr(doc, fieldname, value)
+        doc.prepayment_writeoff_status = "无需核销"
+        return doc
     stage = _clean(getattr(doc, "payment_stage", None))
     percentage = Decimal(str(getattr(doc, "prepayment_percentage", 0) or 0))
     if stage in {"预付款", "全额付款"}:
@@ -3293,6 +3301,10 @@ def _require_procurement_lifecycle_access(doc, action):
     elif request_type == REQUEST_PROCUREMENT_PAYMENT:
         if workflow_status != STATUS_PAID:
             frappe.throw(frappe._("采购付款完成后才能登记到货、验收和核销。"))
+        if _clean(getattr(doc, "source_purchase_order", None)):
+            # 修复（2026-09-24，审查 X1-7 / R3-53 J）：PO 付款的到货、验收在采购付款工作台按 PO 登记；
+            # 在付款单上登记会把 PO 的数量覆盖到采购申请上，退款也会因为 PO 付款不走金额台账而失败。
+            frappe.throw(frappe._("采购订单付款的到货、验收请在采购付款工作台按 PO 登记；退款、核销暂不支持在付款单上办理。"))
     else:
         frappe.throw(frappe._("只有采购申请或采购付款单可以登记采购履约状态。"))
     user = _clean(getattr(frappe.session, "user", None))
