@@ -62,6 +62,22 @@ SERVER_OWNED_FIELDS = {
     "followup_status",
     "travel_days",
     "invoice_difference_note",
+    # 修复（2026-09-24，审查 R3-52 / #52）：付款计划、PO 来源、价格和合同字段只能由服务端流程写入，
+    # 原来可以通过 /api/resource 直接改。
+    "payment_plan",
+    "source_payment_plan_row",
+    "source_payment_plan_installment",
+    "source_purchase_order",
+    "source_po_payment_plan_row",
+    "pmc_change_version",
+    "price_revision", "price_tax_included", "price_tax_rate", "price_delivery_terms", "price_warranty_terms",
+    "price_invoice_condition", "price_snapshot", "price_submitted_by", "price_submitted_on",
+    "price_approved_by", "price_approved_on",
+    "contract_status", "contract_version", "contract_supplier_legal_name", "contract_credit_code",
+    "contract_supplier_address", "contract_contact", "contract_bank_name", "contract_bank_account",
+    "contract_entity", "contract_template", "contract_seal_user", "contract_snapshot",
+    "contract_draft_content", "contract_reviewed_by", "contract_reviewed_on", "contract_sealed_by",
+    "contract_sealed_on",
 }
 DRAFT_ONLY_BUSINESS_FIELDS = {
     "from_date", "to_date", "leave_type",

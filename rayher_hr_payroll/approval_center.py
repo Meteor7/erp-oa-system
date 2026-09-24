@@ -488,6 +488,13 @@ def project_options(limit=500, *, store=None):
     ]
 
 
+def _can_source_po_payment():
+    """PO 付款期次只给采购和财务（修复 2026-09-24，审查 #2，来自 #52）。"""
+    from rayher_hr_payroll.api.procurement_chain import _can_purchase
+    roles = set(frappe.get_roles(frappe.session.user) or [])
+    return bool(_can_purchase() or roles & {"Accounts User", "System Manager"})
+
+
 def procurement_payment_source_options(limit=500, *, store=None):
     try:
         limit = max(1, min(int(limit or 500), 500))
@@ -556,17 +563,18 @@ def procurement_payment_source_options(limit=500, *, store=None):
     # memory-store unit tests do not bind a Frappe request context, so avoid
     # touching the database in that isolated mode.
     try:
+        # 修复（2026-09-24，审查 #2）：原来任何员工都能在这里看到全部 PO 的供应商、单价和付款计划。
         po_names = frappe.get_all(
             "OA Purchase Order", filters={"contract_status": "已生效", "status": ["not in", ["草稿", "待采购确认", "待合同复核", "待电子用印", "已取消"]]},
             pluck="name", order_by="modified desc", limit_page_length=limit,
-        )
+        ) if _can_source_po_payment() else []
     except RuntimeError:
         po_names = []
     for po_name in po_names:
         po = frappe.get_doc("OA Purchase Order", po_name)
         for row in list(getattr(po, "payment_plan", []) or []):
             row_name = _name(row)
-            if not row_name or _get(row, "status") not in {"待审批", "审批中"}:
+            if not row_name or _get(row, "status") not in {"待审批", "审批中"} or str(_get(row, "payment_request") or "").strip():
                 continue
             trigger = str(_get(row, "trigger_condition") or "").strip()
             if "验收" in trigger and not all(_get(line, "inspection_status") == "已通过" for line in (getattr(po, "lines", []) or [])):
@@ -705,12 +713,20 @@ def save_draft(request_type, payload, name=None, *, store=None):
     if request_type == REQUEST_PROCUREMENT_PAYMENT and not ((source_request and source_payment_plan_row) or (source_purchase_order and source_po_payment_plan_row)):
         raise ApprovalCenterError("采购付款必须选择已生效合同的付款计划期次")
     if source_purchase_order:
-        po = frappe.get_doc("OA Purchase Order", source_purchase_order)
+        # 修复（2026-09-24，审查 #2 / R3-52-1 / R3-54-1）：只有采购和财务能按 PO 期次建采购付款；
+        # 期次已被其他付款占用、或 PO 不是人民币时拒绝。
+        if not _can_source_po_payment():
+            raise ApprovalCenterError("只有采购或财务可以按 PO 付款计划发起采购付款")
+        po = frappe.get_doc("OA Purchase Order", source_purchase_order, for_update=True)
         if _get(po, "contract_status") != "已生效":
             raise ApprovalCenterError("来源 PO 合同必须已电子用印生效")
+        if str(_get(po, "currency") or "CNY") != "CNY":
+            raise ApprovalCenterError("采购订单目前只支持人民币（CNY）")
         source_plan = next((row for row in list(_get(po, "payment_plan", []) or []) if _name(row) == source_po_payment_plan_row), None)
         if not source_plan or _get(source_plan, "status") not in {"待审批", "审批中"}:
             raise ApprovalCenterError("PO 付款计划期次不存在或当前不可下推")
+        if str(_get(source_plan, "payment_request") or "").strip() not in {"", _text(name, "草稿编号", 140)}:
+            raise ApprovalCenterError("该 PO 付款计划期次已经生成采购付款单")
         supplier = _text(_get(po, "supplier"), "供应商", 140, required=True)
         source_request = source_request or next((_text(_get(line, "source_request")) for line in list(_get(po, "lines", []) or []) if _text(_get(line, "source_request"))), "")
         source_snapshot = {
