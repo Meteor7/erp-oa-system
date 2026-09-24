@@ -1203,6 +1203,13 @@ def _sync_payment_plan_row(payment_doc, status):
         row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
         if not row:
             frappe.throw(frappe._("来源 PO 付款计划期次不存在。"))
+        if status == "已下推" and (
+            _clean(getattr(row, "status", None)) not in {"待审批", "审批中"}
+            or _clean(getattr(row, "payment_request", None)) not in {"", payment_doc.name}
+        ):
+            # 修复（2026-09-24，审查 R3-52-1，来自 #52）：同一期次已被另一张采购付款占用时不能再提交，
+            # 否则两张都能审批付款，期次上的付款单号和已付金额会被后一张覆盖。
+            frappe.throw(frappe._("该 PO 付款计划期次已经生成其他采购付款，不能重复提交。"))
         if status in {"已下推", "已付款"}:
             row.payment_request = payment_doc.name
             row.pushed_by = _clean(frappe.session.user)
@@ -1211,11 +1218,15 @@ def _sync_payment_plan_row(payment_doc, status):
             if status == "已付款":
                 row.paid_amount = getattr(payment_doc, "amount", None) or 0
         elif status == "待下推":
-            row.payment_request = ""
-            row.pushed_by = ""
-            row.pushed_on = None
-            row.paid_amount = 0
+            # 修复（2026-09-24，审查 #5，来自 #52）：PO 期次没有"待下推"状态，写入后整张 PO 保存失败，
+            # 采购付款无法驳回或撤回。退回时期次回到"待审批"，工作台重新显示为可提交付款审批；
+            # 只清掉本单占用的付款单号，已付金额不动。
+            if _clean(getattr(row, "payment_request", None)) in {"", payment_doc.name}:
+                row.payment_request = ""
+                row.pushed_by = ""
+                row.pushed_on = None
             row.approval_status = "未发起"
+            status = "待审批"
         row.status = status
         if status == "已付款":
             po.paid_amount = sum(float(item.paid_amount or 0) for item in po.payment_plan)
@@ -2079,6 +2090,10 @@ def _validate_procurement_plan_payment(doc):
             frappe.throw(frappe._("来源 PO 付款计划期次不存在。"))
         if _clean(getattr(row, "status", None)) not in {"待审批", "审批中"}:
             frappe.throw(frappe._("来源 PO 付款计划期次已下推或已付款。"))
+        if _clean(getattr(row, "payment_request", None)) not in {"", _clean(getattr(doc, "name", None))}:
+            frappe.throw(frappe._("该 PO 付款计划期次已经生成其他采购付款，不能重复提交。"))
+        if (_clean(getattr(po, "currency", None)) or "CNY") != "CNY":
+            frappe.throw(frappe._("采购订单目前只支持人民币（CNY）。"))
         if _money(getattr(row, "amount", None)) != _money(getattr(doc, "amount", None)):
             frappe.throw(frappe._("采购付款金额必须与 PO 付款计划期次一致。"))
         if _clean(getattr(row, "payment_stage", None)) != _clean(getattr(doc, "payment_stage", None)):
@@ -2175,7 +2190,9 @@ def _submit_draft(doc):
         balance = approval_amount_ledger.source_balance(doc.source_request)
         doc.source_paid_amount = balance["paid_amount"]
         doc.source_available_amount = balance["available_amount"]
-        if _clean(getattr(doc, "source_payment_plan_row", None)):
+        # 修复（2026-09-24，审查 R3-57 / R3-52-1）：从审批中心按 PO 期次建的采购付款只带
+        # source_po_payment_plan_row，原来走旧的校验，跳过了 PO 期次的状态、金额、阶段和到货验收条件。
+        if _clean(getattr(doc, "source_payment_plan_row", None)) or _clean(getattr(doc, "source_po_payment_plan_row", None)):
             doc.payment_stage = _validate_procurement_plan_payment(doc)
         else:
             try:
