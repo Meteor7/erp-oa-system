@@ -309,7 +309,8 @@ const showContractSeal = computed(() => isProcurement.value && Boolean(selectedR
 const showArrival = computed(() => isProcurementOrPayment.value && canRecordArrival(selectedRequest.value, activeDocumentTypes.value));
 const showInspection = computed(() => isProcurementOrPayment.value && canRecordInspection(selectedRequest.value, activeDocumentTypes.value));
 const showWriteoff = computed(() => isPayment.value && canWriteoffPrepayment(selectedRequest.value, activeDocumentTypes.value));
-const showRefundCompletion = computed(() => isPayment.value && canCompleteSupplierRefund(selectedRequest.value, activeDocumentTypes.value));
+// 确认供应商退款只给财务（2026-09-24）。
+const showRefundCompletion = computed(() => isPayment.value && Boolean(optionLoader.data?.can_manage_expense) && canCompleteSupplierRefund(selectedRequest.value, activeDocumentTypes.value));
 const showClose = computed(() => isPayment.value && canCloseProcurement(selectedRequest.value, activeDocumentTypes.value));
 function demandApprovalCompleted(row) {
   if (!row) return false;

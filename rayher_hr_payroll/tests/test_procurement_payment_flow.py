@@ -446,6 +446,19 @@ def test_supplier_refund_endpoint_posts_ledger_and_closes_refund_state(monkeypat
         ),
     )
 
+    # 决定（2026-09-24）：只有财务可以确认供应商退款
+    monkeypatch.setattr(oa_entry, "_is_finance_user", lambda user=None: False)
+    monkeypatch.setattr(oa_entry.frappe, "_", lambda text, *args, **kwargs: text, raising=False)
+
+    def refuse(message, *args, **kwargs):
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(oa_entry.frappe, "throw", refuse, raising=False)
+    with pytest.raises(Exception, match="只有财务可以确认供应商退款"):
+        oa_entry.complete_supplier_refund(doc.name, "退款到账")
+    assert refunds == []
+    monkeypatch.setattr(oa_entry, "_is_finance_user", lambda user=None: True)
+
     result = oa_entry.complete_supplier_refund(doc.name, "退款到账")
 
     assert result["business_status"] == "已退款"

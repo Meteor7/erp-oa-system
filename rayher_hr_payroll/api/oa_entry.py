@@ -3460,6 +3460,10 @@ def complete_supplier_refund(name, reason=None):
         _require_procurement_lifecycle_access(doc, "complete_supplier_refund")
         if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
             frappe.throw(frappe._("只有采购付款单可以确认供应商退款。"))
+        # 决定（2026-09-24）：确认退款会把已付金额冲回台账、让采购申请的额度重新可用，
+        # 并且要核对银行退款回单，只由财务确认；申请人和采购仍可登记退款中、上传回单。
+        if not _is_finance_user():
+            frappe.throw(frappe._("只有财务可以确认供应商退款。"))
         note = _bounded_optional_text(reason, "退款说明", 500)
         evidence = _active_request_business_documents(doc.name)
         old_status = _clean(getattr(doc, "business_status", None))
