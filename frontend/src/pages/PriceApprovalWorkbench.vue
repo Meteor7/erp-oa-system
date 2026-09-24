@@ -29,7 +29,8 @@ const receiptDraft = ref({});
 const inspectionDraft = ref({});
 const paymentDraft = ref({ amount: '', reference: '' });
 const paymentPlanDraft = ref('');
-const contractDraft = ref({ seal_user: 'admin@staff.example.invalid', supplier_legal_name: '', contract_delivery_date: '' });
+// 用印人由服务端按副总经理岗位确定（2026-09-24），页面不再固定填 admin。
+const contractDraft = ref({ seal_user: '', supplier_legal_name: '', contract_delivery_date: '' });
 const summaryDraft = ref('');
 
 
@@ -371,7 +372,7 @@ function initPoDrafts(po) {
   paymentDraft.value = { amount: '', reference: '' };
   paymentPlanDraft.value = '';
   contractDraft.value = {
-    seal_user: po?.contract_seal_user || 'admin@staff.example.invalid',
+    seal_user: po?.contract_seal_user || '',
     supplier_legal_name: po?.contract_supplier_legal_name || po?.supplier || '',
     contract_delivery_date: po?.contract_delivery_date || '',
   };
@@ -826,7 +827,7 @@ async function closeCurrentPo() {
             <button v-if="activePo.can_manage_purchase && activePo.status === '草稿'" type="button" class="approve-button" @click="confirmPo"><FeatherIcon name="check-circle" class="h-4 w-4" />确认 PO</button>
             <button v-if="activePo.can_manage_purchase && activePo.status === '待合同复核' && activePo.contract_status !== '草稿待复核'" type="button" class="secondary-button" @click="savePoContract"><FeatherIcon name="file-plus" class="h-4 w-4" />生成合同草稿</button>
             <button v-if="activePo.can_manage_purchase && activePo.contract_status === '草稿待复核'" type="button" class="secondary-button" @click="reviewPoContract"><FeatherIcon name="check-square" class="h-4 w-4" />复核合同</button>
-            <button v-if="activePo.can_manage_purchase && activePo.contract_status === '待电子用印'" type="button" class="approve-button" @click="sealPoContract"><FeatherIcon name="pen-tool" class="h-4 w-4" />电子用印</button>
+            <button v-if="activePo.can_seal_contract" type="button" class="approve-button" @click="sealPoContract"><FeatherIcon name="pen-tool" class="h-4 w-4" />电子用印</button>
             <button v-if="activePo.can_manage_purchase && activePo.status !== '草稿' && activePo.status !== '已关闭'" type="button" class="primary-button" @click="closeCurrentPo"><FeatherIcon name="lock" class="h-4 w-4" />校验并关闭</button>
           </div>
         </header>

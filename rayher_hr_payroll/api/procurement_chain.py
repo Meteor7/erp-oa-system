@@ -217,6 +217,22 @@ def _sync_po_payment_fulfilment(po):
             frappe.db.set_value("OA Approval Request", name, state, update_modified=False)
 
 
+# 决定（2026-09-24）：PO 合同电子用印人暂定为副总经理（演示员工37）。按岗位取人，换人只需改岗位任命；
+# 原来前端固定填 admin@staff.example.invalid，只有系统管理员能用印。
+CONTRACT_SEAL_POSITION = "vice_manager"
+
+
+def _contract_seal_user():
+    user = _text(position_user(CONTRACT_SEAL_POSITION))
+    if not user or not frappe.db.exists("User", {"name": user, "enabled": 1}):
+        frappe.throw("未找到有效的合同用印人（副总经理岗位），请先在岗位任命中设置。")
+    return user
+
+
+def _can_seal_contract(po):
+    return _user() == _text(getattr(po, "contract_seal_user", None)) or "System Manager" in _roles()
+
+
 def _require_cny(currency):
     """决定（2026-09-24，审查 R3-54-1，来自 #54）：采购报价和订单暂时只用人民币。
     原来可以选美元、欧元、日元，但付款和金额台账一律按人民币记账。外币合同先折算成人民币再录入。"""
@@ -471,6 +487,7 @@ def _po_summary(doc):
     result["paid_amount"] = float(getattr(doc, "paid_amount", 0) or 0)
     result["outstanding_amount"] = max(0, float(doc.total_amount or 0) - result["paid_amount"])
     result["can_manage_purchase"] = 1 if _can_purchase() else 0
+    result["can_seal_contract"] = 1 if _can_seal_contract(doc) and result["contract_status"] == "待电子用印" else 0
     result["can_record_receipt"] = 1 if _can_record_receipt() and doc.status in {"供应商制作中", "到货验收中", "付款中"} else 0
     result["can_record_inspection"] = 1 if _can_purchase() and doc.status in {"供应商制作中", "到货验收中"} else 0
     return result
@@ -1392,7 +1409,7 @@ def confirm_po(name):
 
 @frappe.whitelist(methods=["POST"])
 @procurement_action
-def save_po_contract_information(name, seal_user, contract_delivery_date=None,
+def save_po_contract_information(name, seal_user=None, contract_delivery_date=None,
                                  supplier_legal_name=None, credit_code=None,
                                  supplier_address=None, contract_contact=None,
                                  contract_bank_name=None, contract_bank_account=None,
@@ -1402,16 +1419,19 @@ def save_po_contract_information(name, seal_user, contract_delivery_date=None,
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"待合同复核", "草稿", "待采购确认"}:
         frappe.throw("当前 PO 不在合同信息补充阶段。")
-    seal_user = _text(seal_user)
-    if not seal_user or not frappe.db.exists("User", {"name": seal_user, "enabled": 1}):
-        frappe.throw("用印账号不存在或未启用。")
+    # 用印人由岗位决定，忽略客户端传入的 seal_user。
+    seal_user = _contract_seal_user()
     po.contract_version = int(getattr(po, "contract_version", 0) or 0) + 1
     po.contract_supplier_legal_name = _text(supplier_legal_name) or _text(po.supplier)
-    po.contract_credit_code = _text(credit_code)
-    po.contract_supplier_address = _text(supplier_address)
-    po.contract_contact = _text(contract_contact)
-    po.contract_bank_name = _text(contract_bank_name)
-    po.contract_bank_account = _text(contract_bank_account)
+    # 修复（2026-09-24，审查接口核对 P3）：页面只提交法定名称和交期，原来会把信用代码、地址、
+    # 联系人和银行信息一起清空；现在只改有传入的字段。
+    for fieldname, value in (
+        ("contract_credit_code", credit_code), ("contract_supplier_address", supplier_address),
+        ("contract_contact", contract_contact), ("contract_bank_name", contract_bank_name),
+        ("contract_bank_account", contract_bank_account),
+    ):
+        if value is not None:
+            setattr(po, fieldname, _text(value))
     po.contract_entity = _text(getattr(po, "contract_entity", None)) or "示例企业032有限公司"
     po.contract_template = _text(contract_template) or "标准采购合同"
     po.contract_seal_user = seal_user
@@ -1459,12 +1479,11 @@ def review_po_contract(name, note=None):
 @frappe.whitelist(methods=["POST"])
 @procurement_action
 def seal_po_contract(name, note=None):
-    _require_purchase()
+    # 用印由合同上的用印人（副总经理）本人完成，不再要求采购角色。
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.contract_status != "待电子用印":
         frappe.throw("当前 PO 不在待电子用印状态。")
-    seal_user = _text(getattr(po, "contract_seal_user", None))
-    if _user() != seal_user and "System Manager" not in _roles():
+    if not _can_seal_contract(po):
         frappe.throw("当前账号不是该 PO 配置的用印账号。")
     po.contract_status = "已生效"
     po.status = "供应商制作中"
