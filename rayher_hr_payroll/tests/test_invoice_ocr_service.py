@@ -2529,7 +2529,8 @@ def test_expired_old_worker_cannot_overwrite_new_processing_claim(env, monkeypat
     assert record.processing_claim_id == "new-worker-claim"
     assert record.project_name == "new worker value"
     assert record.processing_error == "new worker owns this state"
-    assert record.retry_count == 0
+    # 修复（2026-09-28）：卡住的识别重新识别时计一次失败（最多重试 3 次）。
+    assert record.retry_count == 1
 
 
 def test_file_and_enqueue_recovery_decisions_use_current_reads(env, monkeypatch):
@@ -3489,3 +3490,44 @@ def test_duplicates_resolved_before_the_rule_change_stay_resolved(env):
     legacy = service._legacy_resolution_prefix("0001|2026-07-14|35.98")
     record = env.add_record(name="INV-NEW", invoice_number="0001", issue_date="2026-07-14", total_amount=Decimal("35.98"), duplicate_reason=legacy + "财务已核对")
     assert service.confirm_invoice(record.name)["recognition_status"] == "已确认"
+
+
+def test_retry_is_limited_to_three_attempts(env):
+    # 第一轮 #8：重试原来不限次数。决定（2026-09-24）：最多重试 3 次。
+    env.add_batch(); file_doc = env.add_file()
+    record = env.add_record(recognition_status="失败", invoice_file=file_doc.file_url, retry_count=4)
+    file_doc.attached_to_doctype, file_doc.attached_to_name = service.RECORD_DOCTYPE, record.name
+    with pytest.raises(ValidationError, match="重试 3 次"):
+        service.retry_invoice(record.name)
+    record.retry_count = 3
+    assert service.retry_invoice(record.name)["recognition_status"] == "排队中"
+
+
+def test_a_stuck_queued_invoice_can_be_retried_and_excluded(env):
+    env.add_batch(); file_doc = env.add_file()
+    record = env.add_record(recognition_status="排队中", invoice_file=file_doc.file_url, modified=datetime(2026, 7, 21, 8, 0, 0))
+    file_doc.attached_to_doctype, file_doc.attached_to_name = service.RECORD_DOCTYPE, record.name
+    service.retry_invoice(record.name)
+    assert record.retry_count == 1 and record.recognition_status == "排队中"
+    fresh = env.add_record(name="INV-FRESH", recognition_status="排队中", invoice_file=file_doc.file_url, modified=datetime(2026, 7, 21, 8, 55, 0))
+    with pytest.raises(ValidationError, match="只有识别失败"):
+        service.retry_invoice(fresh.name)
+    with pytest.raises(ValidationError, match="不允许排除"):
+        service.exclude_invoice(fresh.name, "卡住了")
+    record.modified = datetime(2026, 7, 21, 8, 0, 0)
+    assert service.exclude_invoice(record.name, "卡住了")["recognition_status"] == "已排除"
+
+
+def test_pdf_over_five_pages_is_refused_at_upload(env):
+    six = b"%PDF-1.7\n" + b"".join(b"<< /Type /Page >>\n" for _ in range(6)) + b"<< /Type /Pages >>\n"
+    with pytest.raises(ValidationError, match="最多 5 页"):
+        service._check_document_limits(six, "application/pdf")
+    service._check_document_limits(b"%PDF-1.7\n<< /Type /Page >>\n", "application/pdf")
+
+
+def test_huge_photo_is_refused_at_upload(env, monkeypatch):
+    monkeypatch.setattr(service, "_image_pixels", lambda content: 60_000_000)
+    with pytest.raises(ValidationError, match="5000 万像素"):
+        service._check_document_limits(b"photo", "image/jpeg")
+    monkeypatch.setattr(service, "_image_pixels", lambda content: 12_000_000)
+    service._check_document_limits(b"photo", "image/jpeg")

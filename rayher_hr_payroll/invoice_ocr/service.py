@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
@@ -35,6 +36,10 @@ MAX_ERROR_CHARS = 300
 MAX_EDIT_PAYLOAD_BYTES = 32 * 1024
 MAX_EXPENSE_DESCRIPTION_LENGTH = 1000
 PROCESSING_STALE_SECONDS = 15 * 60
+# 决定（2026-09-24）：识别失败最多重试 3 次；一个 PDF 最多 5 页。照片不超过 5000 万像素。
+MAX_RECOGNITION_RETRIES = 3
+MAX_PDF_PAGES = 5
+MAX_IMAGE_PIXELS = 50_000_000
 PREVIEW_TOKEN_TTL_SECONDS = 60
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 CANONICAL_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
@@ -595,6 +600,51 @@ def _recompute_record_batch(record):
         _recompute_batch_after_commit(batch_name)
 
 
+def _pdf_page_count(content):
+    try:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        return len(PdfReader(BytesIO(content)).pages)
+    except Exception:
+        return len(re.findall(rb"/Type\s*/Page(?![A-Za-z])", content)) or None
+
+
+def _image_pixels(content):
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        with Image.open(BytesIO(content)) as image:
+            width, height = image.size
+            return width * height
+    except Image.DecompressionBombError:
+        return MAX_IMAGE_PIXELS + 1
+    except Exception:
+        return None
+
+
+def _check_document_limits(content, mime):
+    """修复（2026-09-28，第一轮 #8）：识别服务一次只识别一张，大文件会占住全公司的识别队列。
+
+    原来 PDF 不限页数（只受像素总量约束，约 50 页 A4），照片只有 PIL 的默认上限（约 1.8 亿像素）。
+    现在上传时就拒绝：PDF 超过 5 页（一张发票 1 页，带销货清单的一般 2～3 页），
+    照片超过 5000 万像素（手机正常拍照都在这以内）。
+    """
+    if mime == "application/pdf":
+        pages = _pdf_page_count(content)
+        if pages and pages > MAX_PDF_PAGES:
+            _throw(f"发票 PDF 最多 {MAX_PDF_PAGES} 页，这份有 {pages} 页，请只保留发票页后再上传。")
+        return
+    pixels = _image_pixels(content)
+    if pixels and pixels > MAX_IMAGE_PIXELS:
+        _throw("照片像素太大（超过 5000 万像素），请压缩或截图后再上传。")
+
+
 def register_file(batch, file_url):
     batch_name = str(batch)
     file_url = _safe_file_url(file_url)
@@ -625,6 +675,7 @@ def register_file(batch, file_url):
         file_doc, content, server_name, server_mime = _validated_file(
             batch_doc, file_doc, file_url
         )
+        _check_document_limits(content, server_mime)
         file_guard = {
             "name": str(_get(file_doc, "name") or ""),
             "file_url": str(_get(file_doc, "file_url") or ""),
@@ -1121,14 +1172,38 @@ def _processing_claim_is_stale(record):
     return bool(started and (_now() - started).total_seconds() >= PROCESSING_STALE_SECONDS)
 
 
+def _stale_since(value):
+    started = _as_datetime(value)
+    return bool(started and (_now() - started).total_seconds() >= PROCESSING_STALE_SECONDS)
+
+
+def _recognition_stuck(record):
+    """识别超过 15 分钟没有结果，或排队超过 15 分钟还没开始（任务丢失、后台进程宕机）。"""
+    status = _get(record, "recognition_status")
+    return (status == "识别中" and _processing_claim_is_stale(record)) or (
+        status == "排队中" and _stale_since(_get(record, "modified"))
+    )
+
+
 def retry_invoice(invoice_name):
+    """修复（2026-09-28，第一轮 #8）：识别失败最多重试 3 次；卡住的发票也能重新识别。
+
+    原来重试不限次数，识别服务一次只识别一张，一个人反复重试就能占住全公司的队列；
+    停在"排队中"的发票没有任何办法重新识别。retry_count 记已经失败的次数：
+    超过 3 次重试后不再接受，提示排除后重新上传；卡住的发票重新识别时也计一次失败。
+    """
     name = str(invoice_name)
     with _transaction_lock("record", name):
         record = _require_record(name, write=True, current=True)
         status = _get(record, "recognition_status")
-        if status != "失败" and not (status == "识别中" and _processing_claim_is_stale(record)):
+        stuck = _recognition_stuck(record)
+        if status != "失败" and not stuck:
             _throw("只有识别失败或识别超时的发票可以重试。")
+        failures = int(_get(record, "retry_count") or 0) + (1 if stuck else 0)
+        if failures > MAX_RECOGNITION_RETRIES:
+            _throw(f"这张发票已经重试 {MAX_RECOGNITION_RETRIES} 次仍没有识别出来，请排除后重新上传更清晰的文件。")
         _read_private_record(record, current=True)
+        _set(record, "retry_count", failures)
         _set(record, "recognition_status", "排队中")
         _set(record, "processing_error", "")
         _set(record, "processing_started_on", None)
@@ -1148,7 +1223,8 @@ def exclude_invoice(invoice_name, reason):
     name = str(invoice_name)
     with _transaction_lock("record", name):
         record = _require_record(name, write=True, current=True)
-        if _get(record, "recognition_status") not in {"待确认", "疑似重复", "失败"}:
+        # 修复（2026-09-28）：卡住（排队或识别超过 15 分钟）的发票也可以排除。
+        if _get(record, "recognition_status") not in {"待确认", "疑似重复", "失败"} and not _recognition_stuck(record):
             _throw("当前发票状态不允许排除。")
         _set(record, "recognition_status", "已排除")
         _set(record, "duplicate_reason", f"排除：{reason}")
