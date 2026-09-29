@@ -204,3 +204,52 @@ def test_rd_staff_without_a_salary_slip_are_reported():
     )
     assert skipped == ["E2（无工资单）", "E3（无工资单）"]
     assert doc.capitalized_total == Decimal("10000.00")
+
+
+def test_confirmed_company_contributions_follow_the_salary_ratio_as_their_own_accounts():
+    # 审查 X2-2（决定 D1）：单位社保、公积金按工资同样的研发占比进研发人工，单列科目。
+    doc = FakeDoc()
+    populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[
+            {"employee": "E1", "project": "P1", "hours": Decimal("60")},
+            {"employee": "E1", "project": "P2", "hours": Decimal("20")},
+        ],
+        source_expense_rows=[],
+        project_hours=[ProjectHour("P1", Decimal("60"), "capitalized"), ProjectHour("P2", Decimal("20"), "expensed")],
+        salaries={"E1": 10000}, total_hours={"E1": 80}, personnel_types={"E1": "非全时研发"},
+        standard_hours={"E1": 160}, contributions={"E1": {"si": 3000, "hf": 1000}},
+    )
+    by_account = {}
+    for line in doc.tables["lines"]:
+        by_account[line["account_level_3"]] = by_account.get(line["account_level_3"], 0) + float(line["allocated_amount"])
+    assert by_account == {"人工费": 5000.0, "社会保险费用（单位）": 1500.0, "住房公积金（单位）": 500.0}
+    si = [line for line in doc.tables["lines"] if line["account_level_3"] == "社会保险费用（单位）"]
+    assert {line["voucher_no"] for line in si} == {"社保:E1"} and {line["project"] for line in si} == {"P1", "P2"}
+
+
+def test_gl_social_insurance_rows_are_allowed_when_hr_has_no_confirmed_records():
+    # 原来有工资单时，任何人员人工类总账行都报冲突；现在单位社保行只和人事的单位社保冲突。
+    doc = FakeDoc()
+    expenses = [ExpenseItem(name="GL-SI", amount=Decimal("600"), account_level_3="社会保险费用（单位）", category="personnel")]
+    populate_allocation_document(
+        doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+        salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "全时研发"},
+    )
+    names = [str(l["expense_item_name"]) for l in doc.tables["lines"]]
+    assert "GL-SI" in names and any(n.startswith("人工费") for n in names)
+
+
+def test_gl_social_insurance_rows_conflict_with_confirmed_hr_records():
+    import pytest
+
+    doc = FakeDoc()
+    expenses = [ExpenseItem(name="GL-SI", amount=Decimal("600"), account_level_3="社会保险费用（单位）", category="personnel")]
+    with pytest.raises(ValueError, match="社会保险费用"):
+        populate_allocation_document(
+            doc, expenses=expenses, source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("4")}],
+            source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("4"), "capitalized")],
+            salaries={"E1": 10000}, total_hours={"E1": 4}, personnel_types={"E1": "全时研发"},
+            contributions={"E1": {"si": 300, "hf": 0}},
+        )

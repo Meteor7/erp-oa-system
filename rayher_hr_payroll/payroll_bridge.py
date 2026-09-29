@@ -37,6 +37,32 @@ def period_salaries(ym):
     return out
 
 
+def period_company_contributions(ym):
+    """{employee: {"si": 单位社保合计, "hf": 单位公积金合计}}，只读已确认的记录。
+
+    修复（2026-09-29，审查 X2-2，决定 D1）：研发人工原来只有工资单应发，单位承担的社保和公积金
+    进不了研发成本（总账里的同类行又和工资单冲突）。这里只读取人事模块里已确认的记录，
+    不改社保、公积金模块本身。
+    """
+    out = {}
+    for doctype, field, key in (
+        ("Employee Social Insurance", "company_total", "si"),
+        ("Employee Housing Fund", "company_amount", "hf"),
+    ):
+        rows = frappe.get_all(
+            doctype,
+            filters={"status": "Confirmed", "period": ym},
+            fields=["employee", field],
+            limit_page_length=0,
+        )
+        for r in rows:
+            if not r.get("employee"):
+                continue
+            entry = out.setdefault(r.get("employee"), {"si": 0.0, "hf": 0.0})
+            entry[key] += float(r.get(field) or 0)
+    return out
+
+
 def period_pay_totals(ym):
     """Aggregate {gross, deductions} from submitted Salary Slips in the period."""
     start, end = month_bounds(ym)

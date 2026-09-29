@@ -133,7 +133,7 @@ class RDCostAllocation(Document):
         # R&D labour cost: each researcher's submitted Salary Slip gross for the
         # period, allocated across THEIR own project hours and merged with expenses.
         import frappe
-        from rayher_hr_payroll.payroll_bridge import period_salaries
+        from rayher_hr_payroll.payroll_bridge import period_company_contributions, period_salaries
 
         period = "%04d-%02d" % (int(self.year), int(self.month))
         salaries = period_salaries(period)
@@ -157,6 +157,8 @@ class RDCostAllocation(Document):
             total_hours=total_hours,
             personnel_types=personnel_types,
             standard_hours=standard_hours,
+            # 已确认的单位社保、公积金（只读，修复 2026-09-29，审查 X2-2，决定 D1）。
+            contributions=period_company_contributions(period),
         )
         # Persist an explicit unresolved-skip state so a submitted allocation records the
         # under-counted employees (auditable), not just a transient warning.

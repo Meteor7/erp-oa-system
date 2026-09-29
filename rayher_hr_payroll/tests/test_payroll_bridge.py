@@ -45,3 +45,21 @@ def test_get_period_salary_sums_all_slips(monkeypatch):
         lambda *a, **k: [pb.frappe._dict({"gross_pay": 1000.0}), pb.frappe._dict({"gross_pay": 1500.0})],
     )
     assert pb.get_period_salary("E1", "2026-07") == 2500.0
+
+
+def test_period_company_contributions_reads_confirmed_records_only(monkeypatch):
+    # 审查 X2-2（决定 D1）：只读已确认的单位社保、公积金，不改这两个模块。
+    from rayher_hr_payroll import payroll_bridge as bridge
+
+    calls = []
+
+    def get_all(doctype, filters=None, fields=None, **kwargs):
+        calls.append((doctype, filters))
+        if doctype == "Employee Social Insurance":
+            return [{"employee": "E1", "company_total": 3000}, {"employee": "E1", "company_total": 10}]
+        return [{"employee": "E1", "company_amount": 1000}, {"employee": "E2", "company_amount": 500}]
+
+    monkeypatch.setattr(bridge.frappe, "get_all", get_all, raising=False)
+
+    assert bridge.period_company_contributions("2026-06") == {"E1": {"si": 3010.0, "hf": 1000.0}, "E2": {"si": 0.0, "hf": 500.0}}
+    assert all(filters == {"status": "Confirmed", "period": "2026-06"} for _doctype, filters in calls)

@@ -12,6 +12,13 @@ from rayher_hr_payroll.rd_cost.allocation import (
 from rayher_hr_payroll.rd_cost.types import ExpenseItem, ProjectHour
 
 LABOR_PREFIX = "labor:"
+# 单位社保、公积金按员工单列（修复 2026-09-29，审查 X2-2，决定 D1）：(前缀, 键, 3 级科目, 凭证前缀)。
+SI_ACCOUNT = "社会保险费用（单位）"
+HF_ACCOUNT = "住房公积金（单位）"
+CONTRIBUTION_ITEMS = (
+    ("labor_si:", "si", SI_ACCOUNT, "社保"),
+    ("labor_hf:", "hf", HF_ACCOUNT, "公积金"),
+)
 # labor_skipped 里"没有工资单"的员工带这个后缀，和"工时不完整"的区分开（修复 2026-09-29，审查 X2-11-B）。
 NO_SALARY_SUFFIX = "（无工资单）"
 
@@ -58,11 +65,12 @@ def _employee_project_hours(
 
 
 def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, personnel_types=None, skipped=None,
-                  standard_hours=None):
+                  standard_hours=None, contributions=None):
     employee_hours = _employee_project_hours(source_hour_rows, project_hours)
     total_hours = total_hours or {}
     personnel_types = personnel_types or {}
     standard_hours = standard_hours or {}
+    contributions = contributions or {}
     items = []
     for emp, gross in salaries.items():
         if not gross:
@@ -97,10 +105,36 @@ def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, p
                 skipped.append(str(emp))
             continue
         amount = Decimal(str(gross)) * ratio
-        if amount <= 0:
-            continue
-        items.append(ExpenseItem(name=key, amount=amount, account_level_3="人工费", category="人工费"))
+        if amount > 0:
+            items.append(ExpenseItem(name=key, amount=amount, account_level_3="人工费", category="人工费"))
+        # 单位社保、公积金用和工资相同的研发工时占比，分到同样的项目。
+        employee_contributions = contributions.get(emp) or contributions.get(str(emp)) or {}
+        for prefix, field, account, _voucher in CONTRIBUTION_ITEMS:
+            value = Decimal(str(employee_contributions.get(field) or 0)) * ratio
+            if value > 0:
+                name = prefix + str(emp)
+                employee_hours[name] = hours
+                items.append(ExpenseItem(name=name, amount=value, account_level_3=account, category="人工费"))
     return allocate_labor(salaries=items, employee_hours=employee_hours)
+
+
+def _labor_conflicts(labor, expenses):
+    """总账的人员人工行和工资单、单位社保公积金重复的科目。
+
+    修复（2026-09-29，审查 X2-2）：原来只要有工资单人工，任何人员人工类总账行都算冲突，
+    单位社保和公积金两条路都进不来。现在按科目判断：社保行只和系统算出的单位社保冲突，
+    公积金行只和单位公积金冲突，其余人员人工行（工资等）和工资单冲突，和原来一样。
+    """
+    booked = {str(line.expense_item).split(":", 1)[0] + ":" for line in labor.lines}
+    conflicts = set()
+    for expense in expenses:
+        if (expense.category or "") != "personnel":
+            continue
+        level_3 = str(expense.account_level_3 or "").strip()
+        prefix = next((item[0] for item in CONTRIBUTION_ITEMS if item[2] == level_3), LABOR_PREFIX)
+        if prefix in booked:
+            conflicts.add(level_3 or "人员人工费用")
+    return sorted(conflicts)
 
 
 def populate_allocation_document(
@@ -114,27 +148,31 @@ def populate_allocation_document(
     total_hours: Mapping[str, float] | None = None,
     personnel_types: Mapping[str, str] | None = None,
     standard_hours: Mapping[str, float] | None = None,
+    contributions: Mapping[str, Mapping[str, float]] | None = None,
 ) -> list:
     skipped: list = []
     labor = None
     if salaries:
         labor = _labor_result(
-            salaries, source_hour_rows, project_hours, total_hours, personnel_types, skipped, standard_hours
+            salaries, source_hour_rows, project_hours, total_hours, personnel_types, skipped, standard_hours,
+            contributions,
         )
     # 修复（2026-09-29，审查 X2-11-B，决定 D14）：有研发工时却没有工资单（或应发为 0）的员工，
     # 原来直接不算人工费、也不提示。现在记进 labor_skipped 并提示，先不阻止提交。
     paid = {str(emp) for emp, gross in (salaries or {}).items() if gross}
     hour_employees = sorted({str(_value(row, "employee")) for row in source_hour_rows if _value(row, "employee")})
     skipped.extend(emp + NO_SALARY_SUFFIX for emp in hour_employees if emp not in paid)
-    if labor and labor.lines and any((e.category or "") == "personnel" for e in expenses):
+    conflicts = _labor_conflicts(labor, expenses) if labor and labor.lines else []
+    if conflicts:
         # Personnel-category GL rows ARE R&D labour booked via GL; combined with the
-        # Salary-Slip labour they double-count R&D personnel cost. Only a real conflict
-        # (slips that actually produced labour) raises -- a period whose salaried R&D
-        # employees logged no R&D hours produces no labour, so the GL rows are the sole
-        # source and there is nothing to double-count.
+        # Salary-Slip labour (or the confirmed company contributions) they double-count
+        # R&D personnel cost. Only a real conflict (labour actually produced for the same
+        # account) raises -- a period whose salaried R&D employees logged no R&D hours
+        # produces no labour, so the GL rows are the sole source.
         raise ValueError(
-            "本期同时存在「人工费」类导入费用与工资单(研发人工费),会重复计算研发人工成本。"
-            "请移除人工费类导入费用,或本期不纳入工资单人工费,只保留一种来源。"
+            "本期同时存在「人工费」类导入费用与工资单或人事的单位社保、公积金(研发人工费),会重复计算研发人工成本"
+            "(重复科目:" + "、".join(conflicts) + ")。"
+            "请移除这些导入费用,或本期不纳入工资单人工费,只保留一种来源。"
         )
     result = allocate_expenses(expenses=expenses, project_hours=project_hours)
     if labor:
@@ -152,11 +190,20 @@ def populate_allocation_document(
         doc.append("expense_snapshots", row)
 
     for line in result.lines:
-        if str(line.expense_item).startswith(LABOR_PREFIX):
-            emp = str(line.expense_item)[len(LABOR_PREFIX):]
+        item_key = str(line.expense_item)
+        contribution = next((item for item in CONTRIBUTION_ITEMS if item_key.startswith(item[0])), None)
+        if item_key.startswith(LABOR_PREFIX):
+            emp = item_key[len(LABOR_PREFIX):]
             item_name = "\u4eba\u5de5\u8d39-" + emp
             voucher = "\u5de5\u8d44\u5355:" + emp  # voucher_no is reqd; mark the Salary Slip source
             account_level_3 = "\u4eba\u5de5\u8d39"
+            account_level_4 = emp
+        elif contribution:
+            prefix, _field, account, voucher_prefix = contribution
+            emp = item_key[len(prefix):]
+            item_name = account + "-" + emp
+            voucher = voucher_prefix + ":" + emp
+            account_level_3 = account
             account_level_4 = emp
         else:
             source = expense_sources.get(line.expense_item, {})

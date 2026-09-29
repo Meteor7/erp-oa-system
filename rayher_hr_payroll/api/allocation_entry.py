@@ -281,7 +281,8 @@ def _with_snapshot_accounts(line, snapshots, period_by_parent):
     level_3 = _clean(_value(line, "account_level_3")) or _clean(_value(snapshot, "account_level_3"))
     level_4 = _clean(_value(line, "account_level_4")) or _clean(_value(snapshot, "account_level_4"))
     level_2 = _clean(_value(snapshot, "account_level_2"))
-    if not level_2 and level_3 == "\u4eba\u5de5\u8d39":
+    # 工资单人工费和人事的单位社保、公积金都归"人员人工费用"（修复 2026-09-29）。
+    if not level_2 and level_3 in ("\u4eba\u5de5\u8d39", "\u793e\u4f1a\u4fdd\u9669\u8d39\u7528\uff08\u5355\u4f4d\uff09", "\u4f4f\u623f\u516c\u79ef\u91d1\uff08\u5355\u4f4d\uff09"):
         level_2 = "\u4eba\u5458\u4eba\u5de5\u8d39\u7528"
     level_1 = _clean(_value(snapshot, "account_level_1")) or ("\u7814\u53d1\u8d39\u7528" if level_2 or level_3 else "")
     return {
