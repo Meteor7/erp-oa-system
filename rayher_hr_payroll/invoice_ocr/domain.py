@@ -1,5 +1,6 @@
 """Pure validation rules shared by the invoice OCR workflow."""
 
+import unicodedata
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -33,8 +34,48 @@ def _iso_date(value):
         return None
 
 
-def business_key(invoice_number, issue_date, total_amount):
-    """Return the normalized business duplicate key, or ``None`` if incomplete."""
+# 全电发票（数电票）的发票号码是 20 位；老版增值税发票是"发票代码（10 或 12 位）+ 发票号码（8 位）"。
+FULL_DIGITAL_NUMBER_LENGTH = 20
+
+
+def normalize_invoice_number(value):
+    """发票号码、发票代码的统一写法（2026-09-28）：全角转半角（NFKC）、去掉所有空白、字母转大写。"""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return "".join(text.split()).upper()
+
+
+def business_key(invoice_number, invoice_code=None):
+    """同一张发票的判定键。决定（2026-09-24）：只看发票号码。
+
+    全电发票（20 位号码）只看号码；老版发票看"发票代码-发票号码"。开票日期和金额不参与：
+    原来按"号码|日期|合计"判断，改一下日期或金额就能把同一张发票报两次。
+    号码为空时返回 None——没有号码的发票不能确认（见 service.confirm_invoice）。
+    """
+    number = normalize_invoice_number(invoice_number)
+    if not number:
+        return None
+    code = normalize_invoice_number(invoice_code)
+    if code and len(number) != FULL_DIGITAL_NUMBER_LENGTH:
+        return f"{code}-{number}"
+    return number
+
+
+def same_invoice(number_a, code_a, number_b, code_b):
+    """两条记录是不是同一张发票：号码相同；老版发票两边都识别出代码时，代码也要相同。
+
+    只有一边识别出代码时按号码算同一张——宁可多标疑似重复，由财务复核。
+    """
+    left = normalize_invoice_number(number_a)
+    if not left or left != normalize_invoice_number(number_b):
+        return False
+    if len(left) == FULL_DIGITAL_NUMBER_LENGTH:
+        return True
+    left_code, right_code = normalize_invoice_number(code_a), normalize_invoice_number(code_b)
+    return not (left_code and right_code and left_code != right_code)
+
+
+def legacy_business_key(invoice_number, issue_date, total_amount):
+    """2026-09-28 之前的判定键（号码|日期|合计），只用来识别当时财务已解除的疑似重复。"""
     number = str(invoice_number or "").strip()
     normalized_date = _iso_date(issue_date)
     amount = _money(total_amount)

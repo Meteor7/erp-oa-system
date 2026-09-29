@@ -20,6 +20,7 @@
     "project_name",
     "issue_date",
     "invoice_number",
+    "invoice_code",
     "amount_before_tax",
     "tax_amount",
     "total_amount",
@@ -137,6 +138,12 @@
       "in_standard_filter": 1,
       "label": "Invoice Number",
       "search_index": 1
+    },
+    {
+      "fieldname": "invoice_code",
+      "fieldtype": "Data",
+      "label": "Invoice Code",
+      "length": 40
     },
     {
       "fieldname": "amount_before_tax",
@@ -273,7 +280,7 @@
   "index_web_pages_for_search": 0,
   "is_submittable": 0,
   "links": [],
-  "modified": "2026-07-20 00:00:00.000000",
+  "modified": "2026-09-28 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Rayher HR Payroll",
   "name": "OA Invoice Record",

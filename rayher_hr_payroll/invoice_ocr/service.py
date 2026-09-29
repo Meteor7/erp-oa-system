@@ -12,7 +12,13 @@ from pathlib import PurePosixPath
 
 import frappe
 
-from rayher_hr_payroll.invoice_ocr.domain import business_key, submission_blockers
+from rayher_hr_payroll.invoice_ocr.domain import (
+    business_key,
+    legacy_business_key,
+    normalize_invoice_number,
+    same_invoice,
+    submission_blockers,
+)
 from rayher_hr_payroll.invoice_ocr import permissions as invoice_permissions
 from rayher_hr_payroll.invoice_ocr.permissions import can_read_invoice
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
@@ -32,7 +38,8 @@ PROCESSING_STALE_SECONDS = 15 * 60
 PREVIEW_TOKEN_TTL_SECONDS = 60
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 CANONICAL_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
-EDITABLE_FIELDS = {"invoice_category", "project_name", "issue_date", "invoice_number", "amount_before_tax", "tax_amount", "total_amount"}
+# invoice_code（2026-09-28）：老版发票的发票代码，识别服务一直能认出来但原来没有存，查重用得上。
+EDITABLE_FIELDS = {"invoice_category", "project_name", "issue_date", "invoice_number", "invoice_code", "amount_before_tax", "tax_amount", "total_amount"}
 MONEY_FIELDS = {"amount_before_tax", "tax_amount", "total_amount"}
 _MANUAL_PRESENCE_PREFIX = "manual-field-presence:"
 REQUEST_RECORD_FIELDS = ["name", "batch", "recognition_status", "invoice_category", "project_name", "invoice_number", "total_amount", "expense_description", "ocr_payload", "field_warnings", "request", "expense_line_key"]
@@ -715,7 +722,7 @@ def recompute_batch(batch_name: str):
 def _normalize_text(field, value):
     if value is None: return ""
     text = str(value).strip()
-    if len(text) > {"invoice_category": 140, "project_name": 1000, "invoice_number": 100}[field]:
+    if len(text) > {"invoice_category": 140, "project_name": 1000, "invoice_number": 100, "invoice_code": 40}[field]:
         _throw("发票字段内容过长，请检查后重试。")
     return text
 
@@ -751,7 +758,8 @@ def _normalized_fields(values):
         "invoice_category": _normalize_text("invoice_category", values.get("invoice_category")),
         "project_name": _normalize_text("project_name", values.get("project_name")),
         "issue_date": _normalize_date(values.get("issue_date")),
-        "invoice_number": _normalize_text("invoice_number", values.get("invoice_number")),
+        "invoice_number": normalize_invoice_number(_normalize_text("invoice_number", values.get("invoice_number"))),
+        "invoice_code": normalize_invoice_number(_normalize_text("invoice_code", values.get("invoice_code"))),
         "amount_before_tax": _normalize_money(values.get("amount_before_tax")),
         "tax_amount": _normalize_money(values.get("tax_amount")),
         "total_amount": derive_total_amount(values.get("amount_before_tax"), values.get("tax_amount"), values.get("total_amount")),
@@ -905,26 +913,74 @@ def update_expense_context(invoice_name, expense_description):
 
 
 def _resolution_prefix(key):
+    # v2（2026-09-28）：键改成发票号码（老版发票含代码），财务的复核结论绑定在这个键上。
+    fingerprint = hashlib.sha256(str(key or "").encode("utf-8")).hexdigest()
+    return f"duplicate-override:v2:{fingerprint}:"
+
+
+def _legacy_resolution_prefix(key):
     fingerprint = hashlib.sha256(str(key or "").encode("utf-8")).hexdigest()
     return f"duplicate-override:v1:{fingerprint}:"
 
 
 def _resolution_applies(record, key):
-    return str(_get(record, "duplicate_reason") or "").startswith(_resolution_prefix(key))
+    reason = str(_get(record, "duplicate_reason") or "")
+    if reason.startswith(_resolution_prefix(key)):
+        return True
+    # 2026-09-28 之前财务解除的疑似重复（v1，按"号码|日期|合计"记录）：这三项都没改过才继续有效。
+    legacy = legacy_business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _record_money(record, "total_amount"))
+    return bool(legacy) and reason.startswith(_legacy_resolution_prefix(legacy))
+
+
+def _record_business_key(record):
+    return business_key(_get(record, "invoice_number"), _get(record, "invoice_code"))
+
+
+def _business_lock_key(record):
+    # 只按号码加锁：一张识别出了代码、一张没识别出代码的同号发票，也要排队查重。
+    return normalize_invoice_number(_get(record, "invoice_number"))
 
 
 def _business_duplicate(record, *, current=False):
-    total_amount = _record_money(record, "total_amount")
-    key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), total_amount)
+    """修复（2026-09-28，R3-49-1 / 第一轮 #7）：同一张发票只看发票号码。
+
+    原来按"号码 + 开票日期 + 合计"判断，日期、金额都能手工改，改一下就能把同一张发票报两次；
+    号码、日期、合计任一为空时干脆不查重。现在全电发票（20 位号码）只看号码，老版发票看
+    "代码 + 号码"（一边没识别出代码时按号码算）。日期、金额不参与判断，只写进疑似重复的原因
+    提示财务。号码为空时不能确认（见 confirm_invoice）。
+    """
+    key = _record_business_key(record)
     if not key:
         return None, None
-    filters = {
-        "invoice_number": str(_get(record, "invoice_number") or "").strip(),
-        "issue_date": _get(record, "issue_date"),
-        "total_amount": total_amount,
-        "recognition_status": "已确认",
-    }
-    return key, _first_duplicate(filters, exclude=_get(record, "name"), current=current)
+    number = normalize_invoice_number(_get(record, "invoice_number"))
+    reader = _current_rows if current else _get_all
+    rows = reader(
+        RECORD_DOCTYPE,
+        filters={"invoice_number": number, "recognition_status": "已确认"},
+        fields=["name", "recognition_status", "request", "invoice_number", "invoice_code", "issue_date", "total_amount"],
+        order_by="creation asc",
+        limit=20,
+    )
+    for row in rows:
+        if _get(row, "name") == _get(record, "name"):
+            continue
+        if same_invoice(number, _get(record, "invoice_code"), _get(row, "invoice_number"), _get(row, "invoice_code")):
+            return key, row
+    return key, None
+
+
+def duplicate_reason(record, duplicate):
+    """疑似重复的原因：号码相同；日期或合计不同时特别提示，让财务核对是不是同一张。"""
+    name = _get(duplicate, "name")
+    same_date = str(_get(record, "issue_date") or "") == str(_get(duplicate, "issue_date") or "")
+    mine, theirs = _record_money(record, "total_amount"), _get(duplicate, "total_amount")
+    try:
+        same_total = mine is not None and theirs is not None and Decimal(str(mine)) == Decimal(str(theirs))
+    except (InvalidOperation, TypeError, ValueError):
+        same_total = False
+    if same_date and same_total:
+        return f"发票号码与已确认发票 {name} 相同，开票日期和合计也相同"
+    return f"发票号码与已确认发票 {name} 相同，但开票日期或合计不同，请核对是否为同一张发票"
 
 
 def _confirm(record):
@@ -955,15 +1011,19 @@ def confirm_invoice(invoice_name, values=None):
         if not description:
             _throw("确认发票前必须填写费用说明。")
         _set(record, "expense_description", description)
+        # 修复（2026-09-28，第一轮 #7）：没有发票号码就没法查重，原来照样能确认。
+        # 决定（2026-09-24）：识别不出号码的票据，由本人对照原件手工补号码后再确认。
+        if not normalize_invoice_number(_get(record, "invoice_number")):
+            _throw("确认发票前必须填写发票号码；识别不出来的请对照原件手工填写。")
         key, _duplicate = _business_duplicate(record)
         if key and not _resolution_applies(record, key):
-            with _transaction_lock("business", key):
+            with _transaction_lock("business", _business_lock_key(record)):
                 _, duplicate = _business_duplicate(record, current=True)
                 if duplicate:
                     duplicate_name = _get(duplicate, "name")
                     _set(record, "recognition_status", "疑似重复")
                     _set(record, "duplicate_of", duplicate_name)
-                    _set(record, "duplicate_reason", "发票号码、开票日期和合计金额与已确认发票相同")
+                    _set(record, "duplicate_reason", duplicate_reason(record, duplicate))
                     _save(record)
                     _recompute_record_batch(record)
                     result = _serialize_record(
@@ -1113,7 +1173,7 @@ def resolve_duplicate(invoice_name, reason):
         record = _current_doc(RECORD_DOCTYPE, name)
         if _get(record, "recognition_status") != "疑似重复":
             _throw("该发票当前不是疑似重复状态。")
-        key = business_key(_get(record, "invoice_number"), _get(record, "issue_date"), _record_money(record, "total_amount"))
+        key = _record_business_key(record)
         _set(record, "recognition_status", "待确认")
         _set(record, "duplicate_reason", f"{_resolution_prefix(key)}{reason}")
         _set(record, "processing_claim_id", "")
@@ -1766,7 +1826,7 @@ def _serialize_record(record, include_attachments=False):
         "name": _get(record, "name"), "batch": _get(record, "batch"), "original_filename": _get(record, "original_filename"),
         "mime_type": _get(record, "mime_type"), "file_size": int(_get(record, "file_size") or 0), "recognition_status": _get(record, "recognition_status"),
         "invoice_category": _get(record, "invoice_category") or "", "project_name": _get(record, "project_name") or "", "issue_date": _get(record, "issue_date"),
-        "invoice_number": _get(record, "invoice_number") or "", "amount_before_tax": _record_money(record, "amount_before_tax"), "tax_amount": _record_money(record, "tax_amount"),
+        "invoice_number": _get(record, "invoice_number") or "", "invoice_code": _get(record, "invoice_code") or "", "amount_before_tax": _record_money(record, "amount_before_tax"), "tax_amount": _record_money(record, "tax_amount"),
         "total_amount": _record_money(record, "total_amount"), "field_warnings": _public_field_warnings(record), "is_duplicate": bool(_get(record, "duplicate_of")),
         "expense_description": _get(record, "expense_description") or "",
         "duplicate_reason": _get(record, "duplicate_reason") or "", "request": _get(record, "request") or "", "expense_line_key": _get(record, "expense_line_key") or "",

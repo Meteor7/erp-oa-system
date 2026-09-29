@@ -11,6 +11,8 @@ import pytest
 from rayher_hr_payroll.invoice_ocr.domain import (
     amount_difference,
     business_key,
+    legacy_business_key,
+    same_invoice,
     submission_blockers,
 )
 
@@ -280,8 +282,38 @@ def test_unrelated_employee_is_rejected_by_hooks_after_base_read(permissions_mod
         ("000123", datetime(2026, 7, 14, 9, 30), 35.98, "000123|2026-07-14|35.98"),
     ],
 )
-def test_business_key_normalizes_without_losing_invoice_number_text(number, issue_date, amount, expected):
-    assert business_key(number, issue_date, amount) == expected
+def test_legacy_business_key_keeps_the_old_format(number, issue_date, amount, expected):
+    # 只用来识别 2026-09-28 之前财务已解除的疑似重复。
+    assert legacy_business_key(number, issue_date, amount) == expected
+
+
+@pytest.mark.parametrize(
+    "number, code, expected",
+    [
+        ("26322000057538912810", "", "26322000057538912810"),
+        ("26322000057538912810", "044001900111", "26322000057538912810"),
+        (" 000123 ", "044001900111", "044001900111-000123"),
+        ("\uff10\uff10\uff10\uff11\uff12\uff13", None, "000123"),
+        ("ab 12", None, "AB12"),
+    ],
+)
+def test_business_key_is_the_invoice_number(number, code, expected):
+    # 决定（2026-09-24）：全电发票只看号码，老版发票看代码+号码；日期、金额不参与。
+    assert business_key(number, code) == expected
+
+
+@pytest.mark.parametrize("number", ["", "   ", None])
+def test_business_key_needs_an_invoice_number(number):
+    assert business_key(number, "044001900111") is None
+
+
+def test_same_invoice_compares_codes_only_when_both_are_known():
+    assert same_invoice("000123", "A1", "000123", "a1")
+    assert not same_invoice("000123", "A1", "000123", "B2")
+    assert same_invoice("000123", "", "000123", "B2")
+    assert same_invoice("26322000057538912810", "A1", "26322000057538912810", "B2")
+    assert not same_invoice("000123", "", "000124", "")
+    assert not same_invoice("", "", "", "")
 
 
 @pytest.mark.parametrize(
@@ -297,8 +329,8 @@ def test_business_key_normalizes_without_losing_invoice_number_text(number, issu
         ("2632", "2026-07-14", "Infinity"),
     ],
 )
-def test_business_key_returns_none_for_missing_or_invalid_parts(number, issue_date, amount):
-    assert business_key(number, issue_date, amount) is None
+def test_legacy_business_key_returns_none_for_missing_or_invalid_parts(number, issue_date, amount):
+    assert legacy_business_key(number, issue_date, amount) is None
 
 
 def test_amount_difference_uses_two_cent_tolerance_and_signed_decimal():

@@ -14,7 +14,7 @@ LIST_LIMIT = 500
 PAGE_SIZE = 100
 FIELDS = [
     "name", "batch", "recognition_status", "invoice_category", "project_name", "issue_date",
-    "invoice_number", "amount_before_tax", "tax_amount", "total_amount", "expense_description",
+    "invoice_number", "invoice_code", "amount_before_tax", "tax_amount", "total_amount", "expense_description",
     "request", "duplicate_of", "duplicate_reason", "processing_error", "original_filename",
     "owner", "modified",
 ]

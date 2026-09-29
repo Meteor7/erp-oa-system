@@ -472,7 +472,8 @@ def test_manual_money_presence_overrides_ocr_presence_and_stays_internal(env):
     assert all("manual-field-presence:" not in item for item in json.loads(cleared["field_warnings"]))
 
 
-def test_missing_ocr_total_does_not_create_zero_value_duplicate_key(env):
+def test_missing_ocr_total_no_longer_hides_a_duplicate_number(env):
+    # 修复（2026-09-28）：查重只看发票号码，合计没识别出来也照样查重。
     env.add_batch()
     env.add_record(
         name="INV-OLD-ZERO",
@@ -489,12 +490,16 @@ def test_missing_ocr_total_does_not_create_zero_value_duplicate_key(env):
         total_amount=Decimal("0.00"),
         ocr_payload=json.dumps({"fields": {"total_amount": None}}),
     )
-    assert service._business_duplicate(record) == (None, None)
+    key, duplicate = service._business_duplicate(record)
+    assert key == "000123" and duplicate["name"] == "INV-OLD-ZERO"
 
 
 def test_confirm_allows_missing_fields_but_stamps_server_audit(env):
     env.add_batch(); record = env.add_record(invoice_number="", issue_date=None, total_amount=None)
-    result = service.confirm_invoice(record.name, {"invoice_category": "电子发票（普通发票）"})
+    # 修复（2026-09-28）：没有发票号码不能确认；其余字段仍可以空着。
+    with pytest.raises(ValidationError, match="发票号码"):
+        service.confirm_invoice(record.name, {"invoice_category": "电子发票（普通发票）"})
+    result = service.confirm_invoice(record.name, {"invoice_category": "电子发票（普通发票）", "invoice_number": "000999"})
     assert result["recognition_status"] == "已确认" and record.confirmed_by == "alice@example.com" and record.confirmed_on == datetime(2026, 7, 21, 9, 0, 0)
 
 
@@ -518,7 +523,7 @@ def test_confirm_detects_business_duplicate_under_lock(env):
     assert result["conflict"]["duplicate_of"] == prior.name
     assert current.duplicate_of == prior.name
     assert any(
-        key == service._lock_key("business", "0001|2026-07-14|35.98")
+        key == service._lock_key("business", "0001")
         for key, _kwargs in env.locks
     )
 
@@ -703,7 +708,7 @@ def test_job_business_duplicate_is_marked_under_business_lock(env, monkeypatch):
     assert result["recognition_status"] == "疑似重复"
     assert record.duplicate_of == "INV-OLD"
     assert any(
-        key == service._lock_key("business", "000123|2026-07-14|106.00")
+        key == service._lock_key("business", "000123")
         for key, _kwargs in env.locks
     )
 
@@ -822,7 +827,7 @@ def test_confirm_holds_business_lock_for_top_level_auto_commit(env):
     service.confirm_invoice(record.name)
     assert record.recognition_status == "已确认"
     assert env.commits == 0
-    key = service._lock_key("business", "0009|2026-07-14|9.00")
+    key = service._lock_key("business", "0009")
     assert key in env.active_locks
     env.db.commit()
     assert key not in env.active_locks
@@ -1423,10 +1428,10 @@ def test_confirm_duplicate_returns_structured_conflict_without_hidden_commit(env
 
 
 def test_duplicate_override_uses_full_sha256_marker(env):
-    key = "0001|2026-07-14|35.98"
+    key = "044001900111-0001"
     prefix = service._resolution_prefix(key)
     assert hashlib.sha256(key.encode("utf-8")).hexdigest() in prefix
-    assert prefix.startswith("duplicate-override:v1:")
+    assert prefix.startswith("duplicate-override:v2:")
 
 
 @pytest.mark.parametrize(
@@ -1629,7 +1634,7 @@ def test_recompute_batch_owns_site_scoped_batch_lock_until_commit(env):
 
 def test_batch_recompute_observes_record_change_before_locked_query(env):
     batch = env.add_batch()
-    first = env.add_record(name="INV-1", recognition_status="待确认")
+    first = env.add_record(name="INV-1", recognition_status="待确认", invoice_number="N-1")
     second = env.add_record(name="INV-2", recognition_status="待确认")
     key = service._lock_key("batch", batch.name)
     env.lock_hooks[key] = lambda: second.__setitem__("recognition_status", "已确认")
@@ -2087,13 +2092,14 @@ def test_register_file_decisions_use_current_batch_file_count_and_sha_reads(env)
 
 def test_web_terminal_state_defers_batch_aggregate_until_record_commit(env):
     batch = env.add_batch()
-    record = env.add_record(recognition_status="待确认")
+    record = env.add_record(recognition_status="待确认", invoice_number="N-1")
 
     result = service.confirm_invoice(record.name)
 
     assert result["recognition_status"] == "已确认"
     assert batch.confirmed_count == 0
-    assert not any(call[:2] == ("get_values", service.RECORD_DOCTYPE) for call in env.current_read_calls)
+    # 确认时按发票号码查重会读发票表（2026-09-28）；这里只检查批次汇总没有在事务里做。
+    assert not any(call[:2] == ("get_values", service.RECORD_DOCTYPE) and "invoice_number" not in str(call[2:]) for call in env.current_read_calls)
     env.db.commit()
     _run_queued_batch_recomputes(env)
     assert batch.confirmed_count == 1
@@ -2104,7 +2110,7 @@ def test_web_terminal_state_defers_batch_aggregate_until_record_commit(env):
 
 def test_two_record_after_commit_aggregates_converge_to_final_counts(env):
     batch = env.add_batch()
-    first = env.add_record(name="INV-FIRST", recognition_status="待确认")
+    first = env.add_record(name="INV-FIRST", recognition_status="待确认", invoice_number="N-FIRST")
     second = env.add_record(name="INV-SECOND", recognition_status="待确认")
 
     service.confirm_invoice(first.name)
@@ -2136,7 +2142,7 @@ def test_worker_claim_uses_current_record_read_after_mvcc_snapshot(env, monkeypa
 
 def test_after_commit_aggregate_only_enqueues_independent_job(env, monkeypatch):
     batch = env.add_batch()
-    record = env.add_record(recognition_status="待确认")
+    record = env.add_record(recognition_status="待确认", invoice_number="N-1")
     service.confirm_invoice(record.name)
     recompute = Mock(side_effect=RuntimeError("database busy"))
     monkeypatch.setattr(service, "recompute_batch", recompute)
@@ -3431,3 +3437,55 @@ def test_serialized_workbench_record_exposes_supplemental_attachments(
             "original_filename": "行程单.pdf",
         }
     ]
+
+
+# ---------------------------------------------------------------- 模块 3：发票查重（2026-09-28）
+
+def test_same_number_is_a_duplicate_even_after_editing_date_and_total(env):
+    # R3-49-1：原来改一下开票日期或金额就能把同一张发票报两次。
+    env.add_batch()
+    env.add_record(name="INV-OLD", recognition_status="已确认", invoice_number="26322000057538912810", issue_date="2026-07-14", total_amount=Decimal("35.98"))
+    record = env.add_record(name="INV-NEW", invoice_number=" 2632200005753891281\uff10 ", issue_date="2026-07-15", total_amount=Decimal("99.00"))
+    result = service.confirm_invoice(record.name)
+    assert result["recognition_status"] == "疑似重复"
+    assert record.duplicate_of == "INV-OLD"
+    assert "开票日期或合计不同" in record.duplicate_reason
+
+
+def test_old_style_invoices_with_different_codes_are_different_invoices(env):
+    env.add_batch()
+    env.add_record(name="INV-OLD", recognition_status="已确认", invoice_number="00012345", invoice_code="044001900111")
+    record = env.add_record(name="INV-NEW", invoice_number="00012345", invoice_code="044001900222", issue_date="2026-07-14", total_amount=Decimal("10.00"))
+    assert service.confirm_invoice(record.name)["recognition_status"] == "已确认"
+
+
+def test_old_style_invoice_without_a_recognised_code_is_flagged(env):
+    env.add_batch()
+    env.add_record(name="INV-OLD", recognition_status="已确认", invoice_number="00012345", invoice_code="044001900111", issue_date="2026-07-14", total_amount=Decimal("10.00"))
+    record = env.add_record(name="INV-NEW", invoice_number="00012345", invoice_code="", issue_date="2026-07-14", total_amount=Decimal("10.00"))
+    result = service.confirm_invoice(record.name)
+    assert result["recognition_status"] == "疑似重复"
+    assert "开票日期和合计也相同" in record.duplicate_reason
+
+
+def test_confirm_requires_an_invoice_number(env):
+    # 第一轮 #7：号码为空时原来跳过查重、照样确认。
+    env.add_batch(); record = env.add_record(invoice_number="  ")
+    with pytest.raises(ValidationError, match="发票号码"):
+        service.confirm_invoice(record.name)
+    assert record.recognition_status == "待确认"
+
+
+def test_invoice_number_and_code_are_normalized_when_edited(env):
+    env.add_batch(); record = env.add_record()
+    result = service.update_invoice(record.name, {"invoice_number": " ab \uff11\uff123 ", "invoice_code": "\uff10\uff14\uff14 001"})
+    assert record.invoice_number == "AB123" and record.invoice_code == "044001"
+    assert result["invoice_code"] == "044001"
+
+
+def test_duplicates_resolved_before_the_rule_change_stay_resolved(env):
+    env.add_batch()
+    env.add_record(name="INV-OLD", recognition_status="已确认", invoice_number="0001", issue_date="2026-07-14", total_amount=Decimal("35.98"))
+    legacy = service._legacy_resolution_prefix("0001|2026-07-14|35.98")
+    record = env.add_record(name="INV-NEW", invoice_number="0001", issue_date="2026-07-14", total_amount=Decimal("35.98"), duplicate_reason=legacy + "财务已核对")
+    assert service.confirm_invoice(record.name)["recognition_status"] == "已确认"

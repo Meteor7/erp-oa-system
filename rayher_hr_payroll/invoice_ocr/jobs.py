@@ -52,18 +52,15 @@ def _save_success(record, payload: dict):
     service._set(record, "processing_claim_id", "")
     service._set(record, "duplicate_of", "")
     service._set(record, "duplicate_reason", "")
+    # 修复（2026-09-28）：识别结果入库时按发票号码查重（老版发票含代码），日期、金额不参与。
     key, _duplicate = service._business_duplicate(record)
     if key:
-        with service._transaction_lock("business", key):
+        with service._transaction_lock("business", service._business_lock_key(record)):
             _, duplicate = service._business_duplicate(record, current=True)
             if duplicate:
                 service._set(record, "recognition_status", "疑似重复")
                 service._set(record, "duplicate_of", service._get(duplicate, "name"))
-                service._set(
-                    record,
-                    "duplicate_reason",
-                    "发票号码、开票日期和合计金额与已确认发票相同",
-                )
+                service._set(record, "duplicate_reason", service.duplicate_reason(record, duplicate))
             else:
                 service._set(record, "recognition_status", "待确认")
             service._save(record)
