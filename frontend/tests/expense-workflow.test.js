@@ -52,7 +52,7 @@ test('workflow API wrappers send the synchronized backend payload', async () => 
     },
     { action: 'action_request', args: { name: 'OA-1', action: 'reject', note: 'Fix it', reject_target: 'applicant' } },
     { action: 'add_sign_request', args: { name: 'OA-1', approver: 'finance@example.com', position: 'before', opinion: 'Review tax' } },
-    { action: 'list_approval_people', args: { query: 'fin', limit: 20 } },
+    { action: 'list_approval_people', args: { query: 'fin', limit: 20, name: '' } },
     { action: 'delete_expense_attachment', args: { name: 'OA-1', attachment: 'ATT-1' } },
   ]);
 });

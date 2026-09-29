@@ -2428,6 +2428,7 @@ def test_request_capabilities_are_server_authoritative_for_finance(monkeypatch):
         "can_approve": False,
         "can_reject": True,
         "can_add_sign": True,
+        "can_add_sign_after": True,
         "can_edit_expense_items": True,
         "classification_ready": False,
         "is_override_actor": False,
@@ -2828,6 +2829,7 @@ def test_override_capabilities_expose_finance_classification_and_action_scope(mo
         "can_approve": False,
         "can_reject": True,
         "can_add_sign": True,
+        "can_add_sign_after": True,
         "can_edit_expense_items": True,
         "classification_ready": False,
         "is_override_actor": True,
@@ -3835,3 +3837,103 @@ def test_expense_reports_cannot_be_widened_by_the_employee_filter(monkeypatch):
     records = oa_entry.list_expense_approval_records(view="all", employee="EMP-2")
     assert {row["request_name"] for row in stats["rows"]} == {"REQ-BOB"}
     assert {row["request_name"] for row in records["records"]} == {"REQ-BOB"}
+
+
+
+def _handle_step(index, key, label, status, approver):
+    step = _workflow_step(index, key, label, status, approver)
+    step.mode = "handle"
+    return step
+
+
+def test_payment_step_allows_add_sign_before_only_and_the_new_step_is_pending():
+    # 决定 D6：付款节点只能前加签；前加签的节点是审批节点，状态为待审批。
+    base = _handle_step(1, "pay", "出纳确认付款", oa_entry.STATUS_WAIT_HANDLE, "cashier@example.com")
+    doc = _dynamic_workflow_doc([base], 1)
+    with pytest.raises(ValidationError, match="前面加签"):
+        oa_entry._insert_add_sign_step(doc, base, "user-a@example.com", "after", "check", "cashier@example.com")
+    inserted = oa_entry._insert_add_sign_step(doc, base, "user-a@example.com", "before", "check", "cashier@example.com")
+    assert inserted.status == oa_entry.STATUS_PENDING
+    assert doc.workflow_status == oa_entry.STATUS_PENDING
+    assert doc.steps[1].step_key == "pay" and doc.steps[1].status == oa_entry.STATUS_WAIT_FLOW
+
+
+def test_contract_delivery_step_cannot_add_sign():
+    # 审查 E1（决定 D9）。
+    base = _workflow_step(1, "delivery", "合同交期确认", oa_entry.STATUS_PENDING, "pmc@example.com", origin="contract_delivery")
+    doc = _dynamic_workflow_doc([base], 1)
+    with pytest.raises(ValidationError, match="合同交期"):
+        oa_entry._insert_add_sign_step(doc, base, "user-a@example.com", "before", "check", "pmc@example.com")
+    assert oa_entry._is_contract_delivery_step(base) is True
+
+
+def test_payment_is_refused_while_an_old_after_sign_step_is_open(monkeypatch):
+    # 审查 X1-5：旧数据里付款节点后面挂着加签节点时，不能直接置为已付款。
+    environment = _install_request_environment(monkeypatch)
+    pay = _handle_step(1, "pay", "出纳确认付款", oa_entry.STATUS_WAIT_HANDLE, "cashier@example.com")
+    orphan = _workflow_step(2, "added", "加签：x", oa_entry.STATUS_WAIT_FLOW, "x@example.com", origin="add_sign")
+    doc = _dynamic_workflow_doc([pay, orphan], 1)
+    doc.workflow_status = oa_entry.STATUS_WAIT_HANDLE
+    object.__setattr__(doc, "environment", environment)
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["cashier@example.com"])
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"cashier@example.com"})
+    with pytest.raises(ValidationError, match="加签"):
+        oa_entry.action_request(doc.name, "approve", "paid")
+    assert pay.status == oa_entry.STATUS_WAIT_HANDLE
+
+
+def test_add_sign_refuses_the_applicant_and_keeps_the_callers_expense_summary(monkeypatch):
+    # 审查 #6：不能把申请人加为审批人；审查 #4：费用明细在改节点之前取好。
+    environment = _install_request_environment(monkeypatch)
+    steps = [_workflow_step(1, "step-1", "manager", oa_entry.STATUS_PENDING, "manager@example.com")]
+    doc = _dynamic_workflow_doc(steps, 1)
+    object.__setattr__(doc, "owner", "alice@example.com")
+    object.__setattr__(doc, "environment", environment)
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["manager@example.com"])
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"manager@example.com"})
+    monkeypatch.setattr(oa_entry, "_resolve_add_sign_approver", lambda value: value, raising=False)
+    with pytest.raises(ValidationError, match="申请人"):
+        oa_entry.add_sign_request(doc.name, "alice@example.com", "before", "please review")
+
+    order = []
+    monkeypatch.setattr(oa_entry, "_with_expense_attachments", lambda current, lines: order.append("lines") or ["LINES"])
+    original_insert = oa_entry._insert_add_sign_step
+    monkeypatch.setattr(oa_entry, "_insert_add_sign_step", lambda *args: order.append("insert") or original_insert(*args))
+    summaries = []
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda current, authorized_expense_lines=None: summaries.append(authorized_expense_lines) or {})
+    oa_entry.add_sign_request(doc.name, "user-a@example.com", "before", "please review")
+    assert order == ["lines", "insert"]
+    assert summaries == [["LINES"]]
+
+
+def test_approval_people_lookup_is_for_the_current_approver_and_active_staff(monkeypatch):
+    # 审查 #7（决定 D8）。
+    environment = _install_request_environment(monkeypatch)
+    steps = [_workflow_step(1, "step-1", "manager", oa_entry.STATUS_PENDING, "manager@example.com")]
+    doc = _dynamic_workflow_doc(steps, 1)
+    object.__setattr__(doc, "owner", "alice@example.com")
+    object.__setattr__(doc, "environment", environment)
+    environment.committed[doc.name] = doc
+    with pytest.raises(ValidationError):
+        oa_entry.list_approval_people("a")
+    monkeypatch.setattr(oa_entry, "_can_act_on_current_step", lambda current, user=None: False)
+    with pytest.raises(ValidationError):
+        oa_entry.list_approval_people("a", name=doc.name)
+    monkeypatch.setattr(oa_entry, "_can_act_on_current_step", lambda current, user=None: True)
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"manager@example.com"})
+    calls = []
+
+    def get_all(doctype, filters=None, **kwargs):
+        calls.append((doctype, filters))
+        if doctype == "Employee":
+            return ["alice@example.com", "bob@example.com", "manager@example.com"]
+        return [{"name": name, "full_name": name} for name in filters["name"][1]]
+
+    monkeypatch.setattr(frappe_stub, "get_all", get_all, raising=False)
+    people = oa_entry.list_approval_people("", name=doc.name)
+    assert [row["user"] for row in people] == ["bob@example.com"]
+    assert calls[0] == ("Employee", {"status": "Active", "user_id": ["is", "set"]})

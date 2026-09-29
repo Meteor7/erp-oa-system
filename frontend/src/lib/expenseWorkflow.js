@@ -104,8 +104,9 @@ export function addSignRequest(name, approver, position, opinion, { api = oaApi,
   }, { signal });
 }
 
-export function listApprovalPeople(query = '', { api = oaApi, signal, limit = 20 } = {}) {
-  return api('list_approval_people', { query: String(query || '').trim(), limit }, { signal });
+export function listApprovalPeople(query = '', { api = oaApi, signal, limit = 20, name = '' } = {}) {
+  // 只有这张单据当前节点的审批人能查可加签的人（服务端按 name 校验）。
+  return api('list_approval_people', { query: String(query || '').trim(), limit, name: String(name || '').trim() }, { signal });
 }
 
 export async function fetchExpenseAttachmentPreview(attachment, {

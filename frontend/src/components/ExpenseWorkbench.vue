@@ -642,7 +642,7 @@ async function submitReject() {
 }
 async function loadPeople() {
   try {
-    approvalPeople.value = await listApprovalPeople(peopleQuery.value);
+    approvalPeople.value = await listApprovalPeople(peopleQuery.value, { name: selectedRequest.value?.name });
   } catch (error) {
     errorMessage.value = apiError(error, '\u5ba1\u6279\u4eba\u52a0\u8f7d\u5931\u8d25');
   }
@@ -1017,7 +1017,7 @@ watch(() => requestForm.invoice_handling_mode, (mode) => {
     <div class="space-y-4 p-5">
       <label class="block text-xs text-gray-500">&#x641C;&#x7D22;&#x5BA1;&#x6279;&#x4EBA;<div class="mt-1 flex gap-2"><input v-model="peopleQuery" class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-sm" placeholder="&#x59D3;&#x540D;&#x6216;&#x90AE;&#x7BB1;" @keyup.enter="loadPeople" /><Button variant="subtle" @click="loadPeople">&#x641C;&#x7D22;</Button></div></label>
       <label class="block text-xs text-gray-500">&#x52A0;&#x7B7E;&#x5BA1;&#x6279;&#x4EBA;<select v-model="addSignForm.approver" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"><option value="">&#x8BF7;&#x9009;&#x62E9;</option><option v-for="person in approvalPeople" :key="person.user" :value="person.user">{{ person.label }} ({{ person.user }})</option></select></label>
-      <fieldset><legend class="text-xs text-gray-500">&#x52A0;&#x7B7E;&#x4F4D;&#x7F6E;</legend><div class="mt-2 flex gap-6 text-sm"><label class="flex items-center gap-2"><input v-model="addSignForm.position" type="radio" value="before" />&#x5728;&#x6211;&#x4E4B;&#x524D;</label><label class="flex items-center gap-2"><input v-model="addSignForm.position" type="radio" value="after" />&#x5728;&#x6211;&#x4E4B;&#x540E;</label></div></fieldset>
+      <fieldset><legend class="text-xs text-gray-500">&#x52A0;&#x7B7E;&#x4F4D;&#x7F6E;</legend><div class="mt-2 flex gap-6 text-sm"><label class="flex items-center gap-2"><input v-model="addSignForm.position" type="radio" value="before" />&#x5728;&#x6211;&#x4E4B;&#x524D;</label><label v-if="selectedRequest.can_add_sign_after" class="flex items-center gap-2"><input v-model="addSignForm.position" type="radio" value="after" />&#x5728;&#x6211;&#x4E4B;&#x540E;</label></div><p v-if="!selectedRequest.can_add_sign_after" class="mt-1 text-xs text-gray-500">付款节点只能在前面加签：被加签人审批后才能确认付款。</p></fieldset>
       <label class="block text-xs text-gray-500">&#x52A0;&#x7B7E;&#x610F;&#x89C1;&#xFF08;&#x5FC5;&#x586B;&#xFF09;<textarea v-model="addSignForm.opinion" rows="4" maxlength="1000" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="&#x586B;&#x5199;&#x52A0;&#x7B7E;&#x539F;&#x56E0;&#x6216;&#x8981;&#x6C42;"></textarea></label>
     </div>
     <footer class="flex justify-end gap-2 border-t bg-gray-50 px-5 py-3"><Button variant="subtle" @click="showAddSignDialog = false">&#x53D6;&#x6D88;</Button><Button variant="solid" :loading="saving" @click="submitAddSign">&#x786E;&#x8BA4;&#x52A0;&#x7B7E;</Button></footer>

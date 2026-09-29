@@ -1046,7 +1046,9 @@ def _request_capabilities(doc, user=None):
     return {
         "can_approve": can_approve,
         "can_reject": bool(can_act),
-        "can_add_sign": bool(can_act),
+        # 合同交期确认阶段不能加签；付款（经办）节点只能前加签（修复 2026-09-29，决定 D6/D9）。
+        "can_add_sign": bool(can_act and not _is_contract_delivery_step(step)),
+        "can_add_sign_after": bool(can_act and not _is_contract_delivery_step(step) and getattr(step, "mode", None) != "handle"),
         "can_edit_expense_items": finance_edit,
         "classification_ready": classification_ready,
         "is_override_actor": is_override,
@@ -4153,6 +4155,9 @@ def action_request(name, action="approve", note=None, reject_target=None):
             return _summarize_doc(doc, authorized_expense_lines)
         done_status = STATUS_HANDLED if step.mode == "handle" else STATUS_APPROVED
         from_status = doc.workflow_status
+        if step.mode == "handle" and _unresolved_add_sign_after(doc, step):
+            # 旧数据里付款节点后面的加签节点还没处理，不能直接置为已付款（修复 2026-09-29，审查 X1-5）。
+            frappe.throw(frappe._("付款节点后面还有未处理的加签节点，请联系管理员处理后再确认付款。"))
         if step.mode == "handle" and doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
             _validate_procurement_payment_release(doc)
         _set_step_action(step, done_status, actor, note)
@@ -4912,6 +4917,31 @@ def _approval_step_values(step):
     }
 
 
+def _is_contract_delivery_step(step):
+    return step is not None and _clean(getattr(step, "origin", None)) == "contract_delivery"
+
+
+def _applicant_users(doc):
+    """申请人本人的账号：单据创建人和申请人员工档案关联的账号。"""
+    users = {_clean(getattr(doc, "owner", None))}
+    employee = _clean(getattr(doc, "employee", None))
+    if employee:
+        users.add(_clean(frappe.db.get_value("Employee", employee, "user_id")))
+    return {user for user in users if user}
+
+
+def _unresolved_add_sign_after(doc, step):
+    """付款节点之后还没处理的加签节点（旧数据里的"后加签"）。"""
+    index = int(getattr(step, "step_index", 0) or 0)
+    unresolved = {STATUS_PENDING, STATUS_WAIT_HANDLE, STATUS_WAIT_FLOW}
+    return [
+        row for row in (getattr(doc, "steps", []) or [])
+        if int(getattr(row, "step_index", 0) or 0) > index
+        and _clean(getattr(row, "origin", None)) == "add_sign"
+        and getattr(row, "status", None) in unresolved
+    ]
+
+
 def _insert_add_sign_step(doc, current_step, approver, position, opinion, actor):
     approver = _bounded_optional_text(approver, "Add-sign approver", 140)
     opinion = _bounded_optional_text(opinion, "Add-sign opinion", 1000)
@@ -4922,6 +4952,14 @@ def _insert_add_sign_step(doc, current_step, approver, position, opinion, actor)
         frappe.throw(frappe._("Add-sign approver and opinion are required."))
     if approver == _clean(actor):
         frappe.throw(frappe._("You cannot add yourself as an approver."))
+    # 修复（2026-09-29，审查 E1，决定 D9）：合同交期确认阶段的加签节点不走交期确认的规则，
+    # 在加签节点驳回会把执行中的采购申请退回草稿，最后一步通过时新交期也不生效。
+    if _is_contract_delivery_step(current_step):
+        frappe.throw(frappe._("合同交期确认阶段不能加签。"))
+    # 修复（2026-09-29，审查 X1-5，决定 D6）：付款（经办）节点确认付款时单据直接变成已付款，
+    # 排在它后面的加签节点再也没人处理。付款节点只能前加签：被加签人先批，批完才能付款。
+    if position == "after" and getattr(current_step, "mode", None) == "handle":
+        frappe.throw(frappe._("付款节点只能在前面加签：被加签人审批后才能确认付款。"))
     rows = sorted(list(getattr(doc, "steps", []) or []), key=lambda row: int(getattr(row, "step_index", 0) or 0))
     if sum(1 for step in rows if _clean(getattr(step, "origin", None)) == "add_sign") >= MAX_ADD_SIGN_OPERATIONS:
         frappe.throw(frappe._("Each request supports at most 20 add-sign operations."))
@@ -4936,7 +4974,8 @@ def _insert_add_sign_step(doc, current_step, approver, position, opinion, actor)
     if position == "before":
         current_step.status = STATUS_WAIT_FLOW
         insert_at = current_position
-        new_status = STATUS_WAIT_HANDLE if current_step.mode == "handle" else STATUS_PENDING
+        # 加签节点都是审批节点（mode=approve），状态也应是待审批；原来前加签到付款节点时写成了待办理。
+        new_status = STATUS_PENDING
     else:
         insert_at = current_position + 1
         new_status = STATUS_WAIT_FLOW
@@ -4993,13 +5032,27 @@ def _resolve_add_sign_approver(value):
 
 
 @frappe.whitelist()
-def list_approval_people(query="", limit=20):
+def list_approval_people(query="", limit=20, name=None):
     query = _bounded_optional_text(query, "Search", 100)
     try:
         limit = max(1, min(int(limit or 20), 50))
     except (TypeError, ValueError):
         frappe.throw(frappe._("Search limit is invalid."))
-    filters = {"enabled": 1, "user_type": "System User"}
+    # 修复（2026-09-29，审查 #7，决定 D8）：原来任何登录用户都能用它列出全公司账号。
+    # 现在只有这张单据当前节点的审批人能查，并且只列在职员工的账号。
+    request_name = _bounded_optional_text(name, "Request", 140)
+    if not request_name:
+        frappe.throw(frappe._("请从待审批的单据上加签。"))
+    doc = _load_request(request_name)
+    require_request_type_access(doc.request_type)
+    if not _can_act_on_current_step(doc):
+        frappe.throw(frappe._("Only the current approver may add an approver."))
+    active_users = sorted({
+        _clean(user) for user in frappe.get_all(
+            "Employee", filters={"status": "Active", "user_id": ["is", "set"]}, pluck="user_id",
+        ) if _clean(user)
+    } - _applicant_users(doc))
+    filters = {"enabled": 1, "user_type": "System User", "name": ["in", active_users or ["__none__"]]}
     or_filters = None
     if query:
         like = "%" + query + "%"
@@ -5029,7 +5082,15 @@ def add_sign_request(name, approver, position, opinion):
         actor_names = _actor_names()
         if resolved in actor_names:
             frappe.throw(frappe._("You cannot add yourself as an approver."))
+        # 修复（2026-09-29，审查 #6）：不能把申请人本人加成审批人。
+        if resolved in _applicant_users(doc):
+            frappe.throw(frappe._("不能把申请人本人加为审批人。"))
         actor = _clean(getattr(frappe.session, "user", None)) or sorted(actor_names)[0]
+        # 修复（2026-09-29，审查 #4）：前加签后当前节点换成被加签人，操作人不再有读附件的权限，
+        # 保存后再取费用明细会报"无权访问"并整体回滚。和 action_request 一样，先取好再改。
+        authorized_expense_lines = _with_expense_attachments(
+            doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
+        )
         inserted = _insert_add_sign_step(doc, step, resolved, position, opinion, actor)
         _append_request_event(
             doc,
@@ -5041,7 +5102,7 @@ def add_sign_request(name, approver, position, opinion):
         )
         _save_document(doc)
         _sync_assignments_after_save(doc)
-        return _summarize_doc(doc)
+        return _summarize_doc(doc, authorized_expense_lines)
 
 
 def _workflow_metadata(doc):
