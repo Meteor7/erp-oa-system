@@ -73,3 +73,23 @@ def test_leave_without_department_or_type_is_still_counted():
 def test_days_uses_eight_hour_workday():
     assert ov.days(12) == 1.5
     assert ov.days(None) == 0
+
+
+def test_attendance_rows_split_cross_month_requests_by_day(monkeypatch):
+    # 审查 #56 P3：9 月 30 日到 10 月 2 日的假原来全记在 9 月。
+    import json as _json
+    rows = [
+        {"request_type": att.REQUEST_LEAVE, "leave_type": "事假", "duration_hours": 20, "department": "研发部",
+         "employee": "E1", "employee_name": "甲", "from_date": "2026-09-30", "to_date": "2026-10-02",
+         "attendance_days": _json.dumps([{"work_date": "2026-09-30", "hours": 8}, {"work_date": "2026-10-01", "hours": 8},
+                                          {"work_date": "2026-10-02", "hours": 4}])},
+        {"request_type": att.REQUEST_LEAVE, "leave_type": "事假", "duration_hours": 8, "department": "研发部",
+         "employee": "E2", "employee_name": "乙", "from_date": "2026-09-10", "to_date": "2026-09-10", "attendance_days": ""},
+    ]
+    monkeypatch.setattr(ov.frappe, "get_all", lambda *args, **kwargs: [dict(row) for row in rows], raising=False)
+    september = ov._attendance_rows([(2026, 9)])
+    october = ov._attendance_rows([(2026, 10)])
+    assert sorted((row["employee"], row["duration_hours"]) for row in september) == [("E1", 8.0), ("E2", 8)]
+    assert [(row["employee"], row["duration_hours"]) for row in october] == [("E1", 12.0)]
+    both = ov._attendance_rows([(2026, 9), (2026, 10)])
+    assert sorted((row["employee"], row["duration_hours"]) for row in both) == [("E1", 20.0), ("E2", 8)]

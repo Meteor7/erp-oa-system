@@ -336,16 +336,33 @@ def _away_today(department=None):
 
 
 def _attendance_rows(months, department=None):
+    """已批准的请假、加班、调休；跨月的申请按天拆开，只算落在所选月份里的小时。
+
+    修复（2026-09-29，审查 #56 P3）：原来按开始日期归月，一张 9 月 30 日到 10 月 2 日的假
+    全部记在 9 月。现在按每天的明细分月；只有起止日期的旧申请仍按开始日期归月。
+    """
     start, end = month_range(months)
     filters = {"request_type": ["in", list(ATTENDANCE_TYPES)],
                "workflow_status": ["in", list(attendance_requests.COMPLETED)],
-               "from_date": ["between", [start, end]]}
+               "from_date": ["<=", end], "to_date": [">=", start]}
     if department:
         filters["department"] = department
-    return frappe.get_all("OA Approval Request", filters=filters,
+    rows = frappe.get_all("OA Approval Request", filters=filters,
                           fields=["request_type", "leave_type", "duration_hours", "department",
-                                  "employee", "employee_name", "from_date"],
+                                  "employee", "employee_name", "from_date", "to_date", "attendance_days"],
                           limit_page_length=0)
+    result = []
+    for row in rows:
+        row = dict(row)
+        if row.get("attendance_days"):
+            hours = attendance_requests.window_hours(row, start, end)
+            if hours <= 0:
+                continue
+            row["duration_hours"] = float(hours)
+        elif not (start <= attendance_requests.as_date(row.get("from_date")) <= end):
+            continue
+        result.append(row)
+    return result
 
 
 @frappe.whitelist()
