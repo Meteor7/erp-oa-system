@@ -85,8 +85,17 @@ def _clean(value):
     return str(value or "").strip()
 
 
+# 笼统的旧部门名，需要按花名册/职务细分到具体部门。
+GENERIC_DEPARTMENTS = {"研发部"}
+
+
 def department_for_employee(employee_name, designation="", current_department=""):
     employee = _clean(employee_name)
+    current = _clean(current_department)
+    # 修复（2026-09-29，模块 7，决定 D5）：已经是正式的具体部门就以它为准（人事调岗后
+    # 导入或部门同步不再按旧花名册改回去）；只有空、旧部门名或笼统的"研发部"才按下面规则推断。
+    if current in CANONICAL_DEPARTMENTS and current not in GENERIC_DEPARTMENTS:
+        return current
     if employee in DEPARTMENT_BY_EMPLOYEE:
         return DEPARTMENT_BY_EMPLOYEE[employee]
 
@@ -95,5 +104,4 @@ def department_for_employee(employee_name, designation="", current_department=""
         if keyword.lower() in job_title.lower():
             return department
 
-    current = _clean(current_department)
     return current if current in CANONICAL_DEPARTMENTS else ""

@@ -32,7 +32,8 @@ def test_normalize_record_maps_source_types_and_chart_department_aliases():
     assert record["gender"] == "Male"
     assert record["date_of_birth"] == "1980-01-02"
     assert record["date_of_joining"] == "2024-02-03"
-    assert record["department"] == "销售部"
+    # 决定 D5：文件里已经是正式的具体部门时以文件为准，不再按旧花名册改成销售部。
+    assert record["department"] == "客服部"
     assert record["bank_ac_no"] == "621234"
     assert "default_monthly_salary" not in record
     assert "default_social_insurance_base" not in record

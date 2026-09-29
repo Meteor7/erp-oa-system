@@ -76,3 +76,18 @@ def test_personnel_import_uses_shared_department_mapping():
     })
 
     assert record["department"] == "研发光学部"
+
+
+
+def test_a_current_specific_department_is_kept_over_the_old_roster():
+    # 模块 7（决定 D5）：人事把演示员工132调到研发系统部后，导入和部门同步不能按旧花名册改回研发软件部。
+    assert department_for_employee("演示员工132", "软件组长", "研发系统部") == "研发系统部"
+    assert department_for_employee("演示员工132", "软件组长", "软件部") == "研发软件部"
+    assert department_for_employee("演示员工132", "软件组长", "研发部") == "研发软件部"
+
+
+def test_the_hard_coded_organization_sync_is_gone():
+    from rayher_hr_payroll import organization_master_data
+
+    assert not hasattr(organization_master_data, "sync_organization_master_data")
+    assert hasattr(organization_master_data, "sync_effective_leaver_statuses")
