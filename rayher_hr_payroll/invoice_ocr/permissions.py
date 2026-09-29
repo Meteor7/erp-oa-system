@@ -115,6 +115,19 @@ def _request_access_context(request, user, *, current=False):
     return request_doc, identity, approvers
 
 
+def _is_involved(request_name, actors):
+    """这张单据抄送给了这些身份，或他们审批、办理过（修复 2026-09-29，审查 R3-57，决定 D3）。"""
+    if not request_name or not actors:
+        return False
+    from rayher_hr_payroll.oa_access import _sql_involvement
+
+    return bool(frappe.db.sql(
+        "SELECT 1 FROM `tabOA Approval Request` WHERE name = %s AND "
+        + _sql_involvement(actors, escape=frappe.db.escape) + " LIMIT 1",
+        (request_name,),
+    ))
+
+
 def _can_read_request(request_name, user, roles=None, *, current=False):
     roles = roles if roles is not None else _roles(user)
     if _is_high_privilege(user, roles):
@@ -128,7 +141,10 @@ def _can_read_request(request_name, user, roles=None, *, current=False):
         return True
     if identity.get("employee") and _get(request, "employee") == identity["employee"]:
         return True
-    return bool(identity["actors"] & approvers)
+    if identity["actors"] & approvers:
+        return True
+    # 抄送人和审批过的人也能看附件。
+    return _is_involved(_get(request, "name"), identity["actors"])
 
 
 def _effective_request(doc, doctype, *, current=False):

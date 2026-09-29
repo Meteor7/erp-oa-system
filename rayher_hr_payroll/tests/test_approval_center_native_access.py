@@ -252,3 +252,22 @@ def test_finance_does_not_read_other_peoples_legacy_expense_drafts(access, monke
     assert module.oa_request_has_permission({**draft, "workflow_status": "待审批"}, "read", "finance@example.com") is None
     procurement_draft = {**draft, "request_type": module.REQUEST_PROCUREMENT_PAYMENT}
     assert module.oa_request_has_permission(procurement_draft, "read", "finance@example.com") is None
+
+
+
+def test_copy_recipients_and_past_approvers_can_read(access, monkeypatch):
+    # 审查 R3-57（决定 D3）：抄送人、审批过的人只读可见；不相干的人仍然看不到。
+    module, _frappe = access
+    monkeypatch.setattr(module, "_actor_names", lambda user, identity=None: {user})
+    doc = {
+        "request_type": module.REQUEST_LEAVE, "owner": "bob@example.com", "employee": "EMP-B",
+        "workflow_status": "已完成", "current_step_index": 0,
+        "copied_to": '[{"label": "人事经理", "user": "hr@example.com"}]',
+        "steps": [{"step_index": 1, "approvers": '["boss@example.com"]', "approved_by": '["boss@example.com"]', "action_by": "boss@example.com"}],
+    }
+    assert module.oa_request_has_permission(doc, "read", "hr@example.com") is None
+    assert module.oa_request_has_permission(doc, "read", "boss@example.com") is None
+    assert module.oa_request_has_permission(doc, "read", "stranger@example.com") is False
+    assert module.oa_request_has_permission(doc, "write", "boss@example.com") is False
+    query = module.oa_request_query("alice@example.com")
+    assert "copied_to" in query and "step.approved_by" in query and "step.action_by" in query

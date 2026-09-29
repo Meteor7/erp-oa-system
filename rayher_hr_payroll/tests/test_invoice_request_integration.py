@@ -1836,14 +1836,20 @@ def _install_report_requests(monkeypatch, docs):
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     connection.create_function("JSON_VALID", 1, lambda value: 1 if value else 0)
-    connection.create_function("JSON_CONTAINS", 2, lambda value, actor: int(json.loads(actor) in json.loads(value)))
-    fields = ["name", "request_type", "workflow_status", "owner", "employee", "purchaser_user", "modified", "current_step_index"]
+    def json_contains(value, candidate):
+        items, wanted = json.loads(value), json.loads(candidate)
+        if isinstance(wanted, dict):
+            return int(any(isinstance(item, dict) and all(item.get(k) == v for k, v in wanted.items()) for item in items))
+        return int(wanted in items)
+
+    connection.create_function("JSON_CONTAINS", 2, json_contains)
+    fields = ["name", "request_type", "workflow_status", "owner", "employee", "purchaser_user", "modified", "current_step_index", "copied_to"]
     connection.execute("CREATE TABLE `tabOA Approval Request` (" + ",".join(fields) + ")")
-    connection.execute("CREATE TABLE `tabOA Approval Step` (parent,parenttype,parentfield,step_index,approvers,approved_by)")
+    connection.execute("CREATE TABLE `tabOA Approval Step` (parent,parenttype,parentfield,step_index,approvers,approved_by,action_by)")
     for doc in docs.values():
-        connection.execute("INSERT INTO `tabOA Approval Request` VALUES (?,?,?,?,?,?,?,?)", [getattr(doc, key, None) for key in fields])
+        connection.execute("INSERT INTO `tabOA Approval Request` VALUES (?,?,?,?,?,?,?,?,?)", [getattr(doc, key, None) for key in fields])
         for step in getattr(doc, "steps", []):
-            connection.execute("INSERT INTO `tabOA Approval Step` VALUES (?,?,?,?,?,?)", [doc.name, "OA Approval Request", "steps", step.step_index, step.approvers, getattr(step, "approved_by", "[]")])
+            connection.execute("INSERT INTO `tabOA Approval Step` VALUES (?,?,?,?,?,?,?)", [doc.name, "OA Approval Request", "steps", step.step_index, step.approvers, getattr(step, "approved_by", "[]"), getattr(step, "action_by", "")])
     def sql(query, values=None, as_dict=False):
         query = re.sub(r"%\((\w+)\)s", r":\1", query)
         return [Row(dict(row)) for row in connection.execute(query.replace("%s", "?"), values or {})]

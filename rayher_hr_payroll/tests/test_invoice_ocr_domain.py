@@ -46,6 +46,10 @@ class FakeDB:
         self.escaped.append(value)
         return "'" + str(value).replace("'", "''") + "'"
 
+    def sql(self, query, values=None, **_kwargs):
+        # 抄送人、审批过的人（模块 6）：这些用例里都没有。
+        return [[1]] if getattr(self, "involved", False) else []
+
     def get_value(self, doctype, name_or_filters, fieldname=None, as_dict=False):
         if doctype == "Employee":
             if isinstance(name_or_filters, dict):
@@ -542,3 +546,14 @@ def test_spoofed_names_do_not_grant_invoice_or_view_log_access(permissions_modul
     assert not permissions.can_read_invoice(frappe.db.records["INV-1"], "ordinary-rd@example.com")
     assert not permissions.can_read_invoice({"doctype": "OA Invoice View Log", "invoice_record": "INV-1"}, "ordinary-rd@example.com")
     assert "approver@example.com" not in permissions.invoice_record_query("ordinary-rd@example.com")
+
+
+
+def test_copy_recipient_or_past_approver_can_read_invoice(permissions_module):
+    # 审查 R3-57（决定 D3）：抄送人和审批过的人能看这张单据的发票附件。
+    permissions, frappe = permissions_module
+    request = {"name": "REQ-1", "owner": "applicant@example.com", "employee": "EMP-A", "workflow_status": "已完成", "current_step_index": 0}
+    frappe.db.requests["REQ-1"] = request
+    assert permissions._can_read_request("REQ-1", "copied@example.com", set()) is False
+    frappe.db.involved = True
+    assert permissions._can_read_request("REQ-1", "copied@example.com", set()) is True

@@ -120,6 +120,35 @@ def _sql_current_step(actors, *, pending=False):
     )
 
 
+def _sql_involvement(actors, escape=None):
+    """抄送给了这个人，或他在任一节点审批、办理过（修复 2026-09-29，审查 R3-57，决定 D3）。
+
+    原来只有申请人、采购经办人、财务和当前审批人能看：抄送人点通知链接提示无权限，
+    主管批完以后也看不到这张单据后来的结果。这两类人现在只读可见。
+    """
+    table = "`tabOA Approval Request`"
+    escape = escape or frappe.db.escape
+    if not actors:
+        return "1=0"
+    copied = [
+        f"JSON_CONTAINS(CASE WHEN JSON_VALID({table}.copied_to) THEN {table}.copied_to ELSE '[]' END, "
+        + escape(json.dumps({"user": actor}, ensure_ascii=False)) + ")"
+        for actor in sorted(actors)
+    ]
+    acted = [
+        "JSON_CONTAINS(CASE WHEN JSON_VALID(step.approved_by) THEN step.approved_by ELSE '[]' END, "
+        + escape(json.dumps(actor, ensure_ascii=False)) + ")"
+        for actor in sorted(actors)
+    ] + [f"step.action_by = {escape(actor)}" for actor in sorted(actors)]
+    return (
+        "(" + " OR ".join(copied) + " OR EXISTS ("
+        "SELECT 1 FROM `tabOA Approval Step` step "
+        f"WHERE step.parent = {table}.name "
+        "AND step.parenttype = 'OA Approval Request' AND step.parentfield = 'steps' "
+        "AND (" + " OR ".join(acted) + ")))"
+    )
+
+
 def _sql_row_scope(user, roles, identity, actors):
     table = "`tabOA Approval Request`"
     if user == "Administrator" or roles & GLOBAL_READ_ROLES:
@@ -140,6 +169,7 @@ def _sql_row_scope(user, roles, identity, actors):
             + f" AND {table}.workflow_status != " + frappe.db.escape(DRAFT_STATUS) + ")"
         )
     clauses.append("(" + _sql_current_step(actors) + ")")
+    clauses.append(_sql_involvement(actors))
     return "(" + " OR ".join(clauses) + ")"
 
 
@@ -186,6 +216,26 @@ def _is_current_approver(doc, actors):
     return False
 
 
+def _is_involved(doc, actors):
+    """Python 版的 _sql_involvement：抄送人，或在任一节点审批、办理过的人。"""
+    if not actors:
+        return False
+    try:
+        copied = json.loads(_get(doc, "copied_to") or "[]") if isinstance(_get(doc, "copied_to"), str) else (_get(doc, "copied_to") or [])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        copied = []
+    for row in copied if isinstance(copied, list) else []:
+        user = row.get("user") if isinstance(row, dict) else row
+        if str(user or "").strip() in actors:
+            return True
+    for step in list(_get(doc, "steps", []) or []):
+        if _parse_approvers(_get(step, "approved_by")) & actors:
+            return True
+        if str(_get(step, "action_by") or "").strip() in actors:
+            return True
+    return False
+
+
 def _is_owner(doc, user, identity):
     if _get(doc, "owner") == user:
         return True
@@ -221,7 +271,8 @@ def _can_read(doc, user, roles, identity):
         return True
     if request_type in PROCUREMENT_REQUEST_TYPES and _get(doc, "purchaser_user") == user:
         return True
-    return _is_current_approver(doc, _actor_names(user, identity))
+    actors = _actor_names(user, identity)
+    return _is_current_approver(doc, actors) or _is_involved(doc, actors)
 
 
 def oa_request_has_permission(doc, ptype=None, user=None):

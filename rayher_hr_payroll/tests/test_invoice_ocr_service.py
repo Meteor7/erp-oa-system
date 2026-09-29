@@ -149,6 +149,13 @@ class FakeDB:
     def __init__(self, environment):
         self.environment = environment
 
+    def escape(self, value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    def sql(self, query, values=None, **_kwargs):
+        # 抄送人、审批过的人（模块 6）：这些用例里都没有。
+        return []
+
     def get_value(self, doctype, filters, fieldname, as_dict=False, **_kwargs):
         if doctype == "File":
             for doc in self.environment.docs[doctype].values():
