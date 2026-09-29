@@ -180,7 +180,10 @@ def test_save_project_keeps_owner_and_project_document_links(monkeypatch):
     frappe.db.exists = lambda *args, **kwargs: False
     frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
     frappe.db.commit = lambda: None
-    frappe.get_all = lambda *args, **kwargs: ["Rayher"]
+    # 报告附件要是本人上传、尚未挂到别处的私有文件（2026-09-29）。
+    frappe.get_all = lambda doctype, *args, **kwargs: (
+        [{"owner": "Administrator", "attached_to_doctype": None, "attached_to_name": None}] if doctype == "File" else ["Rayher"]
+    )
 
     def get_doc(arg, name=None):
         if isinstance(arg, dict):
@@ -342,7 +345,7 @@ def test_all_project_access_can_edit_other_project_without_reassigning(monkeypat
     frappe.get_roles = lambda user=None: ["Employee", "Project Owner", "All Project Access"]
     frappe.session.user = "portfolio@example.com"
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    frappe.db.exists = lambda doctype, name_or_filters=None: doctype == "Project"
+    frappe.db.exists = lambda doctype, name_or_filters=None: doctype == "Project" and isinstance(name_or_filters, str)
     frappe.db.get_value = lambda *args, **kwargs: {
         "project_owner": "owner@example.com",
         "project_owner_name": "Owner",
@@ -403,7 +406,7 @@ def test_project_owner_can_edit_own_project_and_owner_is_preserved(monkeypatch):
     frappe.get_roles = lambda user=None: ["Employee", "Project Owner"]
     frappe.session.user = "owner@example.com"
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    frappe.db.exists = lambda doctype, name_or_filters=None: doctype == "Project"
+    frappe.db.exists = lambda doctype, name_or_filters=None: doctype == "Project" and isinstance(name_or_filters, str)
     frappe.db.get_value = lambda *args, **kwargs: {
         "project_owner": "owner@example.com",
         "project_owner_name": "Owner",
@@ -559,3 +562,71 @@ def test_default_project_seed_preserves_existing_business_state(monkeypatch):
     monkeypatch.setattr(mod, "_save_project_doc", lambda **values: created.append(values["project_code"]))
     mod.ensure_default_projects()
     assert created == ["NEW"]
+
+
+# ---------------------------------------------------------------- 模块 5（2026-09-29）
+
+def _owner_env(monkeypatch, status="Open", files=None, codes=()):
+    mod, frappe = _load_project_entry(monkeypatch)
+    frappe.get_roles = lambda user=None: ["Employee", "Project Owner"]
+    frappe.session.user = "owner@example.com"
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+
+    def exists(doctype, filters=None):
+        if isinstance(filters, dict):
+            return filters.get("rd_project_code") in codes
+        return doctype == "Project" and filters == "RD01"
+
+    frappe.db.exists = exists
+    project = {"project_owner": "owner@example.com", "project_owner_name": "Owner", "status": status,
+               "rd_stage": "资本化", "capitalization_start_date": "2026-01-01", "capitalization_end_date": "2026-12-31",
+               "project_initiation_report": "/private/files/old.pdf"}
+    frappe.db.get_value = lambda doctype, name, fields, as_dict=False: {key: project.get(key) for key in fields}
+    frappe.get_all = lambda doctype, **kwargs: list(files or [])
+    frappe.db.commit = lambda: None
+    captured = {}
+    monkeypatch.setattr(mod, "_save_project_doc", lambda *args, **kwargs: captured.setdefault("call", (args, kwargs)) and "RD01")
+    return mod, captured
+
+
+def test_report_attachment_must_be_the_users_own_private_upload(monkeypatch):
+    # R3-48-1：原来能填任意私有文件地址，之后通过项目报告下载读出别人的文件。
+    mod, _ = _owner_env(monkeypatch, files=[{"owner": "someone@example.com", "attached_to_doctype": "Employee", "attached_to_name": "E1"}])
+    with pytest.raises(RuleError, match="不是您本人"):
+        mod.save_project(project_code="RD01", project_name="P", name="RD01", project_initiation_report="/private/files/salary.xlsx")
+    with pytest.raises(RuleError, match="私有文件"):
+        mod.save_project(project_code="RD01", project_name="P", name="RD01", project_initiation_report="/files/x.pdf")
+    mod, captured = _owner_env(monkeypatch, files=[{"owner": "owner@example.com", "attached_to_doctype": None, "attached_to_name": None}])
+    mod.save_project(project_code="RD01", project_name="P", name="RD01", project_initiation_report="/private/files/mine.pdf")
+    assert captured["call"][1]["project_initiation_report"] == "/private/files/mine.pdf"
+
+
+def test_unchanged_report_attachment_is_not_rechecked(monkeypatch):
+    mod, captured = _owner_env(monkeypatch, files=[])
+    mod.save_project(project_code="RD01", project_name="P", name="RD01", project_initiation_report="/private/files/old.pdf")
+    assert captured["call"]
+
+
+def test_project_codes_are_unique_and_new_projects_do_not_overwrite(monkeypatch):
+    # R3-48-4：编号不唯一，两个同编号项目会让工时填报报"匹配到多个项目"；新增时同名项目被直接覆盖。
+    mod, _ = _owner_env(monkeypatch, codes=("RD02",))
+    with pytest.raises(RuleError, match="编号已被其他项目使用"):
+        mod.save_project(project_code="RD02", project_name="P", name="RD01")
+    mod, frappe = _load_project_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.exists = lambda doctype, filters=None: isinstance(filters, str)
+    frappe.db.get_value = lambda *args, **kwargs: {}
+    frappe.get_all = lambda *args, **kwargs: []
+    with pytest.raises(RuleError, match="不能新增"):
+        mod.save_project(project_code="RD01", project_name="P")
+
+
+def test_owner_cannot_change_stage_or_dates_or_reopen_a_cancelled_project(monkeypatch):
+    mod, captured = _owner_env(monkeypatch)
+    mod.save_project(project_code="RD01", project_name="P", name="RD01", rd_stage="费用化", start_date="2027-01-01", end_date="2027-02-01")
+    kwargs = captured["call"][1]
+    assert kwargs["rd_stage"] == "资本化"
+    assert captured["call"][0][2:4] == ("2026-01-01", "2026-12-31")
+    mod, _ = _owner_env(monkeypatch, status="Cancelled")
+    with pytest.raises(RuleError, match="重新启用"):
+        mod.save_project(project_code="RD01", project_name="P", name="RD01", status="Open")

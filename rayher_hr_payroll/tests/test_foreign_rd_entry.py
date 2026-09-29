@@ -363,3 +363,13 @@ def test_legacy_daily_row_with_zero_occurrence_days_preserves_hours(monkeypatch)
 
     assert monthly[0]["occurrence_days"] == 1.0
     assert monthly[0]["hours"] == 8.0
+
+
+def test_foreign_project_options_use_the_foreign_page_roles(monkeypatch):
+    mod, frappe = _load_foreign_rd_entry(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: seen.setdefault("roles", roles))
+    frappe.get_all = lambda doctype, **kwargs: [{"name": "RD06", "project_name": "MUSHI 7546"}]
+    result = mod.get_foreign_project_options()
+    assert seen["roles"] == mod.RD_FOREIGN_FINANCE_ROLES
+    assert result["projects"][0]["name"] == "RD06"

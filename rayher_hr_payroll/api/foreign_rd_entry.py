@@ -663,3 +663,19 @@ def save_foreign_rd(period, total_amount=0, rows=None):
         doc.save(ignore_permissions=True)
     frappe.db.commit()
     return get_foreign_rd(period_text)
+
+
+@frappe.whitelist()
+def get_foreign_project_options():
+    """境外研发页面的项目下拉（修复 2026-09-29）。
+
+    页面原来调工时模块的 get_rd_options，要求工时查看角色；只有 All Project Access 的账号
+    能进境外页面，却拿不到项目列表。这里按境外页面自己的角色取同样的项目。
+    """
+    require_rd_access(RD_FOREIGN_FINANCE_ROLES)
+    return {
+        "projects": frappe.get_all(
+            "Project", filters={"allow_rd_timesheet": 1, "status": ["not in", ["Completed", "Cancelled"]]},
+            fields=["name", "project_name", "rd_project_code", "rd_project_key"], order_by="project_name",
+        ),
+    }

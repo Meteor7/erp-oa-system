@@ -44,7 +44,7 @@ const batchWorkbookInput = ref(null);
 
 const loader = createResource({ url: 'rayher_hr_payroll.api.foreign_rd_entry.get_foreign_rd', method: 'GET' });
 const saver = createResource({ url: 'rayher_hr_payroll.api.foreign_rd_entry.save_foreign_rd' });
-const options = createResource({ url: 'rayher_hr_payroll.api.timesheet_entry.get_rd_options', method: 'GET', auto: true });
+const options = createResource({ url: 'rayher_hr_payroll.api.foreign_rd_entry.get_foreign_project_options', method: 'GET', auto: true });
 
 const projectOptions = computed(() => options.data?.projects || []);
 const isYearScope = computed(() => periodScope.value === 'year');

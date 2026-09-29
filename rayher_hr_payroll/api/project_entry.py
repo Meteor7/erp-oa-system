@@ -85,7 +85,8 @@ def _existing_project_for_edit(name, status, project_owner, roles):
     project = frappe.db.get_value(
         "Project",
         doc_name,
-        ["project_owner", "project_owner_name", "status"],
+        ["project_owner", "project_owner_name", "status", "rd_stage",
+         "capitalization_start_date", "capitalization_end_date"],
         as_dict=True,
     )
     if not project:
@@ -97,7 +98,51 @@ def _existing_project_for_edit(name, status, project_owner, roles):
         frappe.throw(frappe._("\u9879\u76ee\u8d1f\u8d23\u4eba\u4e0d\u80fd\u53d8\u66f4\u9879\u76ee\u8d1f\u8d23\u4eba\u3002"))
     if _status_value(status) == "Cancelled" and project.get("status") != "Cancelled":
         frappe.throw(frappe._("\u9879\u76ee\u8d1f\u8d23\u4eba\u4e0d\u80fd\u53d6\u6d88\u9879\u76ee\u3002"))
+    # 修复（2026-09-29，审查 #48）：负责人原来能把已取消的项目改回进行中（顺带重新开放工时填报）。
+    if project.get("status") == "Cancelled" and _status_value(status) != "Cancelled":
+        frappe.throw(frappe._("已取消的项目只能由财务或人事重新启用。"))
     return project
+
+
+def _check_report_url(value, current, doc_name):
+    """修复（2026-09-29，审查 R3-48-1）：报告附件只能是本人上传的私有文件。
+
+    原来任何 file_url 都照单全收；保存时 Frappe 会把这个文件挂到本项目上，
+    之后 download_project_report 就能读出任意私有文件的内容。值没变（原来就挂着的）不再检查。
+    """
+    url = _clean(value)
+    if not url or url == _clean(current):
+        return
+    if not url.startswith("/private/files/"):
+        frappe.throw(frappe._("项目报告必须是上传的私有文件。"))
+    rows = frappe.get_all(
+        "File",
+        filters={"file_url": url, "is_private": 1},
+        fields=["owner", "attached_to_doctype", "attached_to_name"],
+        limit_page_length=20,
+    )
+    user = frappe.session.user
+    for row in rows:
+        if not isinstance(row, dict) or row.get("owner") != user:
+            continue
+        doctype, name = row.get("attached_to_doctype") or "", row.get("attached_to_name") or ""
+        if not doctype or (doctype == "Project" and name == doc_name):
+            return
+    frappe.throw(frappe._("项目报告附件不是您本人刚上传的文件，请重新上传。"))
+
+
+def _check_new_project_values(name, project_code, reports):
+    """修复（2026-09-29，审查 R3-48-4）：项目编号不能重复；新增时不能覆盖已有项目。"""
+    code = _clean(project_code)
+    doc_name = _clean(name) or code
+    if code and frappe.db.exists("Project", {"rd_project_code": code, "name": ["!=", doc_name]}):
+        frappe.throw(frappe._("研发项目编号已被其他项目使用。"))
+    exists = bool(doc_name) and frappe.db.exists("Project", doc_name)
+    if not _clean(name) and exists:
+        frappe.throw(frappe._("已存在同编号的项目，请在列表里选择该项目编辑，不能新增。"))
+    current = frappe.db.get_value("Project", doc_name, sorted(PROJECT_REPORT_FIELDS), as_dict=True) if exists else None
+    for fieldname, value in reports.items():
+        _check_report_url(value, (current or {}).get(fieldname), doc_name)
 
 
 def _resolve_project_owner(project_owner, project_owner_name):
@@ -367,9 +412,19 @@ def save_project(
     roles = _require_project_access()
     project_name = _clean(project_name) or _clean(english_name)
     existing = _existing_project_for_edit(name, status, project_owner, roles)
+    _check_new_project_values(name, project_code, {
+        "project_initiation_report": project_initiation_report,
+        "project_completion_report": project_completion_report,
+        "capitalization_confirmation_file": capitalization_confirmation_file,
+    })
     if existing is not None:
         project_owner = existing.get("project_owner")
         project_owner_name = existing.get("project_owner_name")
+        # 修复（2026-09-29，审查 #48）：研发阶段和资本化起止日期决定成本是资本化还是费用化，
+        # 只由财务、人事维护；负责人编辑时保留原值。
+        rd_stage = existing.get("rd_stage") or rd_stage
+        start_date = existing.get("capitalization_start_date")
+        end_date = existing.get("capitalization_end_date")
     else:
         project_owner, project_owner_name = _resolve_project_owner(
             project_owner,
