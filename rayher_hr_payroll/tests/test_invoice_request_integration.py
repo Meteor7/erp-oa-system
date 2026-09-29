@@ -3973,3 +3973,27 @@ def test_web_requests_must_name_the_step_but_server_code_need_not(monkeypatch):
     with pytest.raises(ValidationError, match="页面版本过旧"):
         oa_entry._require_expected_step(doc, step, "")
     oa_entry._require_expected_step(doc, step, "step-1")
+
+
+
+def test_approval_summary_counts_new_claim_types_and_follows_feature_gates(monkeypatch):
+    # 审查 E3：报销单、付款单、出差原来不计入待办；审查 #8：关闭的类型不统计。
+    docs = {
+        "C-1": Row(name="C-1", request_type=oa_entry.REQUEST_REIMBURSEMENT, workflow_status=oa_entry.STATUS_PENDING, current_step_index=1, steps=[]),
+        "T-1": Row(name="T-1", request_type=oa_entry.REQUEST_TRAVEL, workflow_status=oa_entry.STATUS_PENDING, current_step_index=1, steps=[]),
+    }
+    seen = []
+    monkeypatch.setattr(frappe_stub, "get_all", lambda *_args, **kwargs: seen.append(kwargs["filters"]) or [{"name": name} for name in docs], raising=False)
+    monkeypatch.setattr(oa_entry, "_load_request", lambda name: docs[name])
+    monkeypatch.setattr(oa_entry, "_current_step", lambda doc: Row(step_index=1))
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["me@example.com"])
+    monkeypatch.setattr(oa_entry, "visible_request_types", lambda types, user=None: [t for t in types if t != oa_entry.REQUEST_TRAVEL])
+    frappe_stub.session.user = "me@example.com"
+    frappe_stub.get_roles = lambda user=None: ["Employee"]
+
+    result = oa_entry.get_my_approval_summary()
+
+    counts = {row["key"]: row["count"] for row in result["categories"]}
+    assert counts["reimbursement"] == 1 and "travel" not in counts
+    assert result["total"] == 1
+    assert oa_entry.REQUEST_TRAVEL not in seen[0]["request_type"][1]

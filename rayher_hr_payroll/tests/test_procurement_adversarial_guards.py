@@ -3,6 +3,13 @@ from types import SimpleNamespace as NS
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _open_procurement_gates(monkeypatch):
+    # 采购链路接口先检查功能开关（模块 6，决定 D7）；这些用例测的是业务规则，不涉及开关。
+    from rayher_hr_payroll.api import procurement_chain as pc
+    monkeypatch.setattr(pc, "_require_gate", lambda request_type: None)
+
+
 def fail(message, *args):
     raise ValueError(message)
 

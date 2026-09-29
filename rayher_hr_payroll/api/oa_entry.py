@@ -3098,6 +3098,8 @@ def modify_procurement_request(name, business_lines=None, expected_delivery_date
         doc = _load_request(request_name, current=True)
         if doc.request_type != REQUEST_PROCUREMENT:
             frappe.throw(frappe._("只有采购申请可以由 PMC 修改。"))
+        # 修复（2026-09-29，审查 #8）：采购申请功能关闭时 PMC 也不能改。
+        require_request_type_access(doc.request_type)
         step = _current_step(doc)
         if doc.workflow_status not in ACTIVE_STATUSES or not step or not _clean(getattr(step, "label", "")).startswith("PMC"):
             frappe.throw(frappe._("采购申请只有流转到 PMC 节点后才能修改。"))
@@ -3565,14 +3567,23 @@ def get_my_approval_summary():
         REQUEST_DIRECT_PURCHASE: {"key": "direct_purchase", "label": "购买", "route": "/approval/direct-purchase"},
         REQUEST_PROCUREMENT_PAYMENT: {"key": "procurement_payment", "label": "采购付款", "route": "/approval/procurement-payment"},
         REQUEST_EXPENSE_PAYMENT: {"key": "expense_payment", "label": "付款/报销", "route": "/approval/reimbursement"},
+        # 修复（2026-09-29，审查 E3）：新的报销单、付款单和出差申请原来不计入待办角标。
+        REQUEST_REIMBURSEMENT: {"key": "reimbursement", "label": "报销", "route": "/approval/claim"},
+        REQUEST_PAYMENT: {"key": "payment", "label": "付款", "route": "/approval/payment"},
+        REQUEST_TRAVEL: {"key": "travel", "label": "出差", "route": "/approval/travel"},
     }
+    # 修复（2026-09-29，审查 #8）：只统计当前账号能用的审批类型（功能开关）。
+    allowed_types = visible_request_types(list(routes))
+    routes = {request_type: value for request_type, value in routes.items() if request_type in allowed_types}
     categories = {
         value["key"]: {**value, "count": 0, "requests": []}
         for value in routes.values()
     }
+    if not routes:
+        return {"total": 0, "categories": []}
     names = frappe.get_all(
         "OA Approval Request",
-        filters={"workflow_status": ["in", list(ACTIVE_STATUSES)]},
+        filters={"workflow_status": ["in", list(ACTIVE_STATUSES)], "request_type": ["in", list(routes)]},
         fields=["name"],
         order_by="modified desc",
         limit_page_length=500,
