@@ -2839,7 +2839,18 @@ def _run_approval_amount_operation(operation, *args, **kwargs):
         frappe.throw(frappe._(str(error)))
 
 
-def _reserve_procurement_payment(doc):
+def _workflow_ledger_kwargs(workflow):
+    """工作流发起的台账操作（驳回释放、确认付款、盖章后自动下推）不按当前操作人的来源权限校验。
+
+    修复（2026-09-29，审查 X1-4 / #12）：默认的台账存储只放行管理员、财务和来源申请的经办人；
+    副总驳回、总经理确认付款、副总盖章后自动下推占用时，操作人不是这些人，整个操作失败。
+    旧费用付款、报销单、付款单已经这样处理（WorkflowLedgerStore），这里把采购付款旧路径补上。
+    申请人自己提交时仍按默认存储校验。
+    """
+    return {"store": approval_amount_ledger.WorkflowLedgerStore()} if workflow else {}
+
+
+def _reserve_procurement_payment(doc, workflow=False):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT_PAYMENT:
         return None
     if _clean(getattr(doc, "source_purchase_order", None)):
@@ -2851,6 +2862,7 @@ def _reserve_procurement_payment(doc):
         doc.name,
         "submit:{0}:{1}".format(doc.name, revision),
         note="采购付款提交占用",
+        **_workflow_ledger_kwargs(workflow),
     )
     _sync_payment_plan_row(doc, "已下推")
     return result
@@ -2868,6 +2880,7 @@ def _release_procurement_payment_reservation(doc, note=""):
         doc.name,
         "release:{0}:{1}".format(doc.name, revision),
         note=note or "采购付款退回释放占用",
+        **_workflow_ledger_kwargs(True),
     )
     _sync_payment_plan_row(doc, "待下推")
     return result
@@ -2884,6 +2897,7 @@ def _mark_procurement_payment_paid(doc):
         doc.name,
         "pay:{0}".format(doc.name),
         note="采购付款确认付款",
+        **_workflow_ledger_kwargs(True),
     )
     _sync_payment_plan_row(doc, "已付款")
     return result
@@ -4457,7 +4471,7 @@ def _auto_push_procurement_payment_plans(source):
         try:
             payment_doc = save_draft(REQUEST_PROCUREMENT_PAYMENT, payload)
             _submit_draft(payment_doc)
-            _reserve_procurement_payment(payment_doc)
+            _reserve_procurement_payment(payment_doc, workflow=True)
             _save_document(payment_doc)
             _sync_assignments_after_save(payment_doc)
             created.append(payment_doc.name)

@@ -484,18 +484,28 @@ def test_procurement_payment_ledger_helpers_use_revisioned_keys(monkeypatch, oa_
         workflow_status="待审批", source_request="PROC-SOURCE-1", operation_log=json.dumps([{"action": "提交申请"}]),
     )
     calls = []
-    monkeypatch.setattr(oa_entry.approval_amount_ledger, "reserve", lambda source, payment, key, note="": calls.append(("reserve", source, payment, key)))
-    monkeypatch.setattr(oa_entry.approval_amount_ledger, "release_all_reserved", lambda source, payment, key, note="": calls.append(("release", source, payment, key)))
-    monkeypatch.setattr(oa_entry.approval_amount_ledger, "mark_paid", lambda source, payment, key, note="": calls.append(("pay", source, payment, key)))
+
+    def recorder(kind):
+        return lambda source, payment, key, note="", **kwargs: calls.append(
+            (kind, source, payment, key, type(kwargs.get("store")).__name__ if kwargs.get("store") else None)
+        )
+
+    monkeypatch.setattr(oa_entry.approval_amount_ledger, "reserve", recorder("reserve"))
+    monkeypatch.setattr(oa_entry.approval_amount_ledger, "release_all_reserved", recorder("release"))
+    monkeypatch.setattr(oa_entry.approval_amount_ledger, "mark_paid", recorder("pay"))
 
     oa_entry._reserve_procurement_payment(doc)
     oa_entry._release_procurement_payment_reservation(doc, "驳回重填")
     oa_entry._mark_procurement_payment_paid(doc)
+    oa_entry._reserve_procurement_payment(doc, workflow=True)
 
+    # 审查 X1-4：驳回释放、确认付款、盖章后自动下推由工作流发起，不按操作人本人的来源权限校验；
+    # 申请人自己提交仍用默认校验。
     assert calls == [
-        ("reserve", "PROC-SOURCE-1", doc.name, "submit:PAY-LIFECYCLE-1:1"),
-        ("release", "PROC-SOURCE-1", doc.name, "release:PAY-LIFECYCLE-1:1"),
-        ("pay", "PROC-SOURCE-1", doc.name, "pay:PAY-LIFECYCLE-1"),
+        ("reserve", "PROC-SOURCE-1", doc.name, "submit:PAY-LIFECYCLE-1:1", None),
+        ("release", "PROC-SOURCE-1", doc.name, "release:PAY-LIFECYCLE-1:1", "WorkflowLedgerStore"),
+        ("pay", "PROC-SOURCE-1", doc.name, "pay:PAY-LIFECYCLE-1", "WorkflowLedgerStore"),
+        ("reserve", "PROC-SOURCE-1", doc.name, "submit:PAY-LIFECYCLE-1:1", "WorkflowLedgerStore"),
     ]
 
 
