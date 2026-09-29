@@ -132,3 +132,45 @@ def test_save_cap_uses_current_read_instead_of_stale_snapshot(calendar_module, m
         return [{"request_type": "请假申请", "workflow_status": "已完成", "leave_type": "事假", "from_date": "2026-09-01", "to_date": "2026-09-01"}]
     frappe.db = types.SimpleNamespace(sql=sql)
     assert mod.resolve_monthly_work_limit(2026, 9, employee="EMP-1", lock=True)["hour_limit"] == 0
+
+
+def test_joining_and_relieving_dates_trim_the_month(calendar_module):
+    # 审查 #51 / X3-6：月中入职、离职的人按整月算上限，工时会摊到入职前、离职后。
+    mod, frappe = calendar_module
+    frappe.db = types.SimpleNamespace(
+        get_value=lambda doctype, key, fields=None, as_dict=False: {
+            ("Employee", "EMP-1"): {
+                "company": "Planck",
+                "date_of_joining": date(2026, 7, 15),
+                "relieving_date": date(2026, 7, 20),
+            },
+        }.get((doctype, key))
+    )
+    frappe.get_all = lambda *args, **kwargs: []
+
+    result = mod.resolve_monthly_calendar(2026, 7, employee="EMP-1")
+
+    assert result["work_dates"] == [date(2026, 7, 15), date(2026, 7, 16), date(2026, 7, 17), date(2026, 7, 20)]
+    assert result["day_limit"] == 4
+    assert result["hour_limit"] == 32
+    assert result["joined_on"] == "2026-07-15"
+    assert result["relieved_on"] == "2026-07-20"
+
+
+def test_stale_relieving_date_of_a_rehired_employee_is_ignored(calendar_module):
+    mod, frappe = calendar_module
+    frappe.db = types.SimpleNamespace(
+        get_value=lambda doctype, key, fields=None, as_dict=False: {
+            ("Employee", "EMP-1"): {
+                "company": "Planck",
+                "date_of_joining": date(2026, 3, 1),
+                "relieving_date": date(2025, 12, 31),
+            },
+        }.get((doctype, key))
+    )
+    frappe.get_all = lambda *args, **kwargs: []
+
+    result = mod.resolve_monthly_calendar(2026, 7, employee="EMP-1")
+
+    assert result["day_limit"] == 23
+    assert result["joined_on"] is None and result["relieved_on"] is None

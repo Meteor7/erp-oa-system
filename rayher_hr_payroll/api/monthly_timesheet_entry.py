@@ -36,22 +36,46 @@ def _roles() -> set[str]:
     return set(frappe.get_roles(_session_user()) or [])
 
 
-def _eligible_employee_filters(**extra) -> dict:
+def _as_date(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "year"):
+        return value
+    return datetime.fromisoformat(str(value)[:10]).date()
+
+
+def _period_start(year: int, month: int):
+    return datetime(int(year), int(month), 1).date()
+
+
+def _eligible_employee_filters(period_start=None, **extra) -> dict:
     filters = {
-        "status": "Active",
+        "status": ["in", ["Active", "Left"]] if period_start else "Active",
         "rd_personnel_type": ["in", _daily_module().RD_TYPES],
     }
     filters.update(extra)
     return filters
 
 
-def _eligible_employee_rows(**extra) -> list:
-    return frappe.get_all(
+def _eligible_employee_rows(period_start=None, **extra) -> list:
+    rows = frappe.get_all(
         "Employee",
-        filters=_eligible_employee_filters(**extra),
-        fields=["name", "employee_name", "user_id", "reports_to"],
+        filters=_eligible_employee_filters(period_start, **extra),
+        fields=["name", "employee_name", "user_id", "reports_to", "status", "relieving_date"],
         order_by="name",
     )
+    if not period_start:
+        return rows
+    # 修复（2026-09-29，审查 X3-6）：离职员工在离职当天就被停用，离职当月的工时再也登记不进去，
+    # 工资却照发。按月份看时，离职日期落在这个月或以后的离职员工仍然可以查看和补登。
+    kept = []
+    for row in rows:
+        relieved_on = _as_date(_value(row, "relieving_date"))
+        if _value(row, "status") != "Left" or (relieved_on and relieved_on >= period_start):
+            kept.append(row)
+    return kept
 
 
 def _row_name(row) -> str:
@@ -67,7 +91,7 @@ def _single_active_linked_rd_employee() -> str:
     return _row_name(rows[0])
 
 
-def _monthly_employee_scope(mode: str) -> list[str] | None:
+def _monthly_employee_scope(mode: str, period_start=None) -> list[str] | None:
     if mode not in {"view", "edit"}:
         raise ValueError("mode must be view or edit")
     roles = _roles()
@@ -75,7 +99,7 @@ def _monthly_employee_scope(mode: str) -> list[str] | None:
         return None
     if "Department Manager" in roles:
         current = _single_active_linked_rd_employee()
-        reports = [_row_name(row) for row in _eligible_employee_rows(reports_to=current)]
+        reports = [_row_name(row) for row in _eligible_employee_rows(period_start, reports_to=current)]
         return sorted({current, *reports})
     if "Accounts User" in roles:
         return None if mode == "view" else []
@@ -84,21 +108,21 @@ def _monthly_employee_scope(mode: str) -> list[str] | None:
     return []
 
 
-def _require_monthly_employee(employee: str, mode: str) -> None:
+def _require_monthly_employee(employee: str, mode: str, period_start=None) -> None:
     employee = str(employee or "").strip()
-    scope = _monthly_employee_scope(mode)
+    scope = _monthly_employee_scope(mode, period_start)
     if scope is not None and employee not in scope:
         frappe.throw(frappe._("您无权查看或登记该员工的工时。"))
-    if mode == "edit" and not _eligible_employee_rows(name=employee):
-        frappe.throw(frappe._("只能为在职研发员工登记工时。"))
+    if mode == "edit" and not _eligible_employee_rows(period_start, name=employee):
+        frappe.throw(frappe._("只能为在职研发员工登记工时；已离职的只能补登离职当月及以前的工时。"))
 
 
-def _employees_for_scope(scope: list[str] | None) -> list:
+def _employees_for_scope(scope: list[str] | None, period_start=None) -> list:
     if scope is None:
-        return _eligible_employee_rows()
+        return _eligible_employee_rows(period_start)
     if not scope:
         return []
-    return _eligible_employee_rows(name=["in", scope])
+    return _eligible_employee_rows(period_start, name=["in", scope])
 
 
 def _monthly_summary_employee_filter(employee=None):
@@ -454,11 +478,12 @@ def _merge_monthly_entry_rows(monthly_rows: list, legacy_rows: list, period: str
 
 
 @frappe.whitelist()
-def get_monthly_options():
+def get_monthly_options(period=None):
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
+    period_start = _period_start(*parse_period(period)) if period else None
     options = dict(_daily_module().get_rd_options())
-    visible = _employees_for_scope(_monthly_employee_scope("view"))
-    editable = _employees_for_scope(_monthly_employee_scope("edit"))
+    visible = _employees_for_scope(_monthly_employee_scope("view", period_start), period_start)
+    editable = _employees_for_scope(_monthly_employee_scope("edit", period_start), period_start)
     options["employees"] = [
         {"name": _row_name(row), "employee_name": str(_value(row, "employee_name") or "")}
         for row in visible
@@ -473,7 +498,7 @@ def list_monthly_entries(period, employee=None):
     year, month = parse_period(period)
     period_text = _canonical_period(year, month)
     if employee:
-        _require_monthly_employee(employee, "view")
+        _require_monthly_employee(employee, "view", _period_start(year, month))
     monthly_rows = _query_monthly_entries(period_text, employee)
     rows = _merge_monthly_entry_rows(
         monthly_rows,
@@ -504,6 +529,8 @@ def list_monthly_entries(period, employee=None):
         "over_limit_hours": max(0, round(total_hours - limit["hour_limit"], 2)) if employee else 0,
         "calendar_source": limit["calendar_source"],
         "holiday_list": limit["holiday_list"],
+        "joined_on": limit.get("joined_on") if employee else None,
+        "relieved_on": limit.get("relieved_on") if employee else None,
         "has_legacy_sources": has_legacy_sources,
         "legacy_daily_present": has_legacy_sources,
     }
@@ -547,6 +574,7 @@ def _replace_monthly_documents(
     company: str,
     expected_revision: str,
     work_dates=None,
+    leave_hours_by_date=None,
 ) -> None:
     existing = _load_existing_monthly_documents(employee, period)
     if _monthly_revision(existing) != expected_revision:
@@ -562,7 +590,12 @@ def _replace_monthly_documents(
         _delete_monthly_document(doc, employee, period)
 
     _daily_module()._ensure_activity()
-    occupied_hours = {}
+    # 修复（2026-09-29，审查 X2-7）：已批准的事假先占住那天的小时数。原来从空表开始摊，
+    # 上限虽然扣了请假，工时却照样排在请假那天，同一天既请假又有 8 小时研发工时。
+    occupied_hours = {
+        _as_date(day): Decimal(str(hours)).quantize(HOUR_QUANTUM)
+        for day, hours in (leave_hours_by_date or {}).items()
+    }
     for row in rows:
         entry_id = row.get("monthly_entry_id") or uuid.uuid4().hex
         logs = build_technical_time_logs(
@@ -602,7 +635,7 @@ def save_monthly_entries(period, employee, rows, expected_revision=None):
     if not expected_revision:
         frappe.throw(frappe._("\u6708\u5ea6\u5de5\u65f6\u6570\u636e\u7248\u672c\u5df2\u5931\u6548\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002"))
     daily = _daily_module()
-    _require_monthly_employee(employee, "edit")
+    _require_monthly_employee(employee, "edit", _period_start(year, month))
     ensure_not_locked(period_text, "lock_timesheets", "工时")
     if daily._period_has_submitted_allocation(year, month):
         frappe.throw(frappe._("本期已存在已提交的研发费用分摊，请先撤销分摊后再调整工时。"))
@@ -644,6 +677,7 @@ def save_monthly_entries(period, employee, rows, expected_revision=None):
             company=company,
             expected_revision=expected_revision,
             work_dates=limit["work_dates"],
+            leave_hours_by_date=limit.get("leave_hours_by_date"),
         )
     except Exception:
         frappe.db.rollback(save_point=MONTHLY_SAVEPOINT)
@@ -667,7 +701,7 @@ def delete_monthly_entry(monthly_entry_id):
     year, month = parse_period(period)
     employee = doc.employee
     daily = _daily_module()
-    _require_monthly_employee(employee, "edit")
+    _require_monthly_employee(employee, "edit", _period_start(year, month))
     ensure_not_locked(period, "lock_timesheets", "工时")
     lock_period_import(year, month)
     if daily._period_has_submitted_allocation(year, month):

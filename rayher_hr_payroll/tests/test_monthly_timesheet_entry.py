@@ -178,7 +178,7 @@ def test_cross_employee_list_is_rejected_before_business_queries(monthly_module,
     mod, _frappe = monthly_module
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
-    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode: ["EMP-SELF"], raising=False)
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode, period_start=None: ["EMP-SELF"], raising=False)
     business_queries = []
     monkeypatch.setattr(mod, "_query_monthly_entries", lambda *args: business_queries.append(args))
     monkeypatch.setattr(mod, "_query_legacy_monthly_entries", lambda *args: business_queries.append(args))
@@ -194,7 +194,7 @@ def test_cross_employee_save_is_rejected_before_business_reads(monthly_module, m
     frappe.db = TransactionDb()
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7))
-    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode: ["EMP-SELF"], raising=False)
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode, period_start=None: ["EMP-SELF"], raising=False)
 
     with pytest.raises(RuleError, match="无权"):
         mod.save_monthly_entries(
@@ -225,7 +225,7 @@ def test_delete_authorizes_actual_timesheet_employee_before_mutation(monthly_mod
     )
     frappe.get_doc = lambda doctype, name: doc
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode: ["EMP-SELF"], raising=False)
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode, period_start=None: ["EMP-SELF"], raising=False)
     mutations = []
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: mutations.append(("lock", args)))
     monkeypatch.setattr(mod, "_delete_monthly_document", lambda *args: mutations.append(("delete", args)))
@@ -449,7 +449,7 @@ class TransactionDb:
 def _install_save_dependencies(monkeypatch, mod, frappe):
     frappe.db = TransactionDb()
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
-    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode: None, raising=False)
+    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode, period_start=None: None, raising=False)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None, raising=False)
     monkeypatch.setattr(mod, "lock_period_import", lambda *args: None, raising=False)
@@ -542,7 +542,7 @@ def test_list_monthly_entries_returns_parent_rows_without_technical_dates(monthl
     mod, _frappe = monthly_module
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
-    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode: None, raising=False)
+    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode, period_start=None: None, raising=False)
     monkeypatch.setattr(
         mod,
         "_query_monthly_entries",
@@ -578,7 +578,7 @@ def test_list_monthly_entries_returns_resolved_day_and_hour_limits(monthly_modul
     mod, _frappe = monthly_module
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None, raising=False)
     monkeypatch.setattr(mod, "parse_period", lambda period: (2026, 7), raising=False)
-    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode: None, raising=False)
+    monkeypatch.setattr(mod, "_require_monthly_employee", lambda employee, mode, period_start=None: None, raising=False)
     monkeypatch.setattr(mod, "_query_monthly_entries", lambda *args: [], raising=False)
     monkeypatch.setattr(mod, "_query_legacy_monthly_entries", lambda *args: [], raising=False)
     monkeypatch.setattr(
@@ -904,3 +904,81 @@ def test_existing_monthly_documents_are_read_with_a_lock(monthly_module):
     assert mod._load_existing_monthly_documents("EMP-1", "2026-07") == [("Timesheet", "TS-1")]
     assert calls[0][0] == "Timesheet" and calls[0][1]["rd_entry_period"] == "2026-07"
     assert calls[0][3] == {"for_update": True, "pluck": True}
+
+
+def test_left_employee_can_be_backfilled_for_the_relieving_month_only(monthly_module):
+    # 审查 X3-6：离职当天账号就停用，离职当月的工时原来谁都补登不了。
+    from datetime import date
+
+    mod, frappe = monthly_module
+    mod._daily_module = lambda: types.SimpleNamespace(RD_TYPES=("全时研发", "非全时研发", "研发辅助"))
+    left = dict(_rd_employee("EMP-LEFT", status="Left"), relieving_date=date(2026, 9, 15))
+    _install_monthly_scope_frappe(frappe, ["HR User"], [_rd_employee("EMP-ACTIVE"), left])
+
+    mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 9, 1))
+    mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 8, 1))
+    with pytest.raises(RuleError, match="离职当月"):
+        mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 10, 1))
+    with pytest.raises(RuleError, match="在职研发员工"):
+        mod._require_monthly_employee("EMP-LEFT", "edit")
+    names = [row["name"] for row in mod._employees_for_scope(None, date(2026, 9, 1))]
+    assert names == ["EMP-ACTIVE", "EMP-LEFT"]
+    assert [row["name"] for row in mod._employees_for_scope(None, date(2026, 10, 1))] == ["EMP-ACTIVE"]
+
+
+def test_left_employee_without_relieving_date_is_not_offered(monthly_module):
+    from datetime import date
+
+    mod, frappe = monthly_module
+    mod._daily_module = lambda: types.SimpleNamespace(RD_TYPES=("全时研发",))
+    _install_monthly_scope_frappe(frappe, ["HR User"], [dict(_rd_employee("EMP-LEFT", status="Left"), relieving_date=None)])
+    assert mod._employees_for_scope(None, date(2026, 9, 1)) == []
+
+
+def test_monthly_spreading_skips_hours_already_taken_by_approved_leave(monthly_module, monkeypatch):
+    # 审查 X2-7：请假那天不能再排 8 小时研发工时。
+    from datetime import date
+
+    mod, frappe = monthly_module
+    inserted = []
+
+    class NewDoc:
+        def __init__(self, payload):
+            self.payload = payload
+            self.flags = types.SimpleNamespace(ignore_permissions=False)
+
+        def insert(self, ignore_permissions=False):
+            inserted.append(self)
+
+        def submit(self):
+            pass
+
+    frappe.db = types.SimpleNamespace(get_values=lambda *args, **kwargs: [])
+    frappe.get_doc = lambda payload: NewDoc(payload)
+    monkeypatch.setattr(mod, "_daily_module", lambda: types.SimpleNamespace(_ensure_activity=lambda: None))
+
+    mod._replace_monthly_documents(
+        employee="EMP-1",
+        period="2026-07",
+        year=2026,
+        month=7,
+        company="Rayher",
+        expected_revision=mod._monthly_revision([]),
+        work_dates=[date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)],
+        leave_hours_by_date={"2026-07-01": 8.0, "2026-07-02": 4.0},
+        rows=[{
+            "monthly_entry_id": "",
+            "project": "PROJ-1",
+            "project_code": "RD14",
+            "project_name": "ACONCA 7961",
+            "occurrence_days": Decimal("1.00"),
+            "calculated_hours": Decimal("8.00"),
+            "remark": "",
+        }],
+    )
+
+    logs = inserted[0].payload["time_logs"]
+    assert [(log["from_time"], log["hours"]) for log in logs] == [
+        (datetime(2026, 7, 2, 4, 0), 4.0),
+        (datetime(2026, 7, 3, 0, 0), 4.0),
+    ]

@@ -44,13 +44,16 @@ def resolve_monthly_calendar(year, month, employee=None, company=None):
     first_day = date(year, month, 1)
     last_day = date(year, month, monthrange(year, month)[1])
     employee_holiday_list = ""
+    joined_on = relieved_on = None
 
     if employee:
         row = frappe.db.get_value(
-            "Employee", employee, ["holiday_list", "company"], as_dict=True
+            "Employee", employee, ["holiday_list", "company", "date_of_joining", "relieving_date"], as_dict=True
         ) or {}
         employee_holiday_list = str(_row_value(row, "holiday_list") or "")
         company = company or _row_value(row, "company")
+        joined_on = _row_value(row, "date_of_joining")
+        relieved_on = _row_value(row, "relieving_date")
 
     if not company and hasattr(frappe.db, "get_single_value"):
         company = frappe.db.get_single_value("Global Defaults", "default_company")
@@ -82,12 +85,25 @@ def resolve_monthly_calendar(year, month, employee=None, company=None):
             "Holiday", filters={"parent": selected_list}, pluck="holiday_date"
         )
     work_dates = count_work_dates(year, month, holiday_dates)
+    # 修复（2026-09-29，审查 #51 / X3-6）：入职前、离职后的日子不算这个员工的工作日。
+    # 原来月中入职或离职的人也按整月算上限，工时会摊到入职前或离职后的日子上。
+    # 复职的人可能还留着上次的离职日期（早于这次入职日期），这种离职日期不用。
+    joined_on = getdate(joined_on) if joined_on else None
+    relieved_on = getdate(relieved_on) if relieved_on else None
+    if relieved_on and joined_on and relieved_on < joined_on:
+        relieved_on = None
+    if joined_on:
+        work_dates = [value for value in work_dates if value >= joined_on]
+    if relieved_on:
+        work_dates = [value for value in work_dates if value <= relieved_on]
     return {
         "day_limit": len(work_dates),
         "hour_limit": len(work_dates) * HOURS_PER_WORKDAY,
         "calendar_source": source,
         "holiday_list": selected_list,
         "work_dates": work_dates,
+        "joined_on": joined_on.isoformat() if joined_on and joined_on > first_day else None,
+        "relieved_on": relieved_on.isoformat() if relieved_on and relieved_on < last_day else None,
     }
 
 

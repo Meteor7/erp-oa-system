@@ -9,6 +9,8 @@ import { exportTableWorkbook } from "../lib/tableExport";
 const options = createResource({
   url: "rayher_hr_payroll.api.monthly_timesheet_entry.get_monthly_options",
   method: "GET",
+  // 员工列表按月份给：离职员工在离职当月及以前的月份仍可补登。
+  makeParams: () => ({ period: period.value }),
   auto: true,
 });
 const monthly = createResource({
@@ -286,6 +288,7 @@ watch(() => options.data?.employees, (items) => {
     selectedEmployee.value = "";
   }
 }, { immediate: true });
+watch(period, () => options.reload());
 watch([period, selectedEmployee], loadEntries, { immediate: true });
 watch(() => monthly.data, hydrateEntries);
 </script>
@@ -327,7 +330,7 @@ watch(() => monthly.data, hydrateEntries);
     <p v-if="errMsg" class="mx-5 mt-4 text-sm text-red-600">{{ errMsg }}</p>
     <p v-if="okMsg" class="mx-5 mt-4 text-sm text-green-700">{{ okMsg }}</p>
 
-    <p v-if="!isAllEmployees" class="mb-3 text-sm text-gray-600">日历工时 {{ monthly.data?.base_hour_limit ?? hourLimit }} 小时 · 已批请假扣减 {{ monthly.data?.leave_hours || 0 }} 小时</p>
+    <p v-if="!isAllEmployees" class="mb-3 text-sm text-gray-600">日历工时 {{ monthly.data?.base_hour_limit ?? hourLimit }} 小时 · 已批请假扣减 {{ monthly.data?.leave_hours || 0 }} 小时<template v-if="monthly.data?.joined_on"> · {{ monthly.data.joined_on }} 入职，之前的日子不计</template><template v-if="monthly.data?.relieved_on"> · {{ monthly.data.relieved_on }} 离职，之后的日子不计</template></p>
     <p v-if="monthly.data?.over_limit_hours > 0" class="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">当前已填报工时超过上限 {{ monthly.data.over_limit_hours }} 小时，请调整后保存。</p>
     <div v-if="monthly.loading" class="flex justify-center py-12"><Spinner class="h-6 w-6" /></div>
     <div v-else class="overflow-x-auto px-5 py-4">
