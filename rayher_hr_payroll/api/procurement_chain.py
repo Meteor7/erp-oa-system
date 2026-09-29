@@ -9,7 +9,8 @@ from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 import frappe
-from rayher_hr_payroll.position_access import position_user, position_users
+from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
+from rayher_hr_payroll.position_access import position_users
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.api.material_progress import _ensure_all_rows
@@ -132,6 +133,14 @@ def _roles():
     return set(frappe.get_roles() or [])
 
 
+def _position_holder(key, label):
+    """必须有人的岗位（生成审批节点、合同用印）。空缺时给出明确提示，而不是 500。"""
+    try:
+        return resolve_role(key)
+    except ApprovalRoleResolutionError:
+        frappe.throw(f"{label}岗位没有有效的在职人员，请先在岗位任命中设置。")
+
+
 def _require_view():
     if _user() not in position_users("pmc", "procurement_manager", "vice_manager") and not (_roles() & PRICE_VIEW_ROLES) and "System Manager" not in _roles():
         frappe.throw("只有 PMC、采购、副总经理或系统管理员可以查看采购链路。")
@@ -145,7 +154,9 @@ def _require_po_view():
 
 def _can_purchase():
     # PMC remains read-only here even when a legacy Purchase User role is assigned.
-    if _user() == position_user("pmc"):
+    # 修复（2026-09-29，审查 #10）：PMC 岗位空缺或绑定的人离职时原来直接抛错，
+    # 采购经理和系统管理员也做不了任何采购操作。空缺时按"不是 PMC"处理。
+    if _user() in position_users("pmc"):
         return False
     return _user() in position_users("procurement_manager") or bool(_roles() & PRICE_ENTRY_ROLES) or "System Manager" in _roles()
 
@@ -176,7 +187,7 @@ def _require_pmc():
 
 
 def _require_purchase_or_qingbo():
-    if _user() not in position_users("procurement_manager") | {position_user("vice_manager")} and "System Manager" not in _roles():
+    if _user() not in position_users("procurement_manager", "vice_manager") and "System Manager" not in _roles():
         frappe.throw("只有采购、副总经理或系统管理员可以生成 PO。")
 
 
@@ -225,7 +236,7 @@ CONTRACT_SEAL_POSITION = "vice_manager"
 
 
 def _contract_seal_user():
-    user = _text(position_user(CONTRACT_SEAL_POSITION))
+    user = _text(_position_holder(CONTRACT_SEAL_POSITION, "副总经理")["user"]).lower()
     if not user or not frappe.db.exists("User", {"name": user, "enabled": 1}):
         frappe.throw("未找到有效的合同用印人（副总经理岗位），请先在岗位任命中设置。")
     return user
@@ -340,7 +351,7 @@ def _notify(subject, content, document_type, document_name, source_requests=None
     其他人（需求申请人、项目主管）只收到"采购进度有更新"和自己那张申请的物料，
     不再看到供应商、报价、金额和别人申请的物料。"""
     source_requests = list(source_requests or [])
-    insiders = {_text(position_user(key)).lower() for key in ("pmc", "procurement_manager", "vice_manager")}
+    insiders = {_text(user).lower() for user in position_users("pmc", "procurement_manager", "vice_manager")}
     related = defaultdict(set)
     for request_name in source_requests:
         try:
@@ -493,7 +504,7 @@ def _price_summary(doc):
         "lines": [row.as_dict() for row in (doc.lines or [])], "quotes": quotes,
         "supplier_comparisons": _supplier_comparisons(doc, quotes),
         "steps": _approval_steps(doc.name), "modified": str(doc.modified or ""),
-        "can_select_quote": (_user() == position_user("vice_manager") or "System Manager" in _roles()) and doc.status == "待审批",
+        "can_select_quote": (_user() in position_users("vice_manager") or "System Manager" in _roles()) and doc.status == "待审批",
     }
 
 
@@ -1025,7 +1036,7 @@ def select_supplier_comparison(price_approval, supplier):
     approval = frappe.get_doc("OA Price Approval", _text(price_approval))
     if approval.status != "待审批":
         frappe.throw("只有待审批的价格审批单可以选择最终成交供应商。")
-    if _user() != position_user("vice_manager") and "System Manager" not in _roles():
+    if _user() not in position_users("vice_manager") and "System Manager" not in _roles():
         frappe.throw("只有副总经理可以在价格审批阶段选择成交供应商。")
     _apply_supplier_selection(approval, supplier)
     frappe.db.commit()
@@ -1262,10 +1273,12 @@ def submit_price_approval(name):
     doc.status = "待审批"
     doc.save(ignore_permissions=True)
     step = frappe.new_doc("OA Approval Step")
+    # 审批人和标签都取副总经理岗位的当前人员（原来标签写死了姓名）；岗位空缺时明确提示。
+    vice = _position_holder("vice_manager", "副总经理")
     step.update({
         "parent": doc.name, "parentfield": "steps", "parenttype": "OA Price Approval",
-        "idx": 1, "step_index": 1, "label": "价格审批：演示员工21", "mode": "approve",
-        "approvers": json.dumps([position_user("vice_manager")], ensure_ascii=False), "status": "待审批",
+        "idx": 1, "step_index": 1, "label": "价格审批：" + (_text(vice.get("employee_name")) or "副总经理"), "mode": "approve",
+        "approvers": json.dumps([_text(vice["user"]).lower()], ensure_ascii=False), "status": "待审批",
         "approved_by": "[]", "step_key": str(uuid4()), "origin": "base",
     })
     step.insert(ignore_permissions=True)
@@ -1280,7 +1293,7 @@ def submit_price_approval(name):
 @procurement_action
 def approve_price_approval(name, note=None):
     _require_gate(REQUEST_PROCUREMENT)
-    if _user() != position_user("vice_manager") and "System Manager" not in _roles():
+    if _user() not in position_users("vice_manager") and "System Manager" not in _roles():
         frappe.throw("只有副总经理或系统管理员可以审批价格审批单。")
     doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status != "待审批":

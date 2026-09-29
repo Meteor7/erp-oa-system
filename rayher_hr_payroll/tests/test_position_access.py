@@ -44,3 +44,29 @@ def test_supervisor_relationship_comes_from_employee_records(monkeypatch):
     monkeypatch.setattr(oa_organization, "executive_names", lambda: {"总经理"})
     result = oa_organization.resolve_stage_two_supervisor("员工", lambda name: name + "@example.com")
     assert result.supervisor_name == "新主管"
+
+
+
+def test_a_vacant_executive_position_does_not_break_the_executive_check(monkeypatch):
+    # 审查 #10：副总或总经理岗位空缺时，原来所有申请的提交都 500。
+    def resolve(key):
+        if key == "general_manager":
+            raise ApprovalRoleResolutionError("position unassigned")
+        return {"employee_name": "副总", "user": "vice@example.com"}
+    monkeypatch.setattr(position_access, "resolve_role", resolve)
+    assert position_access.executive_names() == {"副总"}
+
+
+def test_a_vacant_pmc_position_leaves_purchase_rights_to_purchasers_and_admins(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain as pc
+
+    def resolve(key):
+        raise ApprovalRoleResolutionError("position unassigned")
+    monkeypatch.setattr(position_access, "resolve_role", resolve)
+    monkeypatch.setattr(pc, "resolve_role", resolve)
+    monkeypatch.setattr(pc, "_user", lambda: "admin@example.com")
+    monkeypatch.setattr(pc, "_roles", lambda: {"System Manager"})
+    assert pc._can_purchase() is True
+    monkeypatch.setattr(pc, "frappe", SimpleNamespace(throw=lambda message, *a: (_ for _ in ()).throw(ValueError(message))))
+    with pytest.raises(ValueError, match="副总经理岗位"):
+        pc._position_holder("vice_manager", "副总经理")

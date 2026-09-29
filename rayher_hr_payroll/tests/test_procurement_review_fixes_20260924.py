@@ -67,7 +67,8 @@ def test_notifications_for_requesters_hide_prices(monkeypatch):
 
     monkeypatch.setattr(chain.frappe, "get_doc", lambda *args, **kwargs: sources[args[1]] if len(args) > 1 else Doc(args[0]), raising=False)
     monkeypatch.setattr(chain.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True), raising=False)
-    monkeypatch.setattr(chain, "position_user", lambda key: {"pmc": "pmc@example.com", "procurement_manager": "pm@example.com", "vice_manager": "vp@example.com"}[key])
+    holders = {"pmc": "pmc@example.com", "procurement_manager": "pm@example.com", "vice_manager": "vp@example.com"}
+    monkeypatch.setattr(chain, "position_users", lambda *keys: {holders[key] for key in keys})
     monkeypatch.setattr(chain, "_user", lambda: "pm@example.com")
     monkeypatch.setattr(chain, "_linked_material_context", lambda names: "物料:" + ",".join(sorted(names)))
     monkeypatch.setattr(chain, "_notification_link", lambda *args: "/x")

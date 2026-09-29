@@ -4,7 +4,7 @@ import json
 from datetime import date
 
 import frappe
-from rayher_hr_payroll.position_access import position_user, position_users
+from rayher_hr_payroll.position_access import position_users
 from frappe.utils import get_datetime, getdate, now_datetime
 
 from rayher_hr_payroll.oa_approval import REQUEST_PROCUREMENT
@@ -485,7 +485,9 @@ def list_material_progress(search="", requester="", status="", limit=50, offset=
 def _recipient_users(source):
     users = []
     requester = _requester_user(source)
-    for user in (requester, getattr(source, "purchaser_user", None), getattr(source, "project_owner", None), position_user("pmc"), position_user("procurement_manager"), position_user("vice_manager")):
+    # 岗位空缺时跳过该岗位，不再让整条通知失败（修复 2026-09-29，审查 #10）。
+    insiders = [user for key in ("pmc", "procurement_manager", "vice_manager") for user in sorted(position_users(key))]
+    for user in (requester, getattr(source, "purchaser_user", None), getattr(source, "project_owner", None), *insiders):
         value = _clean(user).lower()
         if value and value not in users:
             users.append(value)
