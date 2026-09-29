@@ -329,10 +329,12 @@ def _permission_rights(permission: dict) -> set[str]:
 
 
 def _permissions_by_role(doc: dict) -> dict[str, dict]:
-    roles = [permission["role"] for permission in doc["permissions"]]
+    # 层级 0 的权限矩阵；OA Invoice Record 另有一行层级 1（原件地址只给系统管理员，2026-09-28）。
+    level_zero = [permission for permission in doc["permissions"] if not permission.get("permlevel")]
+    roles = [permission["role"] for permission in level_zero]
     assert len(roles) == len(set(roles)), (doc["name"], roles)
     assert set(roles) == INVOICE_ROLES, (doc["name"], roles)
-    return {permission["role"]: permission for permission in doc["permissions"]}
+    return {permission["role"]: permission for permission in level_zero}
 
 
 def test_invoice_ocr_changed_doctypes_have_exact_one_to_one_field_order():
@@ -756,3 +758,15 @@ def test_procurement_payment_supplier_is_an_oa_snapshot_until_master_integration
     fields = {field["fieldname"]: field for field in load_doctype("oa_approval_request")["fields"]}
     assert fields["supplier"]["fieldtype"] == "Data"
     assert fields["supplier"]["label"] == "Supplier Snapshot"
+
+
+def test_invoice_original_file_url_is_hidden_and_invoice_code_is_editable():
+    # 修复（2026-09-28）：能读发票记录的人（比如审批人）原来能从通用接口拿到原件地址直接下载，
+    # 绕过预览凭证和查看记录。原件地址只给系统管理员；查看原件走带记录的预览。
+    record = load_doctype("oa_invoice_record")
+    fields = _fields_by_name(record)
+    assert fields["invoice_file"].get("permlevel") == 1
+    assert [perm["role"] for perm in record["permissions"] if perm.get("permlevel") == 1] == ["System Manager"]
+    assert fields["invoice_code"]["fieldtype"] == "Data"
+    assert fields["invoice_code"].get("read_only") != 1
+    assert record["field_order"].index("invoice_code") == record["field_order"].index("invoice_number") + 1

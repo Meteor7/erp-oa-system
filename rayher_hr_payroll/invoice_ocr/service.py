@@ -54,6 +54,8 @@ FINANCE_ROLES = {"System Manager", "Accounts User"}
 ACTIVE_REQUEST_STATUSES = {"草稿"}
 POST_SUBMISSION_INVOICE_STATUSES = {"待审批", "待办理", "待流转", "已完成", "已付款"}
 INVOICE_MODE_PENDING = "暂未取得发票"
+# 新流程的单据：按张选发票（expense_claim_entry._relink_invoices），不走旧的整批挂发票接口。
+NEW_CLAIM_REQUEST_TYPES = {"报销单", "付款单"}
 INVOICE_FOLLOWUP_PENDING = "待收票"
 INVOICE_FOLLOWUP_RECEIVED = "已收票"
 WORKBENCH_STATUSES = {"排队中", "识别中", "待确认", "已确认", "疑似重复", "失败", "已排除"}
@@ -1497,6 +1499,10 @@ def attach_batch_to_request(batch_name, request_doc, difference_note=None):
             locks.enter_context(_transaction_lock("record", record_name))
         batch = _require_batch(batch_name, owner_only=True, current=True)
         current_request = _current_doc(REQUEST_DOCTYPE, request_name)
+        # 修复（2026-09-28）：这是旧"费用付款申请"整批挂发票的接口，它会把整批发票都记到单据上
+        # （batch.request），而报销单、付款单按张选发票、撤下时不会清掉这个标记。
+        if _get(current_request, "request_type") in NEW_CLAIM_REQUEST_TYPES:
+            _throw("报销单、付款单请在单据里逐张选择发票。")
         workflow_status = str(_get(current_request, "workflow_status") or "")
         supplementing = workflow_status != "草稿"
         if supplementing:
@@ -1676,6 +1682,9 @@ def link_invoice(invoice_name, request, expense_line_key):
                     _throw("\u53d1\u7968\u6279\u6b21\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002")
                 batch = _current_doc(BATCH_DOCTYPE, batch_name)
                 request_doc = _current_doc(REQUEST_DOCTYPE, request_name)
+                # 修复（2026-09-28）：旧接口，报销单、付款单按张选发票，不能从这里关联。
+                if _get(request_doc, "request_type") in NEW_CLAIM_REQUEST_TYPES:
+                    _throw("报销单、付款单请在单据里逐张选择发票。")
                 _request_permission(request_doc, "edit", current=True)
                 if _get(record, "recognition_status") != "\u5df2\u786e\u8ba4":
                     _throw("\u53ea\u6709\u5df2\u786e\u8ba4\u53d1\u7968\u53ef\u4ee5\u5173\u8054\u8d39\u7528\u660e\u7ec6\u3002")

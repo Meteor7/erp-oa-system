@@ -330,7 +330,7 @@ export async function uploadInvoiceSupplementalAttachment(invoiceName, file, {
 export function deleteInvoiceSupplementalAttachment(invoiceName, attachmentName, options) {
   return invoiceApi('delete_supplemental_attachment', {
     invoice_name: invoiceName,
-    attachment_name: attachmentName,
+    attachment: attachmentName,
   }, options);
 }
 
@@ -406,7 +406,7 @@ export async function fetchInvoicePreview(invoiceName, { signal } = {}) {
 
 export async function fetchInvoiceSupplementalAttachmentPreview(attachmentName, { signal } = {}) {
   const metadata = await invoiceApi('preview_supplemental_attachment', {
-    attachment_name: attachmentName,
+    attachment: attachmentName,
   }, { signal });
   if (metadata?.preview_method !== 'POST' || !metadata?.token || !metadata?.preview_url) {
     throw new Error('补充附件预览凭证无效');

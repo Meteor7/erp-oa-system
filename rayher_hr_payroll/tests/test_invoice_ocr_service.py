@@ -3531,3 +3531,14 @@ def test_huge_photo_is_refused_at_upload(env, monkeypatch):
         service._check_document_limits(b"photo", "image/jpeg")
     monkeypatch.setattr(service, "_image_pixels", lambda content: 12_000_000)
     service._check_document_limits(b"photo", "image/jpeg")
+
+
+def test_legacy_invoice_endpoints_refuse_new_claims(env):
+    # 修复（2026-09-28）：旧的整批挂发票 / 关联接口不能作用到报销单、付款单上。
+    env.add_batch()
+    env.add_record(name="INV-OK", recognition_status="已确认", invoice_number="0001")
+    env.docs[service.REQUEST_DOCTYPE]["OA-CLAIM"] = Doc(env, dict(doctype=service.REQUEST_DOCTYPE, name="OA-CLAIM", request_type="报销单", workflow_status="草稿", owner="alice@example.com", employee="", amount=0))
+    with pytest.raises(ValidationError, match="逐张选择"):
+        service.attach_batch_to_request("BATCH-1", {"name": "OA-CLAIM"})
+    with pytest.raises(ValidationError, match="逐张选择"):
+        service.link_invoice("INV-OK", "OA-CLAIM", "")

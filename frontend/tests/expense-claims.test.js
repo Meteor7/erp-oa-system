@@ -298,3 +298,10 @@ test("invoice folder: finance can upload and confirm their own invoices (2026-09
   assert.match(source, /editableByOwner\(selected\.value, !ownView\.value\)/);
   assert.match(source, /view: ownView\.value \? 'mine' : 'all'/);
 });
+
+test("supplemental attachment calls send the parameter name the server expects (2026-09-28)", () => {
+  // R3-49-X1：前端发 attachment_name，后端参数叫 attachment，删除和预览补充附件一直失败。
+  const source = read("../src/lib/invoiceOcr.js");
+  assert.doesNotMatch(source, /attachment_name:/);
+  assert.equal((source.match(/\battachment: attachmentName/g) || []).length, 2);
+});

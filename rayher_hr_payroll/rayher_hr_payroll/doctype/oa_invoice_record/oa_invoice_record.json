@@ -58,7 +58,8 @@
       "fieldtype": "Attach",
       "label": "Private Invoice File",
       "read_only": 1,
-      "reqd": 1
+      "reqd": 1,
+      "permlevel": 1
     },
     {
       "fieldname": "original_filename",
@@ -322,6 +323,12 @@
       "role": "HR Manager",
       "permlevel": 0,
       "read": 1
+    },
+    {
+      "role": "System Manager",
+      "permlevel": 1,
+      "read": 1,
+      "write": 1
     }
   ],
   "sort_field": "modified",
