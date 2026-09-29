@@ -109,25 +109,55 @@ export function filterFolder(invoices = [], tab = 'list') {
 }
 
 // 员工能改识别结果的状态：待确认（含 OCR 没认全的）。识别失败先重新识别。
-export function editableByOwner(invoice, finance = false) {
-  return !finance && String(invoice?.folder_status || '').trim() === '待确认';
+// 第二个参数：当前是不是只读视图（财务的“疑似重复待处理 / 全部发票”页签）。
+export function editableByOwner(invoice, readOnlyView = false) {
+  return !readOnlyView && String(invoice?.folder_status || '').trim() === '待确认';
 }
 
 // ---------------------------------------------------------------- 服务端筛选（修复 2026-09-23）
 // 列表按页签在服务端筛选、分页；页签上的数量用服务端按状态统计的结果，不受条数上限影响。
 const LISTED = ['识别中', '待确认', '可用', '已使用', '疑似重复', '识别失败'];
 export const TAB_STATUSES = Object.freeze({
-  list: LISTED, allinv: LISTED, todo: WAITING, ok: ['可用'], used: ['已使用'], dup: ['疑似重复'],
+  list: LISTED, allinv: LISTED, mine: LISTED, todo: WAITING, ok: ['可用'], used: ['已使用'], dup: ['疑似重复'],
 });
 
 export function tabStatuses(tab) {
   return TAB_STATUSES[tab] || TAB_STATUSES.list;
 }
 
-export function folderTabsFromCounts(counts = {}, finance = false) {
-  const count = (tab) => tabStatuses(tab).reduce((total, status) => total + Number(counts[status] || 0), 0);
-  const keys = finance
-    ? [['dup', '疑似重复待处理'], ['allinv', '全部发票']]
-    : [['list', '全部'], ['todo', '待确认'], ['ok', '可用'], ['used', '已使用'], ['dup', '疑似重复']];
+export function folderTabsFromCounts(counts = {}, finance = false, mineCounts = null) {
+  const count = (tab, source = counts) => tabStatuses(tab).reduce((total, status) => total + Number((source || {})[status] || 0), 0);
+  if (finance) {
+    // 修复（2026-09-28）：财务也有自己的发票要报销，加“我的发票”页签（数量按本人发票算）。
+    return [
+      { key: 'dup', label: '疑似重复待处理', count: count('dup') },
+      { key: 'allinv', label: '全部发票', count: count('allinv') },
+      { key: 'mine', label: '我的发票', count: count('mine', mineCounts || counts) },
+    ];
+  }
+  const keys = [['list', '全部'], ['todo', '待确认'], ['ok', '可用'], ['used', '已使用'], ['dup', '疑似重复']];
   return keys.map(([key, label]) => ({ key, label, count: count(key) }));
+}
+
+// ---------------------------------------------------------------- 重试和疑似重复（修复 2026-09-28）
+export const MAX_RECOGNITION_RETRIES = 3;
+const STUCK_MS = 15 * 60 * 1000;
+
+// 'retry'：识别失败，可以重新识别；'exhausted'：已重试 3 次，只能排除后重新上传；
+// 'stuck'：识别超过 15 分钟没有结果（任务可能丢了），可以重新识别；''：不需要。
+export function retryState(invoice, now = Date.now()) {
+  const status = String(invoice?.folder_status || '').trim();
+  if (status === '识别失败') return Number(invoice?.retry_count || 0) > MAX_RECOGNITION_RETRIES ? 'exhausted' : 'retry';
+  if (status === '识别中') {
+    const since = Date.parse(String(invoice?.modified || '').replace(' ', 'T'));
+    if (Number.isFinite(since) && now - since >= STUCK_MS) return 'stuck';
+  }
+  return '';
+}
+
+// 疑似重复的原因：用服务端写的原因（号码相同；日期或合计不同时会特别提示）。
+export function duplicateText(invoice) {
+  const reason = String(invoice?.duplicate_reason || '').trim();
+  if (reason && !reason.startsWith('duplicate-override:')) return reason;
+  return `发票号码与已确认发票 ${invoice?.duplicate_of || ''} 相同`;
 }

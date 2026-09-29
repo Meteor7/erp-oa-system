@@ -27,6 +27,8 @@ import {
   filterFolder,
   folderTabs,
   folderTabsFromCounts,
+  retryState,
+  duplicateText,
   tabStatuses,
   canEditFields,
   canRetry,
@@ -238,7 +240,9 @@ test("invoice folder tabs are counted by the server, not from the loaded page", 
   const counts = { 识别中: 1, 待确认: 2, 可用: 700, 已使用: 3, 疑似重复: 4, 识别失败: 1, 已排除: 9 };
   assert.deepEqual(folderTabsFromCounts(counts).map((tab) => [tab.key, tab.count]),
     [["list", 711], ["todo", 4], ["ok", 700], ["used", 3], ["dup", 4]]);
-  assert.deepEqual(folderTabsFromCounts(counts, true).map((tab) => [tab.label, tab.count]), [["疑似重复待处理", 4], ["全部发票", 711]]);
+  assert.deepEqual(folderTabsFromCounts(counts, true).map((tab) => [tab.label, tab.count]), [["疑似重复待处理", 4], ["全部发票", 711], ["我的发票", 711]]);
+  // 修复（2026-09-28）：财务的“我的发票”按本人发票计数。
+  assert.deepEqual(folderTabsFromCounts(counts, true, { 待确认: 2, 可用: 1 }).map((tab) => [tab.key, tab.count]), [["dup", 4], ["allinv", 711], ["mine", 3]]);
   assert.deepEqual(tabStatuses("todo"), ["待确认", "识别中", "识别失败"]);
   assert.equal(tabStatuses("unknown").includes("已排除"), false);
 });
@@ -269,4 +273,28 @@ test("review fixes 2026-09-23 stay wired into the pages", () => {
   const app = read("../src/App.vue");
   assert.match(app, /inMenu\(child\.to\)/);
   assert.doesNotMatch(read("../src/pages/TravelRequest.vue"), /list_approval_center_projects/);
+});
+
+test("invoice folder: retries stop after three failures and stuck recognitions can be retried (2026-09-28)", () => {
+  assert.equal(retryState({ folder_status: "识别失败", retry_count: 1 }), "retry");
+  assert.equal(retryState({ folder_status: "识别失败", retry_count: 3 }), "retry");
+  assert.equal(retryState({ folder_status: "识别失败", retry_count: 4 }), "exhausted");
+  const now = Date.parse("2026-09-28T10:30:00");
+  assert.equal(retryState({ folder_status: "识别中", modified: "2026-09-28 10:00:00.123456" }, now), "stuck");
+  assert.equal(retryState({ folder_status: "识别中", modified: "2026-09-28 10:25:00" }, now), "");
+  assert.equal(retryState({ folder_status: "可用" }, now), "");
+});
+
+test("invoice folder: the duplicate message comes from the server reason (2026-09-28)", () => {
+  assert.equal(duplicateText({ duplicate_reason: "发票号码与已确认发票 OIR-1 相同，但开票日期或合计不同，请核对是否为同一张发票" }),
+    "发票号码与已确认发票 OIR-1 相同，但开票日期或合计不同，请核对是否为同一张发票");
+  assert.equal(duplicateText({ duplicate_reason: "duplicate-override:v2:abc:ok", duplicate_of: "OIR-2" }), "发票号码与已确认发票 OIR-2 相同");
+});
+
+test("invoice folder: finance can upload and confirm their own invoices (2026-09-28)", () => {
+  const source = read("../src/pages/InvoiceFolder.vue");
+  assert.doesNotMatch(source, /<label v-if="!finance" class="btn pri"/);
+  assert.match(source, /const ownView = computed\(\(\) => !finance \|\| tab\.value === 'mine'\)/);
+  assert.match(source, /editableByOwner\(selected\.value, !ownView\.value\)/);
+  assert.match(source, /view: ownView\.value \? 'mine' : 'all'/);
 });

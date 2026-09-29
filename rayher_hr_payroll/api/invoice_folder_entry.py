@@ -29,6 +29,10 @@ def _require_access():
     return user
 
 
+def _is_finance(user):
+    return user == "Administrator" or bool(set(frappe.get_roles(user) or []) & service.FINANCE_ROLES)
+
+
 def _requests(names):
     names = sorted({str(name or "").strip() for name in names if str(name or "").strip()})
     if not names:
@@ -91,12 +95,17 @@ def list_invoice_folder(status=None, include_excluded=0, view="mine", statuses=N
     table = f"`tab{service.RECORD_DOCTYPE}`"
     case = folder.status_case_sql(frappe.db.escape)
     scope = "1 = 1" if finance_view else "`owner` = %(owner)s"
-    counts = {name: 0 for name in folder.FOLDER_STATUSES}
-    for row in frappe.db.sql(
-        f"SELECT {case} AS folder_status, COUNT(*) AS n FROM {table} WHERE {scope} GROUP BY folder_status",
-        {"owner": user}, as_dict=True,
-    ):
-        counts[row["folder_status"]] = int(row["n"] or 0)
+
+    def count_by_status(where):
+        result = {name: 0 for name in folder.FOLDER_STATUSES}
+        for row in frappe.db.sql(
+            f"SELECT {case} AS folder_status, COUNT(*) AS n FROM {table} WHERE {where} GROUP BY folder_status",
+            {"owner": user}, as_dict=True,
+        ):
+            result[row["folder_status"]] = int(row["n"] or 0)
+        return result
+
+    counts = count_by_status(scope)
     columns = ", ".join(f"`{field}`" for field in FIELDS)
     rows = frappe.db.sql(
         f"SELECT {columns} FROM {table} WHERE {scope} AND ({case}) IN %(wanted)s"
@@ -112,7 +121,13 @@ def list_invoice_folder(status=None, include_excluded=0, view="mine", statuses=N
                                       fields=["name", "full_name"], limit_page_length=0)
         }
     items = [_serialize(row, requests, owners) for row in rows]
-    return {"invoices": items, "counts": counts, "total": sum(counts[name] for name in wanted)}
+    result = {"invoices": items, "counts": counts, "total": sum(counts[name] for name in wanted)}
+    # 修复（2026-09-28）：财务自己也要报销、也要上传发票，发票夹多一个"我的发票"页签。
+    # 同时返回全部发票和本人发票的数量，页签上的数字不随当前页签变化。
+    if _is_finance(user):
+        result["counts_all"] = counts if finance_view else count_by_status("1 = 1")
+        result["counts_mine"] = count_by_status("`owner` = %(owner)s") if finance_view else counts
+    return result
 
 
 @frappe.whitelist()

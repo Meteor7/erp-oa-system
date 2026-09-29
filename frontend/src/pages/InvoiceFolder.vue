@@ -5,7 +5,9 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import '../styles/expenseUi.css';
 import InvoicePreviewDrawer from '../components/invoice/InvoicePreviewDrawer.vue';
 import { callApi, isFinanceUser, money, pillClass } from '../lib/expenseClaims.js';
-import { confirmBlockers, editableByOwner, folderTabsFromCounts, missingFields, tabStatuses, usedByText } from '../lib/invoiceFolderView.js';
+import {
+  confirmBlockers, duplicateText, editableByOwner, folderTabsFromCounts, missingFields, retryState, tabStatuses, usedByText,
+} from '../lib/invoiceFolderView.js';
 import {
   confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice,
   updateInvoice, updateInvoiceExpenseContext, uploadInvoiceFiles, validateInvoiceFiles,
@@ -22,15 +24,20 @@ const banner = reactive({ ok: '', err: '' });
 const previewOpen = ref(false);
 const fileInput = ref(null);
 const counts = ref({});
+const countsAll = ref(null);
+const countsMine = ref(null);
 const total = ref(0);
 const PAGE = 100;
 let poller = null;
 let alive = true;
 
-const tabs = computed(() => folderTabsFromCounts(counts.value, finance));
+// 修复（2026-09-28）：财务也要报销、也要上传发票。财务有“我的发票”页签，在里面上传、核对、确认自己的发票；
+// 另外两个页签（疑似重复待处理、全部发票）是只读的财务视图。
+const ownView = computed(() => !finance || tab.value === 'mine');
+const tabs = computed(() => folderTabsFromCounts(countsAll.value || counts.value, finance, countsMine.value));
 const rows = computed(() => invoices.value);
 const selected = computed(() => rows.value.find((row) => row.name === selectedName.value) || rows.value[0] || null);
-const editable = computed(() => editableByOwner(selected.value, finance));
+const editable = computed(() => editableByOwner(selected.value, !ownView.value));
 const missing = computed(() => (selected.value && editable.value ? missingFields({ ...selected.value, ...edit }) : []));
 const currentUser = typeof window !== 'undefined' ? (window.full_name || window.user || '') : '';
 
@@ -44,7 +51,7 @@ function hydrate(invoice) {
   if (!invoice) return;
   Object.assign(edit, {
     invoice_category: invoice.invoice_category || '', project_name: invoice.project_name || '',
-    issue_date: invoice.issue_date || '', invoice_number: invoice.invoice_number || '',
+    issue_date: invoice.issue_date || '', invoice_number: invoice.invoice_number || '', invoice_code: invoice.invoice_code || '',
     amount_before_tax: invoice.amount_before_tax ?? '', tax_amount: invoice.tax_amount ?? '',
     total_amount: invoice.total_amount ?? '', expense_description: invoice.expense_description || '',
   });
@@ -54,7 +61,7 @@ async function load({ more = false } = {}) {
   loading.value = true;
   try {
     const result = await callApi('invoice_folder_entry.list_invoice_folder', {
-      view: finance ? 'all' : 'mine',
+      view: ownView.value ? 'mine' : 'all',
       statuses: tabStatuses(tab.value).join(','),
       // 刷新时把已经翻出来的几页一起取回，列表不会缩回第一页。
       limit: more ? PAGE : Math.max(PAGE, invoices.value.length),
@@ -62,6 +69,8 @@ async function load({ more = false } = {}) {
     }, { method: 'GET' });
     invoices.value = more ? [...invoices.value, ...(result?.invoices || [])] : (result?.invoices || []);
     counts.value = result?.counts || {};
+    countsAll.value = result?.counts_all || null;
+    countsMine.value = result?.counts_mine || null;
     total.value = result?.total ?? invoices.value.length;
     if (poller) clearTimeout(poller);
     // 识别是后台任务：还有识别中的发票就每 4 秒刷新一次；离开页面后不再刷新。
@@ -113,8 +122,9 @@ async function upload(event) {
     const results = await uploadInvoiceFiles(files, batch.name);
     const failed = results.filter((result) => result.error);
     flash(`已上传 ${results.length - failed.length} 张发票，正在识别`, failed.length ? `${failed.length} 个文件上传失败：${failed[0].error}` : '');
-    if (tab.value === 'todo') await load();
-    else tab.value = 'todo';
+    const target = finance ? 'mine' : 'todo';
+    if (tab.value === target) await load();
+    else tab.value = target;
   } catch (error) {
     flash('', String(error?.message || error));
   } finally {
@@ -127,7 +137,7 @@ async function saveEdits() {
   const invoice = selected.value;
   await updateInvoice(invoice.name, {
     invoice_category: edit.invoice_category, project_name: edit.project_name, issue_date: edit.issue_date,
-    invoice_number: edit.invoice_number, amount_before_tax: edit.amount_before_tax, tax_amount: edit.tax_amount,
+    invoice_number: edit.invoice_number, invoice_code: edit.invoice_code, amount_before_tax: edit.amount_before_tax, tax_amount: edit.tax_amount,
     total_amount: edit.total_amount,
   });
   if ((edit.expense_description || '') !== (invoice.expense_description || '')) {
@@ -146,7 +156,7 @@ async function confirm() {
     const result = await confirmInvoice(selected.value.name);
     if (result?.conflict?.code === 'duplicate') {
       await load();
-      throw new Error(`发票号码、开票日期和金额与 ${result.conflict.duplicate_of} 相同，已标为疑似重复，等待财务处理`);
+      throw new Error(`发票号码与已确认的 ${result.conflict.duplicate_of} 相同，已标为疑似重复，等待财务处理`);
     }
     return result;
   }, '发票已确认，可以在报销、付款里选用');
@@ -184,9 +194,9 @@ onBeforeUnmount(() => {
     <div class="ph">
       <div>
         <h3>发票夹</h3>
-        <div class="muted">{{ finance ? '处理疑似重复的发票，确认是否真的重复。' : '先上传、识别、核对，确认后的发票才能在报销和付款里选用。' }}</div>
+        <div class="muted">{{ finance ? '处理疑似重复的发票；自己的发票在“我的发票”里上传、核对、确认。' : '先上传、识别、核对，确认后的发票才能在报销和付款里选用。' }}</div>
       </div>
-      <label v-if="!finance" class="btn pri" :class="{ disabled: busy }">
+      <label class="btn pri" :class="{ disabled: busy }">
         ＋ 上传发票
         <input ref="fileInput" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" hidden :disabled="busy" @change="upload" />
       </label>
@@ -203,19 +213,19 @@ onBeforeUnmount(() => {
       <div class="panel flush">
         <div class="tbl narrow">
           <table>
-            <thead><tr><th>发票号码</th><th>项目名称</th><th v-if="finance">上传人</th><th class="r">合计</th><th>状态</th></tr></thead>
+            <thead><tr><th>发票号码</th><th>项目名称</th><th v-if="!ownView">上传人</th><th class="r">合计</th><th>状态</th></tr></thead>
             <tbody>
               <tr v-for="invoice in rows" :key="invoice.name" class="row-sel" :class="{ on: selected?.name === invoice.name }" tabindex="0"
                 @click="select(invoice)" @keydown.enter="select(invoice)">
                 <td class="num"><template v-if="invoice.invoice_number">{{ invoice.invoice_number }}</template><span v-else class="muted">未识别</span></td>
                 <td>{{ invoice.project_name || '—' }}</td>
-                <td v-if="finance">{{ invoice.owner_name || invoice.owner || '—' }}</td>
+                <td v-if="!ownView">{{ invoice.owner_name || invoice.owner || '—' }}</td>
                 <td class="r num">{{ money(invoice.total_amount) }}</td>
                 <td><span :class="pillClass(invoice.folder_status)">{{ invoice.folder_status }}</span></td>
               </tr>
-              <tr v-if="!rows.length"><td :colspan="finance ? 5 : 4" class="empty">{{ loading ? '正在加载…' : '这里没有发票' }}</td></tr>
+              <tr v-if="!rows.length"><td :colspan="ownView ? 4 : 5" class="empty">{{ loading ? '正在加载…' : '这里没有发票' }}</td></tr>
               <tr v-if="rows.length && rows.length < total">
-                <td :colspan="finance ? 5 : 4" class="empty">
+                <td :colspan="ownView ? 4 : 5" class="empty">
                   <button type="button" class="btn sm" :disabled="loading" @click="load({ more: true })">加载更多（还有 {{ total - rows.length }} 张）</button>
                 </td>
               </tr>
@@ -239,15 +249,18 @@ onBeforeUnmount(() => {
           <div v-if="selected.processing_error" class="err">识别失败：{{ selected.processing_error }}</div>
           <div v-if="missing.length" class="err">识别不完整：{{ missing.join('、') }} 未识别，请对照原件补全</div>
           <div v-if="selected.folder_status === '疑似重复'" class="err">
-            发票号码、开票日期和合计金额与 {{ selected.duplicate_of }} 相同，{{ finance ? '请确认是否为同一张发票' : '等待财务处理' }}
+            {{ duplicateText(selected) }}，{{ ownView ? '等待财务处理' : '请确认是否为同一张发票' }}
           </div>
+          <div v-if="ownView && retryState(selected) === 'exhausted'" class="err">这张发票已经重试 3 次仍没有识别出来，请排除后重新上传更清晰的文件。</div>
+          <div v-if="ownView && retryState(selected) === 'stuck'" class="muted">识别超过 15 分钟还没有结果，可以重新识别。</div>
 
           <h4>识别结果<template v-if="editable">（可修改）</template></h4>
           <div class="form">
             <div class="f"><label>发票类别</label><input v-model="edit.invoice_category" :readonly="!editable" /></div>
             <div class="f"><label>项目名称</label><input v-model="edit.project_name" :readonly="!editable" /><div class="h">发票上的货物或服务名称</div></div>
             <div class="f"><label>开票日期<b>*</b></label><input v-model="edit.issue_date" type="date" :readonly="!editable" /></div>
-            <div class="f"><label>发票号码<b>*</b></label><input v-model="edit.invoice_number" :readonly="!editable" /></div>
+            <div class="f"><label>发票号码<b>*</b></label><input v-model="edit.invoice_number" :readonly="!editable" /><div class="h">查重只看号码；识别不出来的请对照原件填写</div></div>
+            <div class="f"><label>发票代码</label><input v-model="edit.invoice_code" :readonly="!editable" /><div class="h">老版发票左上角 10 或 12 位；全电发票没有，可不填</div></div>
             <div class="f"><label>税前金额</label><input v-model="edit.amount_before_tax" type="number" step="0.01" :readonly="!editable" /></div>
             <div class="f"><label>税额</label><input v-model="edit.tax_amount" type="number" step="0.01" :readonly="!editable" /></div>
             <div class="f"><label>合计<b>*</b></label><input v-model="edit.total_amount" type="number" step="0.01" :readonly="!editable" /></div>
@@ -260,11 +273,11 @@ onBeforeUnmount(() => {
               <button type="button" class="btn" :disabled="busy" @click="saveOnly">只保存修改</button>
               <button type="button" class="btn danger" :disabled="busy" @click="exclude()">排除</button>
             </template>
-            <template v-else-if="!finance && selected.folder_status === '识别失败'">
-              <button type="button" class="btn pri" :disabled="busy" @click="retry">重新识别</button>
+            <template v-else-if="ownView && ['retry', 'stuck', 'exhausted'].includes(retryState(selected))">
+              <button v-if="retryState(selected) !== 'exhausted'" type="button" class="btn pri" :disabled="busy" @click="retry">重新识别</button>
               <button type="button" class="btn danger" :disabled="busy" @click="exclude()">排除</button>
             </template>
-            <template v-else-if="finance && selected.folder_status === '疑似重复'">
+            <template v-else-if="!ownView && selected.folder_status === '疑似重复'">
               <button type="button" class="btn" :disabled="busy" @click="notDuplicate">不是重复，退回员工确认</button>
               <button type="button" class="btn pri" :disabled="busy" @click="exclude('确认是重复发票，请填写排除原因')">确认重复，排除</button>
             </template>
