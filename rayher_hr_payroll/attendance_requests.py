@@ -93,6 +93,122 @@ def leave_hours_by_date(rows, work_dates):
     return result
 
 
+def approved_attendance(row):
+    """已批准（已完成）的请假、加班、调休。"""
+    return value(row, "request_type") in ATTENDANCE_TYPES and value(row, "workflow_status") in COMPLETED
+
+
+def expand_days(row):
+    """一张申请占用的每一天：[(日期, 小时数)]。
+
+    新申请有逐日明细；只有起止日期的旧申请，按期间内每个周一到周五 8 小时算。
+    """
+    raw = value(row, "attendance_days")
+    if raw:
+        details = json.loads(raw) if isinstance(raw, str) else raw
+        return [(as_date(detail["work_date"]), Decimal(str(detail["hours"]))) for detail in details]
+    start, end = as_date(value(row, "from_date")), as_date(value(row, "to_date"))
+    span = (start + timedelta(days=offset) for offset in range((end - start).days + 1))
+    return [(day, Decimal("8")) for day in span if day.weekday() < 5]
+
+
+def window_hours(row, start, end):
+    """这张申请落在 [start, end] 这段日期里的小时数（跨月的申请按天拆开）。"""
+    return sum((hours for day, hours in expand_days(row) if start <= day <= end), ZERO)
+
+
+ABSENCE_LABELS = {REQUEST_LEAVE: "请假", REQUEST_COMP_TIME: "调休", REQUEST_OVERTIME: "加班"}
+MAX_ABSENCE_HOURS_PER_DAY = Decimal("8")
+MAX_OVERTIME_HOURS_PER_DAY = Decimal("24")
+_STATUS_TEXT = {"待审批": "审批中", "待办理": "审批中", "已完成": "已通过", "已通过": "已通过"}
+
+
+def _taken_by_day(others, wanted):
+    """这个员工其他有效申请在指定日期上已经占了多少：{日期: {absence, overtime, row}}。"""
+    taken = {}
+    for row in others:
+        if value(row, "workflow_status") not in ACTIVE:
+            continue
+        kind = "overtime" if value(row, "request_type") == REQUEST_OVERTIME else "absence"
+        for day, hours in expand_days(row):
+            if day in wanted:
+                slot = taken.setdefault(day, {"absence": ZERO, "overtime": ZERO, "row": row})
+                slot[kind] += hours
+                if hours:
+                    slot["row"] = row
+    return taken
+
+
+def _where(day, row):
+    label = ABSENCE_LABELS.get(value(row, "request_type"), "")
+    return f"{day.month}月{day.day}日已有{label}申请 {value(row, 'name')}（{_STATUS_TEXT.get(value(row, 'workflow_status'), '')}）"
+
+
+def find_day_conflict(request_type, days, others):
+    """新申请的哪一天和这个员工已有的（审批中或已通过的）申请撞了；没有撞返回 None，撞了返回提示。
+
+    修复（2026-09-29，审查 #56 P2）：三类申请之间原来没有任何日期冲突检查，
+    同一天可以同时请假、调休、加班，加班一天还能报到 24 小时。规则：
+    - 请假和调休：同一天合计不超过 8 小时（一天 8 小时）；
+    - 加班：同一天已有的加班合计不超过 24 小时；
+    - 同一天有请假或调休的，不能再申请加班，反过来也一样。
+    """
+    wanted = {}
+    for detail in days:
+        day = as_date(detail["work_date"])
+        wanted[day] = wanted.get(day, ZERO) + Decimal(str(detail["hours"]))
+    taken = _taken_by_day(others, set(wanted))
+    for day in sorted(taken):
+        slot, row = taken[day], taken[day]["row"]
+        where = _where(day, row)
+        if request_type == REQUEST_OVERTIME:
+            if slot["absence"] > 0:
+                return f"{where}，同一天不能再申请加班。"
+            if slot["overtime"] + wanted[day] > MAX_OVERTIME_HOURS_PER_DAY:
+                return f"{where}，同一天的加班合计不能超过 24 小时。"
+        else:
+            if slot["overtime"] > 0:
+                return f"{where}，同一天不能再申请{ABSENCE_LABELS[request_type]}。"
+            if slot["absence"] + wanted[day] > MAX_ABSENCE_HOURS_PER_DAY:
+                return f"{where}，同一天的请假和调休合计不能超过 8 小时。"
+    return None
+
+
+def day_limits(request_type, dates, others):
+    """申请表里每一天还能填多少小时；这天已经被占满时给出是哪张申请占的：
+    {日期: {max_hours, conflict: None | {request, text}}}。"""
+    taken = _taken_by_day(others, set(dates))
+    limits = {}
+    for day in dates:
+        slot = taken.get(day)
+        if request_type == REQUEST_OVERTIME:
+            blocked = bool(slot and slot["absence"] > 0)
+            remaining = MAX_OVERTIME_HOURS_PER_DAY - (slot["overtime"] if slot else ZERO)
+        else:
+            blocked = bool(slot and slot["overtime"] > 0)
+            remaining = MAX_ABSENCE_HOURS_PER_DAY - (slot["absence"] if slot else ZERO)
+        if slot and (blocked or remaining <= 0):
+            row = slot["row"]
+            limits[day] = {"max_hours": 0, "conflict": {"request": value(row, "name"), "text": _where(day, row)}}
+        else:
+            limits[day] = {"max_hours": float(remaining), "conflict": None}
+    return limits
+
+
+def active_rows(employee, start, end, *, exclude="", lock=False):
+    """员工在 [start, end] 里审批中或已通过的请假、加班、调休申请（含每日明细）。"""
+    import frappe
+    statuses, types = sorted(ACTIVE), sorted(ATTENDANCE_TYPES)
+    status_marks, type_marks = ", ".join(["%s"] * len(statuses)), ", ".join(["%s"] * len(types))
+    return frappe.db.sql(
+        "SELECT name, request_type, leave_type, workflow_status, from_date, to_date, attendance_days, duration_hours "
+        "FROM `tabOA Approval Request` WHERE employee = %s AND name <> %s "
+        f"AND request_type IN ({type_marks}) AND workflow_status IN ({status_marks}) "
+        "AND from_date <= %s AND to_date >= %s" + (" FOR UPDATE" if lock else ""),
+        (employee, exclude or "", *types, *statuses, end, start), as_dict=True,
+    )
+
+
 def balance_effect(request_type, status, hours):
     hours = Decimal(str(hours or 0))
     if status not in ACTIVE:
@@ -182,6 +298,22 @@ def sync_balance(doc):
         frappe.msgprint("加班额度冲回后调休余额不足，已保留调休记录；请联系人事处理，余额补足前不能新增调休。", indicator="orange")
 
 
+def check_day_conflicts(doc):
+    """申请提交（从草稿变成审批中）时，和这个员工其他有效申请比对日期。员工行已经加锁，读当前数据。"""
+    import frappe
+    employee, start, end = value(doc, "employee"), value(doc, "from_date"), value(doc, "to_date")
+    if not (employee and start and end):
+        return
+    rows = active_rows(employee, start, end, exclude=value(doc, "name"), lock=True)
+    message = find_day_conflict(doc.request_type, expand_detail_rows(doc), rows)
+    if message:
+        frappe.throw(message)
+
+
+def expand_detail_rows(doc):
+    return [{"work_date": day.isoformat(), "hours": float(hours)} for day, hours in expand_days(doc)]
+
+
 def validate_attendance_request(doc):
     if value(doc, "request_type") not in ATTENDANCE_TYPES:
         return
@@ -192,6 +324,8 @@ def validate_attendance_request(doc):
     # Keep historical approved date-only leave readable; normalize when submitted/edited.
     if before is None or value(before, "workflow_status") == "草稿":
         prepare_request(doc)
+    if value(doc, "workflow_status") in ACTIVE and (before is None or value(before, "workflow_status") not in ACTIVE):
+        check_day_conflicts(doc)
     from rayher_hr_payroll.annual_leave import validate_annual_request
     validate_annual_request(doc, before)
     sync_balance(doc)

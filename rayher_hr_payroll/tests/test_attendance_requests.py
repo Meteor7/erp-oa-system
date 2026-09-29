@@ -160,3 +160,78 @@ def test_hr_mutations_lock_employee_before_request_action(monkeypatch):
 
 def test_legacy_empty_string_details_use_work_calendar():
     assert hr.normalize_days("", "2026-09-01", "2026-09-01", work_dates=[date(2026, 9, 1)]) == [{"work_date": "2026-09-01", "hours": 8}]
+
+
+# ---------------------------------------------------------------- 模块 4（2026-09-29）
+
+def att_request(name, request_type, status, days, **extra):
+    return {"name": name, "request_type": request_type, "workflow_status": status,
+            "attendance_days": json.dumps([{"work_date": d, "hours": h} for d, h in days]), **extra}
+
+
+@pytest.mark.parametrize("request_type", [hr.REQUEST_LEAVE, hr.REQUEST_OVERTIME, hr.REQUEST_COMP_TIME])
+def test_only_approved_attendance_is_final(request_type):
+    # 审查 R3-56-1：已批准的请假、加班、调休不能撤回；审批中的仍可以。
+    assert hr.approved_attendance({"request_type": request_type, "workflow_status": "已完成"})
+    assert hr.approved_attendance({"request_type": request_type, "workflow_status": "已通过"})
+    for status in ("草稿", "待审批", "待办理"):
+        assert not hr.approved_attendance({"request_type": request_type, "workflow_status": status})
+    assert not hr.approved_attendance({"request_type": "购买申请", "workflow_status": "已完成"})
+
+
+def test_a_day_cannot_be_booked_twice_by_leave_and_comp_time():
+    others = [att_request("OA-1", hr.REQUEST_LEAVE, "待审批", [("2026-10-13", 8)])]
+    message = hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-13", "hours": 4}], others)
+    assert "10月13日已有请假申请 OA-1（审批中）" in message and "不能超过 8 小时" in message
+    assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, [{"work_date": "2026-10-13", "hours": 1}], others)
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-14", "hours": 8}], others) is None
+
+
+def test_two_half_days_fit_in_one_day_but_a_third_does_not():
+    others = [att_request("OA-1", hr.REQUEST_LEAVE, "已完成", [("2026-10-13", 4)])]
+    assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, [{"work_date": "2026-10-13", "hours": 4}], others) is None
+    others.append(att_request("OA-2", hr.REQUEST_COMP_TIME, "待审批", [("2026-10-13", 4)]))
+    assert "合计不能超过 8 小时" in hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-13", "hours": 0.5}], others)
+
+
+def test_overtime_cannot_share_a_day_with_leave_or_comp_time_or_exceed_24_hours():
+    leave_day = [att_request("OA-1", hr.REQUEST_LEAVE, "待审批", [("2026-10-13", 4)])]
+    assert "不能再申请加班" in hr.find_day_conflict(hr.REQUEST_OVERTIME, [{"work_date": "2026-10-13", "hours": 2}], leave_day)
+    overtime_day = [att_request("OA-3", hr.REQUEST_OVERTIME, "已完成", [("2026-10-17", 20)])]
+    assert "不能再申请请假" in hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-17", "hours": 4}], overtime_day)
+    assert "不能超过 24 小时" in hr.find_day_conflict(hr.REQUEST_OVERTIME, [{"work_date": "2026-10-17", "hours": 5}], overtime_day)
+    assert hr.find_day_conflict(hr.REQUEST_OVERTIME, [{"work_date": "2026-10-17", "hours": 4}], overtime_day) is None
+
+
+@pytest.mark.parametrize("status", ["草稿", "已拒绝", "已撤回"])
+def test_drafts_and_dead_requests_do_not_block_days(status):
+    others = [att_request("OA-1", hr.REQUEST_LEAVE, status, [("2026-10-13", 8)])]
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-13", "hours": 8}], others) is None
+
+
+def test_legacy_date_only_requests_book_their_weekdays():
+    legacy = {"name": "OA-OLD", "request_type": hr.REQUEST_LEAVE, "workflow_status": "已完成",
+              "from_date": "2026-10-09", "to_date": "2026-10-12", "attendance_days": ""}
+    assert [d.isoformat() for d, _ in hr.expand_days(legacy)] == ["2026-10-09", "2026-10-12"]
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-10", "hours": 8}], [legacy]) is None
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, [{"work_date": "2026-10-12", "hours": 1}], [legacy])
+
+
+def test_window_hours_splits_a_cross_month_request_by_day():
+    row = att_request("OA-1", hr.REQUEST_LEAVE, "已完成", [("2026-09-30", 8), ("2026-10-01", 4), ("2026-10-02", 8)])
+    assert hr.window_hours(row, date(2026, 9, 1), date(2026, 9, 30)) == Decimal("8")
+    assert hr.window_hours(row, date(2026, 10, 1), date(2026, 10, 31)) == Decimal("12")
+    assert hr.window_hours(row, date(2026, 11, 1), date(2026, 11, 30)) == Decimal("0")
+
+
+def test_day_limits_tell_the_form_how_many_hours_are_left():
+    others = [att_request("OA-1", hr.REQUEST_LEAVE, "待审批", [("2026-10-13", 4)]),
+              att_request("OA-2", hr.REQUEST_OVERTIME, "已完成", [("2026-10-17", 6)])]
+    days = [date(2026, 10, 12), date(2026, 10, 13), date(2026, 10, 17)]
+    leave = hr.day_limits(hr.REQUEST_LEAVE, days, others)
+    assert leave[days[0]] == {"max_hours": 8.0, "conflict": None}
+    assert leave[days[1]] == {"max_hours": 4.0, "conflict": None}
+    assert leave[days[2]]["max_hours"] == 0 and leave[days[2]]["conflict"]["request"] == "OA-2"
+    overtime = hr.day_limits(hr.REQUEST_OVERTIME, days, others)
+    assert overtime[days[1]]["max_hours"] == 0 and overtime[days[1]]["conflict"]["request"] == "OA-1"
+    assert overtime[days[2]] == {"max_hours": 18.0, "conflict": None}

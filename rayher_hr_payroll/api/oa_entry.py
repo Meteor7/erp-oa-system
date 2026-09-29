@@ -9,7 +9,9 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import frappe
 
-from rayher_hr_payroll.attendance_requests import ATTENDANCE_TYPES, REQUEST_OVERTIME, REQUEST_COMP_TIME, attendance_request_transaction
+from rayher_hr_payroll.attendance_requests import (
+    ATTENDANCE_TYPES, REQUEST_OVERTIME, REQUEST_COMP_TIME, approved_attendance, attendance_request_transaction,
+)
 from frappe.utils import now_datetime
 
 from rayher_hr_payroll.invoice_ocr import service as invoice_service
@@ -1573,6 +1575,8 @@ def _summarize_doc(doc, authorized_expense_lines=None):
                     doc.request_type in {REQUEST_DIRECT_PURCHASE, REQUEST_TRAVEL}
                     and doc.workflow_status == STATUS_COMPLETED
                 )
+                # 修复（2026-09-29，审查 R3-56-1）：已批准的请假、加班、调休暂不能撤回。
+                and not approved_attendance(doc)
             )
         ) and invoice_service.invoice_permissions.can_edit_request(doc, frappe.session.user),
         "can_withdraw_payment": doc.workflow_status == STATUS_PAID and _is_finance_user(),
@@ -4663,6 +4667,11 @@ def withdraw_request(name, note=None):
             frappe.throw(frappe._("已付款单据必须先由财务撤回付款。"))
         if doc.request_type in {REQUEST_DIRECT_PURCHASE, REQUEST_TRAVEL} and doc.workflow_status == STATUS_COMPLETED:
             frappe.throw(frappe._("已通过的申请不能撤回。"))
+        # 修复（2026-09-29，审查 R3-56-1，来自 #56）：已批准的请假、加班、调休原来可以随时撤回：
+        # 假期过后撤回，年假、调休余额退回，那天也不会被扣，事假还会把月度工时上限抬回去。
+        # 决定（2026-09-29）：批准后暂时不能撤回，需要取消的请联系人事（销假流程以后再做）。
+        if approved_attendance(doc):
+            frappe.throw(frappe._("已批准的请假、加班、调休暂不能撤回，需要取消请联系人事。"))
         if doc.request_type == REQUEST_PROCUREMENT:
             if doc.workflow_status not in ACTIVE_STATUSES:
                 frappe.throw(frappe._("采购申请仅可在需求审批期间撤回；进入询价、价格审批或采购执行后不可撤回。"))
