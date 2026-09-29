@@ -142,6 +142,13 @@ def sync_effective_leaver_statuses(today=None):
                 continue
             if joining and joining > relieving:
                 continue
+            positions = frappe.get_all(
+                "OA Approval Role Assignment", filters={"employee": row.name, "enabled": 1}, pluck="role_label",
+            )
+            if positions:
+                # 修复（2026-09-29，模块 7）：岗位任职人离职当晚账号一停用，所有需要这个岗位审批的单子
+                # 都提交不了。先不标离职，记日志提醒人事去岗位任命里交接；交接后下次任务自动处理。
+                raise ValueError(f"仍担任岗位 {'、'.join(positions)}，请先完成岗位交接")
             doc.status = "Left"
             # Use save so the linked login is disabled by the normal lifecycle hook.
             doc.save(ignore_permissions=True)

@@ -251,6 +251,11 @@ def save_employee(
         if not frappe.has_permission("Employee", "write", doc=name):
             frappe.throw(frappe._("您无权修改该员工。"))
         doc = frappe.get_doc("Employee", name)
+        if vals.get("status") == "Left" and frappe.db.get_value(
+            "OA Approval Role Assignment", {"employee": name, "enabled": 1}, "role_label",
+        ):
+            # 岗位任职人立即离职会让这个岗位的审批全部卡住，先交接（修复 2026-09-29，模块 7）。
+            frappe.throw(frappe._("此人还担任审批岗位，请先在岗位任命中完成交接，再办理离职。"))
         doc.update(vals)
         final_name = getattr(doc, "employee_name", None) or employee_name
         if (getattr(doc, "status", None) or "Active") == "Active" and final_name:

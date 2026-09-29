@@ -76,6 +76,40 @@ def sync_roles(user, relinquished, required, retained):
                         "parentfield": "roles", "role": role}).insert(ignore_permissions=True)
     frappe.clear_cache(user=user)
 
+PROCUREMENT_REQUEST_TYPES = ("采购申请", "购买申请", "采购付款")
+FINISHED_BUSINESS_STATUSES = ("验收通过", "已关闭", "已取消")
+FINISHED_WORKFLOW_STATUSES = ("已付款", "已撤回", "已取消")
+
+
+def transfer_purchaser_requests(old_user, new_user):
+    """采购经理交接：把还没办完的采购单的采购经办人改成新任（修复 2026-09-29，审查 X3-9，决定 D6）。
+
+    原来交接不动历史单据，新采购经理看不到旧采购单、也不能下推采购付款，通知还发给前任。
+    已验收、已关闭、已取消、已付款、已撤回的单据保持原样；每张改动的单据留一条备注。
+    """
+    import frappe
+    if not old_user or not new_user or old_user == new_user:
+        return []
+    names = frappe.get_all(
+        "OA Approval Request",
+        filters={
+            "request_type": ["in", list(PROCUREMENT_REQUEST_TYPES)],
+            "purchaser_user": old_user,
+            "business_status": ["not in", list(FINISHED_BUSINESS_STATUSES)],
+            "workflow_status": ["not in", list(FINISHED_WORKFLOW_STATUSES)],
+        },
+        pluck="name", limit_page_length=0,
+    )
+    for name in names:
+        frappe.db.set_value("OA Approval Request", name, "purchaser_user", new_user, update_modified=False)
+        frappe.get_doc({
+            "doctype": "Comment", "comment_type": "Info",
+            "reference_doctype": "OA Approval Request", "reference_name": name,
+            "content": f"采购经理岗位交接：采购经办人由 {old_user} 改为 {new_user}",
+        }).insert(ignore_permissions=True)
+    return names
+
+
 def apply_assignment(doc):
     """Called inside the assignment's save transaction; never commits."""
     import frappe
@@ -118,6 +152,8 @@ def apply_assignment(doc):
         sync_roles(old.user, profile_roles(old.role_profile), set(), independent_roles(old.user, doc.name))
     relinquished = profile_roles(old.role_profile) if old and old.user == doc.user else set()
     sync_roles(doc.user, relinquished, profile_roles(doc.role_profile), independent_roles(doc.user, doc.name))
+    if doc.get("role_key") == "procurement_manager" and old and old.user and old.user != doc.user:
+        transfer_purchaser_requests(old.user, doc.user)
     # Parent-position links are stable; update child holders when their parent changes.
     if previous != doc.employee:
         for row in frappe.get_all("OA Approval Role Assignment",

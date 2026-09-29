@@ -31,3 +31,30 @@ def test_inactive_holder_rejected():
 def test_idempotent():
     rows=[dict(name="a",status="Active",reports_to=None),dict(name="b",status="Active",reports_to="a")]
     assert reporting_plan(rows,"b","b","a")=={}
+
+
+
+def test_purchaser_handover_moves_open_procurement_requests(monkeypatch):
+    # 审查 X3-9（决定 D6）：采购经理交接后，没办完的采购单改由新任经办，并留备注。
+    import sys
+    import types as _types
+    from rayher_hr_payroll import position_handover as ph
+
+    calls = {"filters": None, "set": [], "comments": []}
+    fake = _types.ModuleType("frappe")
+
+    def get_all(doctype, filters=None, **kwargs):
+        calls["filters"] = filters
+        return ["OA-1", "OA-2"]
+
+    fake.get_all = get_all
+    fake.db = _types.SimpleNamespace(set_value=lambda *a, **k: calls["set"].append(a))
+    fake.get_doc = lambda values: _types.SimpleNamespace(insert=lambda **k: calls["comments"].append(values["reference_name"]))
+    monkeypatch.setitem(sys.modules, "frappe", fake)
+
+    assert ph.transfer_purchaser_requests("old@x", "new@x") == ["OA-1", "OA-2"]
+    assert calls["filters"]["purchaser_user"] == "old@x"
+    assert "已关闭" in calls["filters"]["business_status"][1] and "已付款" in calls["filters"]["workflow_status"][1]
+    assert calls["set"] == [("OA Approval Request", "OA-1", "purchaser_user", "new@x"), ("OA Approval Request", "OA-2", "purchaser_user", "new@x")]
+    assert calls["comments"] == ["OA-1", "OA-2"]
+    assert ph.transfer_purchaser_requests("same@x", "same@x") == []

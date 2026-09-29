@@ -14,6 +14,8 @@ def test_daily_departure_uses_current_records_and_normal_save(monkeypatch):
     employee = Employee()
     fake = types.ModuleType("frappe")
     def get_all(dt, **kwargs):
+        if dt == "OA Approval Role Assignment":
+            return []
         assert kwargs["filters"] == {"status": "Active", "relieving_date": ["<", "2026-09-20"]}
         return [SimpleNamespace(name="EMP-1")]
     fake.get_all = get_all
@@ -59,7 +61,7 @@ def test_one_failing_leaver_does_not_stop_the_others_and_rehires_stay_active(mon
         "REHIRED": Employee("REHIRED", "2025-12-31", joining="2026-03-01"),
     }
     fake = types.ModuleType("frappe")
-    fake.get_all = lambda *a, **kw: [SimpleNamespace(name=n) for n in people]
+    fake.get_all = lambda dt, **kw: [] if dt == "OA Approval Role Assignment" else [SimpleNamespace(name=n) for n in people]
     fake.get_doc = lambda dt, name, **kw: people[name]
     fake.db = SimpleNamespace(savepoint=lambda name: None, rollback=lambda save_point=None: rolled.append(save_point))
     fake.log_error = lambda title=None, message=None: logged.append(message)
@@ -70,3 +72,20 @@ def test_one_failing_leaver_does_not_stop_the_others_and_rehires_stay_active(mon
     assert [row["employee_name"] for row in result] == ["E2"]
     assert saved == ["E2"] and people["REHIRED"].status == "Active"
     assert rolled == ["leaver_sync"] and "BOSS" in logged[0]
+
+
+
+def test_a_position_holder_is_not_relieved_before_handover(monkeypatch):
+    # 模块 7：岗位任职人离职当晚账号停用会让该岗位的审批全部卡住。
+    from rayher_hr_payroll import organization_master_data as mod
+    logged = []
+    holder = SimpleNamespace(name="CASHIER", employee_name="出纳", status="Active", relieving_date="2026-09-10",
+                             date_of_joining="2020-01-01", save=lambda **kw: None)
+    fake = types.ModuleType("frappe")
+    fake.get_all = lambda dt, **kw: ["出纳"] if dt == "OA Approval Role Assignment" else [SimpleNamespace(name="CASHIER")]
+    fake.get_doc = lambda *a, **kw: holder
+    fake.db = SimpleNamespace(savepoint=lambda name: None, rollback=lambda save_point=None: None)
+    fake.log_error = lambda title=None, message=None: logged.append(message)
+    monkeypatch.setitem(sys.modules, "frappe", fake)
+    assert mod.sync_effective_leaver_statuses(today="2026-09-20") == []
+    assert holder.status == "Active" and "岗位交接" in logged[0]
