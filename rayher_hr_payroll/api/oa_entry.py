@@ -573,11 +573,11 @@ def _employee_context(user=None, employee=None):
     if employee_name in current_supervisors():
         try:
             resolution = resolve_stage_two_supervisor(employee_name, _enabled_employee_user)
-        except OrganizationResolutionError as exc:
+        except (OrganizationResolutionError, ApprovalRoleResolutionError) as exc:
             frappe.throw(str(exc))
         try:
             executive = resolve_top_executive(employee_name, _enabled_employee_user)
-        except OrganizationResolutionError:
+        except (OrganizationResolutionError, ApprovalRoleResolutionError):
             executive = None
         context.update(
             {

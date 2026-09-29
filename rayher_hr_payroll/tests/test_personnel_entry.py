@@ -27,7 +27,7 @@ def _install_fake_frappe(monkeypatch):
     frappe.throw = throw
     frappe.whitelist = whitelist
     frappe.utils = SimpleNamespace(today=lambda: "2026-09-20")
-    frappe.db = SimpleNamespace(commit=lambda: None)
+    frappe.db = SimpleNamespace(commit=lambda: None, get_value=lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "frappe", frappe)
     return frappe
 
@@ -285,3 +285,18 @@ def test_future_departure_remains_active_until_effective_date(monkeypatch):
     frappe.get_doc = lambda *a: Doc()
     mod.save_employee(name="EMP-1", relieving_date="2099-12-31")
     assert captured["status"] == "Active"
+
+
+
+def test_a_second_active_employee_with_the_same_name_is_refused(monkeypatch):
+    # 审查 X3-1（决定 D1）：在职同名会让主管解析出错，保存时就拦住。
+    import pytest
+
+    mod, frappe = _load_personnel_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_company", lambda company, required=False: "Rayher")
+    frappe.db = SimpleNamespace(commit=lambda: None, get_value=lambda doctype, filters, field: "HR-EMP-90001" if filters["employee_name"] == "演示员工130" else None)
+    frappe.get_doc = lambda values: SimpleNamespace(insert=lambda **kwargs: None, name="HR-EMP-NEW")
+    with pytest.raises(RuleError, match="演示员工130\\(研发\\)|加区分"):
+        mod.save_employee(employee_name="演示员工130", company="Rayher")
+    assert mod.save_employee(employee_name="演示员工130(研发)", company="Rayher") == {"name": "HR-EMP-NEW"}

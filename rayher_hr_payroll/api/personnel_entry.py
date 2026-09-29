@@ -167,6 +167,15 @@ def _company(value, required=False):
     return company or None
 
 
+def _require_unique_active_name(employee_name, exclude=None):
+    """在职员工不能重名（修复 2026-09-29，审查 X3-1，决定 D1）：审批路线按姓名找主管。"""
+    clash = frappe.db.get_value(
+        "Employee", {"employee_name": employee_name, "status": "Active", "name": ["!=", exclude or ""]}, "name",
+    )
+    if clash:
+        frappe.throw(frappe._("已有在职员工叫「{0}」（{1}），请在姓名后加区分，例如「{0}(研发)」。").format(employee_name, clash))
+
+
 @frappe.whitelist(methods=["POST"])
 def save_employee(
     name=None, employee_number=None, employee_name=None, company=None, english_name=None, id_card_number_cn=None, date_of_birth=None, gender=None,
@@ -242,10 +251,15 @@ def save_employee(
             frappe.throw(frappe._("您无权修改该员工。"))
         doc = frappe.get_doc("Employee", name)
         doc.update(vals)
+        final_name = getattr(doc, "employee_name", None) or employee_name
+        if (getattr(doc, "status", None) or "Active") == "Active" and final_name:
+            _require_unique_active_name(final_name, exclude=name)
         doc.save(ignore_permissions=True)
     else:
         if not frappe.has_permission("Employee", "create"):
             frappe.throw(frappe._("您无权新增员工。"))
+        if _employment_status(relieving_date) == "Active" and employee_name:
+            _require_unique_active_name(employee_name)
         company_value = vals.pop("company")
         doc = frappe.get_doc({
             "doctype": "Employee", "company": company_value,
