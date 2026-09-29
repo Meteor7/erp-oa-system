@@ -83,10 +83,19 @@ def test_new_user_created_and_bound(monkeypatch):
 
 def test_linked_user_disabled_on_left(monkeypatch):
     user = FakeUser(enabled=1)
-    monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
+    monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda doctype, *a, **k: doctype == "User"))
     monkeypatch.setattr(lc.frappe, "get_doc", lambda *a, **k: user)
     lc.sync_user_for_employee(FakeEmp(status="Left", user_id="e@tests-x.example.invalid"))
     assert user.enabled == 0 and user.saved
+
+
+def test_saving_an_old_leaver_record_keeps_the_rehired_login(monkeypatch):
+    # 审查 X3-5：复职后新旧两份档案共用一个账号，保存旧的离职档不能停用账号。
+    user = FakeUser(enabled=1)
+    monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
+    monkeypatch.setattr(lc.frappe, "get_doc", lambda *a, **k: user)
+    lc.sync_user_for_employee(FakeEmp(status="Left", user_id="e@tests-x.example.invalid"))
+    assert user.enabled == 1 and not user.saved
 
 
 def test_linked_user_reenabled_on_rehire(monkeypatch):

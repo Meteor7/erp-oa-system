@@ -115,24 +115,40 @@ def _create_missing_employees(frappe, employees):
 
 
 def sync_effective_leaver_statuses(today=None):
-    """Apply the dates maintained by HR, preserving rehires and current assignments."""
+    """Apply the dates maintained by HR, preserving rehires and current assignments.
+
+    修复（2026-09-29，模块 7）：
+    - 决定 D3：离职日当天还算在职（本人还能交工时、报销、办交接），离职日的第二天起才标离职、停用账号。
+    - 复职：离职日期早于入职日期的是上次离职留下的旧日期，不再把人标回离职。
+    - 逐人处理：原来一人出错（例如主管名下还有在职下属，ERPNext 不让标离职）整批回滚，
+      当天所有人都没处理，以后每天重复失败。现在出错的人记日志，其他人照常处理。
+    """
     import frappe
 
     current_date = str(today or frappe.utils.today())
     rows = frappe.get_all(
-        "Employee", filters={"status": "Active", "relieving_date": ["<=", current_date]},
+        "Employee", filters={"status": "Active", "relieving_date": ["<", current_date]},
         fields=["name"], order_by="name", limit_page_length=0,
     )
     updates = []
     for row in rows:
-        doc = frappe.get_doc("Employee", row.name, for_update=True)
-        if (doc.status != "Active" or not doc.relieving_date
-                or str(doc.relieving_date) > current_date):
-            continue
-        doc.status = "Left"
-        # Use save so the linked login is disabled by the normal lifecycle hook.
-        doc.save(ignore_permissions=True)
-        updates.append({"employee_name": doc.employee_name, "status": doc.status})
+        savepoint = "leaver_sync"
+        frappe.db.savepoint(savepoint)
+        try:
+            doc = frappe.get_doc("Employee", row.name, for_update=True)
+            relieving = str(getattr(doc, "relieving_date", "") or "")
+            joining = str(getattr(doc, "date_of_joining", "") or "")
+            if doc.status != "Active" or not relieving or relieving >= current_date:
+                continue
+            if joining and joining > relieving:
+                continue
+            doc.status = "Left"
+            # Use save so the linked login is disabled by the normal lifecycle hook.
+            doc.save(ignore_permissions=True)
+            updates.append({"employee_name": doc.employee_name, "status": doc.status})
+        except Exception as exc:  # noqa: BLE001 - one employee must not stop the others
+            frappe.db.rollback(save_point=savepoint)
+            frappe.log_error(title="离职状态同步失败", message=f"{row.name}: {exc}")
     return updates
 
 

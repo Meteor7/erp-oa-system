@@ -275,7 +275,9 @@ def test_list_employees_adds_household_classification(monkeypatch):
 def test_future_departure_remains_active_until_effective_date(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     assert mod._employment_status("2026-09-21") == "Active"
-    assert mod._employment_status("2026-09-20") == "Left"
+    # 决定 D3：离职日当天仍在职，第二天起离职（today = 2026-09-20）。
+    assert mod._employment_status("2026-09-20") == "Active"
+    assert mod._employment_status("2026-09-19") == "Left"
     assert mod._employment_status(None) == "Active"
     captured = {}
     class Doc:

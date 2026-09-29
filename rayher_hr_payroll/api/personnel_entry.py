@@ -32,7 +32,8 @@ def _employment_status(relieving_date):
     except ValueError:
         frappe.throw("离职日期格式无效。")
     current = date.fromisoformat(str(frappe.utils.today()))
-    return "Left" if effective <= current else "Active"
+    # 决定 D3（2026-09-29）：离职日当天仍在职，第二天起离职。
+    return "Left" if effective < current else "Active"
 
 
 @frappe.whitelist()

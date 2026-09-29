@@ -47,7 +47,8 @@ def hr_scope():
     if _is_leader() or bool(_roles() & HR_ROLES):
         return True, None
     if "Department Manager" in _roles():
-        department = frappe.db.get_value("Employee", {"user_id": _user()}, "department")
+        department = (frappe.db.get_value("Employee", {"user_id": _user(), "status": "Active"}, "department")
+                      or frappe.db.get_value("Employee", {"user_id": _user()}, "department"))
         if department:
             return True, department
     return False, None
@@ -682,7 +683,7 @@ def get_my_requests(limit=6):
     user = _user()
     if user in {"", "guest"}:
         frappe.throw(frappe._("请先登录。"))
-    employee = frappe.db.get_value("Employee", {"user_id": user}, "name")
+    employee = frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, "name") or frappe.db.get_value("Employee", {"user_id": user}, "name")
     filters = {"workflow_status": ["in", ["待审批", "待办理", "草稿"]]}
     if employee:
         filters["employee"] = employee

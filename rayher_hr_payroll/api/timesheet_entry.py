@@ -80,7 +80,8 @@ def _current_employee():
     user = _session_user()
     if not user or user == "Guest":
         return None
-    return frappe.db.get_value("Employee", {"user_id": user}, "name")
+    # 复职时优先取在职档（修复 2026-09-29，审查 X3-5）。
+    return frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, "name") or frappe.db.get_value("Employee", {"user_id": user}, "name")
 
 
 def _visible_employee_names(include_finance=False):
