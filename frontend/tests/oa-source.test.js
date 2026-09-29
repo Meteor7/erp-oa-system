@@ -48,20 +48,10 @@ test('rayher SPA registers split approval pages', () => {
   assert.match(routerSource, /path:\s*['"]\/approval\/corporate-payment['"],\s*redirect:\s*['"]\/approval\/reimbursement['"]/);
 });
 
-test('approval page keeps leave behavior and delegates expense reimbursement to its workbench', () => {
-  assert.match(pageSource, /useRoute/);
-  assert.match(pageSource, /PAGE_CONFIG/);
-  assert.match(pageSource, /\/approval\/leave/);
-  assert.match(pageSource, /\/approval\/purchase/);
-  assert.match(pageSource, /request_type:\s*currentRequestType\.value/);
-  assert.match(pageSource, /<ExpenseWorkbench\s+v-else\s*\/>/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.preview_route/);
-  assert.match(pageSource, /rayher_hr_payroll\.api\.oa_entry\.create_request/);
-  assert.match(pageSource, /copiedTo/);
-  assert.match(pageSource, /抄送/);
-  assert.match(pageSource, /v-model='leaveForm\.department' readonly/);
-  assert.match(pageSource, /v-model='leaveForm\.supervisor' readonly/);
-  assert.doesNotMatch(pageSource, /<select\s+v-model='form\.request_type'/);
+test('the approval page delegates expense reimbursement to its workbench and no longer carries the leave form', () => {
+  assert.match(pageSource, /<ExpenseWorkbench\s*\/>/);
+  assert.doesNotMatch(pageSource, /leaveForm|preview_route|copiedTo|create_request/);
+  assert.match(routerSource, /path:\s*['"]\/approval\/leave['"],\s*component:\s*attendancePage/);
 });
 
 test('expense workbench exposes four focused expense pages', () => {

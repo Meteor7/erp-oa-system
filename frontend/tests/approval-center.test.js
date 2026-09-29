@@ -122,42 +122,18 @@ test("dashboard shows an explicit loading state instead of false zero totals", (
 });
 
 
-test("existing payment and reimbursement aliases remain on OA approvals", () => {
+test("the reimbursement pages render the expense workbench; leave has its own page", () => {
   const source = read("../src/pages/OAApprovals.vue");
-  assert.ok(source.includes("/approval/reimbursement"));
-  assert.ok(source.includes("/approval/corporate-payment"));
-  assert.match(source, /reject_target/);
-  assert.match(source, /rejection_targets/);
-  assert.match(source, /驳回原因必填/);
+  assert.match(source, /<ExpenseWorkbench\s*\/>/);
+  assert.doesNotMatch(source, /leaveForm|preview_route|create_request|update_leave_draft/);
+  const router = read("../src/router.js");
+  for (const path of ["/approval/reimbursement", "/approval/purchase"]) {
+    assert.match(router, new RegExp(`path: '${path}', component: approvalPage`));
+  }
+  for (const path of ["/approval/leave", "/approval/overtime", "/approval/comp-time"]) {
+    assert.match(router, new RegExp(`path: '${path}', component: attendancePage`));
+  }
 });
-
-test("leave approvals render one detailed pending table", () => {
-  const source = read("../src/pages/OAApprovals.vue");
-  assert.match(source, /申请日期/);
-  assert.match(source, /查看详情/);
-  assert.match(source, /<Card v-if='!isLeaveInnerPage' :title='T\.pendingTitle' class='oa-panel oa-table-panel oa-pending-panel'>/);
-});
-
-test("leave approvals open each request in a dedicated inner page", () => {
-  const source = read("../src/pages/OAApprovals.vue");
-  assert.match(source, /isLeaveInnerPage/);
-  assert.match(source, /attendanceBase/);
-  assert.match(source, /返回\{\{ pageConfig.title \}\}/);
-  assert.match(source, /新建\{\{ currentRequestType \}\}/);
-  assert.match(source, /encodeURIComponent\(row.name\)/);
-  assert.match(source, /REQUEST_LEAVE/);
-  assert.match(source, /v-if='isLeaveInnerPage && selectedLeave'/);
-});
-
-test("returned leave drafts can be edited and resubmitted", () => {
-  const source = read("../src/pages/OAApprovals.vue");
-  assert.match(source, /update_leave_draft/);
-  assert.match(source, /hydrateLeaveDraft/);
-  assert.match(source, /leaveDraftName/);
-  assert.match(source, /mine\.data/);
-  assert.match(source, /draftSubmitter\.submit/);
-});
-
 
 test("overtime and compensatory leave follow the leave access flag", () => {
   for (const route of ["/approval/overtime", "/approval/comp-time"]) {
