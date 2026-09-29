@@ -21,6 +21,7 @@ from rayher_hr_payroll.oa_document_types import (
     REQUEST_PROCUREMENT_PAYMENT,
 )
 from rayher_hr_payroll.oa_role_resolver import resolve_role
+from rayher_hr_payroll.maintenance.test_data_guard import like_prefix, require_test_data_site
 
 
 BATCH_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
@@ -249,7 +250,7 @@ class FrappeSeedStore:
         }
 
     def existing(self, batch_id):
-        prefix = PREFIX.format(batch_id=batch_id) + "%"
+        prefix = like_prefix(PREFIX.format(batch_id=batch_id))
         return frappe.get_all(
             "OA Approval Request",
             filters={"subject": ["like", prefix]},
@@ -392,6 +393,7 @@ class FrappeSeedStore:
         return payload
 
     def seed_batch(self, batch_id, scenarios, prerequisites):
+        require_test_data_site()
         if any(row.get("request_type") == REQUEST_PROCUREMENT for row in scenarios):
             raise ApprovalCenterTestDataError(
                 "审批中心隔离种子不能创建采购链数据，请使用 procurement_test_data.seed"
@@ -478,7 +480,8 @@ class FrappeSeedStore:
             frappe.set_user(original_user)
 
     def cleanup_batch(self, batch_id, dry_run):
-        prefix = PREFIX.format(batch_id=batch_id) + "%"
+        # 批次号可含下划线，LIKE 里要转义，否则批次 a_1 会连带删掉批次 ab1 的单据。
+        prefix = like_prefix(PREFIX.format(batch_id=batch_id))
         names = frappe.get_all(
             "OA Approval Request", filters={"subject": ["like", prefix]},
             pluck="name", limit_page_length=0,
@@ -499,7 +502,7 @@ class FrappeSeedStore:
         ) if names else []
         batch_files = frappe.get_all(
             "File",
-            filters={"file_name": ["like", "oa-test-{0}-%".format(batch_id)]},
+            filters={"file_name": ["like", like_prefix("oa-test-{0}-".format(batch_id))]},
             pluck="name",
             limit_page_length=0,
         )
@@ -512,6 +515,7 @@ class FrappeSeedStore:
         }
         if dry_run:
             return {**counts, "deleted_count": 0}
+        require_test_data_site()
         if not names and not batch_files:
             return {**counts, "deleted_count": 0}
         original_user = frappe.session.user

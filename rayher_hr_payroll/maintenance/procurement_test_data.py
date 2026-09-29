@@ -20,6 +20,7 @@ from rayher_hr_payroll.api.procurement_chain import (
     update_price_approval_summary,
 )
 from rayher_hr_payroll.oa_role_resolver import resolve_role
+from rayher_hr_payroll.maintenance.test_data_guard import require_test_data_site
 
 PREFIX = "[OA正式链路验收:20260907]"
 LEGACY_PREFIXES = (
@@ -70,6 +71,8 @@ def _orphan_progress_names():
 @procurement_action
 def cleanup(dry_run=True):
     """Delete old acceptance chains and material-progress rows with no source OA."""
+    if not dry_run:
+        require_test_data_site()
     sources = _source_names()
     prs = set(frappe.get_all(
         "OA Procurement Request Line", filters={"source_request": ["in", list(sources)]},
@@ -637,6 +640,7 @@ def run_payment_condition_acceptance():
 @procurement_action
 def seed(reset_passwords=True):
     """Rebuild two real, forward-generated chains at every manual test node."""
+    require_test_data_site()
     cleanup_result = cleanup(dry_run=False)
     original = frappe.session.user
     nodes, requests, sources = {}, set(), set()
