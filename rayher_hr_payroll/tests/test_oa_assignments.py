@@ -172,3 +172,28 @@ def test_terminal_result_notification_is_idempotent_and_links_request():
     assert len(store.notifications) == 1
     assert "已完成" in store.notifications[0]["subject"]
     assert store.notifications[0]["link"].endswith("/approval/leave?request=OA-REQ-1")
+
+
+
+def test_sync_leaves_manually_assigned_todos_open():
+    # 审查 #14：Desk 上手工指派的待办不是审批待办，不应被关掉。
+    store = MemoryAssignmentStore()
+    doc = request(step(1, "pmc", ["pmc@example.com"]))
+    store.rows.append({"name": "MANUAL", "reference_type": "OA Approval Request", "reference_name": "OA-REQ-1",
+                       "allocated_to": "someone@example.com", "description": "请帮忙核对附件", "status": "Open"})
+    sync_current_assignments(doc, store=store)
+    assert next(row for row in store.rows if row["name"] == "MANUAL")["status"] == "Open"
+
+
+def test_a_rejected_step_notifies_again_in_the_next_round():
+    # 审查 #14：驳回后同一节点再次待办，要再发一次通知。
+    store = MemoryAssignmentStore()
+    doc = request(step(1, "hr", ["hr@example.com"]))
+    doc.operation_log = json.dumps([{"action": "提交申请"}])
+    sync_current_assignments(doc, store=store)
+    doc.operation_log = json.dumps([{"action": "提交申请"}, {"action": "Targeted rejection"}, {"action": "提交申请"}])
+    sync_current_assignments(doc, store=store)
+    sync_current_assignments(doc, store=store)
+    assert len(store.notifications) == 2
+    assert "oa-assignment:OA-REQ-1:hr:r1" in store.notifications[1]["subject"]
+    assert open_users(store) == ["hr@example.com"]

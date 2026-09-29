@@ -52,12 +52,35 @@ def _current_step(doc):
     )
 
 
+ASSIGNMENT_KEY_PREFIX = "oa-assignment:"
+
+
+def request_round(doc):
+    """单据被驳回、撤回的次数（从操作日志数）。
+
+    修复（2026-09-29，审查 #14）：驳回后同一节点重新待办、撤回付款后重新付款时，节点的 step_key
+    不变，原来的待办键和通知键也不变，于是不会再发通知。轮次不为 0 时把它加进键里。
+    """
+    try:
+        events = json.loads(getattr(doc, "operation_log", None) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        events = []
+    # 定向驳回在日志里记作 "Targeted rejection"，撤回申请、撤回付款是中文。
+    return sum(
+        1 for event in events
+        if isinstance(event, dict)
+        and any(word in _clean(event.get("action")).lower() for word in ("驳回", "撤回", "rejection"))
+    )
+
+
 def assignment_reference_key(doc, step):
     request_name = _clean(getattr(doc, "name", None))
     step_key = _clean(getattr(step, "step_key", None))
     if not request_name or not step_key:
         raise ValueError("OA request name and step key are required for assignment synchronization.")
-    return f"oa-assignment:{request_name}:{step_key}"
+    key = f"{ASSIGNMENT_KEY_PREFIX}{request_name}:{step_key}"
+    current_round = request_round(doc)
+    return f"{key}:r{current_round}" if current_round else key
 
 
 def _description(doc, step):
@@ -246,6 +269,9 @@ def sync_current_assignments(doc, previous_step=None, *, store=None):
     for row in open_rows:
         user = _clean(_row_value(row, "allocated_to"))
         description = _clean(_row_value(row, "description"))
+        if f"[{ASSIGNMENT_KEY_PREFIX}" not in description:
+            # 修复（2026-09-29，审查 #14）：用户在 Desk 上手工指派的待办不是审批待办，不去关它。
+            continue
         expected_key = desired.get(user)
         if expected_key and f"[{expected_key}]" in description and user not in kept:
             kept.add(user)

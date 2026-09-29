@@ -802,7 +802,9 @@ def _notify_copied_users(doc):
         user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
         if not user:
             continue
-        key = f"oa-copy:{doc.name}:{subject_prefix}"
+        # 修复（2026-09-29，审查 #14）：键里带上操作日志条数。第二次确认合同交期、撤回付款后重新付款时
+        # 原来键不变，抄送人收不到新的通知；同一次事件重复调用仍然只发一次。
+        key = f"oa-copy:{doc.name}:{subject_prefix}:{len(_operation_events(doc))}"
         if frappe.db.exists(
             "Notification Log",
             {"for_user": user, "document_type": "OA Approval Request", "document_name": doc.name,
