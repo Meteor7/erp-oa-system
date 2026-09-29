@@ -277,6 +277,23 @@ Write-Host "clearing cache..."
 Invoke-Docker -Cmd @("exec", "-w", $BenchPath, $Container, "bench", "--site", $Site, "clear-cache")
 Invoke-Docker -Cmd @("exec", "-w", $BenchPath, $Container, "bench", "--site", $Site, "clear-website-cache")
 
+# 发票识别服务（PaddleOCR）连通性检查（2026-09-28）：8 月 28 日系统容器重建时没接回识别服务的
+# 内部网络，之后上传的发票都识别不了，直到 9 月 24 日才发现。每次部署顺便检查，连不上就接上并提示。
+$OcrNetwork = "rayher-ocr-internal"
+$ocr = "skipped (no $OcrNetwork network)"
+& docker network inspect $OcrNetwork *> $null
+if ($LASTEXITCODE -eq 0) {
+    & docker exec $Container getent hosts invoice-ocr *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "OCR sidecar not reachable from $Container; connecting it to $OcrNetwork ..."
+        Invoke-Docker -Cmd @("network", "connect", $OcrNetwork, $Container)
+    }
+    $ocr = & docker exec $Container curl -fsS -m 10 http://invoice-ocr:8080/health
+    if ($LASTEXITCODE -ne 0) {
+        $ocr = "NOT REACHABLE - invoice recognition will fail; check the rayher-invoice-ocr container"
+    }
+}
+
 $ping = Get-DockerOutput -Cmd @("exec", $Container, "curl", "-fsS", "-H", ("Host: " + $Site), "http://127.0.0.1:8000/api/method/ping")
 $finalSha = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", "--short", "HEAD")
 
@@ -284,6 +301,7 @@ Write-Host ""
 Write-Host "==== deploy done ===="
 Write-Host ("Docker Git : {0} {1} (matches local {2})" -f $dockerBranch, $finalSha, $localShort)
 Write-Host "Ping       : $ping"
+Write-Host "OCR        : $ocr"
 Write-Host "Site       : http://rayher.localhost:8000"
 Write-Host "Note       : frontend build output may stay uncommitted in Docker; do not edit product source inside the container."
 Write-Host ""
