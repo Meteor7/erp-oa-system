@@ -271,6 +271,7 @@ def _apply_account_plan(plan, *, dry_run=True):
         frappe.throw("Account preflight failed: " + "; ".join(conflicts))
 
     try:
+        renamed = {}
         for item in plan:
             if item.get("rename_user"):
                 frappe.rename_doc(
@@ -279,6 +280,7 @@ def _apply_account_plan(plan, *, dry_run=True):
                     item["user_id"],
                     force=True,
                 )
+                renamed[item["legacy_user_id"]] = item["user_id"]
                 user = frappe.get_doc("User", item["user_id"])
                 user.email = item["user_id"]
                 user.first_name = item["full_name"]
@@ -295,6 +297,11 @@ def _apply_account_plan(plan, *, dry_run=True):
                 employee.db_set("user_id", item["user_id"])
             if item.get("roles_to_add"):
                 frappe.get_doc("User", item["user_id"]).add_roles(*item["roles_to_add"])
+        if renamed:
+            # 修复（2026-09-29，审查 X3-3）：改名后同步改审批人、抄送人等文本字段里的账号。
+            from rayher_hr_payroll.maintenance.account_domain_migration import rewrite_user_references
+
+            rewrite_user_references(renamed)
         frappe.db.commit()
     except Exception:
         frappe.db.rollback()

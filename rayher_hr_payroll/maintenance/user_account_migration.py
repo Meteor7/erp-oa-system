@@ -105,6 +105,16 @@ def rename_generated_rd_users(dry_run=True):
                 frappe.throw(f"Employee link was not updated for {row['employee']}")
             if frappe.db.exists("Project", {"project_owner": row["old_user"]}):
                 frappe.throw(f"Project owner link still references {row['old_user']}")
+        # 修复（2026-09-29，审查 X3-3）：审批人、抄送人等文本字段里的账号 rename_doc 不会改，
+        # 不改的话这些单据生成待办时指向不存在的账号而报错，整张单卡住。
+        from rayher_hr_payroll.maintenance.account_domain_migration import (
+            rewrite_user_references, stale_user_reference_counts,
+        )
+
+        rewrite_user_references({row["old_user"]: row["new_user"] for row in mappings})
+        stale = {user: count for user, count in stale_user_reference_counts([row["old_user"] for row in mappings]).items() if count}
+        if stale:
+            frappe.throw(f"Approval records still reference old accounts: {stale}")
         frappe.db.commit()
     except Exception:
         frappe.db.rollback()

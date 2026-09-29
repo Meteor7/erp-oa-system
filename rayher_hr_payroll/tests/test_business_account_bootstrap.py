@@ -179,10 +179,15 @@ def test_ensure_business_accounts_renames_legacy_user_and_updates_identity(monke
         ),
     )
 
+    from rayher_hr_payroll.maintenance import account_domain_migration
+
+    monkeypatch.setattr(account_domain_migration, "rewrite_user_references", lambda mapping: events.append(("rewrite", mapping)))
     bootstrap.ensure_business_accounts(dry_run=False)
 
+    # 审查 X3-3：改名后同步改审批记录里的账号，再提交。
     assert events == [
         ("rename", "User", "person058@staff.example.invalid", "person060@staff.example.invalid"),
         ("save", "person060@staff.example.invalid", "\u6f14\u793a\u5458\u5de529"),
+        ("rewrite", {"person058@staff.example.invalid": "person060@staff.example.invalid"}),
         "commit",
     ]

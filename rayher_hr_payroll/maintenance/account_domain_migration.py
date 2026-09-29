@@ -11,10 +11,14 @@ TARGET_LOCAL_DOMAIN = "staff.example.invalid"
 LEGACY_MANAGEMENT_USER = "admin@legacy-business.example.invalid"
 TARGET_MANAGEMENT_USER = "admin@staff.example.invalid"
 SAVEPOINT = "planck_account_domain_migration"
+# 审批流程里以文本（JSON）保存的账号。rename_doc 只改 Link 字段，这些要自己改。
+# 修复（2026-09-29，审查 X3-3）：补上 action_by 和抄送人 copied_to。
 OA_TEXT_FIELDS = (
     ("OA Approval Step", "approvers"),
     ("OA Approval Step", "approved_by"),
+    ("OA Approval Step", "action_by"),
     ("OA Approval Request", "paid_by"),
+    ("OA Approval Request", "copied_to"),
 )
 
 
@@ -99,6 +103,19 @@ def plan_account_domain_migration():
         "employee_links": employee_links,
         "old_reference_counts": _old_reference_counts(mappings),
     }
+
+
+def rewrite_user_references(mapping):
+    """把审批步骤、抄送人、付款人里的旧账号改成新账号（任何改账号的脚本都要调用）。
+
+    只改完全相同的账号值（JSON 里逐项比较），不做子串替换。返回改动的行数。
+    """
+    return _repair_oa_text_references(mapping)
+
+
+def stale_user_reference_counts(old_users):
+    """改完之后复查：旧账号还出现在这些字段里的行数（按 LIKE 粗查，应为 0）。"""
+    return _old_reference_counts([{"old_user": user} for user in old_users])
 
 
 def _repair_oa_text_references(mapping):

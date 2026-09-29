@@ -71,3 +71,14 @@ def test_exact_reference_replacement_updates_scalar_user_id(migration_module):
         migration_module.replace_exact_user_ids("admin@legacy-business.example.invalid", mapping)
         == "admin@staff.example.invalid"
     )
+
+
+def test_every_approval_text_field_holding_accounts_is_rewritten():
+    # 审查 X3-3：抄送人 copied_to 和办理人 action_by 原来漏掉了。
+    from rayher_hr_payroll.maintenance import account_domain_migration as mod
+
+    assert ("OA Approval Request", "copied_to") in mod.OA_TEXT_FIELDS
+    assert ("OA Approval Step", "action_by") in mod.OA_TEXT_FIELDS
+    copied = '[{"label":"人事经理","user":"person038@legacy.example.invalid"}]'
+    assert mod.replace_exact_user_ids(copied, {"person038@legacy.example.invalid": "person038@staff.example.invalid"}) == '[{"label":"人事经理","user":"person038@staff.example.invalid"}]'
+    assert mod.replace_exact_user_ids("person038@legacy.example.invalid", {"person038@legacy.example.invalid": "new@x"}) == "new@x"
