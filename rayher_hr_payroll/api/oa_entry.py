@@ -5272,7 +5272,9 @@ def list_approval_business_documents(request):
 
 @frappe.whitelist()
 def get_attendance_options(request_type, from_date=None, to_date=None):
-    from rayher_hr_payroll.attendance_requests import LEAVE_TYPES, date_range, work_dates_for_range, get_balance
+    from rayher_hr_payroll.attendance_requests import (
+        LEAVE_TYPES, active_rows, date_range, day_limits, work_dates_for_range, get_balance,
+    )
     if request_type not in ATTENDANCE_TYPES:
         frappe.throw("不支持的申请类型")
     require_request_type_access(request_type)
@@ -5286,7 +5288,10 @@ def get_attendance_options(request_type, from_date=None, to_date=None):
     if from_date and to_date:
         try:
             dates = date_range(from_date, to_date) if request_type == REQUEST_OVERTIME else sorted(work_dates_for_range(ctx["employee"], from_date, to_date))
-            days = [{"work_date": d.isoformat(), "hours": 8} for d in dates]
+            # 每天还能填多少小时，以及这天已被哪张申请占用（2026-09-29，申请表按这个灰掉冲突的日子）。
+            limits = day_limits(request_type, dates, active_rows(ctx["employee"], from_date, to_date))
+            days = [{"work_date": d.isoformat(), "hours": min(8, limits[d]["max_hours"]),
+                     "max_hours": limits[d]["max_hours"], "conflict": limits[d]["conflict"]} for d in dates]
         except ValueError as exc:
             frappe.throw(str(exc))
     from rayher_hr_payroll.annual_leave import get_annual_balance
