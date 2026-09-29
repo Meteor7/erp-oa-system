@@ -8,6 +8,12 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AttendanceCalendar: typeof import('./src/components/attendance/AttendanceCalendar.vue')['default']
+    AttendanceCards: typeof import('./src/components/attendance/AttendanceCards.vue')['default']
+    AttendanceDetail: typeof import('./src/components/attendance/AttendanceDetail.vue')['default']
+    AttendanceForm: typeof import('./src/components/attendance/AttendanceForm.vue')['default']
+    AttendanceList: typeof import('./src/components/attendance/AttendanceList.vue')['default']
+    AttendanceReview: typeof import('./src/components/attendance/AttendanceReview.vue')['default']
     ClaimWorkbench: typeof import('./src/components/claim/ClaimWorkbench.vue')['default']
     ExpenseApprovalRecords: typeof import('./src/components/expense/ExpenseApprovalRecords.vue')['default']
     ExpenseStatistics: typeof import('./src/components/expense/ExpenseStatistics.vue')['default']

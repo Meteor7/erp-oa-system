@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { canSee, firstVisiblePath } from './lib/access';
 
 const approvalPage = () => import('./pages/OAApprovals.vue');
+const attendancePage = () => import('./pages/AttendanceCenter.vue');
 
 const routes = [
   { path: '/', redirect: () => firstVisiblePath() },
@@ -17,12 +18,12 @@ const routes = [
   { path: '/ledger', redirect: '/entry' },
   { path: '/entry', component: () => import('./pages/TimesheetEntry.vue') },
   { path: '/oa', redirect: '/approval/leave' },
-  { path: '/approval/leave', component: approvalPage },
-  { path: '/approval/overtime', component: approvalPage },
-  { path: '/approval/overtime/:name', component: approvalPage },
-  { path: '/approval/comp-time', component: approvalPage },
-  { path: '/approval/comp-time/:name', component: approvalPage },
-  { path: '/approval/leave/:name', name: 'leave-detail', component: approvalPage },
+  { path: '/approval/leave', component: attendancePage },
+  { path: '/approval/overtime', component: attendancePage },
+  { path: '/approval/overtime/:name', component: attendancePage },
+  { path: '/approval/comp-time', component: attendancePage },
+  { path: '/approval/comp-time/:name', component: attendancePage },
+  { path: '/approval/leave/:name', name: 'leave-detail', component: attendancePage },
   { path: '/approval/procurement', component: () => import('./pages/PreRequestCenter.vue') },
   { path: '/approval/procurement/new', name: 'procurement-new', component: () => import('./pages/PreRequestCenter.vue') },
   { path: '/approval/procurement/price-approvals', name: 'procurement-price-approvals', component: () => import('./pages/PriceApprovalWorkbench.vue') },
