@@ -982,3 +982,20 @@ def test_monthly_spreading_skips_hours_already_taken_by_approved_leave(monthly_m
         (datetime(2026, 7, 2, 4, 0), 4.0),
         (datetime(2026, 7, 3, 0, 0), 4.0),
     ]
+
+
+
+def test_department_managers_outside_rd_can_open_monthly_timesheets(monthly_module):
+    # 审查 X3-7（决定 D4）：总经理、财务主管等不是研发人员的部门经理原来打不开工时页。
+    mod, frappe = monthly_module
+    mod._daily_module = lambda: types.SimpleNamespace(RD_TYPES=("全时研发", "非全时研发", "研发辅助"))
+    staff = [
+        _rd_employee("EMP-FM", user_id="worker@example.com", personnel_type="非研发"),
+        _rd_employee("EMP-RD", user_id="rd@example.com", reports_to="EMP-FM"),
+        _rd_employee("EMP-OTHER", user_id="other@example.com"),
+    ]
+    _install_monthly_scope_frappe(frappe, ["Employee", "Department Manager", "Accounts User"], staff)
+    assert mod._monthly_employee_scope("view") is None
+    assert mod._monthly_employee_scope("edit") == ["EMP-RD"]
+    _install_monthly_scope_frappe(frappe, ["Employee", "Department Manager"], staff)
+    assert mod._monthly_employee_scope("view") == ["EMP-RD"]

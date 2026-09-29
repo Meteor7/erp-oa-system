@@ -98,9 +98,24 @@ def _monthly_employee_scope(mode: str, period_start=None) -> list[str] | None:
     if roles & RD_MONTHLY_ADMIN_ROLES:
         return None
     if "Department Manager" in roles:
-        current = _single_active_linked_rd_employee()
-        reports = [_row_name(row) for row in _eligible_employee_rows(period_start, reports_to=current)]
-        return sorted({current, *reports})
+        own = _eligible_employee_rows(user_id=_session_user())
+        if len(own) > 1:
+            frappe.throw(frappe._("当前账号关联了多个在职研发员工，请联系 HR 清理重复关联。"))
+        if own:
+            current = _row_name(own[0])
+            reports = [_row_name(row) for row in _eligible_employee_rows(period_start, reports_to=current)]
+            return sorted({current, *reports})
+        # 修复（2026-09-29，审查 X3-7，决定 D4）：部门经理本人不是研发人员（总经理、财务主管、IT、
+        # 生产、人事）时原来直接报"未关联在职研发员工"，页面打不开。现在：有财务角色的按财务只读看全部；
+        # 其余看自己名下的研发下属。
+        if "Accounts User" in roles and mode == "view":
+            return None
+        manager = frappe.get_all(
+            "Employee", filters={"user_id": _session_user(), "status": "Active"}, fields=["name"],
+        )
+        if len(manager) != 1:
+            return []
+        return sorted(_row_name(row) for row in _eligible_employee_rows(period_start, reports_to=_row_name(manager[0])))
     if "Accounts User" in roles:
         return None if mode == "view" else []
     if "Employee" in roles:
