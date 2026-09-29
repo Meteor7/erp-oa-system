@@ -8,7 +8,9 @@ from rayher_hr_payroll.oa_role_resolver import (
     ROLE_SPECS,
     bootstrap_pmc,
     bootstrap_procurement_manager,
+    designation_suggestion,
     resolve_role,
+    seed_missing_assignments,
 )
 
 
@@ -27,6 +29,9 @@ class MemoryStore:
 
     def get_assignment(self, role_key):
         return self.assignments.get(role_key)
+
+    def assignment_exists(self, role_key):
+        return role_key in self.assignments
 
     def employees_for_designation(self, designation):
         return list(self.by_designation.get(designation, []))
@@ -77,12 +82,15 @@ def employee(name="EMP-1", employee_name="演示员工16", user="zhang@example.c
     }
 
 
-def test_designation_role_resolves_unique_active_employee_snapshot():
+def test_designation_only_suggests_a_holder_and_never_grants_approval():
+    # 审查 R3-55-2（决定 D4）：改职务不能让人成为审批人，只有岗位任命算数。
     store = MemoryStore()
     row = employee()
     store.by_designation["财务主管"] = [row]
     store.enabled_users.add("zhang@example.com")
-    assert resolve_role("finance_manager", store=store) == {
+    with pytest.raises(ApprovalRoleResolutionError, match="没有找到有效配置"):
+        resolve_role("finance_manager", store=store)
+    assert designation_suggestion("finance_manager", store=store) == {
         "role_key": "finance_manager",
         "role_label": "财务主管",
         "user": "zhang@example.com",
@@ -99,10 +107,10 @@ def test_hr_manager_uses_ordered_designation_fallback():
     store.by_designation["人事经理"] = [successor]
     store.enabled_users.update({"old@example.com", "new@example.com"})
 
-    assert resolve_role("hr_manager", store=store)["employee"] == "EMP-HR-OLD"
+    assert designation_suggestion("hr_manager", store=store)["employee"] == "EMP-HR-OLD"
 
     store.by_designation["人事行政经理"] = []
-    assert resolve_role("hr_manager", store=store)["employee"] == "EMP-HR-NEW"
+    assert designation_suggestion("hr_manager", store=store)["employee"] == "EMP-HR-NEW"
 
 
 def test_pmc_requires_explicit_role_assignment_and_preserves_role_label():
@@ -120,13 +128,16 @@ def test_missing_disabled_and_duplicate_role_holders_block_submission():
     store = MemoryStore()
     with pytest.raises(ApprovalRoleResolutionError, match="财务主管.*没有找到"):
         resolve_role("finance_manager", store=store)
-    store.by_designation["财务主管"] = [employee()]
+    store.assignments["finance_manager"] = {
+        "role_key": "finance_manager", "role_label": "财务主管", "employee": "EMP-1",
+        "employee_name": "演示员工16", "user": "zhang@example.com", "enabled": 1,
+    }
     with pytest.raises(ApprovalRoleResolutionError, match="账号未启用"):
         resolve_role("finance_manager", store=store)
     store.by_designation["财务主管"] = [employee(), employee("EMP-2", "财务主管二", "two@example.com")]
     store.enabled_users.update({"zhang@example.com", "two@example.com"})
     with pytest.raises(ApprovalRoleResolutionError, match="找到多个"):
-        resolve_role("finance_manager", store=store)
+        designation_suggestion("finance_manager", store=store)
 
 
 def test_designation_role_ignores_people_without_an_enabled_account():
@@ -137,7 +148,7 @@ def test_designation_role_ignores_people_without_an_enabled_account():
     store.by_designation["财务主管"] = [eligible, unbound, disabled]
     store.enabled_users.add("zhang@example.com")
 
-    assert resolve_role("finance_manager", store=store)["employee"] == "EMP-1"
+    assert designation_suggestion("finance_manager", store=store)["employee"] == "EMP-1"
 
 
 def test_unknown_role_key_is_rejected():
@@ -198,10 +209,15 @@ def test_hr_assignment_overrides_designation_until_employee_profile_is_available
         resolve_role("hr_manager", store=store)
 
 
-def test_designation_successor_is_resolved_without_changing_route_code():
+def test_seed_fills_only_positions_without_any_assignment():
+    # 新站点：没有任何任命的岗位按职务补建一次；已有（包括停用的）任命不动；职务后来再变不影响审批人。
     store = MemoryStore()
     store.by_designation["出纳"] = [employee(user="first@example.com")]
-    store.enabled_users.update({"first@example.com", "second@example.com"})
+    store.by_designation["财务主管"] = [employee("EMP-FM", "主管", "fm@example.com")]
+    store.enabled_users.update({"first@example.com", "second@example.com", "fm@example.com"})
+    store.assignments["finance_manager"] = {"role_key": "finance_manager", "user": "keep@example.com", "enabled": 0}
+    assert seed_missing_assignments(store=store) == ["finance_auditor"]
+    assert store.assignments["finance_manager"]["user"] == "keep@example.com"
     assert resolve_role("finance_auditor", store=store)["user"] == "first@example.com"
     store.by_designation["出纳"] = [employee(user="second@example.com")]
-    assert resolve_role("finance_auditor", store=store)["user"] == "second@example.com"
+    assert resolve_role("finance_auditor", store=store)["user"] == "first@example.com"

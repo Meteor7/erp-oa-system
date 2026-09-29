@@ -59,6 +59,11 @@ class FrappeRoleStore:
                 raise ApprovalRoleResolutionError("审批岗位绑定的员工状态或账号不匹配")
         return row
 
+    def assignment_exists(self, role_key):
+        import frappe
+
+        return bool(frappe.db.exists("OA Approval Role Assignment", {"role_key": role_key}))
+
     def employees_for_designation(self, designation):
         import frappe
 
@@ -169,6 +174,56 @@ def _snapshot(role_key, spec, row, user=None):
     }
 
 
+def _designation_holder(role_key, spec, store):
+    """按员工职务找岗位的人。只用于给没有配置的岗位补建配置（seed_missing_assignments）。"""
+    rows = []
+    for designation in spec.get("designations") or (spec["designation"],):
+        if not designation:
+            continue
+        rows = list(store.employees_for_designation(designation) or [])
+        if rows:
+            break
+    if not rows:
+        raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到在职人员")
+    eligible = [
+        row for row in rows
+        if _text(_get(row, "user_id")) and store.is_user_enabled(_text(_get(row, "user_id")).lower())
+    ]
+    if len(eligible) > 1:
+        raise ApprovalRoleResolutionError(f"审批角色{spec['label']}找到多个具备启用账号的在职人员，无法唯一解析")
+    if len(eligible) == 1:
+        return _snapshot(role_key, spec, eligible[0])
+    if len(rows) == 1:
+        return _snapshot(role_key, spec, rows[0])
+    raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到关联启用账号的在职人员")
+
+
+def designation_suggestion(role_key, *, store=None):
+    """按职务推荐的岗位人选（诊断和补建配置用），不参与审批。"""
+    spec = ROLE_SPECS.get(_text(role_key))
+    if not spec:
+        raise ApprovalRoleResolutionError(f"未知审批角色：{role_key}")
+    return _designation_holder(_text(role_key), spec, _store(store))
+
+
+def seed_missing_assignments(*, store=None):
+    """给一条配置都没有的岗位按职务补建一次配置（新装的站点）；已有配置（包括停用的）不动。"""
+    store = _store(store)
+    seeded = []
+    for role_key, spec in ROLE_SPECS.items():
+        if store.assignment_exists(role_key):
+            continue
+        try:
+            holder = _designation_holder(role_key, spec, store)
+        except ApprovalRoleResolutionError:
+            continue
+        if not holder["user"] or not store.is_user_enabled(holder["user"]):
+            continue
+        store.upsert_assignment(role_key, spec["label"], holder["employee"], holder["user"])
+        seeded.append(role_key)
+    return seeded
+
+
 def _resolve_role_uncached(role_key, *, store=None):
     role_key = _text(role_key)
     spec = ROLE_SPECS.get(role_key)
@@ -176,30 +231,12 @@ def _resolve_role_uncached(role_key, *, store=None):
         raise ApprovalRoleResolutionError(f"未知审批角色：{role_key}")
     store = _store(store)
     row = store.get_assignment(role_key)
-    if row or spec.get("assignment_required"):
-        if not row or not int(_get(row, "enabled") or 0):
-            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到有效配置")
-        result = _snapshot(role_key, spec, row)
-    else:
-        rows = []
-        for designation in spec.get("designations") or (spec["designation"],):
-            rows = list(store.employees_for_designation(designation) or [])
-            if rows:
-                break
-        if not rows:
-            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到在职人员")
-        eligible = [
-            row for row in rows
-            if _text(_get(row, "user_id")) and store.is_user_enabled(_text(_get(row, "user_id")).lower())
-        ]
-        if len(eligible) > 1:
-            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}找到多个具备启用账号的在职人员，无法唯一解析")
-        if len(eligible) == 1:
-            result = _snapshot(role_key, spec, eligible[0])
-        elif len(rows) == 1:
-            result = _snapshot(role_key, spec, rows[0])
-        else:
-            raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到关联启用账号的在职人员")
+    # 修复（2026-09-29，审查 R3-55-2，决定 D4）：审批岗位只认岗位任命（只有系统管理员能改）。
+    # 原来没有启用的任命时按员工职务找人，人事改一下某人的职务就能让他成为出纳、总经理等审批人。
+    # 职务只用于诊断和给新站点补建任命（designation_suggestion / seed_missing_assignments）。
+    if not row or not int(_get(row, "enabled") or 0):
+        raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到有效配置，请在岗位任命中设置")
+    result = _snapshot(role_key, spec, row)
     if not result["user"]:
         raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有关联用户账号")
     if not store.is_user_enabled(result["user"]):

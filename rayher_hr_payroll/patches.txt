@@ -21,3 +21,4 @@ rayher_hr_payroll.patches.v1_0.index_oa_progress_queries
 rayher_hr_payroll.patches.v1_0.repair_po_fulfillment_file_links
 rayher_hr_payroll.patches.v1_0.backfill_active_uniqueness_keys
 rayher_hr_payroll.patches.v1_0.normalize_invoice_numbers
+rayher_hr_payroll.patches.v1_0.seed_approval_role_assignments
