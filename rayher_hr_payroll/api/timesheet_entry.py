@@ -11,7 +11,9 @@ from datetime import timedelta
 import frappe
 from frappe.utils import getdate
 
-from rayher_hr_payroll.api._guards import lock_period_import, require_rd_access, ensure_not_locked, parse_period
+from rayher_hr_payroll.api._guards import (
+    lock_period_import, period_has_submitted_allocation, require_rd_access, ensure_not_locked, parse_period,
+)
 
 RD_TYPES = ("全时研发", "非全时研发", "研发辅助")
 RD_ACTIVITY_TYPES = (
@@ -48,8 +50,8 @@ def _period_has_submitted_allocation(year, month):
     """True if the period already has a SUBMITTED RD Cost Allocation. Once allocated,
     the period's hours are frozen: any add/update/delete would silently invalidate the
     submitted allocation (which only a System Manager can supersede), so hour mutations
-    are blocked until that allocation is cancelled."""
-    return bool(frappe.db.exists("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1}))
+    are blocked until that allocation is cancelled. 修复（2026-09-29）：当前读，见 _guards."""
+    return period_has_submitted_allocation(year, month)
 
 
 def _month_has_monthly_entries(employee, year, month):

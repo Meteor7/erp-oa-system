@@ -157,7 +157,7 @@ def ensure_no_submitted_allocation(
 
 def _ensure_no_submitted_allocation(doc, frappe) -> None:
     from rayher_hr_payroll.rd_cost.frappe_adapter import RD_PERSONNEL_TYPES
-    from rayher_hr_payroll.api._guards import lock_period_import
+    from rayher_hr_payroll.api._guards import lock_period_import, period_has_submitted_allocation
 
     def is_rd_employee(e):
         return bool(e) and (frappe.db.get_value("Employee", e, "rd_personnel_type") or "") in RD_PERSONNEL_TYPES
@@ -166,7 +166,8 @@ def _ensure_no_submitted_allocation(doc, frappe) -> None:
         return bool(frappe.db.get_value("Project", pr, "allow_rd_timesheet"))
 
     def has_submitted_allocation(yy, mm):
-        return bool(frappe.db.exists("RD Cost Allocation", {"year": yy, "month": mm, "docstatus": 1}))
+        # 修复（2026-09-29）：加锁后当前读，见 _guards.period_has_submitted_allocation。
+        return period_has_submitted_allocation(yy, mm)
 
     # Evaluate BOTH the post-edit doc AND its pre-save version, so an R&D timesheet cannot be
     # edited OUT of an allocated period (e.g. reclassified to a non-R&D employee/project) any

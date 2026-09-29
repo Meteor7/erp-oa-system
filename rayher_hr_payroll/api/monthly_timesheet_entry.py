@@ -309,6 +309,7 @@ def _legacy_daily_exists(employee: str, year: int, month: int) -> bool:
                and year(tsd.from_time) = %(year)s
                and month(tsd.from_time) = %(month)s
              limit 1
+             for update
             """,
             {"employee": employee, "year": year, "month": month},
         )
@@ -509,15 +510,20 @@ def list_monthly_entries(period, employee=None):
 
 
 def _load_existing_monthly_documents(employee: str, period: str) -> list:
-    names = frappe.get_all(
+    # 修复（2026-09-29，审查第一轮 #9）：员工行加锁后当前读（get_all 不支持 for_update）。
+    # 原来是快照读，两个请求同时首次保存同一员工同一月时，都看到"还没有月度工时"，
+    # 各插入一整套，超出月度上限。
+    names = frappe.db.get_values(
         "Timesheet",
-        filters={
+        {
             "employee": employee,
             "rd_system_generated": 1,
             "rd_entry_period": period,
             "docstatus": ["<", 2],
         },
-        pluck="name",
+        "name",
+        for_update=True,
+        pluck=True,
     )
     return [frappe.get_doc("Timesheet", name) for name in names]
 

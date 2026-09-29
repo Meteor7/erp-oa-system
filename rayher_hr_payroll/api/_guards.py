@@ -54,6 +54,20 @@ def lock_period_import(year, month):
     return name
 
 
+def period_has_submitted_allocation(year, month):
+    """这个期间是不是已经有提交的研发分摊（当前读，修复 2026-09-29）。
+
+    审查第一轮 #9：加锁之后的复查原来用普通读（exists / get_all）。MariaDB 的可重复读下，
+    同一事务在加锁前已经读过别的表，快照就固定了；等锁期间别的请求刚提交的分摊，这里看不到，
+    工时就会写进已分摊的期间。现在先锁住期间的导入单，再按主键当前读它的状态：
+    分摊提交时会在同一事务里把导入单标成 Allocated，撤销时再改回去。原来的 exists 保留兜底。
+    """
+    name = lock_period_import(year, month)
+    if name and frappe.db.get_value("RD Expense Import", name, "status", for_update=True) == "Allocated":
+        return True
+    return bool(frappe.db.exists("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1}))
+
+
 def parse_period(period):
     """Parse a strict 'YYYY-MM' / 'YYYYMM' period into (year, month); raise on malformed."""
     import re as _re

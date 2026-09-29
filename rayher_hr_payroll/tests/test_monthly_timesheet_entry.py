@@ -668,7 +668,7 @@ def test_replace_monthly_documents_preserves_ids_and_submits_generated_parents(m
         def submit(self):
             self.submitted = True
 
-    frappe.get_all = lambda *args, **kwargs: ["TS-OLD"]
+    frappe.db = types.SimpleNamespace(get_values=lambda *args, **kwargs: ["TS-OLD"])
 
     def get_doc(*args):
         if len(args) == 2:
@@ -887,3 +887,20 @@ def test_replace_monthly_documents_allows_intentional_empty_save(monthly_module,
     )
 
     assert deleted == [(old_doc, "EMP-1", "2026-07")]
+
+
+def test_existing_monthly_documents_are_read_with_a_lock(monthly_module):
+    # 审查第一轮 #9：加锁后当前读；frappe.get_all 不支持 for_update，要用 get_values。
+    mod, frappe = monthly_module
+    calls = []
+
+    def get_values(doctype, filters, fieldname, **kwargs):
+        calls.append((doctype, filters, fieldname, kwargs))
+        return ["TS-1"]
+
+    frappe.db = types.SimpleNamespace(get_values=get_values)
+    frappe.get_doc = lambda doctype, name: (doctype, name)
+
+    assert mod._load_existing_monthly_documents("EMP-1", "2026-07") == [("Timesheet", "TS-1")]
+    assert calls[0][0] == "Timesheet" and calls[0][1]["rd_entry_period"] == "2026-07"
+    assert calls[0][3] == {"for_update": True, "pluck": True}
