@@ -4017,3 +4017,10 @@ def test_submitting_without_an_active_employee_is_refused(monkeypatch):
         oa_entry._route_context("财务部", "副总", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, require_employee=True)
     ctx = oa_entry._route_context("财务部", "副总", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT)
     assert ctx["supervisor"] == "副总"
+
+
+
+def test_approval_note_is_length_limited(monkeypatch):
+    # 审查 E5：通过时的意见原来没有长度限制。
+    with pytest.raises(ValidationError):
+        oa_entry.action_request("REQ-X", "approve", "x" * 1001)

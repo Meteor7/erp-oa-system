@@ -4130,6 +4130,8 @@ def _validate_procurement_material_codes(doc, step):
 @attendance_request_transaction
 def action_request(name, action="approve", note=None, reject_target=None, expected_step_key=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
+    # 审批意见和驳回原因一样最多 1000 字（修复 2026-09-29，审查 E5）。
+    note = _bounded_optional_text(note, "审批意见", 1000) or None
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
