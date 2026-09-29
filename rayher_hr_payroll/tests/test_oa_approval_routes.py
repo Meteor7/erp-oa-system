@@ -455,3 +455,14 @@ def current_position_fixture(monkeypatch):
         label, name, user = values[key]
         return {"role_key": key, "role_label": label, "employee_name": name, "user": user}
     monkeypatch.setattr(module, "resolve_role", resolve)
+
+
+
+def test_procurement_route_refuses_a_supervisor_without_an_account(monkeypatch):
+    # 审查 X3-12：主管没有账号时原来直接去掉主管节点。
+    import pytest
+    from rayher_hr_payroll import oa_approval
+
+    monkeypatch.setattr(oa_approval, "resolve_role", lambda key: {"role_key": key, "role_label": key, "employee_name": key, "user": key + "@example.com"})
+    with pytest.raises(oa_approval.ApprovalRouteError, match="没有关联可用账号"):
+        oa_approval.build_procurement_route(supervisor="张主管", supervisor_user="", supervisor_decision="approve", applicant_user="a@example.com")

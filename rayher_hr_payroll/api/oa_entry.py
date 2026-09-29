@@ -707,6 +707,9 @@ def _leave_employee_context(user=None):
     return context
 
 
+NO_ACTIVE_EMPLOYEE_MESSAGE = "当前账号没有关联在职员工档案，不能提交这类申请；请联系人事处理。"
+
+
 def _route_context(
     department=None,
     supervisor=None,
@@ -714,6 +717,7 @@ def _route_context(
     *,
     request_type=None,
     applicant_employee=None,
+    require_employee=False,
 ):
     if request_type in ATTENDANCE_TYPES:
         ctx = _leave_employee_context()
@@ -737,6 +741,11 @@ def _route_context(
         return ctx
 
     organization_managed = bool(ctx.get("employee"))
+    # 修复（2026-09-29，审查 X3-12，决定 D5）：没有在职员工档案的账号（管理员、离职但账号还开着的人）
+    # 原来会直接用页面传来的部门和主管生成路线：部门填"财务部"能跳过副总，主管填副总的名字能免掉主管节点。
+    # 提交和预览时要求在职员工档案；审批人驳回退回草稿等内部重算不受影响。
+    if require_employee and not organization_managed:
+        frappe.throw(frappe._(NO_ACTIVE_EMPLOYEE_MESSAGE))
     selected_department = ctx.get("department") if organization_managed else (department or ctx.get("department"))
     ctx["department"] = _canonical_department(selected_department)
     if not organization_managed:
@@ -1896,7 +1905,8 @@ def _prepare_request_doc(
 ):
     if request_type not in REQUEST_TYPES:
         frappe.throw(frappe._("\u4e0d\u652f\u6301\u7684 OA \u7533\u8bf7\u7c7b\u578b\u3002"))
-    ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type)
+    ctx = _route_context(department=department, supervisor=supervisor, asset_category=asset_category, request_type=request_type,
+                         require_employee=_to_bool(submit))
     if request_type == REQUEST_EXPENSE_PAYMENT:
         classification = _expense_classification(doc_type, asset_category, submitting=submit)
         ctx["asset_category"] = classification["asset_category"]
@@ -2233,6 +2243,7 @@ def _submit_draft(doc):
         asset_category=getattr(doc, "asset_category", None),
         request_type=doc.request_type,
         applicant_employee=getattr(doc, "employee", None),
+        require_employee=True,
     )
     doc.department = ctx["department"]
     doc.supervisor = ctx["supervisor"]
@@ -2329,6 +2340,7 @@ def preview_route(
             asset_category=asset_category,
             request_type=request_type,
             applicant_employee=applicant_employee,
+            require_employee=_to_bool(active),
         )
         roles = _resolve_approval_roles(
             request_type, department=ctx["department"], asset_category=ctx["asset_category"],

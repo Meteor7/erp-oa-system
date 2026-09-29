@@ -4003,3 +4003,17 @@ def test_approval_summary_counts_new_claim_types_and_follows_feature_gates(monke
     assert counts["reimbursement"] == 1 and "travel" not in counts
     assert result["total"] == 1
     assert oa_entry.REQUEST_TRAVEL not in seen[0]["request_type"][1]
+
+
+
+def test_submitting_without_an_active_employee_is_refused(monkeypatch):
+    # 审查 X3-12（决定 D5）：没有在职员工档案的账号不能提交；内部重算（驳回退回草稿）不受影响。
+    monkeypatch.setattr(oa_entry, "_employee_context", lambda user=None, employee=None: {
+        "employee": None, "employee_name": "", "applicant_user": "admin@example.com", "department": "",
+        "supervisor": "", "supervisor_user": "", "supervisor_decision": "", "supervisor_path": [],
+        "upper_supervisor": "", "upper_supervisor_user": "",
+    })
+    with pytest.raises(ValidationError, match="在职员工档案"):
+        oa_entry._route_context("财务部", "副总", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, require_employee=True)
+    ctx = oa_entry._route_context("财务部", "副总", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT)
+    assert ctx["supervisor"] == "副总"
