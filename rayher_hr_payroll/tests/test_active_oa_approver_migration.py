@@ -30,3 +30,22 @@ def test_migration_never_looks_up_mutable_display_names(monkeypatch):
     assert migration._resolve_user("review-user-alias") == "review-user-alias"
     assert migration._resolve_user("actual@example.com") == "actual@example.com"
     assert migration._resolve_user(migration.YE) == migration.YE_USER
+
+
+
+def test_migration_keeps_a_step_whose_target_account_is_missing_or_disabled(monkeypatch):
+    # 审查 #12：映射到已离职（账号停用）的人，这一步就没人能审批。
+    import json
+    from types import SimpleNamespace
+
+    step = SimpleNamespace(label="\u6f14\u793a\u5458\u5de510", approvers=json.dumps(["\u6f14\u793a\u5458\u5de510"]), status="\u5f85\u5ba1\u6279", step_index=1)
+    doc = SimpleNamespace(steps=[step], current_step_index=1, save=lambda **kw: (_ for _ in ()).throw(AssertionError("must not save")))
+    monkeypatch.setattr(migration.frappe, "get_all", lambda *a, **k: ["OA-1"])
+    monkeypatch.setattr(migration.frappe, "get_doc", lambda *a, **k: doc)
+    monkeypatch.setattr(migration.frappe, "db", SimpleNamespace(get_value=lambda doctype, name, field: 0))
+
+    report = migration.execute()
+
+    assert report["changed_steps"] == 0
+    assert report["unresolved"][0]["unusable_accounts"] == ["person047@staff.example.invalid"]
+    assert json.loads(step.approvers) == ["\u6f14\u793a\u5458\u5de510"]

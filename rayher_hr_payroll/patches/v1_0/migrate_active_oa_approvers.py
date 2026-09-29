@@ -115,6 +115,23 @@ def execute(dry_run=False):
                 )
             if next_label == step.label and next_approvers == current:
                 continue
+            # 修复（2026-09-29，审查 #12）：映射表里的演示员工13、演示员工10已离职。把待办步骤改到不存在或
+            # 已停用的账号，这一步就没人能审批，整张单卡住。这种情况保留原步骤，列入 unresolved。
+            unusable = [
+                value for value in next_approvers
+                if value not in current and not frappe.db.get_value("User", value, "enabled")
+            ]
+            if unusable:
+                report["unresolved"].append(
+                    {
+                        "request": request_name,
+                        "step_index": int(step.step_index or 0),
+                        "label": next_label,
+                        "approvers": next_approvers,
+                        "unusable_accounts": unusable,
+                    }
+                )
+                continue
             changed = True
             report["changed_steps"] += 1
             if not dry_run:
