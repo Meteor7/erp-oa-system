@@ -221,6 +221,7 @@ def test_get_foreign_rd_recalculates_from_imported_foreign_expenses(monkeypatch)
         "expense_sources": [{"voucher_no": "V-COMMON", "allocation_type": "common"}, {"voucher_no": "V-DIRECT", "allocation_type": "project"}],
     }, raising=False)
     frappe.db.get_value = lambda *args, **kwargs: "FOREIGN-1"
+    frappe.db.exists = lambda *args, **kwargs: False
 
     frappe.get_doc = lambda doctype, name: SimpleNamespace(
         name=name, period="2026-06", year=2026, month=6, total_amount=1000, status="Calculated",
@@ -250,6 +251,9 @@ def test_get_foreign_rd_recalculates_from_imported_foreign_expenses(monkeypatch)
     assert result["combined_stage_summaries"][0]["total"] == 700.0
     assert result["combined_project_summaries"][0]["project"] == "RD06"
     assert result["combined_project_summaries"][0]["total_amount"] == 700.0
+    # 保存时导入合计是 1000，现在是 1200：提示重新保存（审查 R3-48-3）。
+    assert result["stale"] is True
+    assert result["allocation_submitted"] is False
 
 
 def test_save_foreign_rd_reports_concurrent_first_save_without_overwrite(monkeypatch):
@@ -258,6 +262,7 @@ def test_save_foreign_rd_reports_concurrent_first_save_without_overwrite(monkeyp
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
+    monkeypatch.setattr(mod, "period_has_submitted_allocation", lambda year, month: False)
     monkeypatch.setattr(mod, "_foreign_expense_context", lambda year, month: {
         "expense_import": None,
         "total_amount": 0.0,
@@ -405,3 +410,59 @@ def test_foreign_rows_use_the_date_window_when_stage_is_undecided(monkeypatch):
 
     assert allocated[0]["project_stage"] == "capitalized"
     assert summaries[0]["project_stage"] == "capitalized"
+
+
+def test_saved_rows_still_read_after_the_project_is_renamed(monkeypatch):
+    # 审查 R3-51-1：项目改名或被删后，读取不能再报"项目名称与项目不匹配"。
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    rows = [{"project": "RD06", "project_code": "RD06", "project_name": "OLD NAME", "project_stage": "expensed",
+             "foreign_entity": "QIHENG DEMO OVERSEAS", "occurrence_days": 1, "work_date": "2026-06-01"},
+            {"project": "GONE", "project_code": "RD99", "project_name": "DELETED", "project_stage": "capitalized",
+             "foreign_entity": "QIHENG DEMO OVERSEAS", "occurrence_days": 1, "work_date": "2026-06-01"}]
+
+    with pytest.raises(RuleError):
+        mod._allocate_foreign_rows(100, [dict(row) for row in rows], _project_info(), year=2026, month=6)
+    allocated = mod._allocate_foreign_rows(100, rows, _project_info(), year=2026, month=6, strict=False)
+
+    assert [(row["project_name"], row["project_stage"], row["allocated_amount"]) for row in allocated] == [
+        ("OLD NAME", "expensed", 50.0), ("DELETED", "capitalized", 50.0),
+    ]
+
+
+def test_common_cost_without_foreign_hours_is_counted_as_unknown(monkeypatch):
+    # 审查 X2-1：没有境外工时的公共费用原来不进任何合计。
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    monkeypatch.setattr(mod, "_foreign_project_info", lambda names: {})
+    context = {"expense_import": "EXP-1", "total_amount": 900.0, "common_amount": 900.0, "direct_amount": 0.0,
+               "direct_amounts_by_project": {}, "expense_sources": [{"voucher_no": "V-COMMON", "allocation_type": "common"}]}
+
+    result = mod._response("2026-06", 2026, 6, [], context)
+
+    assert result["unallocated_common_amount"] == 900.0
+    assert result["foreign_project_summaries"][-1]["project"] == mod.UNALLOCATED_COMMON_PROJECT
+    assert result["foreign_stage_summaries"][2] == {"stage": "unknown", "label": "\u672a\u5224\u5b9a", "total": 900.0}
+    assert result["stale"] is False
+
+
+def test_foreign_save_is_refused_once_the_domestic_allocation_is_submitted(monkeypatch):
+    # 审查 R3-48-3（决定 D5）：分摊提交后境外工时冻结。
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
+    monkeypatch.setattr(mod, "period_has_submitted_allocation", lambda year, month: True)
+    monkeypatch.setattr(mod, "_foreign_expense_context", lambda year, month: (_ for _ in ()).throw(AssertionError("must stop first")))
+
+    with pytest.raises(RuleError, match="\u64a4\u9500\u5206\u644a"):
+        mod.save_foreign_rd("2026-06", rows=[])
+
+
+def test_foreign_occurrence_days_are_capped_by_the_month(monkeypatch):
+    # 审查 17-d（决定 D13）。
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    row = {"project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546", "occurrence_days": 31}
+
+    with pytest.raises(RuleError, match="\u81ea\u7136\u65e5"):
+        mod._allocate_foreign_rows(100, [row], _project_info(), year=2026, month=6)
+    assert mod._allocate_foreign_rows(100, [dict(row, occurrence_days=30)], _project_info(), year=2026, month=6)[0]["hours"] == 240.0
+    with pytest.raises(RuleError, match="\u6570\u5b57\u683c\u5f0f"):
+        mod._allocate_foreign_rows(100, [dict(row, occurrence_days="abc")], _project_info(), year=2026, month=6)

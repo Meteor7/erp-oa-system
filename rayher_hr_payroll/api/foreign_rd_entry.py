@@ -1,9 +1,12 @@
 import json
+from calendar import monthrange
 from datetime import date
 
 import frappe
 
-from rayher_hr_payroll.api._guards import RD_FINANCE_ROLES, ensure_not_locked, parse_period, require_rd_access
+from rayher_hr_payroll.api._guards import (
+    RD_FINANCE_ROLES, ensure_not_locked, parse_period, period_has_submitted_allocation, require_rd_access,
+)
 from rayher_hr_payroll.api.allocation_entry import STAGE_LABELS, _project_summaries
 from rayher_hr_payroll.rd_cost.frappe_adapter import (
     foreign_commissioned_expense_rows,
@@ -14,6 +17,8 @@ from rayher_hr_payroll.rd_cost.frappe_adapter import (
 RD_FOREIGN_FINANCE_ROLES = (*RD_FINANCE_ROLES, "All Project Access")
 MAX_DAILY_HOURS = 8
 DEFAULT_FOREIGN_ENTITY = "QIHENG DEMO OVERSEAS"
+# 没有境外工时可分的境外公共费用，在汇总和矩阵里单独列成这一"项目"，计入未判定（审查 X2-1，决定 D4）。
+UNALLOCATED_COMMON_PROJECT = "\u672a\u5206\u644a\u5883\u5916\u516c\u5171\u8d39\u7528"
 
 STAGE_ALIASES = {
     "capitalized": "capitalized", "Capitalized": "capitalized", "\u8d44\u672c\u5316": "capitalized",
@@ -40,7 +45,11 @@ def _clean(value):
 
 
 def _number(value):
-    return float(value or 0)
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        # 修复（2026-09-29，审查 17-d）：非数字原来直接抛 ValueError，页面上是 500。
+        frappe.throw(frappe._("\u5883\u5916\u7814\u53d1\u6570\u5b57\u683c\u5f0f\u4e0d\u6b63\u786e\uff1a{0}").format(value))
 
 
 def _money(value):
@@ -93,6 +102,10 @@ def _monthly_foreign_rows(rows, year, month):
                 "hours": 0.0,
                 "description": "",
             }
+            saved_stage = _clean(_value(row, "project_stage"))
+            if saved_stage:
+                # 保存时的阶段快照，读取时沿用（修复 2026-09-29，审查 17-a）。
+                grouped[key]["project_stage"] = saved_stage
         item = grouped[key]
         item["occurrence_days"] = item["occurrence_days"] + occurrence_days
         item["hours"] = round(item["hours"] + hours, 2)
@@ -272,7 +285,14 @@ def _foreign_expense_context(year, month):
     return _foreign_expense_context_from_rows(rows, _foreign_project_info(direct_projects), expense_import=expense_import)
 
 
-def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_project=None, year=None, month=None):
+def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_project=None, year=None, month=None, strict=True):
+    """按工时比例分境外公共费用。
+
+    strict=True 是保存路径：项目必须存在、代码和名称必须和项目一致，阶段按当前项目算。
+    修复（2026-09-29，审查 R3-51-1 / 17-a）：读取路径传 strict=False——项目改名、改编码或被删后，
+    已保存的境外工时照样能显示（原来整月、整年的境外页面和分摊页面都会报错）；
+    代码、名称和阶段用保存时的值，和国内已提交分摊一样是快照。
+    """
     prepared = []
     for row in rows or []:
         project = _clean(_value(row, "project"))
@@ -302,11 +322,20 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5fc5\u987b\u5927\u4e8e 0\u3002"))
         if not is_monthly and hours > MAX_DAILY_HOURS:
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5355\u65e5\u4e0d\u80fd\u8d85\u8fc7 8 \u5c0f\u65f6\u3002"))
+        # 修复（2026-09-29，审查 17-d，决定 D13）：发生天数不能超过当月自然日数，和国内一致。
+        if strict and is_monthly and year and month and occurrence_days > monthrange(int(year), int(month))[1]:
+            frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u53d1\u751f\u5929\u6570\u4e0d\u80fd\u8d85\u8fc7\u6240\u9009\u6708\u4efd\u7684\u81ea\u7136\u65e5\u5929\u6570\u3002"))
         info = project_info.get(project)
-        if not info:
-            frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u9879\u76ee {0} \u4e0d\u5b58\u5728\u6216\u672a\u542f\u7528\u3002").format(project))
-        project_code, project_name = _validate_project_identity(row, info)
-        stage = _info_stage(info, year, month)
+        if strict:
+            if not info:
+                frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u9879\u76ee {0} \u4e0d\u5b58\u5728\u6216\u672a\u542f\u7528\u3002").format(project))
+            project_code, project_name = _validate_project_identity(row, info)
+            stage = _info_stage(info, year, month)
+        else:
+            project_code = _clean(_value(row, "project_code")) or (_project_code(info, project) if info else project)
+            project_name = _clean(_value(row, "project_name")) or (_project_name(info, project) if info else project)
+            saved_stage = _clean(_value(row, "project_stage"))
+            stage = _normalize_stage(saved_stage) if saved_stage else _info_stage(info, year, month)
         prepared_row = {"project": project, "project_code": project_code, "project_name": project_name, "project_stage": stage, "stage_label": STAGE_LABELS.get(stage, STAGE_LABELS["unknown"]), "work_date": work_day.isoformat(), "activity_type": activity_type, "hours": float(hours), "description": description}
         if is_monthly:
             prepared_row["foreign_entity"] = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
@@ -517,7 +546,7 @@ def _foreign_doc_name(year, month):
     )
 
 
-def _response(period, year, month, domestic_projects, expense_context, name=None, status="Draft", lines=None):
+def _response(period, year, month, domestic_projects, expense_context, name=None, status="Draft", lines=None, saved_total=None):
     lines = lines or []
     project_names = {row["project"] for row in lines if row.get("project")}
     project_names.update(expense_context.get("direct_amounts_by_project", {}).keys())
@@ -530,6 +559,7 @@ def _response(period, year, month, domestic_projects, expense_context, name=None
             direct_amounts_by_project=expense_context.get("direct_amounts_by_project"),
             year=year,
             month=month,
+            strict=False,
         )
     else:
         allocated_lines = []
@@ -541,6 +571,18 @@ def _response(period, year, month, domestic_projects, expense_context, name=None
         month=month,
     )
     unallocated_common = expense_context["common_amount"] if expense_context["common_amount"] and not allocated_lines else 0.0
+    if _money(unallocated_common):
+        # 修复（2026-09-29，审查 X2-1，决定 D4）：没有境外工时时，公共费用原来只在本页黄条里出现，
+        # 分摊页、全年、看板、导出的合计都少这笔钱。现在单列一行，计入未判定，合计和导入单对得上。
+        foreign_projects.append({
+            "project": UNALLOCATED_COMMON_PROJECT, "project_code": UNALLOCATED_COMMON_PROJECT,
+            "project_name": UNALLOCATED_COMMON_PROJECT, "project_stage": "unknown",
+            "stage_label": STAGE_LABELS["unknown"], "hours": 0.0, "ratio": 0.0,
+            "common_allocated_amount": _money(unallocated_common), "direct_allocated_amount": 0.0,
+            "allocated_amount": _money(unallocated_common), "line_count": 0,
+        })
+    # 修复（2026-09-29，审查 R3-48-3，决定 D5）：读取时按最新导入重算；保存后导入变了要提示重新保存。
+    stale = bool(name and saved_total is not None and _money(saved_total) != _money(expense_context["total_amount"]))
     return {
         "name": name,
         "period": period,
@@ -552,6 +594,8 @@ def _response(period, year, month, domestic_projects, expense_context, name=None
         "common_amount": _money(expense_context["common_amount"]),
         "direct_amount": _money(expense_context["direct_amount"]),
         "unallocated_common_amount": _money(unallocated_common),
+        "stale": stale,
+        "saved_total_amount": _money(saved_total) if saved_total is not None else None,
         "expense_sources": expense_context.get("expense_sources", []),
         "total_hours": round(sum(row["hours"] for row in allocated_lines), 2),
         "lines": allocated_lines,
@@ -572,7 +616,8 @@ def _get_foreign_rd_month(year, month):
         return _response(period_text, year, month, domestic_projects, expense_context)
     doc = frappe.get_doc("Foreign RD Expense", name)
     lines = _monthly_foreign_rows([_serialize_line(line) for line in (doc.lines or [])], year, month)
-    return _response(period_text, year, month, domestic_projects, expense_context, name=doc.name, status=doc.status, lines=lines)
+    return _response(period_text, year, month, domestic_projects, expense_context, name=doc.name, status=doc.status, lines=lines,
+                     saved_total=_value(doc, "total_amount"))
 
 
 def _get_foreign_rd_year(year):
@@ -617,7 +662,12 @@ def get_foreign_rd(period, scope="month"):
     year, month = parse_period(period)
     if str(scope or "month") == "year":
         return _get_foreign_rd_year(year)
-    return _get_foreign_rd_month(year, month)
+    payload = _get_foreign_rd_month(year, month)
+    # 本期国内分摊已提交时境外工时冻结（修复 2026-09-29），页面据此禁用保存。
+    payload["allocation_submitted"] = bool(
+        frappe.db.exists("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1})
+    )
+    return payload
 
 
 @frappe.whitelist(methods=["POST"])
@@ -626,6 +676,10 @@ def save_foreign_rd(period, total_amount=0, rows=None):
     year, month = parse_period(period)
     period_text = _period_string(year, month)
     ensure_not_locked(period_text, "lock_allocations", "\u5206\u644a")
+    # 修复（2026-09-29，审查 R3-48-3，决定 D5）：国内分摊提交后导入单就冻结了，境外工时原来还能改，
+    # 合计跟着变。现在和国内工时一样：先撤销分摊才能改。锁住期间导入单后当前读，和分摊提交互斥。
+    if period_has_submitted_allocation(year, month):
+        frappe.throw(frappe._("\u672c\u671f\u56fd\u5185\u7814\u53d1\u8d39\u7528\u5206\u644a\u5df2\u63d0\u4ea4\uff0c\u5883\u5916\u5de5\u65f6\u4e0d\u80fd\u518d\u4fee\u6539\uff0c\u8bf7\u5148\u64a4\u9500\u5206\u644a\u3002"))
     if isinstance(rows, str):
         try:
             rows = json.loads(rows or "[]")

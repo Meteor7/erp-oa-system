@@ -550,3 +550,13 @@ def test_foreign_matrix_direct_cost_uses_the_period_stage_when_given():
 
     assert rows[0]["project_stage"] == "capitalized"
     assert build_foreign_allocation_matrix_lines(sources, [], {"RD20": {"rd_stage": "\u8d39\u7528\u5316"}})[0]["project_stage"] == "expensed"
+
+
+def test_foreign_common_cost_without_hours_gets_its_own_column():
+    sources = [{"voucher_no": "F-COMMON", "account_level_3": "\u5883\u5916", "amount": 100, "allocation_type": "common"}]
+
+    rows = build_foreign_allocation_matrix_lines(sources, [], {})
+
+    assert [(row["project"], row["project_stage"], row["allocated_amount"]) for row in rows] == [
+        ("\u672a\u5206\u644a\u5883\u5916\u516c\u5171\u8d39\u7528", "unknown", 100.0),
+    ]

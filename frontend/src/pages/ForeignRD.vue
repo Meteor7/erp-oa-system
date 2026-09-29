@@ -52,6 +52,8 @@ const importedTotalAmount = computed(() => Number(data.value.total_amount || 0))
 const commonAmount = computed(() => Number(data.value.common_amount || 0));
 const directAmount = computed(() => Number(data.value.direct_amount || 0));
 const unallocatedCommonAmount = computed(() => Number(data.value.unallocated_common_amount || 0));
+const importChanged = computed(() => Boolean(data.value.stale));
+const allocationSubmitted = computed(() => Boolean(data.value.allocation_submitted));
 const totalHours = computed(() => activeRows().reduce((sum, row) => sum + Number(row.hours || 0), 0));
 const foreignExpenseCards = computed(() => [
   { key: 'total', label: TEXT.importedTotal, value: importedTotalAmount.value },
@@ -275,7 +277,9 @@ load();
           </div>
         </div>
 
-        <div v-if="unallocatedCommonAmount > 0" class="mb-4 rounded border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">有 {{ unallocatedCommonAmount.toFixed(2) }} 元公共费用等待境外工时分摊</div>
+        <div v-if="unallocatedCommonAmount > 0" class="mb-4 rounded border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">有 {{ unallocatedCommonAmount.toFixed(2) }} 元境外公共费用还没有境外工时可分，暂按"未分摊境外公共费用"计入未判定；录入境外工时并保存后会分到项目。</div>
+        <div v-if="importChanged && !isYearScope" class="mb-4 rounded border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">费用导入在上次保存后变了（上次 {{ Number(data.saved_total_amount || 0).toFixed(2) }} 元，现在 {{ importedTotalAmount.toFixed(2) }} 元），下面的金额已按最新导入重算，请核对后重新保存。</div>
+        <div v-if="allocationSubmitted && !isYearScope" class="mb-4 rounded border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-600">本期国内研发费用分摊已提交，境外工时已冻结；需要修改请先在分摊页撤销分摊。</div>
 
         <section class="rounded border border-gray-200 bg-gray-50 p-4">
           <h3 class="mb-3 text-base font-semibold text-gray-900">{{ TEXT.entry }}</h3>
@@ -317,7 +321,7 @@ load();
 
           <div v-if="!isYearScope" class="mt-3 flex flex-wrap items-center gap-3">
             <Button variant="subtle" @click="addRow">{{ TEXT.addRow }}</Button>
-            <Button :loading="saving" @click="save">{{ TEXT.save }}</Button>
+            <Button :loading="saving" :disabled="allocationSubmitted" @click="save">{{ TEXT.save }}</Button>
             <span class="text-xs text-gray-500">合计 {{ (totalHours / 8).toFixed(2) }} 天 / {{ totalHours.toFixed(2) }} 小时</span>
           </div>
 

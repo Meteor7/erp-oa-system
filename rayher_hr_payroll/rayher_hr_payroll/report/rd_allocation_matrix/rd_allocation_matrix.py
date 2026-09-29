@@ -172,6 +172,9 @@ def build_allocation_matrix(
     return columns, rows
 
 
+UNALLOCATED_FOREIGN_COMMON = "\u672a\u5206\u644a\u5883\u5916\u516c\u5171\u8d39\u7528"
+
+
 def build_foreign_allocation_matrix_lines(
     expense_sources: Iterable[Any],
     time_lines: Iterable[Any],
@@ -212,6 +215,17 @@ def build_foreign_allocation_matrix_lines(
             continue
 
         if total_hours <= 0:
+            # 修复（2026-09-29，审查 X2-1，决定 D4）：没有境外工时的公共费用原来直接跳过，
+            # 矩阵和看板少这笔钱。现在单列"未分摊境外公共费用"，计入未判定。
+            rows.append({
+                "voucher_no": voucher_no,
+                "expense_item_name": account_level_4 or account_level_3,
+                "account_level_3": account_level_3,
+                "account_level_4": account_level_4,
+                "project": UNALLOCATED_FOREIGN_COMMON,
+                "project_stage": "unknown",
+                "allocated_amount": amount,
+            })
             continue
         running = 0.0
         for index, line in enumerate(prepared_time_lines):
