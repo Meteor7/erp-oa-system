@@ -147,3 +147,60 @@ def test_part_time_rd_with_real_denominator_prorates():
     )
     labor = [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
     assert labor and sum(float(l["allocated_amount"]) for l in labor) == 5000.0  # 10000 * 4/8
+
+
+def test_part_time_rd_uses_the_month_standard_hours_as_denominator():
+    # 审查 X2-4（决定 D2）：页面只填研发工时时，按当月标准工时算比例，不再整月跳过。
+    doc = FakeDoc()
+    skipped = populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("88")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("88"), "capitalized")],
+        salaries={"E1": 17600}, total_hours={"E1": 88}, personnel_types={"E1": "研发辅助"},
+        standard_hours={"E1": 176},
+    )
+    labor = [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
+    assert skipped == []
+    assert sum(float(l["allocated_amount"]) for l in labor) == 8800.0  # 17600 * 88/176
+
+
+def test_part_time_denominator_takes_the_larger_of_logged_and_standard_hours():
+    doc = FakeDoc()
+    populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("80")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("80"), "capitalized")],
+        salaries={"E1": 20000}, total_hours={"E1": 200}, personnel_types={"E1": "非全时研发"},
+        standard_hours={"E1": 160},
+    )
+    labor = [l for l in doc.tables["lines"] if str(l["expense_item_name"]).startswith("人工费")]
+    assert sum(float(l["allocated_amount"]) for l in labor) == 8000.0  # 20000 * 80/200
+
+
+def test_full_time_rd_ignores_standard_hours():
+    doc = FakeDoc()
+    populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[{"employee": "E1", "project": "P1", "hours": Decimal("80")}],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("80"), "capitalized")],
+        salaries={"E1": 10000}, total_hours={"E1": 80}, personnel_types={"E1": "全时研发"},
+        standard_hours={"E1": 160},
+    )
+    assert doc.capitalized_total == Decimal("10000.00")
+
+
+def test_rd_staff_without_a_salary_slip_are_reported():
+    # 审查 X2-11-B（决定 D14）：有工时没工资单的员工原来悄悄不算，现在列出来。
+    doc = FakeDoc()
+    skipped = populate_allocation_document(
+        doc, expenses=[],
+        source_hour_rows=[
+            {"employee": "E1", "project": "P1", "hours": Decimal("8")},
+            {"employee": "E2", "project": "P1", "hours": Decimal("8")},
+            {"employee": "E3", "project": "P1", "hours": Decimal("8")},
+        ],
+        source_expense_rows=[], project_hours=[ProjectHour("P1", Decimal("24"), "capitalized")],
+        salaries={"E1": 10000, "E3": 0}, total_hours={"E1": 8}, personnel_types={"E1": "全时研发"},
+    )
+    assert skipped == ["E2（无工资单）", "E3（无工资单）"]
+    assert doc.capitalized_total == Decimal("10000.00")

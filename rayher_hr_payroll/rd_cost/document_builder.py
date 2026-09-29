@@ -12,6 +12,8 @@ from rayher_hr_payroll.rd_cost.allocation import (
 from rayher_hr_payroll.rd_cost.types import ExpenseItem, ProjectHour
 
 LABOR_PREFIX = "labor:"
+# labor_skipped 里"没有工资单"的员工带这个后缀，和"工时不完整"的区分开（修复 2026-09-29，审查 X2-11-B）。
+NO_SALARY_SUFFIX = "（无工资单）"
 
 
 def _value(row: Any, fieldname: str, default: Any = None) -> Any:
@@ -55,10 +57,12 @@ def _employee_project_hours(
     return employee_hours
 
 
-def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, personnel_types=None, skipped=None):
+def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, personnel_types=None, skipped=None,
+                  standard_hours=None):
     employee_hours = _employee_project_hours(source_hour_rows, project_hours)
     total_hours = total_hours or {}
     personnel_types = personnel_types or {}
+    standard_hours = standard_hours or {}
     items = []
     for emp, gross in salaries.items():
         if not gross:
@@ -69,8 +73,15 @@ def _labor_result(salaries, source_hour_rows, project_hours, total_hours=None, p
             continue
         rd_hours = sum((h.hours for h in hours), Decimal("0"))
         total = Decimal(str(total_hours.get(emp) or 0))
+        standard = Decimal(str(standard_hours.get(emp) or 0))
+        full_time = str(personnel_types.get(emp) or "") == "全时研发"
         # ratio = R&D hours / total worked hours (<= 1), per the spec "工资 × 研发工时占比".
-        if total > rd_hours and total > 0:
+        if not full_time and standard > 0:
+            # 修复（2026-09-29，审查 X2-4，决定 D2）：页面只能填研发工时，非全时研发和研发辅助的
+            # 总工时就等于研发工时，原来整月工资都被跳过。现在分母取当月标准工时（工作日×8 扣事假），
+            # Desk 里另补了非研发工时的，取两者较大的。
+            ratio = rd_hours / max(total, rd_hours, standard)
+        elif total > rd_hours and total > 0:
             ratio = rd_hours / total
         elif str(personnel_types.get(emp) or "") == "全时研发":
             # Full-time R&D: by definition all worked time is R&D, so the full salary
@@ -102,13 +113,19 @@ def populate_allocation_document(
     salaries: Mapping[str, float] | None = None,
     total_hours: Mapping[str, float] | None = None,
     personnel_types: Mapping[str, str] | None = None,
-) -> None:
+    standard_hours: Mapping[str, float] | None = None,
+) -> list:
     skipped: list = []
     labor = None
     if salaries:
         labor = _labor_result(
-            salaries, source_hour_rows, project_hours, total_hours, personnel_types, skipped
+            salaries, source_hour_rows, project_hours, total_hours, personnel_types, skipped, standard_hours
         )
+    # 修复（2026-09-29，审查 X2-11-B，决定 D14）：有研发工时却没有工资单（或应发为 0）的员工，
+    # 原来直接不算人工费、也不提示。现在记进 labor_skipped 并提示，先不阻止提交。
+    paid = {str(emp) for emp, gross in (salaries or {}).items() if gross}
+    hour_employees = sorted({str(_value(row, "employee")) for row in source_hour_rows if _value(row, "employee")})
+    skipped.extend(emp + NO_SALARY_SUFFIX for emp in hour_employees if emp not in paid)
     if labor and labor.lines and any((e.category or "") == "personnel" for e in expenses):
         # Personnel-category GL rows ARE R&D labour booked via GL; combined with the
         # Salary-Slip labour they double-count R&D personnel cost. Only a real conflict

@@ -1,7 +1,7 @@
 from frappe.model.document import Document
 
 from rayher_hr_payroll.period_controls import normalize_period_fields
-from rayher_hr_payroll.rd_cost.document_builder import populate_allocation_document
+from rayher_hr_payroll.rd_cost.document_builder import NO_SALARY_SUFFIX, populate_allocation_document
 from rayher_hr_payroll.rd_cost.frappe_adapter import (
     ensure_direct_project_stages,
     get_expense_items,
@@ -139,6 +139,13 @@ class RDCostAllocation(Document):
         salaries = period_salaries(period)
         total_hours = total_hours_by_employee(year=self.year, month=self.month)
         personnel_types = personnel_types_by_employee()
+        # 非全时研发、研发辅助的人工费分母：当月标准工时（修复 2026-09-29，审查 X2-4，决定 D2）。
+        from rayher_hr_payroll.working_calendar import resolve_monthly_work_limit
+
+        standard_hours = {}
+        for emp in sorted({str(row.get("employee")) for row in source_hour_rows if row.get("employee")}):
+            if personnel_types.get(emp) in ("非全时研发", "研发辅助"):
+                standard_hours[emp] = resolve_monthly_work_limit(self.year, self.month, employee=emp)["hour_limit"]
 
         skipped = populate_allocation_document(
             self,
@@ -149,13 +156,21 @@ class RDCostAllocation(Document):
             salaries=salaries,
             total_hours=total_hours,
             personnel_types=personnel_types,
+            standard_hours=standard_hours,
         )
         # Persist an explicit unresolved-skip state so a submitted allocation records the
         # under-counted employees (auditable), not just a transient warning.
         self.labor_skipped = ", ".join(skipped)
-        if skipped:
+        incomplete = [emp for emp in skipped if not emp.endswith(NO_SALARY_SUFFIX)]
+        no_salary = [emp[:-len(NO_SALARY_SUFFIX)] for emp in skipped if emp.endswith(NO_SALARY_SUFFIX)]
+        if incomplete:
             frappe.msgprint(
                 "以下员工本期工时不完整(非全时研发),未纳入研发人工分摊;"
                 "请在工时单补录其非研发工时(项目可留空)以提供总工时分母后重新分摊:"
-                + ", ".join(skipped)
+                + ", ".join(incomplete)
+            )
+        if no_salary:
+            frappe.msgprint(
+                "以下研发人员本期有研发工时，但没有已提交的工资单（或应发为 0），未计入研发人工费；"
+                "请确认工资单后重新分摊：" + ", ".join(no_salary)
             )
