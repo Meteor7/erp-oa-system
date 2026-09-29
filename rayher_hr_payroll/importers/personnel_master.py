@@ -110,7 +110,14 @@ def plan_personnel_import(records, existing):
             items.append({"action": "skip", "reason": "ambiguous_employee_number", "record": record})
             continue
         name_matches = by_name.get(name, []) if name else []
-        if len(name_matches) == 1:
+        # 修复（2026-09-29，审查 X3-2，决定 D2）：按姓名匹配只用于"没有工号可比"的在职员工。
+        # 原来会把新员工的身份证、银行卡写进同名离职员工的档案（新人自己没有档案），
+        # 或覆盖工号不同的同名在职同事。复职请在人员页清空原档的离职日期。
+        if len(name_matches) == 1 and (name_matches[0].get("status") or "Active") != "Active":
+            items.append({"action": "skip", "reason": "name_matches_left_employee", "record": record})
+        elif len(name_matches) == 1 and number and _identifier(name_matches[0].get("employee_number")):
+            items.append({"action": "skip", "reason": "employee_number_conflict", "record": record})
+        elif len(name_matches) == 1:
             items.append({"action": "update", "target": name_matches[0]["name"], "record": record})
         elif len(name_matches) > 1:
             items.append({"action": "skip", "reason": "ambiguous_name", "record": record})
@@ -141,7 +148,7 @@ def summarize_plan(plan):
 def _existing_employees(frappe):
     return frappe.get_all(
         "Employee",
-        fields=["name", "employee_number", "employee_name"],
+        fields=["name", "employee_number", "employee_name", "status"],
         limit_page_length=0,
     )
 
@@ -246,8 +253,9 @@ def apply_personnel_import(records, company="Rayher"):
             employee_by_source_index[index] = doc.name
             applied[item["action"]] += 1
 
+        # 主管只在在职员工里按姓名找（修复 2026-09-29，审查 X3-2）。
         all_employees = frappe.get_all(
-            "Employee", fields=["name", "employee_name"], limit_page_length=0
+            "Employee", filters={"status": "Active"}, fields=["name", "employee_name"], limit_page_length=0
         )
         by_name = defaultdict(list)
         for row in all_employees:

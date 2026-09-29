@@ -79,3 +79,25 @@ def test_public_summary_never_exposes_source_personal_data():
         "skip_reasons": {"ambiguous_name": 1},
     }
     assert "secret" not in repr(summary)
+
+
+def test_plan_never_overwrites_a_leaver_or_a_numbered_namesake():
+    # 审查 X3-2（决定 D2）：同名离职员工、工号不同的同名在职员工都不能被覆盖。
+    records = [
+        {"employee_number": "101", "employee_name": "演示员工149"},
+        {"employee_number": "102", "employee_name": "演示员工164"},
+        {"employee_number": "", "employee_name": "演示员工176"},
+    ]
+    existing = [
+        {"name": "EMP-L", "employee_number": "", "employee_name": "演示员工149", "status": "Left"},
+        {"name": "EMP-W", "employee_number": "55", "employee_name": "演示员工164", "status": "Active"},
+        {"name": "EMP-Z", "employee_number": "60", "employee_name": "演示员工176", "status": "Active"},
+    ]
+
+    result = plan_personnel_import(records, existing)
+
+    assert [(item["action"], item.get("reason"), item.get("target")) for item in result["items"]] == [
+        ("skip", "name_matches_left_employee", None),
+        ("skip", "employee_number_conflict", None),
+        ("update", None, "EMP-Z"),
+    ]
