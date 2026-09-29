@@ -1087,7 +1087,7 @@ async function act(action) {
   const requestName = selectedRequest.value.name;
   error.value = ''; message.value = ''; saving.value = true;
   try {
-    const params = { name: requestName, action, note: action === 'reject' ? rejectReason.value.trim() : actionNote.value.trim() };
+    const params = { name: requestName, action, note: action === 'reject' ? rejectReason.value.trim() : actionNote.value.trim(), expected_step_key: selectedRequest.value.current_step_key || '' };
     if (action === 'reject') params.reject_target = rejectTarget.value;
     await actor.submit(params);
     actedRequestSteps[requestName] = currentStepKeyFor(selectedRequest.value);

@@ -6,7 +6,7 @@ import { HOURS_PER_DAY, TYPES, api, dayLabel, departmentLabel, numText, rangeTex
 const props = defineProps({
   data: { type: Object, default: () => ({ items: [], team: [] }) },
 });
-const emit = defineEmits(['acted']);
+const emit = defineEmits(['acted', 'stale']);
 
 const state = reactive({});
 const error = ref('');
@@ -30,7 +30,7 @@ async function act(row, action) {
   }
   item.busy = true;
   try {
-    const params = { name: row.name, action, note: item.note.trim() };
+    const params = { name: row.name, action, note: item.note.trim(), expected_step_key: row.current_step_key || '' };
     if (action === 'reject') params.reject_target = item.target || 'applicant';
     await api.act(params);
     item.result = action === 'approve' ? 'ok' : 'no';
@@ -38,6 +38,7 @@ async function act(row, action) {
     emit('acted', row.name);
   } catch (failure) {
     error.value = String(failure?.message || failure || '处理失败');
+    if (/单据已经变化|页面版本过旧/.test(error.value)) emit('stale');
   } finally {
     item.busy = false;
   }

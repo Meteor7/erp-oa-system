@@ -54,6 +54,7 @@ async function run(action, okText) {
     return result;
   } catch (error) {
     flash('', String(error?.message || error || '操作失败'));
+    if (/单据已经变化|页面版本过旧/.test(String(error?.message || error || ''))) await load();
     return null;
   } finally {
     busy.value = false;
@@ -111,7 +112,8 @@ function select(row) {
 async function act(action) {
   const note = action === 'reject' ? (window.prompt('请填写驳回原因') || '').trim() : '';
   if (action === 'reject' && !note) return;
-  await run(() => callApi('oa_entry.action_request', { name: selected.value.name, action, note, reject_target: action === 'reject' ? 'applicant' : undefined }),
+  if (busy.value) return;
+  await run(() => callApi('oa_entry.action_request', { name: selected.value.name, action, note, reject_target: action === 'reject' ? 'applicant' : undefined, expected_step_key: selected.value.current_step_key || '' }),
     action === 'reject' ? '已驳回给申请人' : '已同意');
 }
 

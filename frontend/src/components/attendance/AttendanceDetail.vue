@@ -66,7 +66,7 @@ async function act(action) {
   }
   busy.value = true;
   try {
-    const params = { name: props.name, action, note: note.value.trim() };
+    const params = { name: props.name, action, note: note.value.trim(), expected_step_key: request.value?.current_step_key || '' };
     if (action === 'reject') params.reject_target = target.value || 'applicant';
     await api.act(params);
     message.value = action === 'approve' ? '已通过，转给下一步' : '已驳回';
@@ -74,6 +74,7 @@ async function act(action) {
     await load();
   } catch (failure) {
     error.value = String(failure?.message || failure || '处理失败');
+    if (/单据已经变化|页面版本过旧/.test(error.value)) await load();
   } finally {
     busy.value = false;
   }

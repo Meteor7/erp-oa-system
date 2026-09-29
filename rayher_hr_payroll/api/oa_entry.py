@@ -1547,6 +1547,8 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "current_step_index": doc.current_step_index,
         "current_step_label": doc.current_step_label,
         "current_step_mode": step.mode if step else "",
+        # 页面审批时带回这个值，服务端据此确认批的是页面上看到的那一步（修复 2026-09-29，决定 D10）。
+        "current_step_key": _clean(getattr(step, "step_key", None)) if step else "",
         "can_act": capabilities["can_approve"] or capabilities["can_reject"],
         **capabilities,
         **document_visibility,
@@ -4087,7 +4089,7 @@ def _validate_procurement_material_codes(doc, step):
 
 @frappe.whitelist(methods=["POST"])
 @attendance_request_transaction
-def action_request(name, action="approve", note=None, reject_target=None):
+def action_request(name, action="approve", note=None, reject_target=None, expected_step_key=None):
     request_name = _bounded_optional_text(name, "申请单号", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
@@ -4095,6 +4097,7 @@ def action_request(name, action="approve", note=None, reject_target=None):
         step = _current_step(doc)
         if not step or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("\u5f53\u524d\u7533\u8bf7\u4e0d\u5728\u53ef\u5904\u7406\u72b6\u6001\u3002"))
+        _require_expected_step(doc, step, expected_step_key)
         matched = _matched_approvers(step)
         is_override = _is_oa_override_user()
         if not _can_act_on_current_step(doc):
@@ -4942,6 +4945,27 @@ def _unresolved_add_sign_after(doc, step):
     ]
 
 
+STALE_STEP_MESSAGE = "这张单据已经变化，现在在「{0}」这一步，已为你刷新，请看过后再操作。"
+
+
+def _require_expected_step(doc, step, expected_step_key):
+    """审批只作用在页面上看到的那一步（修复 2026-09-29，审查 #10，决定 D10）。
+
+    原来接口只收单号，按服务端当前节点处理：双击、或同一人占相邻两个节点（包括管理员放行账号）时
+    第二次点击会把下一步也批掉，最坏连付款一起确认；开着旧页面还会在没看到驳回原因的情况下再批一次。
+    从网页和 API 来的请求必须带 expected_step_key；服务器内部代码（维护脚本、测试）直接调用时不要求。
+    """
+    expected = _clean(expected_step_key)
+    current = _clean(getattr(step, "step_key", None))
+    if not expected:
+        if getattr(getattr(frappe, "local", None), "request", None) is None:
+            return
+        frappe.throw(frappe._("页面版本过旧，请刷新后再操作。"))
+    if expected != current:
+        label = _clean(getattr(step, "label", None)) or _clean(getattr(doc, "current_step_label", None)) or "—"
+        frappe.throw(frappe._(STALE_STEP_MESSAGE).format(label))
+
+
 def _insert_add_sign_step(doc, current_step, approver, position, opinion, actor):
     approver = _bounded_optional_text(approver, "Add-sign approver", 140)
     opinion = _bounded_optional_text(opinion, "Add-sign opinion", 1000)
@@ -5068,7 +5092,7 @@ def list_approval_people(query="", limit=20, name=None):
 
 @frappe.whitelist(methods=["POST"])
 @attendance_request_transaction
-def add_sign_request(name, approver, position, opinion):
+def add_sign_request(name, approver, position, opinion, expected_step_key=None):
     request_name = _bounded_optional_text(name, "Request", 140)
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
@@ -5076,6 +5100,7 @@ def add_sign_request(name, approver, position, opinion):
         step = _current_step(doc)
         if not step or doc.workflow_status not in ACTIVE_STATUSES:
             frappe.throw(frappe._("The request is not at an active approval step."))
+        _require_expected_step(doc, step, expected_step_key)
         if not _matched_approvers(step) or not _can_act_on_current_step(doc):
             frappe.throw(frappe._("Only the current approver may add an approver."))
         resolved = _resolve_add_sign_approver(approver)

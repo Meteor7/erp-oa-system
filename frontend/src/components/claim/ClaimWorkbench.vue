@@ -86,6 +86,8 @@ async function run(action, okText) {
     return result;
   } catch (error) {
     flash('', String(error?.message || error || '操作失败'));
+    // 单据已经变化（别人先处理了、被驳回过）：重新加载，页面显示最新的一步。
+    if (/单据已经变化|页面版本过旧/.test(String(error?.message || error || ''))) await loadDocs();
     return null;
   } finally {
     busy.value = false;
@@ -273,14 +275,14 @@ async function approve(doc) {
       if (problems.length) throw new Error(problems[0]);
       await callApi('expense_claim_entry.save_claim_accounts', { name: doc.name, lines: JSON.stringify(lines) });
     }
-    return callApi('oa_entry.action_request', { name: doc.name, action: 'approve' });
+    return callApi('oa_entry.action_request', { name: doc.name, action: 'approve', expected_step_key: doc.current_step_key || '' });
   }, doc.current_step_mode === 'handle' ? `${doc.name} 已确认付款` : `${doc.name} 已同意`);
 }
 
 async function reject(doc) {
   const note = (window.prompt('请填写驳回原因') || '').trim();
   if (!note) return;
-  await run(() => callApi('oa_entry.action_request', { name: doc.name, action: 'reject', note, reject_target: 'applicant' }), `${doc.name} 已驳回给申请人`);
+  await run(() => callApi('oa_entry.action_request', { name: doc.name, action: 'reject', note, reject_target: 'applicant', expected_step_key: doc.current_step_key || '' }), `${doc.name} 已驳回给申请人`);
 }
 
 async function withdraw(doc) {

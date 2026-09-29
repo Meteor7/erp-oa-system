@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
     <AttendanceDetail v-if="detailName" :key="detailName" :name="detailName" :base="base" />
 
     <template v-else-if="view === 'review'">
-      <AttendanceReview :data="review" @acted="onActed" />
+      <AttendanceReview :data="review" @acted="onActed" @stale="loadReview" />
     </template>
 
     <template v-else-if="view === 'reviewed'">

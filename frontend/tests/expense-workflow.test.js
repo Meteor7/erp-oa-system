@@ -50,8 +50,8 @@ test('workflow API wrappers send the synchronized backend payload', async () => 
         }]),
       },
     },
-    { action: 'action_request', args: { name: 'OA-1', action: 'reject', note: 'Fix it', reject_target: 'applicant' } },
-    { action: 'add_sign_request', args: { name: 'OA-1', approver: 'finance@example.com', position: 'before', opinion: 'Review tax' } },
+    { action: 'action_request', args: { name: 'OA-1', action: 'reject', note: 'Fix it', reject_target: 'applicant', expected_step_key: '' } },
+    { action: 'add_sign_request', args: { name: 'OA-1', approver: 'finance@example.com', position: 'before', opinion: 'Review tax', expected_step_key: '' } },
     { action: 'list_approval_people', args: { query: 'fin', limit: 20, name: '' } },
     { action: 'delete_expense_attachment', args: { name: 'OA-1', attachment: 'ATT-1' } },
   ]);
@@ -85,4 +85,12 @@ test('attachment preview consumes the one-time token with POST', async () => {
   const value = await fetchExpenseAttachmentPreview('ATT-1', { api, fetcher });
   assert.equal(value.metadata.display_name, 'receipt.pdf');
   assert.equal(value.blob.type, 'application/pdf');
+});
+
+
+test('stale-step errors are recognised so pages reload', async () => {
+  const { isStaleStepError } = await import('../src/lib/expenseWorkflow.js');
+  assert.equal(isStaleStepError(new Error('这张单据已经变化，现在在「总经理」这一步')), true);
+  assert.equal(isStaleStepError(new Error('页面版本过旧，请刷新后再操作。')), true);
+  assert.equal(isStaleStepError(new Error('驳回原因必填')), false);
 });

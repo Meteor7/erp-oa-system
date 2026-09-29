@@ -3937,3 +3937,39 @@ def test_approval_people_lookup_is_for_the_current_approver_and_active_staff(mon
     people = oa_entry.list_approval_people("", name=doc.name)
     assert [row["user"] for row in people] == ["bob@example.com"]
     assert calls[0] == ("Employee", {"status": "Active", "user_id": ["is", "set"]})
+
+
+
+def test_approval_refuses_a_step_the_page_did_not_show(monkeypatch):
+    # 审查 #10（决定 D10）：双击或旧页面不能把下一步也批掉。
+    environment = _install_request_environment(monkeypatch)
+    steps = [
+        _workflow_step(1, "step-1", "manager", oa_entry.STATUS_PENDING, "manager@example.com"),
+        _workflow_step(2, "step-2", "director", oa_entry.STATUS_WAIT_FLOW, "manager@example.com"),
+    ]
+    doc = _dynamic_workflow_doc(steps, 1)
+    object.__setattr__(doc, "environment", environment)
+    environment.committed[doc.name] = doc
+    monkeypatch.setattr(service, "_transaction_lock", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(oa_entry, "_matched_approvers", lambda current_step, user=None: ["manager@example.com"])
+    monkeypatch.setattr(oa_entry, "_actor_names", lambda user=None: {"manager@example.com"})
+    oa_entry.action_request(doc.name, "approve", "ok", expected_step_key="step-1")
+    assert doc.current_step_index == 2
+    with pytest.raises(ValidationError, match="已经变化"):
+        oa_entry.action_request(doc.name, "approve", "double click", expected_step_key="step-1")
+    assert steps[1].status == oa_entry.STATUS_PENDING
+    with pytest.raises(ValidationError, match="已经变化"):
+        oa_entry.add_sign_request(doc.name, "x@example.com", "before", "late", expected_step_key="step-1")
+
+
+def test_web_requests_must_name_the_step_but_server_code_need_not(monkeypatch):
+    from types import SimpleNamespace
+
+    step = _workflow_step(1, "step-1", "manager", oa_entry.STATUS_PENDING, "manager@example.com")
+    doc = _dynamic_workflow_doc([step], 1)
+    monkeypatch.setattr(frappe_stub, "local", SimpleNamespace(request=None), raising=False)
+    oa_entry._require_expected_step(doc, step, None)
+    monkeypatch.setattr(frappe_stub, "local", SimpleNamespace(request=object()), raising=False)
+    with pytest.raises(ValidationError, match="页面版本过旧"):
+        oa_entry._require_expected_step(doc, step, "")
+    oa_entry._require_expected_step(doc, step, "step-1")

@@ -6,7 +6,7 @@ import {
   newLineKey, withdrawInvoicePush,
 } from '../lib/invoiceOcr.js';
 import {
-  addSignRequest, fetchExpenseAttachmentPreview, listApprovalPeople,
+  addSignRequest, fetchExpenseAttachmentPreview, isStaleStepError, listApprovalPeople,
   rejectRequest, saveFinanceExpenseItems,
 } from '../lib/expenseWorkflow.js';
 // Backend response compatibility: project_groups are regrouped from expense_lines so per-line descriptions and attachments remain intact.
@@ -516,21 +516,31 @@ async function submitDraft(row) {
   }
 }
 async function act(row, action) {
+  // 防重入：处理中再点不会再提交一次（修复 2026-09-29，审查 #10）。
+  if (saving.value) return;
+  saving.value = true;
   try {
-    await actor.submit({ name: row.name, action, note: actionNote.value.trim() });
+    await actor.submit({ name: row.name, action, note: actionNote.value.trim(), expected_step_key: row.current_step_key || '' });
     actionNote.value = '';
     await reload();
   } catch (error) {
     errorMessage.value = apiError(error, '审批处理失败');
+    if (isStaleStepError(error)) await reload();
+  } finally {
+    saving.value = false;
   }
 }
 async function markPaid(row) {
+  if (saving.value) return;
+  saving.value = true;
   try {
     await paidMarker.submit({ name: row.name, note: actionNote.value.trim() });
     actionNote.value = '';
     await reload();
   } catch (error) {
     errorMessage.value = apiError(error, '付款标记失败');
+  } finally {
+    saving.value = false;
   }
 }
 async function withdrawRequest(row) {
@@ -630,7 +640,7 @@ async function submitReject() {
   }
   saving.value = true;
   try {
-    await rejectRequest(selectedRequest.value.name, rejectTarget.value, rejectReason.value);
+    await rejectRequest(selectedRequest.value.name, rejectTarget.value, rejectReason.value, { expectedStepKey: selectedRequest.value.current_step_key });
     showRejectDialog.value = false;
     actionNote.value = '';
     await reload();
@@ -660,7 +670,7 @@ async function submitAddSign() {
   }
   saving.value = true;
   try {
-    await addSignRequest(selectedRequest.value.name, addSignForm.approver, addSignForm.position, addSignForm.opinion);
+    await addSignRequest(selectedRequest.value.name, addSignForm.approver, addSignForm.position, addSignForm.opinion, { expectedStepKey: selectedRequest.value.current_step_key });
     showAddSignDialog.value = false;
     await reload();
   } catch (error) {
@@ -976,7 +986,7 @@ watch(() => requestForm.invoice_handling_mode, (mode) => {
             <Button v-if="selectedRequest.can_reject && selectedRequest.current_step_mode !== 'handle'" variant="subtle" @click="openReject(selectedRequest)"><FeatherIcon name="corner-up-left" class="h-4 w-4" />&#x5B9A;&#x5411;&#x9A73;&#x56DE;</Button>
             <Button v-if="selectedRequest.can_approve" variant="solid" :loading="saving" @click="act(selectedRequest,'approve')"><FeatherIcon name="check" class="h-4 w-4" /><span v-if="selectedRequest.current_step_mode === 'handle'">确认付款</span><span v-else>&#x5BA1;&#x6279;&#x901A;&#x8FC7;</span></Button>
             <Button v-else-if="selectedRequest.can_act && selectedRequest.current_step_mode !== 'handle'" variant="subtle" disabled title="Finance classification required">&#x8BF7;&#x5148;&#x8865;&#x5168;&#x8D39;&#x7528;&#x79D1;&#x76EE;</Button>
-            <Button v-if="selectedRequest.can_mark_paid" variant="solid" @click="markPaid(selectedRequest)">&#x6807;&#x8BB0;&#x5DF2;&#x4ED8;&#x6B3E;</Button>
+            <Button v-if="selectedRequest.can_mark_paid" variant="solid" :loading="saving" @click="markPaid(selectedRequest)">&#x6807;&#x8BB0;&#x5DF2;&#x4ED8;&#x6B3E;</Button>
           </div>
         </footer>
       </div>

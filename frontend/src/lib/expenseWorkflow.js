@@ -85,23 +85,31 @@ export function saveFinanceExpenseItems(name, lines, { api = oaApi, signal } = {
   return api('save_finance_expense_items', { name, lines: JSON.stringify(values) }, { signal });
 }
 
-export function rejectRequest(name, rejectTarget, reason, { api = oaApi, signal } = {}) {
+// expectedStepKey：页面上看到的当前节点（单据的 current_step_key），服务端据此拒绝已经变化的单据。
+export function rejectRequest(name, rejectTarget, reason, { api = oaApi, signal, expectedStepKey = '' } = {}) {
   return api('action_request', {
     name,
     action: 'reject',
     note: String(reason || '').trim(),
     reject_target: String(rejectTarget || '').trim(),
+    expected_step_key: String(expectedStepKey || '').trim(),
   }, { signal });
 }
 
-export function addSignRequest(name, approver, position, opinion, { api = oaApi, signal } = {}) {
+export function addSignRequest(name, approver, position, opinion, { api = oaApi, signal, expectedStepKey = '' } = {}) {
   if (!ADD_SIGN_POSITIONS.includes(position)) throw new Error('\u52a0\u7b7e\u4f4d\u7f6e\u65e0\u6548');
   return api('add_sign_request', {
     name,
     approver: String(approver || '').trim(),
     position,
     opinion: String(opinion || '').trim(),
+    expected_step_key: String(expectedStepKey || '').trim(),
   }, { signal });
+}
+
+// 服务端说单据已经变化时，页面要重新加载（见 oa_entry.STALE_STEP_MESSAGE）。
+export function isStaleStepError(error) {
+  return /单据已经变化|页面版本过旧/.test(String(error?.message || error || ''));
 }
 
 export function listApprovalPeople(query = '', { api = oaApi, signal, limit = 20, name = '' } = {}) {
