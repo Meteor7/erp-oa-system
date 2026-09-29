@@ -523,7 +523,8 @@ def _save_rd_hours_row(period, employee, project=None, hours=None, work_date=Non
         ts.insert(ignore_permissions=True)
 
 
-@frappe.whitelist(methods=["POST"])
+# 下线（2026-09-29，审查 X2-8 / #51）：页面早已改用按月填报，这个按天写工时的接口没有调用方，
+# 却仍然对外开放，而且允许在调休日填工时（一天 16 小时）。函数保留给后台脚本和测试使用。
 def save_rd_hours(period, employee, project=None, hours=None, work_date=None, activity_type=None, description=None, project_code=None, project_name=None):
     require_rd_access(RD_TIMESHEET_ENTRY_ROLES)
     _save_rd_hours_row(
@@ -542,7 +543,8 @@ def save_rd_hours(period, employee, project=None, hours=None, work_date=None, ac
     return list_rd_hours(period)
 
 
-@frappe.whitelist(methods=["POST"])
+# 下线（2026-09-29，审查 X2-8 / #51）：页面早已改用按月填报，这个按天写工时的接口没有调用方，
+# 却仍然对外开放，而且允许在调休日填工时（一天 16 小时）。函数保留给后台脚本和测试使用。
 def bulk_save_rd_hours(period, rows):
     require_rd_access(RD_TIMESHEET_ENTRY_ROLES)
     if isinstance(rows, str):
@@ -577,7 +579,8 @@ def bulk_save_rd_hours(period, rows):
     frappe.db.commit()
     return list_rd_hours(period)
 
-@frappe.whitelist(methods=["POST"])
+# 下线（2026-09-29，审查 X2-8 / #51）：页面早已改用按月填报，这个按天写工时的接口没有调用方，
+# 却仍然对外开放，而且允许在调休日填工时（一天 16 小时）。函数保留给后台脚本和测试使用。
 def delete_rd_hours(timesheet):
     require_rd_access(RD_TIMESHEET_ENTRY_ROLES)
     doc = frappe.get_doc("Timesheet", timesheet)
