@@ -31,6 +31,8 @@ test("builds allocation export sheets for totals, full matrix, and stage matrice
     ["2026-06", "\u8d39\u7528\u5316\u5408\u8ba1", 200],
     ["2026-06", "\u8d44\u672c\u548c\u8d39\u7528\u5408\u8ba1", 300],
     ["2026-06", "\u672a\u5224\u5b9a\u5408\u8ba1", 0],
+    // 阶段合计 300，明细只有 30：多出一行未对账差额（审查 X2-11-A）。
+    ["2026-06", "\u672a\u5bf9\u8d26\u5dee\u989d\uff08\u9636\u6bb5\u5408\u8ba1\u2212\u5206\u644a\u660e\u7ec6\uff09", 270],
   ]);
   assert.equal("projectSummary" in sheets, false);
   assert.deepEqual(sheets.matrix, [
@@ -117,4 +119,15 @@ test("annual stage sheets use independently filtered matrices when one project c
     ["\u65e5\u671f", "RD01", "\u6c47\u603b"],
     ["2026-02", 50, 50],
   ]);
+});
+
+
+test("stage totals that match the matrix add no reconciliation row", () => {
+  const sheets = buildAllocationExportSheets({
+    period: "2026-06",
+    summary: { capitalized: 10, expensed: 20, unknown: 0 },
+    columns,
+    result,
+  });
+  assert.equal(sheets.stageTotals.length, 5);
 });

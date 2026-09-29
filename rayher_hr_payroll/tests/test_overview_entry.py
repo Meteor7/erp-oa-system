@@ -93,3 +93,33 @@ def test_attendance_rows_split_cross_month_requests_by_day(monkeypatch):
     assert [(row["employee"], row["duration_hours"]) for row in october] == [("E1", 12.0)]
     both = ov._attendance_rows([(2026, 9), (2026, 10)])
     assert sorted((row["employee"], row["duration_hours"]) for row in both) == [("E1", 20.0), ("E2", 8)]
+
+
+def test_allocated_months_drop_rd_project_purchases_and_expenses_only():
+    # 审查 X2-10（决定 D7）：已提交分摊的月份，研发项目的采购和报销已在分摊里，不再重复计入。
+    rows = [
+        {"project": "RD02", "kind": "rd", "amount": 100, "period": (2026, 6)},
+        {"project": "RD02", "kind": "po", "amount": 50, "cost_month": (2026, 6)},
+        {"project": "RD02", "kind": "expense", "amount": 30, "cost_month": (2026, 7)},
+        {"project": "OFFICE", "kind": "expense", "amount": 20, "cost_month": (2026, 6)},
+        {"project": None, "kind": "po", "amount": 10, "cost_month": (2026, 6)},
+    ]
+
+    kept = ov.drop_allocated_rd_duplicates(rows, {(2026, 6)}, {"RD02"})
+
+    assert [(row["project"], row["kind"], row["amount"]) for row in kept] == [
+        ("RD02", "rd", 100), ("RD02", "expense", 30), ("OFFICE", "expense", 20), (None, "po", 10),
+    ]
+
+
+def test_cost_rows_include_foreign_rd_and_apply_the_dedup(monkeypatch):
+    monkeypatch.setattr(ov, "_rd_rows", lambda months: [{"project": "RD02", "kind": "rd", "amount": 100}])
+    monkeypatch.setattr(ov, "_foreign_rd_rows", lambda months: [{"project": "RD06", "kind": "rd", "amount": 40, "label": ov.FOREIGN_RD_LABEL}])
+    monkeypatch.setattr(ov, "_po_rows", lambda months: [{"project": "RD02", "kind": "po", "amount": 50, "cost_month": (2026, 6)}])
+    monkeypatch.setattr(ov, "_expense_rows", lambda months: [])
+    monkeypatch.setattr(ov, "_allocated_months", lambda months: {(2026, 6)})
+    monkeypatch.setattr(ov, "_rd_project_names", lambda: {"RD02", "RD06"})
+
+    totals = ov.sum_costs(ov.project_costs(ov.cost_rows([(2026, 6)])))
+
+    assert totals == {"rd": 140.0, "po": 0.0, "expense": 0.0, "total": 140.0}

@@ -149,18 +149,28 @@ def _rd_rows(months):
                                        limit_page_length=0)]
 
 
+def _year_month(value):
+    if not value:
+        return None
+    if hasattr(value, "year"):
+        return (value.year, value.month)
+    text = str(value)
+    return (int(text[:4]), int(text[5:7])) if len(text) >= 7 else None
+
+
 def _po_rows(months):
     start, end = month_range(months)
-    names = frappe.get_all("OA Purchase Order",
-                           filters={"status": ["not in", PO_DEAD_STATUS],
-                                    # 修复（2026-09-23）：日期上限对时间字段本来就取到当天 23:59:59，
-                                    # 再加一天会把下月 1 日的数据也算进本月（下月再算一次）。
-                                    "creation": ["between", [start, end]]},
-                           pluck="name")
-    if not names:
+    orders = frappe.get_all("OA Purchase Order",
+                            filters={"status": ["not in", PO_DEAD_STATUS],
+                                     # 修复（2026-09-23）：日期上限对时间字段本来就取到当天 23:59:59，
+                                     # 再加一天会把下月 1 日的数据也算进本月（下月再算一次）。
+                                     "creation": ["between", [start, end]]},
+                            fields=["name", "creation"], limit_page_length=0)
+    if not orders:
         return []
-    lines = frappe.get_all("OA Purchase Order Line", filters={"parent": ["in", names]},
-                           fields=["project", "amount", "item_name", "material_code", "source_request"],
+    month_by_order = {row.name: _year_month(row.creation) for row in orders}
+    lines = frappe.get_all("OA Purchase Order Line", filters={"parent": ["in", list(month_by_order)]},
+                           fields=["parent", "project", "amount", "item_name", "material_code", "source_request"],
                            limit_page_length=0)
     sources = {row.source_request for row in lines if row.source_request}
     departments = {row.name: row.department for row in frappe.get_all(
@@ -168,7 +178,8 @@ def _po_rows(months):
         fields=["name", "department"], limit_page_length=0)} if sources else {}
     return [{"project": line.project, "kind": "po", "amount": line.amount,
              "label": line.item_name or line.material_code or "采购物料",
-             "department": departments.get(line.source_request) or ""}
+             "department": departments.get(line.source_request) or "",
+             "cost_month": month_by_order.get(line.parent)}
             for line in lines]
 
 
@@ -179,15 +190,17 @@ def _expense_rows(months):
                               filters={"request_type": ["in", list(COST_REQUEST_TYPES)],
                                        "workflow_status": "已付款",
                                        "paid_on": ["between", [start, end]]},
-                              fields=["name", "project", "department"], limit_page_length=0)
+                              fields=["name", "project", "department", "paid_on"], limit_page_length=0)
     if not requests:
         return []
     project_by_request = {row.name: row.project for row in requests}
     department_by_request = {row.name: row.department for row in requests}
+    month_by_request = {row.name: _year_month(row.get("paid_on")) for row in requests}
     return [{"project": line.claim_project or line.project_name or project_by_request.get(line.parent),
              "kind": "expense", "amount": line.total_amount or line.amount,
              "label": line.expense_account_level_2 or line.category or "其他报销",
-             "department": department_by_request.get(line.parent) or ""}
+             "department": department_by_request.get(line.parent) or "",
+             "cost_month": month_by_request.get(line.parent)}
             for line in frappe.get_all("OA Approval Expense Line",
                                        filters={"parent": ["in", list(project_by_request)]},
                                        fields=["parent", "project_name", "claim_project", "total_amount",
@@ -195,8 +208,64 @@ def _expense_rows(months):
                                        limit_page_length=0)]
 
 
+FOREIGN_RD_LABEL = "境外委托研发"
+
+
+def _foreign_rd_rows(months):
+    """境外委托研发按项目的分摊额，计入研发（修复 2026-09-29，审查 X2-10，决定 D7）。
+
+    原来首页的研发只读国内分摊行，境外委托研发不在任何首页数字里。只对费用导入已提交的月份计算：
+    国内只算已提交的分摊，草稿导入的境外费用也不提前出现在首页。
+    """
+    wanted = set(months)
+    imported = {(int(row.year), int(row.month)) for row in frappe.get_all(
+        "RD Expense Import",
+        filters={"docstatus": 1, "year": ["in", sorted({year for year, _ in wanted})]},
+        fields=["year", "month"], limit_page_length=0) if row.year and row.month} & wanted
+    if not imported:
+        return []
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
+        _foreign_matrix_lines_for_month,
+    )
+
+    rows = []
+    for year, month in sorted(imported):
+        for line in _foreign_matrix_lines_for_month(year, month):
+            rows.append({"project": line.get("project"), "kind": "rd", "amount": line.get("allocated_amount"),
+                         "label": FOREIGN_RD_LABEL, "period": (year, month)})
+    return rows
+
+
+def _allocated_months(months):
+    wanted = set(months)
+    return {(int(row.year), int(row.month)) for row in frappe.get_all(
+        "RD Cost Allocation",
+        filters={"docstatus": 1, "year": ["in", sorted({year for year, _ in wanted})]},
+        fields=["year", "month"], limit_page_length=0) if row.year and row.month} & wanted
+
+
+def _rd_project_names():
+    return set(frappe.get_all("Project", filters={"rd_project_code": ["!=", ""]}, pluck="name"))
+
+
+def drop_allocated_rd_duplicates(rows, allocated_months, rd_projects):
+    """去掉已进研发分摊的采购和报销行（修复 2026-09-29，审查 X2-10，决定 D7）。
+
+    研发分摊的来源是财务总账导入，研发项目的采购付款、报销在总账里本来就有。某个月的分摊
+    已提交时，这个月研发项目的采购和报销再加一遍就是重复计算；非研发项目、没有分摊的月份照旧。
+    """
+    return [row for row in rows
+            if not (row["kind"] in ("po", "expense")
+                    and row.get("cost_month") in allocated_months
+                    and (row.get("project") or "") in rd_projects)]
+
+
 def cost_rows(months):
-    return _rd_rows(months) + _po_rows(months) + _expense_rows(months)
+    rows = _rd_rows(months) + _foreign_rd_rows(months) + _po_rows(months) + _expense_rows(months)
+    allocated = _allocated_months(months)
+    if not allocated:
+        return rows
+    return drop_allocated_rd_duplicates(rows, allocated, _rd_project_names())
 
 
 def _project_labels(keys):

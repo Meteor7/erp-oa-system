@@ -449,7 +449,7 @@ const stages = [
             <div class="mt-1 text-xs text-white/85">{{ deltaText(cost.data.deltas.total) }}</div>
           </div>
           <div v-for="item in [
-              { key: 'rd', label: '研发分摊（含工资）', color: '#FF8F00' },
+              { key: 'rd', label: '研发分摊（含工资、境外）', color: '#FF8F00' },
               { key: 'po', label: '采购（PO 金额）', color: '#3E63DD' },
               { key: 'expense', label: '报销', color: '#1FA58C' }]" :key="item.key"
             class="rounded-xl border border-gray-200 bg-white p-5">
@@ -459,6 +459,7 @@ const stages = [
               <span :class="deltaClass(cost.data.deltas[item.key])">{{ deltaText(cost.data.deltas[item.key]) }}</span></div>
           </div>
         </div>
+        <p class="-mt-2 text-xs text-gray-500">研发分摊含境外委托研发；已提交研发分摊的月份，研发项目的采购和报销已包含在研发分摊里，不再重复计入。</p>
 
         <div class="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
           <div class="rounded-xl border border-gray-200 bg-white">
