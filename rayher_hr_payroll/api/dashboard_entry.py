@@ -141,7 +141,7 @@ def get_dashboard(period):
         inner join `tabProject` p on p.name = tsd.project
         where ts.docstatus = 1 and month(tsd.from_time) = %(m)s and year(tsd.from_time) = %(y)s
           and e.rd_personnel_type in %(t)s
-          and coalesce(p.allow_rd_timesheet, 0) = 1
+          and coalesce(p.rd_project_code, '') != ''
         group by ts.employee
         """,
         {"m": month, "y": year, "t": RD_TYPES}, as_dict=True)

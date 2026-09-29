@@ -213,6 +213,7 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
                ts.employee,
                e.department as fallback_department,
                e.designation as fallback_designation,
+               e.rd_personnel_type as employee_rd_personnel_type,
                tsd.project,
                date(tsd.from_time) as posting_date,
                coalesce(ts.rd_system_generated, 0) as rd_system_generated,
@@ -224,7 +225,7 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
          where ts.docstatus = 1
            and month(tsd.from_time) = %(month)s
            and year(tsd.from_time) = %(year)s
-           and coalesce(p.allow_rd_timesheet, 0) = 1
+           and coalesce(p.rd_project_code, '') != ''
            and e.rd_personnel_type in %(rd_personnel_types)s
         """,
         {"year": year, "month": month, "rd_personnel_types": RD_PERSONNEL_TYPES},
@@ -251,6 +252,8 @@ def get_project_hour_rows(*, year: int, month: int) -> list[dict[str, Any]]:
                 "employee": row.employee,
                 "employee_department": org["employee_department"],
                 "employee_designation": org["employee_designation"],
+                # 修复（2026-09-29，审查 X2-6，决定 D6）：分摊时的研发人员类型快照。
+                "employee_rd_personnel_type": _value(row, "employee_rd_personnel_type"),
                 "project": row.project,
                 "posting_date": posting_date,
                 "hours": row.hours,

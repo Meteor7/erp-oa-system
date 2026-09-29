@@ -78,6 +78,7 @@ def test_generated_monthly_hours_use_month_end_for_org_history(monkeypatch):
                     employee="EMP-1",
                     fallback_department="Current",
                     fallback_designation="Current Role",
+                    employee_rd_personnel_type="非全时研发",
                     project="PROJ-1",
                     posting_date=date(2026, 7, 1),
                     rd_system_generated=1,
@@ -99,6 +100,9 @@ def test_generated_monthly_hours_use_month_end_for_org_history(monkeypatch):
     assert rows[0]["posting_date"] == date(2026, 7, 31)
     assert rows[0]["employee_department"] == "New Department"
     assert rows[0]["employee_designation"] == "New Role"
+    # 审查 X2-6：快照带分摊时的人员类型；17-c：历史按研发项目编号取，不看 allow_rd_timesheet。
+    assert rows[0]["employee_rd_personnel_type"] == "非全时研发"
+    assert "p.rd_project_code" in captured["query"] and "allow_rd_timesheet" not in captured["query"]
 
 
 def test_expense_items_from_rows_converts_frappe_child_rows():

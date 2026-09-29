@@ -140,7 +140,7 @@ def execute(filters=None):
           inner join `tabTimesheet` ts on ts.name = tsd.parent
           inner join `tabProject` p on p.name = tsd.project
          where ts.docstatus = 1
-           and coalesce(p.allow_rd_timesheet, 0) = 1
+           and coalesce(p.rd_project_code, '') != ''
            and year(tsd.from_time) = %(year)s
            and month(tsd.from_time) = %(month)s
          group by ts.employee
@@ -161,7 +161,7 @@ def execute(filters=None):
          where ts.docstatus = 1
            and year(tsd.from_time) = %(year)s
            and month(tsd.from_time) = %(month)s
-           and coalesce(p.allow_rd_timesheet, 0) = 1
+           and coalesce(p.rd_project_code, '') != ''
          group by e.name
         ''',
         {'year': year, 'month': month},

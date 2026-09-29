@@ -46,6 +46,13 @@
       "options": "Designation"
     },
     {
+      "fieldname": "employee_rd_personnel_type",
+      "label": "分摊时研发人员类型",
+      "fieldtype": "Data",
+      "reqd": 0,
+      "read_only": 1
+    },
+    {
       "fieldname": "project",
       "label": "项目",
       "fieldtype": "Link",

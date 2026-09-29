@@ -281,7 +281,7 @@ def list_rd_hours(period, employee=None, scope="month"):
           {_period_filter_sql(scope)}
           and e.rd_personnel_type in %(types)s
           {employee_filter}
-          and coalesce(p.allow_rd_timesheet, 0) = 1
+          and coalesce(p.rd_project_code, '') != ''
         order by date(tsd.from_time), e.employee_name, project_name, tsd.activity_type
         """,
         {
@@ -338,7 +338,7 @@ def get_rd_hour_summary(period, employee=None, scope="month"):
         where ts.docstatus = 1
           {_period_filter_sql(scope)}
           and e.rd_personnel_type in %(types)s
-          and coalesce(p.allow_rd_timesheet, 0) = 1
+          and coalesce(p.rd_project_code, '') != ''
           {employee_filter}
         """,
         {

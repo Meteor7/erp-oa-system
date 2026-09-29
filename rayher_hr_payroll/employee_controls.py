@@ -33,7 +33,7 @@ def _employee_has_rd_hours(employee, ym):
            inner join `tabTimesheet` ts on ts.name = tsd.parent and ts.docstatus = 1
            inner join `tabProject` p on p.name = tsd.project
            where ts.employee = %(e)s and date_format(tsd.from_time, '%%Y%%m') = %(ym)s
-             and coalesce(p.allow_rd_timesheet, 0) = 1
+             and coalesce(p.rd_project_code, '') != ''
            limit 1""",
         {"e": employee, "ym": ym},
     ))
@@ -62,19 +62,17 @@ def validate_employee_rd_lock(doc, method=None):
     before = doc.get_doc_before_save()
     if allocation_policy(before.get("rd_personnel_type") if before else None) == allocation_policy(doc.get("rd_personnel_type")):
         return
+    from rayher_hr_payroll.project_controls import guarded_rd_periods
+
+    # 修复（2026-09-29，审查 X2-5，决定 D6）：已提交分摊的期间和锁定期间一样保护。
+    locked, allocated = guarded_rd_periods(frappe)
     blocked = []
-    for lk in frappe.get_all(
-        "RD Period Lock",
-        filters={"docstatus": 1, "lock_project_stage": 1},
-        fields=["period"],
-        limit_page_length=0,
-    ):
-        ym = "".join(c for c in str(lk.period or "") if c.isdigit())[:6]
-        if len(ym) == 6 and _employee_has_rd_hours(doc.name, ym):
+    for ym in sorted(locked | allocated):
+        if _employee_has_rd_hours(doc.name, ym):
             blocked.append("%s-%s" % (ym[:4], ym[4:]))
     if blocked:
         frappe.throw(
-            frappe._("会改变已锁定期间（{0}）的研发分摊输入，不允许修改该员工的研发人员类型。").format(
+            frappe._("会改变已锁定期间或已分摊期间（{0}）的研发分摊输入，不允许修改该员工的研发人员类型；确需修改请先撤销这些期间的分摊。").format(
                 ", ".join(sorted(set(blocked)))
             )
         )

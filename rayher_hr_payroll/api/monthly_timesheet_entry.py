@@ -406,7 +406,7 @@ def _query_legacy_monthly_entries(period: str, employee=None) -> list:
            and coalesce(ts.rd_system_generated, 0) = 0
            and date_format(tsd.from_time, '%%Y-%%m') = %(period)s
            and e.rd_personnel_type in %(types)s
-           and coalesce(p.allow_rd_timesheet, 0) = 1
+           and coalesce(p.rd_project_code, '') != ''
            {employee_filter}
          group by ts.employee, e.employee_name, tsd.project,
                   coalesce(nullif(tsd.rd_project_code, ''), p.rd_project_code),

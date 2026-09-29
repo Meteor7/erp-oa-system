@@ -136,7 +136,7 @@ def ensure_no_submitted_allocation(
     """Freeze R&D hours once their period has a SUBMITTED RD Cost Allocation, on EVERY
     write path (Desk, REST, custom API) -- enforced in the controller hook, not only in
     the SPA endpoint. Scoped to rows that actually feed allocation (R&D employee +
-    allow_rd_timesheet project, matching the snapshot query), so ordinary non-R&D
+    R&D-coded project, matching the snapshot query), so ordinary non-R&D
     timesheets are never blocked. Pure: all I/O is injected for testability."""
     employee = getattr(doc, "employee", None)
     if not employee or not is_rd_employee(employee):
@@ -163,7 +163,9 @@ def _ensure_no_submitted_allocation(doc, frappe) -> None:
         return bool(e) and (frappe.db.get_value("Employee", e, "rd_personnel_type") or "") in RD_PERSONNEL_TYPES
 
     def project_rd_enabled(pr):
-        return bool(frappe.db.get_value("Project", pr, "allow_rd_timesheet"))
+        # 修复（2026-09-29，审查 17-c）：按研发项目编号判断，和分摊取数一致；项目取消后
+        # allow_rd_timesheet 变 0，原来它在已分摊期间的工时就不再冻结。
+        return bool(str(frappe.db.get_value("Project", pr, "rd_project_code") or "").strip())
 
     def has_submitted_allocation(yy, mm):
         # 修复（2026-09-29）：加锁后当前读，见 _guards.period_has_submitted_allocation。
@@ -206,7 +208,8 @@ def _is_period_locked(period: str | None) -> bool:
 
 def _is_project_enabled(project: str) -> bool:
     frappe = _get_frappe()
-    return bool(frappe.db.get_value('Project', project, 'allow_rd_timesheet'))
+    # 按研发项目编号判断（修复 2026-09-29，审查 17-c），见 _ensure_no_submitted_allocation。
+    return bool(str(frappe.db.get_value('Project', project, 'rd_project_code') or '').strip())
 
 
 def _project_stage_for_entry(project: str, posting_date: date | None) -> str:
