@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import frappe
@@ -79,9 +79,10 @@ def occupancy_is_effective(start_date, end_date, period_start, period_end):
 
 
 def _employee_for_name(employee_name):
+    # 只匹配在职员工：离职员工的同名新人不能被登记到离职档上（修复 2026-09-29，模块 7）。
     matches = frappe.get_all(
         "Employee",
-        filters={"employee_name": employee_name},
+        filters={"employee_name": employee_name, "status": "Active"},
         pluck="name",
         limit=2,
     )
@@ -96,6 +97,12 @@ def _upsert_room(values):
     return bool(name)
 
 
+def _move_out_date(old_start, new_start):
+    move_out = new_start - timedelta(days=1) if new_start else date.today()
+    old_start = _date_value(old_start)
+    return max(move_out, old_start) if old_start else move_out
+
+
 def _upsert_occupancy(room_no, values, employee):
     existing = frappe.db.get_value(
         "Accommodation Occupancy",
@@ -103,13 +110,18 @@ def _upsert_occupancy(room_no, values, employee):
         "name",
     )
     if not existing:
+        # 修复（2026-09-29，审查 #15a）：换房时原来只把旧记录 is_active 改成 0，唯一键
+        # active_employee_key 还在，新记录保存撞唯一键，整个导入失败；旧记录也没有退宿日期，
+        # 下次保存又变回"在住"。现在按正常退宿保存旧记录：退宿日 = 新入住日前一天（无入住日按今天）。
         old_current = frappe.get_all(
             "Accommodation Occupancy",
             filters={"employee": employee, "is_active": 1},
             pluck="name",
         )
         for name in old_current:
-            frappe.db.set_value("Accommodation Occupancy", name, "is_active", 0, update_modified=False)
+            old = frappe.get_doc("Accommodation Occupancy", name)
+            old.end_date = _move_out_date(old.start_date, values["start_date"])
+            old.save(ignore_permissions=True)
     doc = frappe.get_doc("Accommodation Occupancy", existing) if existing else frappe.new_doc("Accommodation Occupancy")
     doc.update(
         {
@@ -139,6 +151,7 @@ def import_master(workbook_path):
         "occupancy_created": 0,
         "occupancy_updated": 0,
         "unmatched": [],
+        "errors": [],
         "monthly_rent_total": 0.0,
         "paid_deposit_total": 0.0,
     }
@@ -158,8 +171,15 @@ def import_master(workbook_path):
             if not employee:
                 result["unmatched"].append(occupancy["employee_name"])
             else:
-                existed = _upsert_occupancy(room_no, occupancy, employee)
-                result["occupancy_updated" if existed else "occupancy_created"] += 1
+                # 一行出错（例如房间已有别人在住）只跳过这一行，不影响其他房间。
+                frappe.db.savepoint("accommodation_row")
+                try:
+                    existed = _upsert_occupancy(room_no, occupancy, employee)
+                except Exception as exc:  # noqa: BLE001 - reported per row
+                    frappe.db.rollback(save_point="accommodation_row")
+                    result["errors"].append(f"{room_no} {occupancy['employee_name']}: {exc}")
+                else:
+                    result["occupancy_updated" if existed else "occupancy_created"] += 1
     frappe.db.commit()
     return result
 

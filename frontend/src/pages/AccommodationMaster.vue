@@ -30,6 +30,11 @@ const blank = () => ({
 });
 const form = reactive(blank());
 const editing = ref(false);
+// 离职员工不能新安排入住；正在编辑的房间原入住人即使已离职也保留，方便填写退宿日期。
+const originalEmployee = ref('');
+const employeeChoices = computed(() => (employees.data || [])
+  .filter((employee) => employee.status !== 'Left' || employee.name === originalEmployee.value));
+const leftStillRegistered = computed(() => (rows.data || []).filter((row) => row.employee_left));
 const saving = ref(false);
 const uploadingField = ref('');
 const errMsg = ref('');
@@ -52,6 +57,7 @@ const roomStats = computed(() => {
 
 function newRoom() {
   Object.assign(form, blank());
+  originalEmployee.value = '';
   editing.value = true;
   errMsg.value = '';
 }
@@ -66,6 +72,7 @@ function edit(row) {
     employee: row.employee || '',
     room_purpose: row.room_purpose || '',
   });
+  originalEmployee.value = row.employee || '';
   editing.value = true;
   errMsg.value = '';
 }
@@ -155,6 +162,9 @@ async function save() {
           <div class="text-xs text-gray-500">{{ stat.label }}</div><div class="mt-1 text-2xl font-semibold tabular-nums" :class="stat.tone">{{ stat.value }}</div>
         </div>
       </div>
+      <div v-if="leftStillRegistered.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        {{ leftStillRegistered.length }} 位已离职员工还登记在住：{{ leftStillRegistered.map((row) => `${row.room_no} ${row.employee_name}`).join('、') }}。请核实后点"编辑"填写退宿日期。
+      </div>
       <div class="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 md:flex-row">
         <input v-model="filters.keyword" class="min-w-0 flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="搜索房号、房型或入住人" />
         <select v-model="filters.status" class="rounded border border-gray-300 bg-white px-3 py-2 text-sm md:w-40"><option value="">全部状态</option><option value="有人">有人</option><option value="空置">空置</option><option value="客房">客房</option><option value="午休室">午休室</option></select>
@@ -168,7 +178,7 @@ async function save() {
           <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">到期日</span><input v-model="form.lease_end_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
           <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">每月租金（房间总租金）</span><input v-model.number="form.monthly_rent" type="number" min="0" step="0.01" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
           <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">已付押金</span><input v-model.number="form.paid_deposit" type="number" min="0" step="0.01" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
-          <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">入住人</span><select v-model="form.employee" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="selectEmployee"><option value="">未关联员工</option><option v-for="employee in employees.data || []" :key="employee.name" :value="employee.name">{{ employee.employee_name }} · {{ employee.name }}</option></select></label>
+          <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">入住人</span><select v-model="form.employee" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="selectEmployee"><option value="">未关联员工</option><option v-for="employee in employeeChoices" :key="employee.name" :value="employee.name">{{ employee.employee_name }} · {{ employee.name }}{{ employee.status === 'Left' ? '（已离职）' : '' }}</option></select></label>
           <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">房间用途</span><select v-model="form.room_purpose" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="selectPurpose"><option v-for="purpose in PURPOSES" :key="purpose || 'normal'" :value="purpose">{{ purpose || '普通员工宿舍' }}</option></select></label>
           <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">入住日期</span><input v-model="form.start_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
           <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">退宿日期</span><input v-model="form.end_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
@@ -206,7 +216,7 @@ async function save() {
               <td class="whitespace-nowrap px-3 py-2">{{ row.lease_start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.lease_end_date || '-' }}</td><td class="px-3 py-2 text-right">{{ money(row.monthly_rent) }}</td><td class="px-3 py-2 text-right">{{ money(row.paid_deposit) }}</td>
               <td class="max-w-[150px] px-3 py-2"><a v-if="row.rent_contract_attachment" :href="row.rent_contract_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看合同</a><span v-else class="text-gray-400">-</span></td>
               <td class="max-w-[150px] px-3 py-2"><a v-if="row.deposit_attachment" :href="row.deposit_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看附件</a><span v-else class="text-gray-400">-</span></td>
-              <td class="whitespace-nowrap px-3 py-2">{{ row.employee_name || row.room_purpose || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.end_date || '-' }}</td><td class="max-w-[220px] px-3 py-2">{{ row.remark || '-' }}</td><td class="px-3 py-2 text-right"><button class="text-xs text-blue-600 hover:underline" @click="edit(row)">编辑</button></td>
+              <td class="whitespace-nowrap px-3 py-2">{{ row.employee_name || row.room_purpose || '-' }}<span v-if="row.employee_left" class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">已离职</span></td><td class="whitespace-nowrap px-3 py-2">{{ row.start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.end_date || '-' }}</td><td class="max-w-[220px] px-3 py-2">{{ row.remark || '-' }}</td><td class="px-3 py-2 text-right"><button class="text-xs text-blue-600 hover:underline" @click="edit(row)">编辑</button></td>
             </tr>
             <tr v-if="!filteredRows.length"><td colspan="14" class="py-8 text-center text-gray-400">暂无宿舍基础资料</td></tr>
           </tbody>

@@ -109,7 +109,8 @@ def get_emp_options():
     # app); get_all works for management roles that lack an Employee read DocPerm.
     return frappe.get_all(
         "Employee",
-        fields=["name", "employee_name", "expense_account_category"],
+        # status 供宿舍页区分离职员工：新入住只能选在职员工，历史记录照常显示姓名。
+        fields=["name", "employee_name", "expense_account_category", "status"],
         order_by="employee_name",
     )
 
@@ -221,24 +222,6 @@ def get_allowed_rooms(period, employee=None, occupant_type=EMPLOYEE_OCCUPANT):
         order_by="room_no",
     )
 
-
-@frappe.whitelist()
-def list_occupancies():
-    require_rd_access(("System Manager", "HR User", "HR Manager"))
-    return frappe.get_all("Accommodation Occupancy", filters={"is_active": 1}, fields=["name", "employee", "employee_name", "room", "start_date", "end_date"], order_by="room")
-
-
-@frappe.whitelist(methods=["POST"])
-def save_occupancy(employee, room, start_date, end_date=None):
-    require_rd_access(("System Manager", "HR User", "HR Manager"))
-    if not frappe.db.exists("Employee", employee) or not frappe.db.exists("Accommodation Room", room):
-        frappe.throw(frappe._("请选择有效的员工和房间。"))
-    current = frappe.db.get_value("Accommodation Occupancy", {"employee": employee, "is_active": 1}, "name")
-    doc = frappe.get_doc("Accommodation Occupancy", current) if current else frappe.new_doc("Accommodation Occupancy")
-    doc.update({"employee": employee, "room": room, "start_date": start_date, "end_date": end_date or None})
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return {"name": doc.name}
 
 @frappe.whitelist()
 def list_accommodation(period):

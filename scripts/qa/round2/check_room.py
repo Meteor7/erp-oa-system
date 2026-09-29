@@ -17,8 +17,9 @@ def room_probe():
             if len(employees)==2:break
         assert len(employees)==2
         frappe.get_doc(dict(doctype="Accommodation Room",room_no=room_name,is_active=1,monthly_rent=100,default_rent=100)).insert()
-        from rayher_hr_payroll.api.accommodation_entry import save_occupancy
         from rayher_hr_payroll.api.accommodation_master_entry import list_rooms
+        def save_occupancy(employee, room, start_date):
+            return frappe.get_doc(dict(doctype="Accommodation Occupancy", employee=employee, room=room, start_date=start_date)).insert(ignore_permissions=True).as_dict()
         names.append(save_occupancy(employees[0],room_name,"2026-09-01")["name"])
         try:
             save_occupancy(employees[1],room_name,"2026-09-01")

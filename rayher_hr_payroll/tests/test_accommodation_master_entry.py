@@ -132,3 +132,48 @@ def test_rejoining_same_room_creates_new_history_instead_of_overwriting_checkout
 
     module.save_room(room_no="B702", employee="HR-EMP-90015", start_date="2027-01-01")
     assert any(item[0] == "NEW-OCC" and item[2].isoformat() == "2027-01-01" for item in saved)
+
+
+def test_save_room_refuses_a_new_stay_for_a_leaver_but_allows_checking_them_out(monkeypatch):
+    # 模块 7（决定 D7）：离职员工不能新安排入住，已登记在住的仍可填写退宿日期。
+    module, frappe = _load_module(monkeypatch)
+    monkeypatch.setattr(module, "require_rd_access", lambda roles: None)
+    current = {"employee": "EMP-OTHER"}
+
+    class Reached(Exception):
+        pass
+
+    frappe.db.exists = lambda doctype, value: value
+    def get_value(doctype, filters, fieldname=None, **kwargs):
+        if doctype == "Employee":
+            return "Left"
+        return current["employee"]
+    frappe.db.get_value = get_value
+    frappe.get_doc = lambda doctype, name: SimpleNamespace(update=lambda values: None, save=lambda **kw: (_ for _ in ()).throw(Reached()))
+
+    with pytest.raises(RuleError, match="已离职"):
+        module.save_room(room_no="B702", employee="EMP-LEFT", start_date="2026-09-01")
+    current["employee"] = "EMP-LEFT"
+    with pytest.raises(Reached):
+        module.save_room(room_no="B702", employee="EMP-LEFT", start_date="2025-01-01", end_date="2026-09-30")
+
+
+def test_list_rooms_flags_leavers_still_registered(monkeypatch):
+    module, frappe = _load_module(monkeypatch)
+    monkeypatch.setattr(module, "require_rd_access", lambda roles: None)
+
+    def get_all(doctype, **kwargs):
+        if doctype == "Accommodation Room":
+            return [{"name": "A101", "room_no": "A101"}, {"name": "A102", "room_no": "A102"}]
+        if doctype == "Accommodation Occupancy":
+            return [
+                {"name": "O1", "employee": "EMP-L", "employee_name": "离职者", "room": "A101", "is_active": 1},
+                {"name": "O2", "employee": "EMP-A", "employee_name": "在职者", "room": "A102", "is_active": 1},
+            ]
+        assert kwargs["filters"] == {"name": ["in", ["EMP-A", "EMP-L"]], "status": "Left"}
+        return ["EMP-L"]
+
+    frappe.get_all = get_all
+    rows = {row["room_no"]: row for row in module.list_rooms()}
+    assert rows["A101"]["employee_left"] is True
+    assert rows["A102"]["employee_left"] is False

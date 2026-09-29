@@ -56,7 +56,9 @@ def test_get_emp_options_exposes_employee_expense_category(monkeypatch):
 
     assert captured["roles"] == ("System Manager", "HR User", "HR Manager")
     assert "expense_account_category" in captured["fields"]
+    assert "status" in captured["fields"]
     assert data[0]["expense_account_category"] == "研发费用"
+    assert not hasattr(mod, "save_occupancy") and not hasattr(mod, "list_occupancies")
 
 
 def test_get_room_options_returns_distinct_nonempty_rooms(monkeypatch):

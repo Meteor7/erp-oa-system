@@ -1,6 +1,7 @@
 from datetime import date
 import sys
 import types
+from types import SimpleNamespace
 
 fake_frappe = types.ModuleType("frappe")
 sys.modules["frappe"] = fake_frappe
@@ -74,3 +75,45 @@ def test_blank_start_date_is_effective_until_checkout():
 
 def test_future_checkin_is_not_effective_for_earlier_period():
     assert not occupancy_is_effective(date(2026, 9, 1), None, date(2026, 8, 1), date(2026, 8, 31))
+
+
+
+def test_moving_rooms_checks_out_the_old_stay_through_a_normal_save(monkeypatch):
+    # 审查 #15a：原来只改 is_active，唯一键还在，新记录保存失败，整个导入中断。
+    from rayher_hr_payroll.importers import accommodation_master as mod
+    saved = []
+
+    class Doc(SimpleNamespace):
+        def update(self, values):
+            self.__dict__.update(values)
+
+        def save(self, **kwargs):
+            saved.append((self.name, self.room, self.end_date))
+
+    old = Doc(name="OLD", room="A101", start_date=date(2025, 1, 1), end_date=None)
+    new = Doc(name="NEW", room=None, end_date=None)
+    fake = SimpleNamespace(
+        db=SimpleNamespace(get_value=lambda *a, **k: None),
+        get_all=lambda *a, **k: ["OLD"],
+        get_doc=lambda doctype, name: old,
+        new_doc=lambda doctype: new,
+    )
+    monkeypatch.setattr(mod, "frappe", fake)
+
+    mod._upsert_occupancy("B202", {"start_date": date(2026, 9, 1), "end_date": None, "remark": ""}, "EMP-1")
+
+    assert saved == [("OLD", "A101", date(2026, 8, 31)), ("NEW", "B202", None)]
+    assert mod._move_out_date(date(2026, 9, 1), date(2026, 9, 1)) == date(2026, 9, 1)
+
+
+def test_import_matches_active_employees_only(monkeypatch):
+    from rayher_hr_payroll.importers import accommodation_master as mod
+    captured = {}
+
+    def get_all(doctype, filters=None, **kwargs):
+        captured.update(filters)
+        return ["EMP-1"]
+
+    monkeypatch.setattr(mod, "frappe", SimpleNamespace(get_all=get_all))
+    assert mod._employee_for_name("演示员工108") == "EMP-1"
+    assert captured == {"employee_name": "演示员工108", "status": "Active"}

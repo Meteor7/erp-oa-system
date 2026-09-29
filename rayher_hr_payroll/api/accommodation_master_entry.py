@@ -53,12 +53,18 @@ def list_rooms():
             continue
         if _get(occupancy, "is_active"):
             active_by_room.setdefault(room_name, occupancy)
+    # 已离职但还登记在住的员工单独标出，提醒人事办理退宿（模块 7，决定 D7）。
+    occupant_ids = sorted({_get(row, "employee") for row in active_by_room.values() if _get(row, "employee")})
+    left_ids = set(frappe.get_all(
+        "Employee", filters={"name": ["in", occupant_ids], "status": "Left"}, pluck="name",
+    )) if occupant_ids else set()
     result = []
     for source in rooms:
         row = _dict(source)
         active_occupancy = active_by_room.get(row.get("name"))
         row.update({
             "employee": _get(active_occupancy, "employee"),
+            "employee_left": _get(active_occupancy, "employee") in left_ids,
             "employee_name": _get(active_occupancy, "employee_name"),
             "start_date": _get(active_occupancy, "start_date"),
             "end_date": _get(active_occupancy, "end_date"),
@@ -135,6 +141,14 @@ def save_room(
         frappe.throw(frappe._("员工入住与特殊房间用途不能同时设置。"))
     if employee and not frappe.db.exists("Employee", employee):
         frappe.throw(frappe._("请选择有效的入住人。"))
+    if employee and frappe.db.get_value("Employee", employee, "status") == "Left":
+        # 修复（2026-09-29，模块 7，决定 D7）：离职员工不能新安排入住；已登记在住的离职员工
+        # 仍可在原记录上填写退宿日期（离职不自动退宿，由人事维护）。
+        current_employee = frappe.db.get_value(
+            "Accommodation Occupancy", {"room": room_no, "is_active": 1}, "employee"
+        )
+        if current_employee != employee:
+            frappe.throw(frappe._("该员工已离职，不能安排入住。"))
 
     existing_room = frappe.db.exists("Accommodation Room", room_no)
     room = frappe.get_doc("Accommodation Room", existing_room) if existing_room else frappe.new_doc("Accommodation Room")
