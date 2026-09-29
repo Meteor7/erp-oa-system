@@ -101,6 +101,9 @@ def source_row_key_for_row(row: Any) -> str:
 
 
 def stage_for_period(project: Mapping[str, Any], *, year: int, month: int) -> ProjectStage:
+    # 显式的 rd_stage 优先，起止日期只在没有显式阶段时兜底。审查 R3-48-2 建议反过来，
+    # 但这两个日期在页面上是"立项时间/结项时间"：费用化项目填了结项时间后，按日期会整段
+    # 变成资本化，所以保持现状（2026-09-29 核对了本地数据）。境外路径也改用这个规则。
     rd_stage = str(project.get("rd_stage") or "").strip()
     if rd_stage == "资本化":
         return "capitalized"

@@ -540,3 +540,13 @@ def test_enrich_allocation_lines_with_snapshot_accounts_restores_old_submitted_r
 
     assert enriched[0]["account_level_3"] == "\u793e\u4f1a\u4fdd\u9669\u8d39\u7528\uff08\u5355\u4f4d\uff09"
     assert enriched[0]["account_level_4"] == "\u517b\u8001\u4fdd\u9669"
+
+
+def test_foreign_matrix_direct_cost_uses_the_period_stage_when_given():
+    sources = [{"voucher_no": "V1", "account_level_3": "\u5883\u5916", "amount": 80, "allocation_type": "project", "direct_project": "RD20"}]
+    info = {"RD20": {"rd_stage": "", "period_stage": "capitalized"}}
+
+    rows = build_foreign_allocation_matrix_lines(sources, [], info)
+
+    assert rows[0]["project_stage"] == "capitalized"
+    assert build_foreign_allocation_matrix_lines(sources, [], {"RD20": {"rd_stage": "\u8d39\u7528\u5316"}})[0]["project_stage"] == "expensed"

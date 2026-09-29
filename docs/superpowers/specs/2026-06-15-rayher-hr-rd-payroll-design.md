@@ -133,7 +133,7 @@ Rayher 自定义 App 补充对象：
 |---|---|---|---|
 | 研发人员类型：全时 / 非全时 / 非研发 | Employee 员工主档 | 在 Employee 增加自定义字段 `rd_personnel_type`。建议选项：全时研发、非全时研发、非研发、研发辅助。 | 存在 `tabEmployee` 的自定义字段列中。 |
 | 个人研发工时占比（研发人员认定） | 月度研发人员认定报表 | 这是个人口径，用于判断全时/非全时研发人员，不用于切费用。第一版不导入考勤，因此公式改为：个人当期研发项目 Timesheet 工时 / 个人当期全部已提交 Timesheet 工时。它是填报口径，不等同于考勤口径；待后续接入 Attendance / Employee Checkin 后，再扩展为考勤口径。 | 原始工时存在 `tabTimesheet` / `tabTimesheet Detail`；月度快照存在 `tabRD Work Ratio Snapshot`，字段使用 `total_submitted_timesheet_hours`、`rd_project_hours`、`rd_ratio`。 |
-| 项目资本化/费用化阶段 | Project 项目页面 | Project 增加 `rd_stage` 字段；实际展示按期间是否落入资本化起止日期动态判断。该状态只用于项目分摊额的事后分组/小计，不改变统一分摊分母。 | 存在 `tabProject` 自定义字段。 |
+| 项目资本化/费用化阶段 | Project 项目页面 | Project 增加 `rd_stage` 字段；显式填写的 `rd_stage`（资本化/费用化）优先，只有为空或"未判定"时才按期间是否落入起止日期判断（2026-09-29 更正：起止日期在页面上是立项/结项时间，不能盖过显式阶段）。国内分摊和境外研发用同一规则。该状态只用于项目分摊额的事后分组/小计，不改变统一分摊分母。 | 存在 `tabProject` 自定义字段。 |
 | 资本化起止日期 | Project 项目页面 | Project 增加 `capitalization_start_date`、`capitalization_end_date`。 | 存在 `tabProject` 自定义字段。 |
 | 费用分摊依据 | 研发费用分摊单 | 自定义 DocType `R&D Cost Allocation` 增加 `allocation_basis`。第一版默认按研发项目工时占比，后续可扩展面积、设备使用时长、直接指定项目。 | 主表存在 `tabR&D Cost Allocation`；明细存在 `tabR&D Cost Allocation Line`。 |
 | 分摊计算版本 | 研发费用分摊单 | 每个期间、筛选口径、计算时间生成一个版本号；提交后锁定。如需重算，取消旧版本或生成新版本，保留差异。 | 版本号存在 `tabR&D Cost Allocation`；Frappe Document Version 记录修改历史。 |

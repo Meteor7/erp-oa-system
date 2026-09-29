@@ -205,7 +205,8 @@ def build_foreign_allocation_matrix_lines(
                 "account_level_3": account_level_3,
                 "account_level_4": account_level_4,
                 "project": direct_project,
-                "project_stage": _normalize_stage(_value(info, "rd_stage")),
+                # 修复（2026-09-29）：优先用按月份算好的阶段（和境外页面、国内分摊同一规则）。
+                "project_stage": _normalize_stage(_value(info, "period_stage") or _value(info, "rd_stage")),
                 "allocated_amount": amount,
             })
             continue
@@ -373,7 +374,10 @@ def _foreign_matrix_lines_for_month(year: Any, month: Any) -> list[dict[str, Any
         for source in expense_context.get("expense_sources", [])
         if _clean(_value(source, "direct_project"))
     )
-    project_info = foreign._foreign_project_info(project_names)
+    project_info = {
+        name: {**dict(info), "period_stage": foreign._info_stage(info, int(year), int(month))}
+        for name, info in foreign._foreign_project_info(project_names).items()
+    }
     return build_foreign_allocation_matrix_lines(expense_context.get("expense_sources", []), time_lines, project_info)
 
 

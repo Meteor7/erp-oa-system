@@ -8,6 +8,7 @@ from rayher_hr_payroll.api.allocation_entry import STAGE_LABELS, _project_summar
 from rayher_hr_payroll.rd_cost.frappe_adapter import (
     foreign_commissioned_expense_rows,
     source_row_key_for_row,
+    stage_for_period,
 )
 
 RD_FOREIGN_FINANCE_ROLES = (*RD_FINANCE_ROLES, "All Project Access")
@@ -109,10 +110,34 @@ def _foreign_project_info(project_names):
     rows = frappe.get_all(
         "Project",
         filters={"name": ["in", names]},
-        fields=["name", "project_name", "rd_project_code", "rd_stage"],
+        fields=["name", "project_name", "rd_project_code", "rd_stage",
+                "capitalization_start_date", "capitalization_end_date"],
         limit_page_length=len(names),
     )
     return {_clean(_value(row, "name")): row for row in rows}
+
+
+def _info_stage(info, year=None, month=None):
+    """项目在某个月的研发阶段，和国内分摊同一个规则（frappe_adapter.stage_for_period）。
+
+    修复（2026-09-29，审查 R3-48-2）：境外只看 rd_stage，国内在 rd_stage 为空或"未判定"时
+    还会按起止日期判断，同一个项目两边可能分到不同阶段。现在都是：显式阶段优先，
+    没有显式阶段时才看日期。日期字段在页面上是"立项时间/结项时间"，不是资本化窗口，
+    所以不让日期盖过显式阶段。
+    """
+    if not info:
+        return "unknown"
+    explicit = _normalize_stage(_value(info, "rd_stage"))
+    if explicit != "unknown" or not (year and month):
+        return explicit
+    return stage_for_period(
+        {
+            "capitalization_start_date": _value(info, "capitalization_start_date"),
+            "capitalization_end_date": _value(info, "capitalization_end_date"),
+        },
+        year=int(year),
+        month=int(month),
+    )
 
 
 def _project_code(info, project):
@@ -281,7 +306,7 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
         if not info:
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u9879\u76ee {0} \u4e0d\u5b58\u5728\u6216\u672a\u542f\u7528\u3002").format(project))
         project_code, project_name = _validate_project_identity(row, info)
-        stage = _normalize_stage(_value(info, "rd_stage"))
+        stage = _info_stage(info, year, month)
         prepared_row = {"project": project, "project_code": project_code, "project_name": project_name, "project_stage": stage, "stage_label": STAGE_LABELS.get(stage, STAGE_LABELS["unknown"]), "work_date": work_day.isoformat(), "activity_type": activity_type, "hours": float(hours), "description": description}
         if is_monthly:
             prepared_row["foreign_entity"] = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
@@ -340,9 +365,9 @@ def _serialize_line(line):
     }
 
 
-def _summary_seed(project, project_info):
+def _summary_seed(project, project_info, year=None, month=None):
     info = project_info.get(project)
-    stage = _normalize_stage(_value(info, "rd_stage")) if info else "unknown"
+    stage = _info_stage(info, year, month)
     return {
         "project": project,
         "project_code": _project_code(info, project) if info else project,
@@ -358,7 +383,7 @@ def _summary_seed(project, project_info):
     }
 
 
-def _foreign_project_summaries(lines, direct_amounts_by_project=None, project_info=None):
+def _foreign_project_summaries(lines, direct_amounts_by_project=None, project_info=None, year=None, month=None):
     project_info = project_info or {}
     grouped = {}
     for line in lines or []:
@@ -385,9 +410,9 @@ def _foreign_project_summaries(lines, direct_amounts_by_project=None, project_in
         if not missing:
             continue
         info = project_info.get(project)
-        stage = _normalize_stage(_value(info, "rd_stage")) if info else "unknown"
+        stage = _info_stage(info, year, month)
         key = (project, stage)
-        target = grouped.setdefault(key, _summary_seed(project, project_info))
+        target = grouped.setdefault(key, _summary_seed(project, project_info, year, month))
         target["direct_allocated_amount"] += missing
         target["allocated_amount"] += missing
 
@@ -512,6 +537,8 @@ def _response(period, year, month, domestic_projects, expense_context, name=None
         allocated_lines,
         direct_amounts_by_project=expense_context.get("direct_amounts_by_project"),
         project_info=project_info,
+        year=year,
+        month=month,
     )
     unallocated_common = expense_context["common_amount"] if expense_context["common_amount"] and not allocated_lines else 0.0
     return {

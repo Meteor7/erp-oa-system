@@ -373,3 +373,35 @@ def test_foreign_project_options_use_the_foreign_page_roles(monkeypatch):
     result = mod.get_foreign_project_options()
     assert seen["roles"] == mod.RD_FOREIGN_FINANCE_ROLES
     assert result["projects"][0]["name"] == "RD06"
+
+
+def test_foreign_stage_follows_the_domestic_rule(monkeypatch):
+    # 审查 R3-48-2：同一项目，境外和国内的阶段判断要一致。
+    from datetime import date
+
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    window = {"capitalization_start_date": date(2026, 1, 1), "capitalization_end_date": date(2026, 12, 31)}
+    undecided = SimpleNamespace(rd_stage="", **window)
+    explicit = SimpleNamespace(rd_stage="\u8d39\u7528\u5316", **window)
+
+    assert mod._info_stage(undecided, 2026, 6) == "capitalized"
+    assert mod._info_stage(undecided, 2027, 1) == "expensed"
+    assert mod._info_stage(undecided) == "unknown"
+    assert mod._info_stage(explicit, 2026, 6) == "expensed"
+    assert mod._info_stage(None, 2026, 6) == "unknown"
+
+
+def test_foreign_rows_use_the_date_window_when_stage_is_undecided(monkeypatch):
+    from datetime import date
+
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    info = {"RD20": SimpleNamespace(name="RD20", project_name="NEW", rd_project_code="RD20", rd_stage="\u672a\u5224\u5b9a",
+                                    capitalization_start_date=date(2026, 6, 1), capitalization_end_date=date(2026, 12, 31))}
+    rows = [{"project": "RD20", "project_code": "RD20", "project_name": "NEW", "work_date": "2026-06-03",
+             "activity_type": "\u9700\u6c42\u5206\u6790", "hours": 4, "description": "support"}]
+
+    allocated = mod._allocate_foreign_rows(100, rows, info, year=2026, month=6)
+    summaries = mod._foreign_project_summaries([], direct_amounts_by_project={"RD20": 50}, project_info=info, year=2026, month=6)
+
+    assert allocated[0]["project_stage"] == "capitalized"
+    assert summaries[0]["project_stage"] == "capitalized"
