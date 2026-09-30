@@ -37,6 +37,7 @@ const groups = [
     { to: '/social-insurance', step: '02', label: '社保信息管理' },
     { to: '/housing-fund', step: '03', label: '公积金信息管理' },
     { step: '04', label: '宿舍信息管理', children: [
+      { to: '/accommodation', label: '宿舍看板' },
       { to: '/accommodation/master', label: '宿舍基本信息管理' },
       { to: '/accommodation/monthly', label: '当月费用管理' },
     ] },
@@ -87,7 +88,7 @@ const WIDE_PAGE_PATHS = new Set([
 ]);
 const route = useRoute();
 const router = useRouter();
-const ACCOMMODATION_PATHS = new Set(['/accommodation/master', '/accommodation/monthly']);
+const ACCOMMODATION_PATHS = new Set(['/accommodation', '/accommodation/master', '/accommodation/monthly']);
 const openNavGroups = reactive(new Set());
 const mobileNavOpen = ref(false);
 function isNavGroupOpen(item) { return openNavGroups.has(item.label); }

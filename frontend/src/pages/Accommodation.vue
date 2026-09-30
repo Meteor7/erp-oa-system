@@ -1,11 +1,16 @@
 <script setup>
 import { ref, reactive, computed, watch } from "vue";
+import { useRoute } from "vue-router";
 import { Card, Button, createResource } from "frappe-ui";
+import AccommodationTabs from "../components/AccommodationTabs.vue";
 import { period } from "../lib/period";
 import { extractFrappeError } from "../lib/frappeError";
 
 const EXPENSE_ACCOUNT_CATEGORIES = ["研发费用", "管理费用", "销售费用", "生产成本"];
 const SPECIAL_OCCUPANTS = ["空", "客房", "午休室"];
+// 从宿舍看板点"登记费用"进来时带上月份和房间（先设月份，再建数据请求）。
+const route = useRoute();
+if (/^\d{4}-\d{2}$/.test(String(route.query.period || ""))) period.value = String(route.query.period);
 
 const options = createResource({ url: "rayher_hr_payroll.api.accommodation_entry.get_emp_options", method: "GET", auto: true });
 const roomOptions = createResource({
@@ -130,10 +135,15 @@ async function del(name) {
 
 watch(period, reloadPeriodData);
 watch(() => [period.value, form.room_no], reloadOccupants);
+if (route.query.room) {
+  form.room_no = String(route.query.room);
+  reloadOccupants();
+}
 </script>
 
 <template>
   <div class="space-y-4">
+    <AccommodationTabs />
     <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
       <Card title="当月费用管理" subtitle="按基础信息中的有效入住关系登记费用；个人承担与公司承担相加后自动形成房间总费用">
         <div class="flex items-center gap-2 mb-4">

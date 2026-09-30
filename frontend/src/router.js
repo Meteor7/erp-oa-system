@@ -10,7 +10,7 @@ const routes = [
   { path: '/personnel', component: () => import('./pages/Personnel.vue') },
   { path: '/social-insurance', component: () => import('./pages/SocialInsurance.vue') },
   { path: '/housing-fund', component: () => import('./pages/HousingFund.vue') },
-  { path: '/accommodation', redirect: '/accommodation/monthly' },
+  { path: '/accommodation', component: () => import('./pages/AccommodationBoard.vue') },
   { path: '/accommodation/master', component: () => import('./pages/AccommodationMaster.vue') },
   { path: '/accommodation/monthly', component: () => import('./pages/Accommodation.vue') },
   { path: '/payroll', component: () => import('./pages/Payroll.vue') },
