@@ -161,3 +161,16 @@ export function duplicateText(invoice) {
   if (reason && !reason.startsWith('duplicate-override:')) return reason;
   return `发票号码与已确认发票 ${invoice?.duplicate_of || ''} 相同`;
 }
+
+// ---------------------------------------------------------------- 首页状态条（2026-09-30 改版）
+const STATUS_COLORS = [
+  ['已使用', '#8C96A8'], ['可用', '#7FA38E'], ['识别中', '#5470C6'], ['待确认', '#E3B26B'], ['识别失败', '#D98C4A'], ['疑似重复', '#B42318'],
+];
+
+export function folderStatusBar(counts = {}) {
+  const total = STATUS_COLORS.reduce((sum, [status]) => sum + Number(counts[status] || 0), 0) || 1;
+  return STATUS_COLORS.map(([label, color]) => {
+    const count = Number(counts[label] || 0);
+    return { label, color, count, width: `${((count / total) * 100).toFixed(1)}%` };
+  });
+}

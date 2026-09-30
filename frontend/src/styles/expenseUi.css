@@ -255,3 +255,14 @@
   .xp .todo-row { flex-wrap: wrap; }
   .xp .invoice-cta { flex: 1 1 100%; }
 }
+.xp .drop-zone { display: flex; align-items: center; gap: 16px; padding: 16px 20px; margin-bottom: 12px; border: 1.5px dashed var(--xp-line2); border-radius: 12px; background: #fff; cursor: pointer; }
+.xp .drop-zone:hover { border-color: var(--xp-brand); }
+.xp .drop-zone.disabled { opacity: .5; cursor: not-allowed; }
+.xp .recognizing { display: flex; flex-direction: column; gap: 4px; width: 180px; }
+.xp .pulse { height: 6px; border-radius: 999px; background: #EEF1F6; overflow: hidden; }
+.xp .pulse i { display: block; width: 40%; height: 100%; background: var(--xp-cobalt); animation: xp-pulse 1.4s ease-in-out infinite; }
+@keyframes xp-pulse { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .xp .pulse i { animation: none; } }
+.xp .folder-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 0; border: 0; border-top: 1px solid var(--xp-line); background: none; font: inherit; text-align: left; cursor: pointer; color: var(--xp-ink); }
+.xp .folder-row:hover { background: var(--xp-soft); }
+.xp .bucket-card.static { cursor: default; }

@@ -342,3 +342,14 @@ test("claim pages keep every action on the detail page (2026-09-30)", () => {
   assert.match(workbench, /push_from_application/);
   assert.doesNotMatch(workbench, /role="tablist"/, "no more top tabs");
 });
+
+
+test("invoice folder opens on a home page with sections; the list keeps the review panel (2026-09-30)", async () => {
+  const { folderStatusBar } = await import("../src/lib/invoiceFolderView.js");
+  const bar = folderStatusBar({ 已使用: 3, 可用: 1 });
+  assert.deepEqual(bar.slice(0, 2).map((item) => [item.label, item.count, item.width]), [["已使用", 3, "75.0%"], ["可用", 1, "25.0%"]]);
+  const folder = read("../src/pages/InvoiceFolder.vue");
+  assert.match(folder, /view === 'home'/);
+  assert.match(folder, /class="drop-zone"/);
+  assert.match(folder, /go\(\{ view: 'list', tab: item\.key \}\)/);
+});

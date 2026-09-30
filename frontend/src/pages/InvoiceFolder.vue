@@ -1,12 +1,14 @@
 <script setup>
 // 发票夹：上传 → 识别 → 核对 → 确认。确认后的发票才能在报销、付款里选用；识别不全的字段可以对照原件补。
-// 财务在这里处理疑似重复。版式按已确认的设计稿第 5 版。
+// 财务在这里处理疑似重复。版式按已确认的设计稿第 5 版；2026-09-30 改版：先进首页（上传区 + 分栏目），
+// 点栏目或发票进列表页（原来的列表 + 右侧核对面板）。
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import InvoicePreviewDrawer from '../components/invoice/InvoicePreviewDrawer.vue';
 import { callApi, isFinanceUser, money, pillClass } from '../lib/expenseClaims.js';
 import {
-  confirmBlockers, duplicateText, editableByOwner, folderTabsFromCounts, missingFields, retryState, tabStatuses, usedByText,
+  confirmBlockers, duplicateText, editableByOwner, folderStatusBar, folderTabsFromCounts, missingFields, retryState, tabStatuses, usedByText,
 } from '../lib/invoiceFolderView.js';
 import {
   confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice,
@@ -14,9 +16,16 @@ import {
 } from '../lib/invoiceOcr.js';
 
 const finance = isFinanceUser();
-const tab = ref(finance ? 'dup' : 'list');
+const route = useRoute();
+const router = useRouter();
+const view = computed(() => (route.query.view === 'list' ? 'list' : 'home'));
+const tab = ref(String(route.query.tab || (finance ? 'dup' : 'list')));
 const invoices = ref([]);
-const selectedName = ref('');
+const selectedName = ref(String(route.query.invoice || ''));
+const ATTENTION = ['待确认', '识别中', '识别失败', '疑似重复'];
+const home = reactive({ attention: [], ready: [], duplicates: [], counts: {}, countsAll: {} });
+const attentionCount = computed(() => ATTENTION.reduce((sum, status) => sum + Number(home.counts[status] || 0), 0));
+const allStatus = computed(() => folderStatusBar(home.countsAll));
 const edit = reactive({});
 const loading = ref(false);
 const busy = ref(false);
@@ -44,6 +53,49 @@ const currentUser = typeof window !== 'undefined' ? (window.full_name || window.
 function flash(ok = '', err = '') {
   banner.ok = ok;
   banner.err = err;
+}
+
+function go(query = {}) {
+  flash();
+  router.push({ path: route.path, query });
+}
+
+function homeCount(status) {
+  return Number(home.counts[status] || 0);
+}
+
+function attentionReason(invoice) {
+  if (invoice.folder_status === '疑似重复') return duplicateText(invoice);
+  if (invoice.folder_status === '识别失败') return invoice.processing_error || '识别失败，可以重新识别';
+  if (invoice.folder_status === '识别中') return '正在识别，完成后会自动刷新';
+  return missingFields(invoice).length ? `请补全：${missingFields(invoice).join('、')}` : '识别完成，请核对后确认';
+}
+
+function refresh() {
+  return view.value === 'list' ? load() : loadHome();
+}
+
+// 首页：本人需要处理的、可用的发票各取几张，数量用服务端统计；财务另外看全部发票和疑似重复。
+async function loadHome() {
+  const folder = (listView, statuses, limit) => callApi('invoice_folder_entry.list_invoice_folder', {
+    view: listView, statuses: statuses.join(','), limit, offset: 0,
+  }, { method: 'GET' });
+  try {
+    const [attention, ready, duplicates] = await Promise.all([
+      folder('mine', ATTENTION, 5),
+      folder('mine', ['可用'], 5),
+      finance ? folder('all', ['疑似重复'], 20) : null,
+    ]);
+    home.attention = attention?.invoices || [];
+    home.ready = ready?.invoices || [];
+    home.duplicates = duplicates?.invoices || [];
+    home.counts = attention?.counts || {};
+    home.countsAll = duplicates?.counts || {};
+    if (poller) clearTimeout(poller);
+    if (alive && view.value === 'home' && homeCount('识别中') > 0) poller = setTimeout(refresh, 4000);
+  } catch (error) {
+    flash('', String(error?.message || error));
+  }
 }
 
 function hydrate(invoice) {
@@ -74,7 +126,7 @@ async function load({ more = false } = {}) {
     total.value = result?.total ?? invoices.value.length;
     if (poller) clearTimeout(poller);
     // 识别是后台任务：还有识别中的发票就每 4 秒刷新一次；离开页面后不再刷新。
-    if (alive && Number(counts.value['识别中'] || 0) > 0) poller = setTimeout(load, 4000);
+    if (alive && Number(counts.value['识别中'] || 0) > 0) poller = setTimeout(refresh, 4000);
   } catch (error) {
     flash('', String(error?.message || error));
   } finally {
@@ -91,9 +143,14 @@ function select(invoice) {
 // 点确认会把已保存的费用说明清空。
 watch(() => (selected.value ? `${selected.value.name}|${selected.value.folder_status}` : ''), () => hydrate(selected.value), { immediate: true });
 watch(tab, () => {
-  selectedName.value = '';
-  load();
+  selectedName.value = String(route.query.invoice || '');
+  if (view.value === 'list') load();
 });
+watch(() => [route.query.tab, route.query.invoice], ([nextTab, invoice]) => {
+  if (nextTab && nextTab !== tab.value) tab.value = String(nextTab);
+  else if (invoice) selectedName.value = String(invoice);
+});
+watch(view, () => refresh());
 
 async function run(action, okText) {
   busy.value = true;
@@ -123,8 +180,10 @@ async function upload(event) {
     const failed = results.filter((result) => result.error);
     flash(`已上传 ${results.length - failed.length} 张发票，正在识别`, failed.length ? `${failed.length} 个文件上传失败：${failed[0].error}` : '');
     const target = finance ? 'mine' : 'todo';
-    if (tab.value === target) await load();
-    else tab.value = target;
+    // 从首页上传：进列表页看识别结果。
+    if (view.value !== 'list') go({ view: 'list', tab: target });
+    else if (tab.value === target) await load();
+    else go({ view: 'list', tab: target });
   } catch (error) {
     flash('', String(error?.message || error));
   } finally {
@@ -182,7 +241,7 @@ async function retry() {
   await run(() => retryInvoice(selected.value.name), '已重新提交识别');
 }
 
-onMounted(load);
+onMounted(refresh);
 onBeforeUnmount(() => {
   alive = false;
   if (poller) clearTimeout(poller);
@@ -193,6 +252,7 @@ onBeforeUnmount(() => {
   <div class="xp">
     <div class="ph">
       <div>
+        <div v-if="view === 'list'" class="crumb"><button type="button" class="link" @click="go({})">发票夹</button> › 列表</div>
         <h3>发票夹</h3>
         <div class="muted">{{ finance ? '处理疑似重复的发票；自己的发票在“我的发票”里上传、核对、确认。' : '先上传、识别、核对，确认后的发票才能在报销和付款里选用。' }}</div>
       </div>
@@ -201,13 +261,65 @@ onBeforeUnmount(() => {
         <input ref="fileInput" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" hidden :disabled="busy" @change="upload" />
       </label>
     </div>
+    <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
+    <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
+
+    <!-- ============================== 首页（2026-09-30 改版） ============================== -->
+    <template v-if="view === 'home'">
+      <label class="drop-zone" :class="{ disabled: busy }">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#8A93A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"></path><path d="M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"></path></svg>
+        <span class="grow-col"><b>点这里选择发票上传</b><span class="muted">PDF 或照片，一次最多 20 个文件；识别完会自动刷新</span></span>
+        <span v-if="homeCount('识别中')" class="recognizing"><span class="muted">正在识别 {{ homeCount('识别中') }} 张</span><span class="pulse"><i></i></span></span>
+        <span class="btn">选择文件</span>
+        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png" hidden :disabled="busy" @change="upload" />
+      </label>
+
+      <div class="home-grid">
+        <section class="panel">
+          <div class="pt"><span>需要你看一下 <span class="count-pill">{{ attentionCount }}</span></span><button type="button" class="link" @click="go({ view: 'list', tab: finance ? 'mine' : 'todo' })">全部 →</button></div>
+          <button v-for="invoice in home.attention" :key="invoice.name" type="button" class="folder-row" @click="go({ view: 'list', tab: finance ? 'mine' : invoice.folder_status === '疑似重复' ? 'dup' : 'todo', invoice: invoice.name })">
+            <span :class="pillClass(invoice.folder_status)">{{ invoice.folder_status }}</span>
+            <span class="grow-col"><b class="ellipsis">{{ invoice.project_name || invoice.original_filename || '未识别' }}</b><span class="muted ellipsis">{{ attentionReason(invoice) }}</span></span>
+            <span class="amount">{{ Number(invoice.total_amount) ? '¥ ' + money(invoice.total_amount) : '—' }}</span>
+          </button>
+          <div v-if="!home.attention.length" class="empty">没有需要处理的发票</div>
+        </section>
+
+        <section class="panel">
+          <div class="pt"><span>可以用来报销、付款 <span class="muted">{{ homeCount('可用') }} 张</span></span><button type="button" class="link" @click="router.push({ path: '/approval/claim', query: { view: 'new', pick: 'all' } })">用这些发票新建报销 →</button></div>
+          <button v-for="invoice in home.ready" :key="invoice.name" type="button" class="folder-row" @click="go({ view: 'list', tab: finance ? 'mine' : 'ok', invoice: invoice.name })">
+            <span class="grow-col"><span class="ellipsis">{{ invoice.project_name || '未填写项目名称' }}</span><span class="muted num">{{ invoice.invoice_number }} · {{ invoice.issue_date || '—' }}</span></span>
+            <span class="amount">¥ {{ money(invoice.total_amount) }}</span>
+          </button>
+          <div v-if="!home.ready.length" class="empty">还没有确认好的发票</div>
+        </section>
+      </div>
+
+      <div class="home-grid">
+        <section class="panel">
+          <div class="pt"><span>已用于报销 / 付款</span><button type="button" class="link" @click="go({ view: 'list', tab: finance ? 'mine' : 'used' })">全部 →</button></div>
+          <div class="bucket-cards">
+            <div class="bucket-card static"><span class="muted">已使用</span><b>{{ homeCount('已使用') }} 张</b></div>
+            <div class="bucket-card static"><span class="muted">可用</span><b>{{ homeCount('可用') }} 张</b></div>
+            <div class="bucket-card static"><span class="muted">待确认 / 识别失败</span><b>{{ homeCount('待确认') + homeCount('识别失败') }} 张</b></div>
+          </div>
+        </section>
+
+        <section v-if="finance" class="panel">
+          <div class="pt"><span>全部发票 <span class="tag">财务可见</span></span><button type="button" class="link" @click="go({ view: 'list', tab: 'allinv' })">全部列表 →</button></div>
+          <div class="stack-bar"><i v-for="item in allStatus" :key="item.label" :style="{ width: item.width, background: item.color }"></i></div>
+          <div class="bucket-legend"><span v-for="item in allStatus" :key="item.label"><i :style="{ background: item.color }"></i>{{ item.label }} {{ item.count }}</span></div>
+          <button v-if="home.duplicates.length" type="button" class="link" @click="go({ view: 'list', tab: 'dup' })">{{ home.duplicates.length }} 张疑似重复等你处理 →</button>
+        </section>
+      </div>
+    </template>
+
+    <template v-else>
     <div class="tabs" role="tablist">
-      <button v-for="item in tabs" :key="item.key" role="tab" :aria-selected="tab === item.key" @click="tab = item.key">
+      <button v-for="item in tabs" :key="item.key" role="tab" :aria-selected="tab === item.key" @click="go({ view: 'list', tab: item.key })">
         {{ item.label }}<span class="c">{{ item.count }}</span>
       </button>
     </div>
-    <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
-    <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
 
     <div class="inv-grid">
       <div class="panel flush">
@@ -285,6 +397,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    </template>
 
     <InvoicePreviewDrawer :open="previewOpen" :invoice="selected?.name || ''" :current-user="currentUser" :title="selected?.invoice_number || '发票原件'" @close="previewOpen = false" />
   </div>
