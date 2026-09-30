@@ -1,23 +1,25 @@
 // 宿舍看板的显示规则（与 demo 一致），纯函数便于测试。
+// 颜色压低饱和度：蓝 = 公司承担 / 入住，沙色 = 个人承担，橙褐 = 空置；醒目的颜色只留给需要处理的提醒。
 export const COLORS = {
-  company: '#3E63DD',
-  companyText: '#1E3A8A',
-  personal: '#F2A541',
-  personalText: '#8A4B00',
-  vacant: '#E8730C',
-  vacantText: '#A34700',
-  guest: '#7D8696',
-  nap: '#C9CED8',
-  empty: '#E3E6EC',
+  company: '#5470C6',
+  companyText: '#34489A',
+  personal: '#E3B26B',
+  personalText: '#8A5A1C',
+  vacant: '#D98C4A',
+  vacantText: '#9A5A1F',
+  guest: '#8C96A8',
+  nap: '#C3CAD6',
+  empty: '#E6E9EF',
+  leaver: '#B42318',
 };
 
 export const STATUS_ORDER = ['入住', '空置', '客房', '午休室'];
 
 export const STATUS_STYLE = {
-  入住: { bg: '#EEF2FF', border: '#3E63DD', text: '#1E3A8A', dot: COLORS.company, line: 'solid' },
-  空置: { bg: '#FFF4E6', border: '#E8730C', text: '#8A3D00', dot: COLORS.vacant, line: 'solid' },
-  客房: { bg: '#F2F4F7', border: '#7D8696', text: '#394150', dot: COLORS.guest, line: 'solid' },
-  午休室: { bg: '#FAFBFC', border: '#B8BFCB', text: '#4A5263', dot: COLORS.nap, line: 'dashed' },
+  入住: { text: '#34489A', dot: COLORS.company, line: 'solid' },
+  空置: { text: '#9A5A1F', dot: COLORS.vacant, line: 'solid' },
+  客房: { text: '#4A5263', dot: COLORS.guest, line: 'solid' },
+  午休室: { text: '#5B6475', dot: COLORS.nap, line: 'dashed' },
 };
 
 const USE_COLORS = { 员工: COLORS.company, 空: COLORS.vacant, 午休室: COLORS.guest, 客房: COLORS.nap };

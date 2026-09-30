@@ -12,6 +12,8 @@
   line-height: 1.6;
 }
 .xp .num { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+/* 看板顶部的金额用正文字体（单号等仍用等宽字体）。 */
+.xp .stat .v.num { font-family: inherit; font-weight: 600; }
 .xp .r { text-align: right; }
 /* 单号、金额、日期在窄屏表格里也不折行 */
 .xp td.num, .xp td .num { white-space: nowrap; }

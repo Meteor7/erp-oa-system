@@ -22,7 +22,7 @@ test("lease alert reads like the demo and asks for a decision a week ahead", () 
 
 test("occupancy donut covers occupied, vacant, guest and nap rooms in order", () => {
   const gradient = donutGradient({ total: 35, 入住: 22, 空置: 8, 客房: 2, 午休室: 3 });
-  assert.equal(gradient, "conic-gradient(#3E63DD 0.0deg 226.3deg, #E8730C 226.3deg 308.6deg, #7D8696 308.6deg 329.1deg, #C9CED8 329.1deg 360.0deg)");
+  assert.equal(gradient, "conic-gradient(#5470C6 0.0deg 226.3deg, #D98C4A 226.3deg 308.6deg, #8C96A8 308.6deg 329.1deg, #C3CAD6 329.1deg 360.0deg)");
   assert.equal(percent(22, 30, 0), "73%");
   assert.equal(percent(34483.6, 52765.6), "65.4%");
 });

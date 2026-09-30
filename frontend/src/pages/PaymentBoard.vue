@@ -60,8 +60,8 @@ onMounted(async () => {
       <div class="panel"><div class="pt">近 6 个月付款金额</div><StackedBars :trend="data.trend || []" /></div>
 
       <div class="grid g2">
-        <div class="panel"><div class="pt">本月按费用科目</div><HBars :rows="data.by_account || []" color="#FF8F00" empty="本月还没有付款" /></div>
-        <div class="panel"><div class="pt">本月按部门</div><HBars :rows="data.by_department || []" color="#3E63DD" empty="本月还没有付款" /></div>
+        <div class="panel"><div class="pt">本月按费用科目</div><HBars :rows="data.by_account || []" color="#E0A45A" empty="本月还没有付款" /></div>
+        <div class="panel"><div class="pt">本月按部门</div><HBars :rows="data.by_department || []" color="#5470C6" empty="本月还没有付款" /></div>
       </div>
 
       <div class="panel">

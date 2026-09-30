@@ -8,6 +8,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AccommodationTabs: typeof import('./src/components/AccommodationTabs.vue')['default']
     AttendanceCalendar: typeof import('./src/components/attendance/AttendanceCalendar.vue')['default']
     AttendanceCards: typeof import('./src/components/attendance/AttendanceCards.vue')['default']
     AttendanceDetail: typeof import('./src/components/attendance/AttendanceDetail.vue')['default']
