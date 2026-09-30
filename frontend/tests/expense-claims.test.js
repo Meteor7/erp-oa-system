@@ -261,7 +261,7 @@ test("boards open for the positions the server grants, and the menu shows one se
 
 test("review fixes 2026-09-23 stay wired into the pages", () => {
   const workbench = read("../src/components/claim/ClaimWorkbench.vue");
-  assert.match(workbench, /v-if="doc\.can_approve \|\| doc\.can_edit_expense_items"/, "cashier can approve while filling accounts");
+  assert.match(workbench, /v-if="focusDoc\.can_approve \|\| focusDoc\.can_edit_expense_items"/, "cashier can approve while filling accounts");
   assert.match(workbench, /Promise\.allSettled/, "one failing lookup no longer blanks the form");
   assert.match(workbench, /expense_claim_entry\.list_verify_queue/);
   assert.match(workbench, /expense_claim_entry\.list_claim_projects/);
@@ -304,4 +304,41 @@ test("supplemental attachment calls send the parameter name the server expects (
   const source = read("../src/lib/invoiceOcr.js");
   assert.doesNotMatch(source, /attachment_name:/);
   assert.equal((source.match(/\battachment: attachmentName/g) || []).length, 2);
+});
+
+
+test("claim pages: home, list, detail and a separate new page share one address (2026-09-30)", async () => {
+  const { claimView, waitedDays, canQuickApprove, statusBuckets, stepTimeline } = await import("../src/lib/claimView.js");
+  assert.equal(claimView({}), "home");
+  assert.equal(claimView({ view: "list", scope: "todo" }), "list");
+  assert.equal(claimView({ request: "BX-1" }), "detail", "notification links keep opening the document");
+  assert.equal(claimView({ tab: "new" }), "new");
+  assert.equal(claimView({ source: "OA-1" }), "new", "push from an application still works");
+  assert.equal(claimView({ view: "new", draft: "BX-2" }), "new");
+  const now = Date.parse("2026-09-30T12:00:00");
+  assert.equal(waitedDays({ steps: [{ acted_on: "2026-09-26 09:00:00" }, { acted_on: null }] }, now), 4);
+  assert.equal(waitedDays({ creation: "2026-09-30 08:00:00" }, now), 0);
+  assert.equal(waitedDays({}, now), null);
+  assert.equal(canQuickApprove({ can_approve: true }), true);
+  assert.equal(canQuickApprove({ can_approve: true, current_step_mode: "handle" }), false, "confirming payment happens on the detail page");
+  assert.equal(canQuickApprove({ can_approve: false, can_edit_expense_items: true }), false, "the cashier fills accounts on the detail page");
+  const buckets = statusBuckets([{ workflow_status: "草稿" }, { workflow_status: "待审批", amount: 10 }, { workflow_status: "已付款", business_status: "已完结", amount: 5 }]);
+  assert.deepEqual(buckets.map((bucket) => bucket.count), [1, 1, 0, 1, 0]);
+  const timeline = stepTimeline({ workflow_status: "待审批", current_step_index: 2, steps: [
+    { step_index: 1, label: "直属主管", status: "已通过", acted_on: "2026-09-26 15:40:00", mode: "approve" },
+    { step_index: 2, label: "财务主管", status: "待审批" },
+    { step_index: 3, label: "出纳付款", status: "待审批", mode: "handle" },
+  ] });
+  assert.deepEqual(timeline.map((item) => item.state), ["done", "now", "todo"]);
+  assert.equal(timeline[0].sub, "已同意 · 2026-09-26 15:40");
+});
+
+test("claim pages keep every action on the detail page (2026-09-30)", () => {
+  const workbench = read("../src/components/claim/ClaimWorkbench.vue");
+  for (const action of ["approve(focusDoc)", "reject(focusDoc)", "withdraw(focusDoc)", "verify(focusDoc)", "returnInvoices(focusDoc)", "withdrawPayment(focusDoc)", "openSupplement(focusDoc)", "submitSupplement(focusDoc)"]) {
+    assert.ok(workbench.includes(action), action);
+  }
+  assert.match(workbench, /save\(\{ submit: true \}\)/);
+  assert.match(workbench, /push_from_application/);
+  assert.doesNotMatch(workbench, /role="tablist"/, "no more top tabs");
 });
