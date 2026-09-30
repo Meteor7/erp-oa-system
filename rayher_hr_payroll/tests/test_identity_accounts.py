@@ -23,3 +23,13 @@ def test_old_server_domain_and_wang_account_follow_same_person(monkeypatch):
     monkeypatch.setitem(sys.modules, "frappe", SimpleNamespace(db=SimpleNamespace(get_value=value)))
     assert account_user("person046@business.example.invalid") == "person030@staff.example.invalid"
     assert account_user("person007@staff.example.invalid") == "person059@staff.example.invalid"
+
+
+def test_site_aliases_keep_historical_approval_constants_usable(monkeypatch):
+    # 2026-09-30 账号按企业邮箱前缀改名后，旧账号名通过 site_config 的对照表找到新账号。
+    monkeypatch.setitem(sys.modules, "frappe", SimpleNamespace(
+        conf={"company_email_account_aliases": {
+            "person060@staff.example.invalid": "person066@staff.example.invalid"}},
+        db=SimpleNamespace()))
+    assert account_user("person060@staff.example.invalid") == "person066@staff.example.invalid"
+    assert account_user("person056@staff.example.invalid") == "person056@staff.example.invalid"

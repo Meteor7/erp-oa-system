@@ -6,14 +6,17 @@ LEGACY_ACCOUNTS = {
 }
 
 def account_user(legacy):
-    if legacy not in LEGACY_ACCOUNTS:
-        return legacy
     try:
         import frappe
     except ImportError:
         return legacy
     if not getattr(frappe, "db", None):
         return legacy
+    aliases = getattr(frappe, "conf", {}).get("company_email_account_aliases", {})
+    if legacy in aliases:
+        return aliases[legacy]
+    if legacy not in LEGACY_ACCOUNTS:
+        return legacy
     person, canonical = LEGACY_ACCOUNTS[legacy]
     bound = frappe.db.get_value("Employee", {"employee_name": person}, "user_id")
-    return canonical if bound == canonical else legacy
+    return bound or legacy
