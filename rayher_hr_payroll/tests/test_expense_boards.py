@@ -214,3 +214,19 @@ def test_every_inspection_status_except_passed_is_pending():
         for index, status in enumerate(["未验收", "待验收", "验收不合格", "验收通过", ""])
     ]
     assert boards.procurement_board(rows, today=TODAY)["summary"]["pending_inspection"] == 3
+
+
+
+def test_request_board_month_mix_and_flow():
+    # 2026-09-30 看板改版：本月提交的申请构成和走到哪一步。
+    rows = [
+        purchase("P1", creation="2026-09-02 10:00:00", paid_amount=400),
+        purchase("P2", creation="2026-09-05 10:00:00", asset_nature="固定资产", approved_amount=3000),
+        purchase("P3", creation="2026-09-21 10:00:00", workflow_status="待审批", amount=500, approved_amount=0),
+        travel("T1", creation="2026-09-10 10:00:00"),
+        purchase("OLD", creation="2026-08-30 10:00:00"),
+    ]
+    board = boards.request_board(rows, today=TODAY)
+    assert board["month_mix"] == [["购买申请 · 非固定资产", 2], ["购买申请 · 固定资产", 1], ["出差申请", 1]]
+    flow = {step["key"]: (step["count"], step["amount"]) for step in board["month_flow"]}
+    assert flow == {"submitted": (4, 4500.0), "approved": (3, 4000.0), "executed": (2, 1000.0), "pending": (1, 500.0)}

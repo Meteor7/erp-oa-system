@@ -1,12 +1,14 @@
 <script setup>
-// 付款看板：钱付出去多少、还欠多少、谁的发票没交。采购付款在"采购付款"页签单独看。
+// 付款看板：钱付出去多少、花在哪、出纳还有多少没付、谁的发票没交。采购付款在"采购付款"页签单独看。
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
+import ColumnChart from '../components/expense-ui/ColumnChart.vue';
+import DonutChart from '../components/expense-ui/DonutChart.vue';
 import HBars from '../components/expense-ui/HBars.vue';
 import StackedBars from '../components/expense-ui/StackedBars.vue';
 import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
-import { boardRoute, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
+import { agingColumns, boardRoute, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 
 const router = useRouter();
@@ -15,6 +17,8 @@ const data = ref({});
 const loading = ref(true);
 const error = ref('');
 const kpis = computed(() => paymentKpis(data.value));
+const aging = computed(() => agingColumns(data.value.cashier_queue || []));
+const urgent = computed(() => (data.value.cashier_queue || []).filter((row) => row.urgency === '加急').length);
 
 function open(row, requestType) {
   router.push({ path: boardRoute(requestType || row.request_type), query: { request: row.name } });
@@ -32,11 +36,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="xp">
+  <div class="xp board">
     <div class="ph">
       <div>
         <h3>付款看板</h3>
-        <div class="muted">给出纳、财务主管和管理层：钱付出去多少、还欠多少、谁的发票没交。</div>
+        <div class="muted">钱付出去多少、花在哪、出纳还有多少没付、谁的发票没交。</div>
       </div>
       <span class="muted">{{ scopeText(data) }}</span>
     </div>
@@ -57,15 +61,22 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="panel"><div class="pt">近 6 个月付款金额</div><StackedBars :trend="data.trend || []" /></div>
+      <div class="grid g75">
+        <div class="panel"><div class="pt"><span>近 6 个月付出去多少</span><span class="muted">按实际付款日期</span></div><StackedBars :trend="data.trend || []" /></div>
+        <div class="panel"><div class="pt"><span>本月钱花在哪</span><span class="muted">按费用科目</span></div><DonutChart :rows="data.by_account || []" center-label="本月已付" empty="本月还没有付款" /></div>
+      </div>
 
       <div class="grid g2">
-        <div class="panel"><div class="pt">本月按费用科目</div><HBars :rows="data.by_account || []" color="#E0A45A" empty="本月还没有付款" /></div>
-        <div class="panel"><div class="pt">本月按部门</div><HBars :rows="data.by_department || []" color="#5470C6" empty="本月还没有付款" /></div>
+        <div class="panel"><div class="pt"><span>本月按部门</span><span class="muted">已付金额</span></div><HBars :rows="data.by_department || []" empty="本月还没有付款" /></div>
+        <div class="panel">
+          <div class="pt"><span>出纳待付：等了多久</span><span class="muted">{{ (data.cashier_queue || []).length }} 张<template v-if="urgent"> · 加急 {{ urgent }} 张</template></span></div>
+          <ColumnChart v-if="(data.cashier_queue || []).length" :columns="aging" />
+          <div v-else class="empty">出纳没有待付的单据</div>
+        </div>
       </div>
 
       <div class="panel">
-        <div class="pt"><span>出纳待办</span><span class="muted">加急优先，其次按等待时间</span></div>
+        <div class="pt"><span>出纳待办</span><span class="muted">加急优先，其次按等待时间；点一行打开单据</span></div>
         <div class="tbl">
           <table>
             <thead><tr><th>单据</th><th>类型</th><th>申请人</th><th>部门</th><th class="r">金额</th><th>等待</th><th>状态</th></tr></thead>
@@ -76,7 +87,7 @@ onMounted(async () => {
                 <td>{{ row.employee_name }}</td>
                 <td>{{ row.department }}</td>
                 <td class="r num">{{ money(row.amount) }}</td>
-                <td>{{ row.waited_days }} 天</td>
+                <td :class="{ warn: row.waited_days >= 3 }">{{ row.waited_days }} 天</td>
                 <td><span :class="pillClass(row.status)">{{ row.status }}</span></td>
               </tr>
               <tr v-if="!(data.cashier_queue || []).length"><td colspan="7" class="empty">没有待办</td></tr>
@@ -85,30 +96,22 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="panel">
-        <div class="pt"><span>补票追踪</span><span class="muted">到期前 3 天开始提醒申请人，逾期每天提醒</span></div>
-        <div class="tbl">
-          <table>
-            <thead><tr><th>付款单</th><th>申请人</th><th>收款单位</th><th class="r">金额</th><th>预计取票</th><th>情况</th><th>已提醒</th></tr></thead>
-            <tbody>
-              <tr v-for="row in data.invoice_tracking || []" :key="row.name" class="row-sel" @click="open(row, '付款单')">
-                <td class="num">{{ row.name }}</td>
-                <td>{{ row.employee_name }}</td>
-                <td>{{ row.payee_name || '—' }}</td>
-                <td class="r num">{{ money(row.amount) }}</td>
-                <td class="num">{{ row.expected_invoice_date || '—' }}</td>
-                <td><span :class="'pill ' + dueText(row).tone">{{ dueText(row).text }}</span></td>
-                <td>{{ row.reminders }} 次</td>
-              </tr>
-              <tr v-if="!(data.invoice_tracking || []).length"><td colspan="7" class="empty">没有待补票的付款单</td></tr>
-            </tbody>
-          </table>
+      <div class="grid g75">
+        <div class="panel">
+          <div class="pt"><span>待补票</span><span class="muted">到期前 3 天开始提醒申请人，逾期每天提醒</span></div>
+          <div v-for="row in data.invoice_tracking || []" :key="row.name" class="line-row row-sel" @click="open(row, '付款单')">
+            <span class="num strong">{{ row.name }}</span>
+            <span class="grow">{{ row.employee_name }} · {{ row.payee_name || '—' }}</span>
+            <span class="num">¥ {{ money(row.amount) }}</span>
+            <span :class="'pill ' + dueText(row).tone">{{ dueText(row).text }}</span>
+            <span class="muted">提醒 {{ row.reminders }} 次</span>
+          </div>
+          <div v-if="!(data.invoice_tracking || []).length" class="empty">没有待补票的付款单</div>
         </div>
-      </div>
-
-      <div v-if="data.scope !== 'department'" class="panel">
-        <div class="pt"><span>本年付款收款单位 Top 5</span><span class="muted">看付款是否过于集中</span></div>
-        <HBars :rows="data.top_payees || []" color="#1FA58C" empty="今年还没有对外付款" />
+        <div v-if="data.scope !== 'department'" class="panel">
+          <div class="pt"><span>今年付给谁最多</span><span class="muted">收款单位 Top 5</span></div>
+          <HBars :rows="data.top_payees || []" color="#8C96A8" :limit="5" empty="今年还没有对外付款" />
+        </div>
       </div>
     </template>
   </div>

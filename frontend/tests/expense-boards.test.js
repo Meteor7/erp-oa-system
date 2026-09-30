@@ -15,6 +15,7 @@ import {
 import { canSee } from "../src/lib/access.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+import { agingColumns, budgetBars, donutSegments, flowBars, waitBars } from "../src/lib/expenseBoards.js";
 
 test("申请看板 KPIs follow the design and drop the stand-alone 占用 number", () => {
   const cards = requestKpis({ summary: {
@@ -23,7 +24,7 @@ test("申请看板 KPIs follow the design and drop the stand-alone 占用 number
   } });
   assert.deepEqual(cards.map((card) => card.label), ["本月通过的购买申请", "已批准未付出的额度", "审批中", "出差中 / 本月出差"]);
   assert.deepEqual(cards.map((card) => card.value), ["¥ 1,000.00", "¥ 600.00", "2 张", "1 人 / 3 次"]);
-  assert.equal(cards[2].tone, "#DC2626", "waiting more than 3 days turns red");
+  assert.equal(cards[2].tone, "#B42318", "waiting more than 3 days turns red");
   assert.ok(!cards.some((card) => card.label.includes("占用")));
 });
 
@@ -35,7 +36,7 @@ test("付款看板 KPIs split the month and show what the cashier still owes", (
   assert.deepEqual(cards.map((card) => card.value), ["¥ 200.00", "¥ 350.00", "¥ 45.00", "¥ 700.00"]);
   assert.equal(cards[2].sub, "1 张，其中加急 1 张");
   assert.equal(cards[3].sub, "2 张，逾期 1 张");
-  assert.equal(cards[3].tone, "#DC2626");
+  assert.equal(cards[3].tone, "#B42318");
   assert.deepEqual(procurementKpis({ summary: { application_count: 3, application_pending: 1 } }).map((card) => card.value)[0], "3 张");
   assert.equal(procurementKpis({ summary: {} }, "payment").length, 4);
 });
@@ -93,4 +94,29 @@ test("the boards are closed to plain employees and open to finance, managers and
   assert.equal(canSee("/approval/expense-payment-board"), true);
   globalThis.window = { roles: ["Accounts User"], oa_access: {} };
   assert.equal(canSee("/approval/expense-payment-board"), false, "closed until a claim type is switched on");
+});
+
+
+test("board charts: donut merges the tail into 其他 and aging buckets count the cashier queue (2026-09-30)", () => {
+  const donut = donutSegments([["差旅费", 600], ["办公费", 300], ["招待费", 50], ["维修费", 30], ["快递费", 15], ["其他费用", 5]], 5);
+  assert.deepEqual(donut.segments.map((row) => [row.label, row.value]), [["差旅费", 600], ["办公费", 300], ["招待费", 50], ["维修费", 30], ["其他", 20]]);
+  assert.equal(donut.total, 1000);
+  assert.equal(donut.segments[0].share, "60%");
+  assert.match(donut.gradient, /^conic-gradient\(#5470C6 0\.0deg 216\.0deg/);
+  assert.equal(donutSegments([]).total, 0);
+  const aging = agingColumns([{ waited_days: 0, amount: 10 }, { waited_days: 2, amount: 20 }, { waited_days: 4, amount: 30 }, { waited_days: 9, amount: 40 }, { waited_days: 9, amount: 1 }]);
+  assert.deepEqual(aging.map((column) => column.value), [1, 1, 1, 2]);
+  assert.equal(aging[3].sub, "¥ 41.00");
+  assert.deepEqual(flowBars([{ key: "submitted", count: 4 }, { key: "approved", count: 3 }]).map((row) => row.width), ["100.0%", "75.0%"]);
+  assert.deepEqual(budgetBars([{ approved_amount: 1000, paid_amount: 250, reserved_amount: 100 }]).map((row) => [row.paidWidth, row.reservedWidth]), [["25.0%", "10.0%"]]);
+  assert.deepEqual(waitBars([{ waited_days: 8 }, { waited_days: 2 }], 3).map((row) => [row.overdue, row.width]), [[true, "100.0%"], [false, "25.0%"]]);
+});
+
+test("the boards draw charts instead of only tables (2026-09-30)", () => {
+  const request = read("../src/pages/RequestBoard.vue");
+  const payment = read("../src/pages/PaymentBoard.vue");
+  assert.match(payment, /<DonutChart :rows="data\.by_account/);
+  assert.match(payment, /<ColumnChart/);
+  assert.match(request, /month_mix/);
+  assert.match(request, /flowBars/);
 });

@@ -210,6 +210,53 @@ def request_board(rows, *, today, stuck_days=STUCK_DAYS, stale_days=STALE_DAYS):
         "non_fixed_amount": float(sum((money(_get(row, "approved_amount")) for row in approved if row not in fixed), ZERO)),
         "stuck_days": stuck_days,
         "stale_days": stale_days,
+        **month_flow(rows, today),
+    }
+
+
+def month_flow(rows, today):
+    """本月提交的购买、出差申请（看板只取审批中和已完成的，不含驳回、撤回）：构成和走到哪一步。
+
+    2026-09-30 看板改版：申请看板加"本月都申请了什么"环形图和"申请走到哪一步了"。
+    购买申请金额取批准金额（未批准的取申请金额）；出差申请没有金额。
+    """
+    month = today.strftime("%Y-%m")
+    mine = [row for row in rows if month_key(_get(row, "creation")) == month]
+    purchases = [row for row in mine if _get(row, "request_type") == REQUEST_DIRECT_PURCHASE]
+    trips = [row for row in mine if _get(row, "request_type") == REQUEST_TRAVEL]
+    fixed = [row for row in purchases if _get(row, "asset_nature") == "固定资产"]
+    approved = [row for row in mine if _get(row, "workflow_status") == COMPLETED]
+    pending = [row for row in mine if _get(row, "workflow_status") in ACTIVE_STATUSES]
+
+    def executed(row):
+        if _get(row, "request_type") == REQUEST_DIRECT_PURCHASE:
+            return money(_get(row, "paid_amount")) > 0
+        start = as_date(_get(row, "travel_start_date"))
+        return bool(start and start <= today)
+
+    def amount(items):
+        total = ZERO
+        for row in items:
+            if _get(row, "request_type") != REQUEST_DIRECT_PURCHASE:
+                continue
+            value = _get(row, "approved_amount") if _get(row, "workflow_status") == COMPLETED else _get(row, "amount")
+            total += money(value)
+        return float(total)
+
+    done = [row for row in approved if executed(row)]
+    mix = [
+        ["购买申请 · 非固定资产", len(purchases) - len(fixed)],
+        ["购买申请 · 固定资产", len(fixed)],
+        ["出差申请", len(trips)],
+    ]
+    return {
+        "month_mix": [item for item in mix if item[1]],
+        "month_flow": [
+            {"key": "submitted", "label": "本月提交", "count": len(mine), "amount": amount(mine)},
+            {"key": "approved", "label": "已通过", "count": len(approved), "amount": amount(approved)},
+            {"key": "executed", "label": "已付款 / 已出发", "count": len(done), "amount": amount(done)},
+            {"key": "pending", "label": "还在审批", "count": len(pending), "amount": amount(pending)},
+        ],
     }
 
 
