@@ -14,6 +14,15 @@ import {
 } from "../src/lib/procurementWorkflow.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+// 采购申请 / 购买申请页面（2026-09-30 改版）：旧的 PreRequestCenter.vue 只剩一层壳，页面在 components/procurement 下。
+const part = (name) => read(`../src/components/procurement/${name}.vue`);
+const workbench = part("ProcurementWorkbench");
+const detail = part("ProcDetail");
+const form = part("ProcForm");
+const editor = part("ProcLineEditor");
+const documents = part("ProcDocuments");
+const home = part("ProcHome");
+const view = read("../src/lib/procurementView.js");
 
 test("server errors are converted to plain text without rendering raw HTML", () => {
   assert.equal(normalizeServerError({ messages: ["用户<strong>admin</strong>无权访问"] }), "用户admin无权访问");
@@ -92,75 +101,60 @@ test('procurement request accepts any category depth from third level through fu
 });
 
 test('procurement keeps broad asset nature while detailed classes belong only to direct purchase', () => {
-  const source = read('../src/pages/PreRequestCenter.vue');
-  assert.match(source, /<label v-if="isProcurement \|\| isDirectPurchase" class="text-xs font-medium text-gray-700">资产属性/);
-  assert.match(source, /<label v-if="isDirectPurchase && form\.asset_nature === '固定资产'"/);
+  // 两种申请都选固定 / 非固定资产；固定资产类别（三选一）只有购买申请出现，采购申请没有。
+  assert.match(form, /aria-label="资产属性"/);
+  assert.match(form, /<div v-if="!isProcurement && form\.asset_nature === '固定资产'" class="f">/);
+  assert.match(form, /v-for="item in FIXED_ASSET_CATEGORIES"/);
+  assert.match(view, /FIXED_ASSET_CATEGORIES = Object\.freeze\(\[/);
+  assert.doesNotMatch(form, /fixedCategories/);
 });
 
 test('purchase application does not auto-load the procurement material catalog', () => {
-  const source = read('../src/pages/PreRequestCenter.vue');
-  assert.match(source, /const categoryLoader = createResource\(\{ url: 'rayher_hr_payroll\.api\.procurement_materials\.list_categories'/);
-  assert.doesNotMatch(source, /list_categories[^\n]+auto: true/);
-  assert.match(source, /if \(requestType === '采购申请'\) await categoryLoader\.reload\(\)/);
-  assert.match(source, /<div v-if="isProcurement" class="border-t border-gray-200">/);
-  assert.match(source, /<div v-else class="border-t border-gray-200">/);
+  assert.match(form, /procurement_materials\.list_categories/);
+  assert.match(form, /async function loadCategories\(\) \{\s*if \(!isProcurement\) return;/);
+  assert.doesNotMatch(form, /list_categories[^\n]+auto: true/);
+  assert.match(form, /<ProcLineEditor\s+v-if="isProcurement"/);
+  assert.match(form, /<div v-else class="pr-lines">/);
 });
-
 
 test("forms use real project options and conditional business fields", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /oa_entry\.list_approval_center_projects/);
-  assert.match(source, /oa_entry\.list_procurement_payment_sources/);
-  assert.match(source, /oa_entry\.list_procurement_users/);
-  assert.match(source, /oa_entry\.list_procurement_applicants/);
-  assert.doesNotMatch(source, /project_entry\.list_project_owners/);
-  assert.match(source, /view: 'all'/);
-  assert.match(source, /<select v-model=['"]form\.project/);
-  assert.match(source, /form\.procurement_scope === ['"]项目采购['"]/);
-  assert.match(source, /non_project_allocation_type/);
-  assert.match(source, /purchase_method/);
-  assert.doesNotMatch(source, /<select v-model=['"]form\.payment_stage/);
-  assert.doesNotMatch(source, /<option>全额付款<\/option>/);
-  assert.match(source, /付款计划期次/);
-  assert.match(source, /source_payment_plan_row/);
-  assert.match(source, /save_procurement_contract_information/);
-  assert.match(source, /review_procurement_contract/);
-  assert.match(source, /seal_procurement_contract/);
-  assert.match(source, /remove_approval_business_document/);
-  assert.match(source, /isProcurementOrPayment/);
-  assert.match(source, /prepayment_risk_note/);
-  assert.match(source, /record_arrival/);
-  assert.match(source, /record_inspection/);
-  assert.match(source, /writeoff_prepayment/);
-  assert.match(source, /close_procurement/);
-  assert.match(source, /complete_supplier_refund/);
-  assert.match(source, /退款回单/);
-  assert.match(source, /row\.purchaser_user === currentUser/);
-  assert.match(source, /逐级选择，至少三级/);
-  assert.match(source, /选择一级分类/);
-  assert.match(source, /没有下一级时可停在当前级/);
-  assert.match(source, /categoryLevelOptions/);
-  assert.match(source, /categoryMaterialResults/);
-  assert.match(source, /loadCategoryMaterials/);
-  assert.match(source, /选择物料编号/);
-  assert.match(source, /chooseCategoryMaterial/);
-  assert.match(source, /closeCategoryPicker\(line\)/);
-  assert.match(source, /startsWith\(`\$\{code\}\.\`\)/);
-  assert.match(source, /inferredCategory/);
-  assert.match(source, /选择物料编号会自动带出完整物料资料/);
-  assert.match(source, /validateProcurementRequestForm/);
-  assert.match(source, /watch\(form, \(\) => \{/);
-  assert.match(source, /canManageExpense \|\| row\.purchaser_user/);
-  assert.match(source, /if \(isProcurement\.value && !form\.purchaser_user/);
-  assert.doesNotMatch(source, /<select v-model=['"]form\.purchaser_user/);
+  assert.match(workbench, /oa_entry\.list_approval_center_projects/);
+  assert.match(workbench, /oa_entry\.list_procurement_users/);
+  assert.match(workbench, /oa_entry\.list_procurement_applicants/);
+  assert.match(workbench, /oa_entry\.get_options/);
+  assert.doesNotMatch(form, /project_entry\.list_project_owners/);
+  assert.match(detail, /view: 'all'/);
+  assert.match(form, /<select v-model="form\.project"/);
+  assert.match(form, /form\.procurement_scope === '项目采购'/);
+  assert.match(form, /non_project_allocation_type/);
+  assert.match(form, /purchase_method/);
+  assert.match(documents, /remove_approval_business_document/);
+  assert.match(documents, /attach_approval_business_document/);
+  assert.match(editor, /按分类逐级选择物料编号/);
+  assert.match(editor, /选择一级分类/);
+  assert.match(editor, /没有下一级时可停在当前级/);
+  assert.match(editor, /categoryChildren/);
+  assert.match(editor, /catMaterials/);
+  assert.match(editor, /loadCatMaterials/);
+  assert.match(editor, /选择物料编号/);
+  assert.match(editor, /closePicker\(line\)/);
+  assert.match(view, /startsWith\(`\$\{code\}\.`\)/);
+  assert.match(view, /const inferred = /);
+  assert.match(editor, /名称、规格等自动带出、不能改/);
+  assert.match(form, /validateRequestForm/);
+  assert.match(view, /validateProcurementRequestForm/);
+  assert.match(form, /watch\(form, \(\) => \{/);
+  // 采购经办人由系统默认指定，表单里只读
+  assert.match(form, /if \(!form\.purchaser_user && ctx\.purchasers\.length\)/);
+  assert.doesNotMatch(form, /<select v-model=['"]form\.purchaser_user/);
 });
 
-test("procurement payment is opened from PO and has no standalone new-request form", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /<button v-if="!isPayment"[^>]*>/);
-  assert.match(source, /<section v-if="!isPayment && \(showCreateForm \|\| isNewRequestPage \|\| isPmcEditPage\)/);
-  assert.match(source, /source_purchase_order/);
-  assert.match(source, /source_po_payment_plan_row/);
+test("the procurement pages no longer carry payment, price or contract screens", () => {
+  const all = [workbench, detail, form, editor, documents, home, part("ProcList"), part("PurchaseHome")].join("\n");
+  assert.doesNotMatch(all, /isPayment|paymentSources|source_payment_plan_row|list_procurement_payment_sources/);
+  assert.doesNotMatch(all, /save_procurement_contract_information|review_procurement_contract|seal_procurement_contract|submit_procurement_quote/);
+  assert.doesNotMatch(all, /record_arrival|record_inspection|writeoff_prepayment|complete_supplier_refund|close_procurement/);
+  assert.match(view, /name: 'procurement-price-approvals'/);
 });
 
 test("structured price form validates locked commercial totals", () => {
@@ -180,183 +174,123 @@ test("structured price form validates locked commercial totals", () => {
 });
 
 test("business document responses cannot overwrite the newly selected request", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /const requestedName = name/);
-  assert.match(source, /requestedName === activeRequestName\.value/);
-  assert.match(source, /documentLoader\.fetch\(\{ request: requestedName \}\)/);
+  assert.match(documents, /const name = props\.request/);
+  assert.match(documents, /requested = name/);
+  assert.match(documents, /if \(requested === name\) docs\.value = rows/);
+  assert.match(documents, /list_approval_business_documents', \{ request: name \}/);
 });
 
-
-test("approvers see procurement decision data before approval controls", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  const details = source.indexOf("采购需求");
-  const lines = source.indexOf("采购明细", details);
-  const documents = source.indexOf("业务资料", lines);
-  const timeline = source.indexOf("审批轨迹", lines);
-  const actions = source.indexOf("价格审批待处理", timeline);
-  assert.ok(details > -1);
-  assert.ok(lines > details);
-  assert.ok(documents > lines);
-  assert.ok(timeline > lines);
-  assert.ok(actions > timeline);
-  assert.match(source, /selectedRequest\.employee_name/);
-  assert.match(source, /selectedRequest\.department/);
-  assert.match(source, /selectedRequest\.reason/);
-  assert.match(source, /selectedRequest\.expected_delivery_date/);
-  assert.match(source, /selectedRequest\.procurement_scope/);
-  assert.match(source, /line\.item_name/);
-  assert.match(source, /line\.specification/);
-  assert.match(source, /line\.quantity/);
-  assert.match(source, /line\.unit/);
-  assert.match(source, /line\.remarks/);
-  assert.match(source, /selectedRequest\.operation_log/);
+test("approvers see procurement decision data before the progress and attachments", () => {
+  const template = detail.slice(detail.indexOf("<template>"));
+  const facts = template.indexOf("需求信息");
+  const lines = template.indexOf("物料明细", facts);
+  const progress = template.indexOf("审批进度", lines);
+  const attachments = template.indexOf("<ProcDocuments", progress);
+  const log = template.indexOf("操作记录", attachments);
+  assert.ok(facts > -1);
+  assert.ok(lines > facts);
+  assert.ok(progress > lines);
+  assert.ok(attachments > progress);
+  assert.ok(log > attachments);
+  assert.match(detail, /row\.employee_name/);
+  assert.match(detail, /row\.department/);
+  assert.match(view, /row\?\.reason/);
+  assert.match(view, /row\?\.expected_delivery_date/);
+  assert.match(view, /row\?\.procurement_scope/);
+  for (const field of ["line.item_name", "line.specification", "line.quantity", "line.unit", "line.remarks"]) assert.ok(detail.includes(field), field);
+  assert.match(detail, /row\.value\?\.operation_log/);
 });
 
-test("approval workbench appears before the collapsible creation form", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  const formGuard = source.indexOf('v-if="!isPayment && (showCreateForm || isNewRequestPage || isPmcEditPage)');
-  assert.ok(source.indexOf("申请与待办") < formGuard);
-  assert.match(source, /@click="toggleCreateForm"/);
-  assert.match(source, /<section v-if="false"[^>]*border-amber-200/);
+test("home links to separate new-request pages and the form is its own route", () => {
+  assert.match(home, /ctx\.goNew\(\)/);
+  assert.match(workbench, /name: isProcurement\.value \? 'procurement-new' : 'direct-purchase-new'/);
+  assert.match(workbench, /router\.push\(\{ name: 'procurement-pmc-edit', params: \{ name \} \}\)/);
+  assert.match(form, /route\.name === 'procurement-pmc-edit'/);
 });
 
-test("new procurement payment forms cannot inherit or upload against the viewed request", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  const start = source.slice(source.indexOf("function startNewRequest()"), source.indexOf("function closeRequestForm()"));
-  assert.match(source, /const creatingNew = ref\(false\)/);
-  assert.match(source, /if \(creatingNew\.value\) return null/);
-  assert.match(source, /creatingNew\.value \? draftName\.value/);
-  assert.match(start, /resetRequestForm\(\)/);
-  assert.match(start, /creatingNew\.value = true/);
-  assert.match(start, /draftName\.value = ''/);
-  assert.match(start, /documents\.value = \[\]/);
-  assert.match(source, /@click="selectRequest\(row\.name\)"/);
-  assert.match(source, /if \(creatingNew\.value\) return;/);
-  const requestRowsWatcher = source.slice(source.indexOf("watch(requestRows"), source.indexOf("watch(() => route.query.request"));
-  assert.match(requestRowsWatcher, /if \(creatingNew\.value\) return;/);
-});
-
-
-test("procurement price and contract work move to dedicated inner routes", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /procurement-price-approval/);
-  assert.match(source, /procurement-contract/);
-  assert.match(source, /isPriceInnerPage/);
-  assert.match(source, /isContractInnerPage/);
-  assert.match(source, /const routeRequestName = String\(route\.params\.name \|\| ''\)/);
-  assert.match(source, /row\.name === routeRequestName/);
-  assert.match(source, /返回采购主单/);
-  assert.match(source, /价格审批决策/);
-  assert.match(source, /contract_entity: '示例企业032有限公司'/);
-  assert.doesNotMatch(source, /contract_entity: '普朗克半导体'/);
+test("a new form starts blank and only saved drafts get attachments", () => {
+  assert.match(form, /const draftName = ref\(isPmc \? '' : String\(route\.query\.draft \|\| ''\)\)/);
+  assert.match(form, /<ProcDocuments v-if="draftName \|\| isPmc"/);
+  assert.match(form, /const form = reactive\(blankForm\(\)\)/);
 });
 
 test("procurement OA links keep PR, price approval, and PO in one scoped chain", () => {
-  const requestSource = read("../src/pages/PreRequestCenter.vue");
-  const priceSource = read("../src/pages/PriceApprovalWorkbench.vue");
-  assert.match(requestSource, /procurement_chain/);
-  assert.match(requestSource, /procurementChainRoute\(selectedRequest/);
-  assert.match(requestSource, /等待 PMC 提 PR/);
-  assert.match(priceSource, /const contextRequest = computed/);
-  assert.match(priceSource, /line\.source_request === contextRequest\.value/);
-  assert.match(priceSource, /当前仅查看这张采购申请的完整链路/);
-  assert.match(priceSource, /hasPendingPr && !actionable/);
+  assert.match(view, /procurement_chain/);
+  assert.match(view, /export function chainRoute/);
+  assert.match(detail, /chainRoute\(current\)/);
+  assert.match(view, /等待提 PR/);
+  assert.match(view, /relatedDocuments/);
+  assert.match(detail, /can_view_procurement_po/);
 });
 
-test("procurement workbench uses a focused queue, decision summary, formal price review, and docked actions", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /审批队列/);
-  assert.match(source, /当前审批节点/);
-  const priceSummary = source.indexOf("价格决策摘要");
-  const demandDetails = source.indexOf("采购需求", priceSummary);
-  assert.ok(priceSummary > -1 && demandDetails > priceSummary);
-  assert.match(source, /function paymentPlanSummary\(row\)/);
-  assert.match(source, /本次审批总额/);
-  assert.match(source, /付款安排/);
-  assert.match(source, /border-blue-700 bg-blue-700 text-white/);
-  assert.match(source, /border-emerald-200 bg-\[#15803d\] text-white/);
-  assert.match(source, /价格审批表 V/);
-  assert.match(source, /商业条件审批/);
-  assert.match(source, /采购报价明细/);
-  assert.match(source, /价格审批决策/);
-  assert.match(source, /xl:sticky xl:top-3/);
-  assert.doesNotMatch(source, /<fieldset :disabled="!showQuoteForm"/);
-});
-
-test("procurement demand and price approvals are visually distinct and price approval requires its detail page", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /function approvalStageMeta\(row\)/);
-  assert.match(source, /label: '需求审批'/);
-  assert.match(source, /本次需要审批采购需求/);
-  assert.match(source, /label: '价格审批'/);
-  assert.match(source, /本次需要审批价格及付款计划/);
-  assert.match(source, /审核供应商、物品价格、付款方式和分期付款计划/);
-  assert.match(source, /进入价格审批单/);
-  assert.match(source, /!isPriceApprovalStep\(selectedRequest\)/);
-  assert.match(source, /approvalButtonLabel\(selectedRequest\)/);
+test("procurement detail shows who is waiting, the stage strip and role aware primary actions", () => {
+  assert.match(detail, /pr-strip/);
+  assert.match(detail, /chainStrip\(row\.value\)/);
+  assert.match(detail, /<span class="muted">\{\{ isProcurement \? '物料' : '预计金额' \}\}<\/span>/);
+  assert.match(view, /轮到你审批/);
+  assert.match(view, /审批中：当前在/);
+  assert.match(view, /function approvalButtonLabel/);
+  assert.match(view, /需求审批通过/);
+  assert.match(view, /function approveBlocker/);
+  assert.match(detail, /:disabled="ctx\.busy \|\| Boolean\(blocker\)"/);
 });
 
 test('PMC can edit every procurement request at the PMC node while new-material status stays explicit', () => {
-  const source = read('../src/pages/PreRequestCenter.vue');
-  assert.ok(source.includes('const canPmcModify = computed'));
-  assert.ok(source.includes('can_modify_procurement_request'));
-  assert.ok(source.includes('const pmcModifyButtonLabel = computed'));
-  assert.ok(source.includes("needsPmcMaterial(selectedRequest.value) ? '补充/修改物料' : '修改采购申请'"));
-  assert.ok(source.includes('仅当前 PMC 节点的采购申请可进入 PMC 修改'));
+  assert.match(view, /can_modify_procurement_request/);
+  assert.match(view, /export function canMaintainLines/);
+  assert.match(view, /'补充\/修改物料' : '修改采购申请'/);
+  assert.match(detail, /canMaintainLines\(row\.value\)/);
+  assert.match(form, /当前账号没有 PMC 编辑权限/);
+  assert.match(form, /modify_procurement_request/);
 });
 
 test('procurement forms support clearing a material number for PMC completion while serial stays generated', () => {
-  const source = read('../src/pages/PreRequestCenter.vue');
-  assert.match(source, /function clearMaterialSelection\(line\)/);
-  assert.match(source, /改为新增物料/);
-  assert.match(source, /不绑定物料编号，交由 PMC 补充/);
-  assert.match(source, /待 PMC 完善物料编号/);
-  assert.match(source, /function categoryPickerCanConfirm\(line\)/);
-  assert.match(source, /确认当前物料编号，交由 PMC 后续完善/);
-  assert.match(source, /提交后自动生成/);
-  assert.match(source, /procurement-pmc-edit/);
+  assert.match(editor, /function unbind\(line\)/);
+  assert.match(editor, /改为新增物料/);
+  assert.match(editor, /不绑定物料编号，交由 PMC 补充/);
+  assert.match(editor, /待 PMC 完善/);
+  assert.match(editor, /function canConfirm\(line\)/);
+  assert.match(editor, /确认当前物料编号，交由 PMC 后续完善/);
+  assert.match(detail, /提交后自动生成/);
+  assert.match(view, /procurement-pmc-edit/);
+  assert.match(view, /material_serial: line\.material_serial/);
 });
+
 test("approval actions remain distinct and stale workflow state refreshes automatically", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  const approveGuard = source.indexOf('v-if="selectedCanApprove"');
-  const approveAction = source.indexOf("act('approve')");
-  const rejectGuard = source.indexOf('v-if="selectedCanReject"');
-  const rejectAction = source.indexOf("act('reject')");
+  const approveGuard = detail.indexOf('v-if="canApprove"');
+  const approveAction = detail.indexOf("act('approve')");
+  const rejectGuard = detail.indexOf('v-if="canReject"');
+  const rejectAction = detail.indexOf("act('reject')");
   assert.ok(approveGuard > -1 && approveAction > approveGuard);
-  assert.ok(rejectGuard > approveAction && rejectAction > rejectGuard);
-  assert.match(source, /window\.addEventListener\('focus', refreshRequestsSilently\)/);
-  assert.match(source, /document\.addEventListener\('visibilitychange', refreshWhenVisible\)/);
-  assert.match(source, /window\.setInterval\(refreshRequestsSilently, 30000\)/);
-  assert.match(source, /:disabled="saving" @click="act\('approve'\)"/);
-  assert.ok(source.includes('bg-[#15803d]'));
-  assert.match(source, /:disabled="saving" @click="act\('reject'\)"/);
+  assert.ok(rejectGuard > -1 && rejectAction > rejectGuard);
+  assert.match(workbench, /window\.addEventListener\('focus', refreshSilently\)/);
+  assert.match(workbench, /document\.addEventListener\('visibilitychange', refreshWhenVisible\)/);
+  assert.match(workbench, /window\.setInterval\(refreshSilently, 30000\)/);
+  assert.match(detail, /await load\(\{ silent: true \}\)/);
 });
 
-test("background queue refreshes do not overwrite an in-progress price form", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /const hydratedDetailRequestName = ref\(''\)/);
-  assert.match(source, /if \(hydratedDetailRequestName\.value === row\.name\) return;/);
-  assert.match(source, /hydratedDetailRequestName\.value === row\.name\) return;[\s\S]{0,180}hydrateDraftForm\(row\)/);
-  assert.match(source, /hydratedDetailRequestName\.value = ''/);
+test("background refreshes do not wipe what the approver is typing", () => {
+  // 审批意见、驳回原因、撤回原因都是单独的 ref，刷新只换单据；换单据时才清空。
+  assert.match(detail, /const note = ref\(''\)/);
+  assert.match(detail, /const rejectReason = ref\(''\)/);
+  assert.match(detail, /watch\(name, \(\) => \{ withdrawOpen\.value = false; note\.value = ''; rejectReason\.value = ''; load\(\); \}/);
+  assert.match(workbench, /if \(refreshing \|\| busy\.value \|\| !\['home', 'list', 'detail'\]\.includes\(view\.value\)\) return;/);
 });
 
-
-test("PMC edit actions stay visible at the top and are not duplicated below the detail table", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /pmcEditMode \? 'sticky top-0 z-30 shadow-sm'/);
-  assert.match(source, /仅 PMC 可编辑/);
-  assert.match(source, /<div v-if=\"!pmcEditMode\" class=\"flex flex-wrap items-center gap-3 border-t/);
-  assert.match(source, /const isUnauthorizedPmcEdit = computed/);
-  assert.match(source, /当前账号无 PMC 编辑权限/);
-  assert.match(source, /!isMissingInnerRequest && !isUnauthorizedPmcEdit/);
+test("PMC edit page keeps one save button and explains missing or forbidden requests", () => {
+  assert.match(form, /保存修改/);
+  assert.equal(form.split("@click=\"savePmc\"").length - 1, 1);
+  assert.match(form, /采购申请不存在或已被删除/);
+  assert.match(form, /problem\.value = 'forbidden'/);
+  assert.match(form, /只有 PMC 在 PMC 节点能改/);
 });
 
 test("procurement withdrawal is exposed only through the applicant approval-stage action", () => {
-  const source = read("../src/pages/PreRequestCenter.vue");
-  assert.match(source, /const requestWithdrawer = createResource\(\{ url: 'rayher_hr_payroll\.api\.oa_entry\.withdraw_request' \}\)/);
-  assert.match(source, /const canWithdrawSelected = computed\(\(\) => \{/);
-  assert.match(source, /await requestWithdrawer\.submit\(\{ name: selectedRequest\.value\.name, note \}\)/);
-  assert.match(source, /撤回申请/);
-  assert.match(source, /编辑并重新提交/);
-  assert.match(source, /business_status === '已撤回'/);
+  assert.match(detail, /oa_entry\.withdraw_request/);
+  assert.match(view, /export function canWithdrawRow/);
+  assert.match(view, /if \(!isActive\(row\)\) return false;/);
+  assert.match(detail, /撤回申请/);
+  assert.match(detail, /编辑并重新提交/);
+  assert.match(detail, /撤回原因（可选）/);
+  assert.match(detail, /const canResume = computed\(\(\) => row\.value\?\.workflow_status === '草稿' && ownDraft\.value\)/);
 });
