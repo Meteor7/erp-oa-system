@@ -26,6 +26,7 @@ const ok = ref('');
 const error = ref('');
 const removing = ref('');
 const removeReason = ref('');
+const noAccess = ref(false);
 
 const poSourced = computed(() => isPoSourced(props.request));
 const checklist = computed(() => (poSourced.value
@@ -39,10 +40,13 @@ async function load(name = props.request.name) {
     const rows = (await loader.fetch({ request: name })) || [];
     if (name === props.request.name) { documents.value = rows; emit('loaded', rows); }
   } catch (err) {
-    if (name === props.request.name) error.value = errorText(err, '资料加载失败');
+    if (name !== props.request.name) return;
+    // 能看到这张单，但未必有权看它的资料（审批人、财务、管理层常见）：不弹红色错误，只提示。
+    if (/无权/.test(errorText(err, ''))) noAccess.value = true;
+    else error.value = errorText(err, '资料加载失败');
   }
 }
-watch(() => props.request.name, () => { ok.value = ''; error.value = ''; removing.value = ''; documents.value = []; load(); }, { immediate: true });
+watch(() => props.request.name, () => { ok.value = ''; error.value = ''; noAccess.value = false; removing.value = ''; documents.value = []; load(); }, { immediate: true });
 
 function pick(type) {
   uploadType.value = type;
@@ -99,9 +103,10 @@ defineExpose({ load });
         <button type="button" class="btn sm" @click="removing = ''">取消</button>
       </div>
     </div>
-    <p v-if="!documents.length" class="muted">暂无已归档资料</p>
+    <p v-if="noAccess" class="muted">你没有权限查看这张付款单的资料（发票等）。需要查看请联系申请人或财务。</p>
+    <p v-else-if="!documents.length" class="muted">暂无已归档资料</p>
 
-    <div v-for="item in checklist" :key="item.key" class="pay-check">
+    <div v-for="item in (noAccess ? [] : checklist)" :key="item.key" class="pay-check">
       <div class="split"><b>{{ item.label }}</b><span class="pill" :class="`p-${item.tone}`">{{ item.state }}</span></div>
       <span class="muted">{{ item.hint }}</span>
       <span v-if="item.matched?.length" class="muted">已归档：{{ item.matched.join('、') }}</span>
@@ -110,7 +115,7 @@ defineExpose({ load });
       </div>
     </div>
 
-    <div class="pay-docs-foot">
+    <div v-if="!noAccess" class="pay-docs-foot">
       <button type="button" class="btn" :disabled="uploading" @click="pick('其他补充资料')">{{ uploading ? '上传中…' : '上传补充资料' }}</button>
       <span class="muted">
         <template v-if="poSourced">报价和合同属于 PO，不再出现在这里的“缺资料”里；到货、验收记录在左边只读显示。<template v-if="text(invoiceRequirement) === INVOICE_BEFORE && missing.length"> 当前缺发票，确认付款时系统会拦下。</template></template>

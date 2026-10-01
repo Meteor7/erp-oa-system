@@ -19,7 +19,7 @@ defineProps({
       </span>
       <a v-if="record.evidence_file" class="link" :href="record.evidence_file" target="_blank" rel="noopener">{{ record.original_filename || '查看资料' }}</a>
       <span v-else class="muted">{{ record.original_filename || '—' }}</span>
-      <span class="muted">{{ record.recorded_by }}</span>
+      <span class="muted">{{ record.recorded_by_name || record.recorded_by }}</span>
     </div>
     <div v-if="!records.length" class="muted">{{ emptyText }}</div>
   </div>

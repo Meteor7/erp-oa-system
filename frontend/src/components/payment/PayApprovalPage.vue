@@ -61,11 +61,22 @@ const canAct = computed(() => !isDraft.value && (canApprove.value || canReject.v
 const canWithdraw = computed(() => !isDraft.value && Boolean(props.request.can_withdraw));
 const label = computed(() => approveLabel(props.request));
 const finalPay = computed(() => isFinalPayStep(props.request));
-const banner = computed(() => approvalBanner(props.request, { canAct: canAct.value, finalPay: finalPay.value, review: review.value }));
+const bannerBase = computed(() => approvalBanner(props.request, { canAct: canAct.value, finalPay: finalPay.value, review: review.value }));
 const regressedText = computed(() => (review.value.regressed ? regressionNote(review.value.blockers) : ''));
 const invoiceRequirement = computed(() => item.value?.invoice_requirement || '');
 const trigger = computed(() => item.value?.trigger_condition || '');
 const amountLabel = computed(() => money(props.request.amount));
+// 最后一步“确认付款”：条件不满足（含缺发票）时按钮置灰并写明原因，服务端在这一步同样会拦下。
+const payBlockedReason = computed(() => {
+  if (!finalPay.value || !review.value.available) return '';
+  if (review.value.blockers?.length) return `本期付款条件现在不满足：${review.value.blockers.join('；')}。`;
+  if (review.value.tiles.some((tile) => tile.key === 'invoice' && tile.state === 0)) return '本期要求付款前提供发票，请申请人先上传发票。';
+  return '';
+});
+// 条件不满足时，顶部提示不能再写“条件都满足，可以确认”。
+const banner = computed(() => (canAct.value && payBlockedReason.value
+  ? { tone: 'warn', text: `轮到你“确认付款”（最后一步），但现在还不能确认。${payBlockedReason.value}` }
+  : bannerBase.value));
 
 watch(() => props.request.name, () => {
   ok.value = '';
@@ -151,11 +162,11 @@ function openWork() {
         <div class="head-buttons">
           <button v-if="canWithdraw" type="button" class="btn danger" :disabled="busy" @click="withdrawOpen = !withdrawOpen">撤回申请</button>
           <button v-if="canReject" type="button" class="btn danger" :disabled="busy" @click="act('reject')">驳回</button>
-          <button v-if="canApprove" type="button" class="btn pri lg" :disabled="busy" @click="act('approve')">{{ label }}</button>
+          <button v-if="canApprove" type="button" class="btn pri lg" :disabled="busy || Boolean(payBlockedReason)" :aria-describedby="payBlockedReason ? 'pay-blocked-hint' : undefined" @click="act('approve')">{{ label }}</button>
         </div>
       </div>
 
-      <div class="pay-banner" :class="`is-${banner.tone}`">{{ banner.text }}</div>
+      <div id="pay-blocked-hint" class="pay-banner" :class="`is-${banner.tone}`">{{ banner.text }}</div>
       <div v-if="ok" class="banner ok" role="status">{{ ok }}</div>
       <div v-if="error" class="banner err" role="alert">{{ error }}</div>
 

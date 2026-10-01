@@ -348,7 +348,7 @@ export const MODE_CONFIG = {
     done: '到货已登记，付款条件已重新判断',
   },
   inspect: {
-    label: '登记验收', column: '验收结果', dateLabel: '验收日期', fileLabel: '验收记录 / 照片 / 报告', submit: '登记验收',
+    label: '登记验收', column: '本次验收', dateLabel: '验收日期', fileLabel: '验收记录 / 照片 / 报告', submit: '登记验收',
     api: 'record_po_inspection', dateParam: 'inspection_date', flag: 'inspect',
     warn: '每项选“通过”或“换货 / 退货”；换货、退货必须写原因。可重复登记，以最后一次为准。',
     done: '验收结果已登记，付款条件已重新判断',
@@ -642,7 +642,8 @@ export function liveReview(request = {}, items = [], groups = [], documents = []
   const ev = evaluateItem(item, group);
   const tiles = gateTiles({
     contractOk: ev.contractOk, trigger: ev.trigger, summary: ev.summary,
-    invoiceRequirement: item.invoice_requirement, invoiceDocs: invoiceDocCount(documents),
+    // 审批人常常没有权限读资料清单：以服务端数好的发票份数为准（两边取大）。
+    invoiceRequirement: item.invoice_requirement, invoiceDocs: Math.max(invoiceDocCount(documents), num(item.invoice_documents)),
   });
   return { available: true, item, group, tiles, ev, blockers: ev.blockers, regressed: conditionsRegressed(item, ev) };
 }
