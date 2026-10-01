@@ -177,7 +177,7 @@ def patch_work(monkeypatch, *, production, purchase, draft=""):
 
 
 def wl(name, quantity, received, status):
-    return WorkLine(name=name, material_serial=name, item_name="物料", quantity=quantity, received_quantity=received, inspection_status=status)
+    return WorkLine(name=name, material_serial=name, item_name="物料", quantity=quantity, received_quantity=received, inspection_status=status, source_request="")
 
 
 def test_work_item_flags_follow_production_role_and_line_states(monkeypatch):
@@ -235,6 +235,7 @@ def test_a_line_being_returned_does_not_count_as_received(monkeypatch):
 
 
 def test_receipt_and_inspection_refuse_lines_still_being_exchanged_or_returned(monkeypatch):
+    import json
     from rayher_hr_payroll.api import procurement_chain as pc
     po = NS(name="PO1", status="到货验收中", lines=[wl("A", 10, 6, "换货中")])
     monkeypatch.setattr(pc, "_require_gate", lambda *a, **kw: None)
