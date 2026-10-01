@@ -4028,7 +4028,7 @@ def test_approval_note_is_length_limited(monkeypatch):
 
 def test_serialized_steps_carry_display_names(monkeypatch):
     monkeypatch.setattr(oa_entry.frappe, "get_all", lambda *args, **kwargs: [
-        {"name": "a@example.com", "full_name": "演示员工129"}, {"name": "b@example.com", "full_name": ""}])
+        {"name": "a@example.com", "full_name": "演示员工129"}, {"name": "b@example.com", "full_name": ""}], raising=False)
     steps = [
         types.SimpleNamespace(step_index=1, step_key="k1", label="直属", mode="approve", approvers='["a@example.com"]',
                               status="已通过", approved_by='["a@example.com", "b@example.com"]', action_by="a@example.com"),
