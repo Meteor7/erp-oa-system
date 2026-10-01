@@ -142,8 +142,8 @@
 
 /* ---------- 物料明细编辑 ---------- */
 .xp .pr-scroll { overflow-x: auto; }
-.xp .pr-lines-inner { min-width: 1040px; }
-.xp .pr-row { display: grid; grid-template-columns: 24px 210px minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, .8fr) 84px 64px 70px; gap: 8px; align-items: start; }
+.xp .pr-lines-inner { min-width: 820px; }
+.xp .pr-row { display: grid; grid-template-columns: 24px 172px minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, .8fr) 76px 56px 64px; gap: 8px; align-items: start; }
 .xp .pr-lhead { padding: 6px 0; border-bottom: 1px solid var(--xp-line); font-size: 12px; color: var(--xp-ink3); align-items: center; }
 .xp .pr-line { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; border-bottom: 1px solid #EEF0F4; }
 .xp .pr-line:last-child { border-bottom: 0; }
@@ -180,8 +180,8 @@
 .xp .pr-more { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-left: 32px; font-size: 12px; color: var(--xp-ink3); }
 .xp .pr-more label { display: flex; flex-direction: column; gap: 3px; }
 .xp .pr-lines-note { padding-top: 8px; }
-.xp .pr-pl.pr-lines-inner { min-width: 1120px; }
-.xp .pr-pl .pr-row { grid-template-columns: 24px minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, 1.2fr) 84px 64px 100px 100px minmax(0, 1fr) 28px; align-items: center; }
+.xp .pr-pl.pr-lines-inner { min-width: 900px; }
+.xp .pr-pl .pr-row { grid-template-columns: 24px minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, 1.2fr) 76px 56px 88px 88px minmax(0, 1fr) 28px; align-items: center; }
 .xp .pr-pl .pr-no { padding-top: 0; }
 
 /* ---------- 物料执行进度（MaterialExecutionProgress） ---------- */

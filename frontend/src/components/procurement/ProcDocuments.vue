@@ -22,17 +22,23 @@ const input = ref(null);
 const uploadType = ref('需求申请');
 const removing = ref('');
 const reason = ref('');
+const noAccess = ref(false);
 let requested = '';
 
 async function load() {
   const name = props.request;
   requested = name;
+  noAccess.value = false;
   if (!name) { docs.value = []; return; }
   try {
     const rows = (await apiGet('oa_entry.list_approval_business_documents', { request: name })) || [];
     if (requested === name) docs.value = rows;
   } catch (error) {
-    if (requested === name) ctx.flash('', errText(error, '资料加载失败'));
+    if (requested !== name) return;
+    docs.value = [];
+    // 全局角色可以看到这张单，但未必有权看它的附件：这是正常情况，不弹整页错误。
+    if (/无权/.test(errText(error, ''))) noAccess.value = true;
+    else ctx.flash('', errText(error, '资料加载失败'));
   }
 }
 
@@ -107,7 +113,8 @@ async function confirmRemove(doc) {
         <button type="button" class="btn sm" @click="removing = ''">取消</button>
       </div>
     </div>
-    <div v-if="!docs.length" class="muted">暂无已归档资料</div>
+    <div v-if="noAccess" class="muted">你没有权限查看这张申请的附件。</div>
+    <div v-else-if="!docs.length" class="muted">暂无已归档资料</div>
 
     <div v-for="item in checklist" :key="item.key" class="pr-check">
       <div class="split"><b>{{ item.label }}</b><span :class="['pill', item.satisfied ? 'p-jade' : 'p-sun']">{{ item.satisfied ? '已满足' : '待补资料' }}</span></div>
@@ -118,7 +125,7 @@ async function confirmRemove(doc) {
     </div>
     <div v-if="missing" class="muted">当前节点还缺 {{ missing }} 项资料。</div>
 
-    <div v-if="!readonly" class="actions">
+    <div v-if="!readonly && !noAccess" class="actions">
       <button type="button" class="btn" :disabled="uploading || !request" @click="pick('需求申请')">{{ uploading ? '上传中…' : '＋ 上传附件' }}</button>
     </div>
     <input ref="input" type="file" class="pr-hidden" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx" :disabled="uploading || !request" aria-label="选择附件" @change="upload" />
