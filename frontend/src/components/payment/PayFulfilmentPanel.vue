@@ -1,6 +1,6 @@
 <script setup>
 // 到货与验收：整张 PO 共用。生产主管有四种登记：到货 / 验收 / 换货到货 / 退货发出（记录只增不改）；其他人只读。
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
 import {
   INSPECT_CHOICES, MODE_CONFIG, MODE_ORDER, REFUND_NOTICE, buildFulfilmentRequest, defaultQuantity, eligibleLines,
@@ -45,6 +45,8 @@ const busy = ref(false);
 const uploading = ref(false);
 const error = ref('');
 const ok = ref('');
+let okTimer = null;
+onBeforeUnmount(() => clearTimeout(okTimer));
 
 function resetModeState(key) {
   drafts[key] = {};
@@ -57,7 +59,7 @@ watch(() => props.group.po, () => {
   error.value = '';
   ok.value = '';
 });
-watch(mode, () => { error.value = ''; });
+watch(mode, () => { error.value = ''; ok.value = ''; });
 
 function qtyValue(line) {
   const raw = drafts[mode.value][line.name];
@@ -91,6 +93,8 @@ async function submit() {
   try {
     await resources[request.method].submit(request.params);
     ok.value = MODE_CONFIG[key].done;
+    clearTimeout(okTimer);
+    okTimer = setTimeout(() => { ok.value = ''; }, 8000);
     resetModeState(key);
     emit('changed');
   } catch (err) { error.value = errorText(err, `${MODE_CONFIG[key].label}失败`); } finally { busy.value = false; }

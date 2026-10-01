@@ -1,6 +1,6 @@
 <script setup>
 // 付款工作项：左边 PO 列表，右边选中的 PO（到货与验收 + 各付款期次）。预置筛选：?status= 和 ?po=。
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
 import { useRoute } from 'vue-router';
 import {
@@ -30,6 +30,8 @@ const statusFilter = ref(presetStatus(route.query));
 const search = ref(String(route.query.po || ''));
 const selectedPo = ref(String(route.query.po || ''));
 const notice = ref('');
+let noticeTimer = null;
+onBeforeUnmount(() => clearTimeout(noticeTimer));
 const error = ref('');
 const pushingKey = ref('');
 
@@ -70,6 +72,8 @@ async function pushPayment(view) {
   try {
     const result = await pusher.submit({ name: view.po, payment_plan_row: view.planRow });
     notice.value = `已生成采购付款 ${result.payment_request} 并进入审批`;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { notice.value = ''; }, 8000);
     await refresh();
     emit('open-request', result.payment_request);
   } catch (err) {

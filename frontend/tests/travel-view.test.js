@@ -102,6 +102,12 @@ test("approval timeline shows who acted when, and the note", () => {
   assert.equal(timeline[0].sub, "已同意 · u1 · 2026-09-30 10:20");
   assert.equal(timeline[0].note, "同意");
   assert.equal(timeline[1].sub, "等待处理");
+  const named = travelTimeline({ workflow_status: "已完成", steps: [
+    { step_index: 1, label: "会签", status: "已通过", mode: "approve", action_by: "a@tests-x.example.invalid", action_by_name: "演示员工129", approved_by: ["a@tests-x.example.invalid"], approved_by_names: ["演示员工129"] },
+    { step_index: 2, label: "会签", status: "已通过", mode: "approve", action_by: "", approved_by: ["b@tests-x.example.invalid", "history.2e7d2c03a9@tests-x.example.invalid"], approved_by_names: ["演示员工146", "演示员工157"] },
+  ] });
+  assert.equal(named[0].who, "演示员工129");
+  assert.equal(named[1].who, "演示员工146、演示员工157");
   assert.equal(travelTimeline({ workflow_status: "已拒绝", steps: [{ step_index: 1, label: "直属主管", status: "已拒绝", note: "改期" }] })[0].state, "rejected");
 });
 

@@ -36,6 +36,8 @@
 .xp .bd-po-grid .panel { margin-bottom: 0; }
 .xp .bd-note { margin-top: 10px; }
 .xp .bd-paid { min-width: 150px; }
+.xp .bd-po table { min-width: 720px; }
+.xp .bd-po .bd-sup { min-width: 150px; max-width: 240px; }
 .xp .bd-paid .bd-mini { margin-top: 4px; }
 .xp .bd-pad { padding: 14px 16px 6px; margin: 0; }
 

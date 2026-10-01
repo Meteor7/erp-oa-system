@@ -73,13 +73,13 @@ defineExpose({ reload: load });
       </div>
       <div class="panel">
         <div class="pt"><span>各 PO 进度</span><span class="muted">点一行进入采购付款</span></div>
-        <div class="tbl narrow">
+        <div class="tbl narrow bd-po">
           <table>
-            <thead><tr><th>PO</th><th>供应商</th><th>到货</th><th>验收通过</th><th>已付 / 总额</th><th>PO 状态</th></tr></thead>
+            <thead><tr><th>PO</th><th class="bd-sup">供应商</th><th>到货</th><th>验收通过</th><th>已付 / 总额</th><th>PO 状态</th></tr></thead>
             <tbody>
               <tr v-for="row in poRows" :key="row.po" class="row-sel" @click="openPo(row)">
                 <td class="num strong">{{ row.po }}</td>
-                <td>{{ row.supplier }}</td>
+                <td class="bd-sup">{{ row.supplier }}</td>
                 <td><span :class="['pill', row.receivedDone ? 'p-jade' : 'p-gray']">{{ row.received }}</span></td>
                 <td><span :class="['pill', row.passedDone ? 'p-jade' : 'p-gray']">{{ row.passed }}</span></td>
                 <td class="bd-paid"><span class="num">{{ row.paidText }}</span><div class="stack-bar bd-mini"><i :style="{ width: row.paidWidth, background: '#7FA38E' }"></i></div></td>

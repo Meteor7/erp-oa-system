@@ -153,7 +153,10 @@ export function travelTimeline(doc = {}) {
     else if (step.status === '已拒绝') state = 'rejected';
     else if (active && index === current) state = 'now';
     const when = step.acted_on ? String(step.acted_on).slice(0, 16) : '';
-    const who = String(step.action_by || '').trim() || (Array.isArray(step.approved_by) ? step.approved_by.filter(Boolean).join('、') : '');
+    // 后端给了姓名就显示姓名，没有（旧数据）才退回账号。
+    const accounts = Array.isArray(step.approved_by) ? step.approved_by.filter(Boolean).join('、') : '';
+    const names = Array.isArray(step.approved_by_names) ? step.approved_by_names.filter(Boolean).join('、') : '';
+    const who = String(step.action_by_name || '').trim() || String(step.action_by || '').trim() || names || accounts;
     const verb = state === 'done' ? `已${step.mode === 'handle' ? '办理' : '同意'}` : state === 'rejected' ? '已驳回' : state === 'now' ? '等待处理' : '';
     return {
       key: `${index}-${step.label}`, label: String(step.label || ''), state, note: String(step.note || ''),
