@@ -85,13 +85,13 @@ test('line result chips: 未到 / 待验收 / 已通过 / 换货中 / 退货中 
 test('summarizeLines counts received / passed / exchange / return lines', () => {
   const summary = summarizeLines([passed(), received(), exchanging(), returning(), line(), line({ received_quantity: 3 })]);
   assert.equal(summary.total, 6);
-  assert.equal(summary.recvN, 4);
+  assert.equal(summary.recvN, 3);
   assert.equal(summary.inspN, 1);
   assert.equal(summary.allReceived, false);
   assert.equal(summary.allInspected, false);
   assert.equal(summary.hasExchange, true);
   assert.equal(summary.hasReturn, true);
-  assert.equal(summary.unreceivedN, 2);
+  assert.equal(summary.unreceivedN, 3);
   assert.equal(summary.anyPartial, true);
   const empty = summarizeLines([]);
   assert.equal(empty.allReceived, false);
@@ -108,12 +108,12 @@ const GATE_CASES = [
   { name: '全部到货 + 到了一半 -> 待到货资料', trigger: '全部到货', lines: () => [received(), line()], status: '待到货资料', blockers: ['本期要求全部到货'] },
   { name: '全部到货 + 部分到货的行 -> 待到货资料', trigger: '全部到货', lines: () => [received(), line({ received_quantity: 4, inspection_status: '待验收' })], status: '待到货资料', blockers: ['本期要求全部到货'] },
   { name: '全部到货 + 到齐（未验收） -> 可提交', trigger: '全部到货', lines: () => [received(), received()], status: '可提交付款审批', blockers: [] },
-  { name: '到货条件 + 有退货中的行（数量还在） -> 不拦（按到货数量判断）', trigger: '到货', lines: () => [received(), returning()], status: '可提交付款审批', blockers: [] },
+  { name: '到货条件 + 有退货中的行（数量还在，但货要退回去） -> 待到货资料', trigger: '到货', lines: () => [received(), returning()], status: '待到货资料', blockers: ['本期要求全部到货'] },
   { name: '到货条件 + 退货发出后数量清零 -> 待到货资料', trigger: '到货', lines: () => [received(), line({ inspection_status: '未验收' })], status: '待到货资料', blockers: ['本期要求全部到货'] },
   { name: '全部到货并验收通过 + 没到 -> 待到货资料（三个阻塞）', trigger: '全部到货并验收通过', lines: () => [line()], status: '待到货资料', blockers: ['本期要求全部到货', '验收前需全部到货', '本期要求验收通过'] },
   { name: '全部到货并验收通过 + 到齐未验收 -> 待验收', trigger: '全部到货并验收通过', lines: () => [received(), received()], status: '待验收', blockers: ['本期要求验收通过'] },
   { name: '全部到货并验收通过 + 一项通过一项换货中 -> 待验收', trigger: '全部到货并验收通过', lines: () => [passed(), exchanging()], status: '待验收', blockers: ['本期要求验收通过'] },
-  { name: '全部到货并验收通过 + 一项退货中 -> 待验收', trigger: '全部到货并验收通过', lines: () => [passed(), returning()], status: '待验收', blockers: ['本期要求验收通过'] },
+  { name: '全部到货并验收通过 + 一项退货中 -> 待验收', trigger: '全部到货并验收通过', lines: () => [passed(), returning()], status: '待到货资料', blockers: ['本期要求全部到货', '验收前需全部到货', '本期要求验收通过'] },
   { name: '全部到货并验收通过 + 全部通过 -> 可提交', trigger: '全部到货并验收通过', lines: () => [passed(), passed()], status: '可提交付款审批', blockers: [] },
   { name: '仅验收 + 没到 -> 待到货资料（验收前需全部到货含“到货”）', trigger: '验收通过', lines: () => [passed(), line()], status: '待到货资料', blockers: ['验收前需全部到货', '本期要求验收通过'] },
   { name: '仅验收 + 到齐、换货中 -> 待验收', trigger: '验收通过', lines: () => [passed(), exchanging()], status: '待验收', blockers: ['本期要求验收通过'] },
@@ -216,13 +216,13 @@ test('installmentView surfaces the regression warning, draft link and push gatin
   assert.equal(view.paymentRequest, 'OA9');
   assert.equal(view.waitFor, '审批中：出纳：x');
 
-  // 被退回的草稿：状态是“可提交”，但不给提交按钮，只给草稿链接
+  // 被退回的草稿：照常可以提交（沿用这张单据），同时给草稿链接
   const draftRow = item([received()], { trigger_condition: '到货', draft_request: 'OA-DRAFT', can_push_payment: 1 });
   const draftView = installmentView(draftRow, null, { canPurchase: true });
   assert.equal(draftView.status, '可提交付款审批');
-  assert.equal(draftView.canPush, false);
+  assert.equal(draftView.canPush, true);
   assert.equal(draftView.draft, 'OA-DRAFT');
-  assert.equal(draftView.draftText, '已退回，存在草稿 OA-DRAFT');
+  assert.equal(draftView.draftText, '上次被退回的付款单 OA-DRAFT，重新提交会沿用这张单据');
 
   // 能提交：采购 + 无阻塞 + 无审批 + 无草稿
   const readyView = installmentView(item([received()], { trigger_condition: '到货', can_push_payment: 1 }), null, { canPurchase: true });
@@ -251,7 +251,7 @@ test('waiting-for text follows who has to act next', () => {
     [{ status: '待验收', summary: sum([passed(), returning()]) }, '等退货发出 / 供应商补发'],
     [{ status: '可提交付款审批', summary: sum([passed()]), canPush: false }, '等采购提交付款审批'],
     [{ status: '可提交付款审批', summary: sum([passed()]), canPush: true }, ''],
-    [{ status: '可提交付款审批', summary: sum([passed()]), draft: 'OA1' }, ''],
+    [{ status: '可提交付款审批', summary: sum([passed()]), canPush: true, draft: 'OA1' }, ''],
     [{ status: '付款审批中', summary: sum([passed()]), requestSummary: { current_step_label: '总账会计：x' } }, '审批中：总账会计：x'],
     [{ status: '待实际付款', summary: sum([passed()]), requestSummary: { current_step_label: '总经理付款：x' } }, '等 总经理付款：x'],
     [{ status: '已付款', summary: sum([passed()]) }, ''],
@@ -740,4 +740,12 @@ test('money, quantity and today formatting', () => {
   assert.equal(quantity('20'), '20');
   assert.equal(todayString(new Date(2026, 9, 1)), '2026-10-01');
   assert.equal(todayString(new Date(2026, 0, 9)), '2026-01-09');
+});
+
+test('a line being returned does not count as received', () => {
+  assert.equal(lineState(returning()).received, false);
+  assert.equal(lineState(exchanging()).received, true);
+  const sum = summarizeLines([passed(), returning()]);
+  assert.equal(sum.allReceived, false);
+  assert.equal(sum.unreceivedN, 1);
 });

@@ -55,7 +55,7 @@ onMounted(() => {
   reloadWork();
   window.addEventListener('focus', refreshAll);
   document.addEventListener('visibilitychange', onVisible);
-  timer = window.setInterval(refreshAll, 30000);
+  timer = window.setInterval(() => { if (!document.hidden) refreshAll(); }, 30000);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('focus', refreshAll);

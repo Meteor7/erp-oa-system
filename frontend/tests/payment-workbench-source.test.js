@@ -38,7 +38,7 @@ test('workbench keeps the two tabs, the PO-view gating and the query-driven view
   assert.match(workbench, /tab: 'approvals'/);
   assert.match(workbench, /查看 PO 与合同/);
   // 30 秒 + 窗口获得焦点 + 页面重新可见时刷新
-  assert.match(workbench, /setInterval\(refreshAll, 30000\)/);
+  assert.match(workbench, /setInterval\(\(\) => \{ if \(!document\.hidden\) refreshAll\(\); \}, 30000\)/);
   assert.match(workbench, /addEventListener\('focus'/);
   assert.match(workbench, /visibilitychange/);
   assert.match(workbench, /removeEventListener\('focus'/);
@@ -102,7 +102,7 @@ test('installment cards show the gates, the trigger text, blockers and who is aw
   for (const text of ['合同已生效', '全部到货', '验收通过']) assert.match(view, new RegExp(text), text);
   for (const text of ['等生产主管登记到货', '等生产主管登记验收', '等供应商换货到货', '等退货发出 / 供应商补发', '等采购提交付款审批']) assert.match(view, new RegExp(text), text);
   assert.match(view, /审批过程中条件已回退/);
-  assert.match(view, /已退回，存在草稿/);
+  assert.match(view, /上次被退回的付款单/);
 });
 
 test('approvals tab keeps queue views, paging, exact lookup and auto refresh', () => {

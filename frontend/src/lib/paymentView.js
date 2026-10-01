@@ -84,7 +84,8 @@ export function lineState(line = {}) {
   else key = 'pending';
   return {
     key, label: LINE_LABEL[key], tone: LINE_TONE[key], qty, recv, left,
-    received: recv + EPS >= qty,
+    // 退货中的货要退回去，不算"已到齐"（服务端同一规则）。
+    received: recv + EPS >= qty && status !== '退货中',
     partial: recv > 0 && left > 0,
     passed: status === '已通过',
     status,
@@ -175,7 +176,7 @@ export function regressionNote(blockers = []) {
   return `审批过程中条件已回退${why}。系统会在最后一步“总经理确认付款”时再检查并拦下，请先处理到货 / 验收。`;
 }
 
-export function draftNote(name) { return `已退回，存在草稿 ${name}`; }
+export function draftNote(name) { return `上次被退回的付款单 ${name}，重新提交会沿用这张单据`; }
 
 // 谁在等谁。
 export function waitingFor({ status, summary, canPush = false, draft = '', requestSummary = {}, paymentRequest = '' }) {
@@ -188,7 +189,6 @@ export function waitingFor({ status, summary, canPush = false, draft = '', reque
     return '等生产主管登记验收';
   }
   if (status === '可提交付款审批') {
-    if (draft) return '';
     return canPush ? '' : '等采购提交付款审批';
   }
   if (status === '付款审批中') return `审批中：${text(requestSummary?.current_step_label) || text(paymentRequest) || '-'}`;
@@ -350,7 +350,7 @@ export const MODE_CONFIG = {
   inspect: {
     label: '登记验收', column: '本次验收', dateLabel: '验收日期', fileLabel: '验收记录 / 照片 / 报告', submit: '登记验收',
     api: 'record_po_inspection', dateParam: 'inspection_date', flag: 'inspect',
-    warn: '每项选“通过”或“换货 / 退货”；换货、退货必须写原因。可重复登记，以最后一次为准。',
+    warn: '每项选“通过”或“换货 / 退货”；换货、退货必须写原因。提交后已通过的物料不再出现在这里，请核对后再提交。',
     done: '验收结果已登记，付款条件已重新判断',
   },
   exchange: {
@@ -471,7 +471,7 @@ export function installmentView(item = {}, group = null, { canPurchase = false }
   const ev = evaluateItem(item, group);
   const draft = text(item.draft_request);
   const flag = item.can_push_payment;
-  const canPush = !draft && (flag === undefined || flag === null
+  const canPush = (flag === undefined || flag === null
     ? Boolean(canPurchase) && ev.status === '可提交付款审批'
     : Boolean(Number(flag)) && ev.status === '可提交付款审批');
   const regressed = conditionsRegressed(item, ev);
