@@ -207,7 +207,7 @@ def test_returned_draft_is_reported_and_the_installment_can_be_pushed_again(monk
 
 def test_push_reuses_the_returned_draft_instead_of_opening_a_second_request(monkeypatch):
     pc = patch_work(monkeypatch, production=False, purchase=True, draft="OA-2026-1")
-    po = NS(name="PO1", status="供应商制作中", contract_status="已生效", payment_plan=[work_row(name="PLAN-1")], lines=[wl("A", 10, 10, "已通过")])
+    po = NS(name="PO1", status="供应商制作中", contract_status="已生效", supplier="供应商", payment_plan=[work_row(name="PLAN-1")], lines=[wl("A", 10, 10, "已通过")])
     po.payment_plan[0].trigger_condition = "合同生效"
     monkeypatch.setattr(pc, "_require_purchase", lambda: None)
     monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: po)
