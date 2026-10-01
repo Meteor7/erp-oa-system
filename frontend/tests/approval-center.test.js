@@ -73,6 +73,7 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /OAApprovals\.vue/);
   assert.match(source, /PreRequestCenter\.vue/);
   assert.match(source, /PaymentCenter\.vue/);
+  // (the page is now a thin wrapper around components/payment/PaymentWorkbench.vue)
   assert.match(source, /ApprovalDashboard\.vue/);
   assert.match(source, /TravelRequest\.vue/);
   assert.match(source, /InvoiceFolder\.vue/);
@@ -83,19 +84,23 @@ test("router registers each page without replacing the existing leave implementa
 });
 
 test("procurement pages save and submit through the real workflow engine", () => {
-  const pre = read("../src/pages/PreRequestCenter.vue");
+  // 采购申请 / 购买申请页面在 components/procurement 下（2026-09-30 改版）；旧页面只是一层壳。
+  const form = read("../src/components/procurement/ProcForm.vue");
+  const detail = read("../src/components/procurement/ProcDetail.vue");
+  const view = read("../src/lib/procurementView.js");
+  const pre = [form, detail, view, read("../src/components/procurement/ProcurementWorkbench.vue")].join("\n");
   assert.doesNotMatch(pre, /审批流程尚未配置/);
-  assert.match(pre, /save_approval_center_draft/);
-  assert.match(pre, /submit_approval_center_draft/);
-  assert.match(pre, />提交审批</);
+  assert.match(form, /save_approval_center_draft/);
+  assert.match(form, /submit_approval_center_draft/);
+  assert.match(form, />\{\{ saving \? '处理中…' : '提交审批' \}\}</);
   assert.match(pre, /current_step_label/);
-  assert.match(pre, /row in selectedRequest.steps/);
-  assert.match(pre, /currentStepMode/);
-  assert.match(pre, /办理完成/);
-  assert.match(pre, /审批通过/);
+  assert.match(view, /stepTimeline/);
+  assert.match(detail, /stepTimeline\(row\.value/);
+  assert.match(view, /办理完成/);
+  assert.match(view, /审批通过/);
   assert.doesNotMatch(pre, /通过\/办理/);
-  assert.match(pre, /reject_target/);
-  assert.match(pre, /驳回原因/);
+  assert.match(detail, /reject_target/);
+  assert.match(detail, /驳回原因/);
 });
 
 test("dashboard renders money, fixed-asset and prepayment risk drilldowns", () => {
@@ -152,11 +157,11 @@ test("the removed consumption push leaves no references behind in OA approvals",
 });
 
 test("procurement pages follow the server's rights (review fixes 2026-09-24)", () => {
-  const payment = read("../src/pages/PaymentCenter.vue");
+  const payment = read("../src/components/payment/PaymentWorkbench.vue");
   assert.match(payment, /const canWork = canSeeProcurementPO\(\)/);
   assert.match(payment, /v-if="canWork"/);
   const board = read("../src/pages/MaterialProgress.vue");
   assert.match(board, /v-if="canCreatePr"/);
-  const price = read("../src/pages/PriceApprovalWorkbench.vue");
+  const price = read("../src/components/price/SupplierDrawer.vue");
   assert.doesNotMatch(price, /<option>USD<\/option>/);
 });
