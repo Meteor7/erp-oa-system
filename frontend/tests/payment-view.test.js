@@ -622,6 +622,10 @@ test('live review finds the work item of the OA and recomputes the gates with th
   const invoiceItems = items.map((i) => (i.payment_plan_row === 'R2' ? { ...i, invoice_requirement: '付款前提供' } : i));
   const withInvoice = liveReview(request, invoiceItems, buildPoGroups(invoiceItems), [{ document_type: '发票', status: '有效' }]);
   assert.equal(withInvoice.tiles[3].state, 1);
+  // 审批人没有权限读资料清单时，以服务端数好的发票份数为准
+  const counted = invoiceItems.map((i) => (i.payment_plan_row === 'R2' ? { ...i, invoice_documents: 1 } : i));
+  assert.equal(liveReview(request, counted, buildPoGroups(counted), []).tiles[3].state, 1);
+  assert.equal(liveReview(request, invoiceItems, buildPoGroups(invoiceItems), []).tiles[3].state, 0);
   // 找不到工作项（比如没有 PO 查看权限）
   const missing = liveReview(payRequest({ source_po_payment_plan_row: 'zzz', name: 'OA-2' }), items, groups, []);
   assert.equal(missing.available, false);
