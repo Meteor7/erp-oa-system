@@ -1,0 +1,109 @@
+/* 采购付款（付款工作项 + 付款审批单）。基础样式用 expenseUi.css，这里只放采购付款自己的部分，类名前缀 pay-，全部挂在 .xp 下。 */
+.xp.pay-root { display: flex; flex-direction: column; gap: 0; }
+.xp .pay-hidden { display: none; }
+
+/* 条件格 */
+.xp .pay-gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.xp .pay-gate { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 8px; background: #F7F8FA; color: var(--xp-ink2); font-size: 13px; }
+.xp .pay-gate span { font-size: 12px; opacity: .75; }
+.xp .pay-gate b { font-weight: 600; }
+.xp .pay-gate.ok { background: var(--xp-jade-bg); color: var(--xp-jade); }
+.xp .pay-gate.wait { background: var(--xp-sun-bg); color: var(--xp-sun); }
+
+/* 履约记录 */
+.xp .pay-records { display: flex; flex-direction: column; gap: 2px; }
+.xp .pay-record { display: grid; grid-template-columns: 76px 92px minmax(0, 1fr) minmax(0, 190px) minmax(0, 150px); gap: 10px; align-items: center; padding: 6px 0; font-size: 13px; border-top: 1px solid var(--xp-line); }
+.xp .pay-record:first-child { border-top: 0; }
+.xp .pay-record-detail { min-width: 0; overflow-wrap: anywhere; }
+.xp .pay-record a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) { .xp .pay-record { grid-template-columns: 70px 90px minmax(0, 1fr); } .xp .pay-record a, .xp .pay-record > span:last-child { grid-column: 3; } }
+
+/* 到货与验收 */
+.xp .pay-modes { display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 10px; background: #F1F3F6; border-radius: 8px; flex-wrap: wrap; }
+.xp .pay-modes button { border: 0; background: none; font: inherit; font-size: 13px; padding: 5px 14px; border-radius: 6px; color: var(--xp-ink3); cursor: pointer; }
+.xp .pay-modes button.on { background: #fff; color: var(--xp-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(26, 33, 48, .08); }
+.xp .pay-lines td { vertical-align: top; }
+.xp .pay-lines .pay-left { color: var(--xp-sun); }
+.xp .pay-lines .pay-full { color: var(--xp-jade); }
+.xp .pay-qty { width: 90px; text-align: right; }
+.xp .pay-reason { margin-top: 4px; min-width: 150px; }
+.xp .pay-reason-text { margin-top: 2px; }
+.xp .pay-form { display: grid; grid-template-columns: 160px minmax(0, 250px) minmax(0, 1fr) auto; gap: 12px; align-items: end; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--xp-line); }
+@media (max-width: 900px) { .xp .pay-form { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .xp .pay-form { grid-template-columns: 1fr; } }
+.xp .pay-file { position: relative; display: block; padding: 7px 10px; margin: 0; border: 1px dashed var(--xp-line2); border-radius: 6px; font-size: 13px; color: var(--xp-brand-d); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xp .pay-file:hover { border-color: var(--xp-brand); }
+.xp .pay-file input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.xp .pay-warn { margin: 8px 0 0; line-height: 1.7; }
+
+/* 付款期次卡片 */
+.xp .pay-inst { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--xp-line); border-radius: 10px; background: #fff; }
+.xp .pay-inst.is-ready { border-color: var(--xp-brand); }
+.xp .pay-inst.is-paid { background: #FAFBFC; }
+.xp .pay-inst-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.xp .pay-inst-head b { font-size: 15px; font-weight: 600; }
+.xp .pay-trigger { font-size: 13px; color: var(--xp-ink2); }
+.xp .pay-trigger b { font-weight: 600; color: var(--xp-ink); }
+.xp .pay-inst-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.xp .pay-block-text { font-size: 12px; color: var(--xp-sun); }
+.xp .banner.pay-regress, .xp .banner.pay-draft { background: var(--xp-sun-bg); color: var(--xp-sun); margin: 0; }
+.xp .pay-foot { margin: 4px 0 0; line-height: 1.7; }
+
+/* 工作项：筛选 + PO 列表 */
+.xp .pay-filters { margin-bottom: 12px; }
+.xp .pay-filters .pay-search { flex: 1; min-width: 200px; max-width: 260px; margin-left: auto; font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid var(--xp-line2); border-radius: 8px; }
+.xp .pay-chip-n { margin-left: 6px; opacity: .7; }
+.xp .pay-page { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.xp .pay-split { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .xp .pay-split { grid-template-columns: 1fr; } }
+.xp .pay-po-list { margin-bottom: 0; }
+.xp .pay-po-title { padding: 12px 14px; margin: 0; border-bottom: 1px solid var(--xp-line); }
+.xp .pay-po { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--xp-line); background: #fff; font: inherit; font-size: 12px; text-align: left; cursor: pointer; color: var(--xp-ink); }
+.xp .pay-po:hover { background: #FFFAF3; }
+.xp .pay-po.on { background: #FFFAF3; box-shadow: inset 3px 0 0 var(--xp-brand); }
+.xp .pay-po .split { width: 100%; }
+.xp .pay-po b { font-size: 13px; }
+.xp .pay-po-sup { color: var(--xp-ink2); }
+.xp .pay-po-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.xp .pay-mini { padding: 2px 6px; font-size: 11px; }
+.xp .pay-main { min-width: 0; display: flex; flex-direction: column; }
+.xp .pay-main > .panel { margin-bottom: 16px; }
+.xp .pay-po-head h3 { margin: 0; font-size: 20px; font-weight: 600; }
+
+/* 审批单 */
+.xp .pay-approvals { display: flex; flex-direction: column; }
+.xp .pay-note { margin: 0 0 10px; }
+.xp .pay-queue { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.xp .pay-queue .empty { grid-column: 1 / -1; }
+.xp .pay-queue-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--xp-line); border-radius: 10px; background: #fff; font: inherit; font-size: 13px; text-align: left; cursor: pointer; color: var(--xp-ink); }
+.xp .pay-queue-card:hover { border-color: var(--xp-line2); }
+.xp .pay-queue-card.todo { border-left: 3px solid var(--xp-brand); }
+.xp .pay-queue-card.on { border-color: var(--xp-brand); box-shadow: inset 3px 0 0 var(--xp-brand); }
+.xp .pay-queue-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xp .pay-approval-head .detail-head { margin-bottom: 10px; }
+.xp .pay-banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; background: #F7F8FA; color: var(--xp-ink2); margin-bottom: 10px; }
+.xp .pay-banner.is-warn { background: var(--xp-sun-bg); color: var(--xp-sun); }
+.xp .pay-banner.is-act { background: var(--xp-brand-bg); color: #7A4210; }
+.xp .pay-act-form { display: grid; grid-template-columns: minmax(0, 1.4fr) 220px minmax(0, 1fr); gap: 12px; padding: 14px; background: var(--xp-soft); border-radius: 10px; align-items: end; }
+.xp .pay-act-form.pay-withdraw { grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 10px; }
+.xp .pay-act-form.pay-withdraw .s2 { grid-column: auto; }
+@media (max-width: 900px) { .xp .pay-act-form { grid-template-columns: 1fr; } }
+.xp .pay-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 20px; }
+.xp .pay-facts > div { display: flex; flex-direction: column; gap: 2px; }
+.xp .pay-facts b { font-weight: 500; font-size: 14px; overflow-wrap: anywhere; }
+.xp .pay-log { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; font-size: 12px; padding: 4px 0; }
+
+/* 业务资料 */
+.xp .pay-doc { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--xp-line); font-size: 13px; }
+.xp .pay-doc:first-of-type { border-top: 0; }
+.xp .pay-doc.void { opacity: .5; }
+.xp .pay-doc.void .ellipsis { text-decoration: line-through; }
+.xp .pay-doc a { min-width: 0; color: inherit; }
+.xp .pay-remove { flex-basis: 100%; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.xp .pay-remove .cell { flex: 1; min-width: 160px; }
+.xp .pay-check { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-top: 8px; border: 1px solid var(--xp-line); border-radius: 8px; }
+.xp .pay-docs-foot { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; align-items: flex-start; }
+
+/* 旧数据付款后跟进 */
+.xp .pay-legacy-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.xp .pay-legacy-row .cell { width: auto; min-width: 120px; flex: 1; }
