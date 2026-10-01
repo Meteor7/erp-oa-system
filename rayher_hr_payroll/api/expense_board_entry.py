@@ -16,6 +16,7 @@ from rayher_hr_payroll.api import oa_entry
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_PAYMENT,
+    REQUEST_PROCUREMENT_PAYMENT,
     REQUEST_REIMBURSEMENT,
     REQUEST_TRAVEL,
 )
@@ -192,7 +193,7 @@ def procurement_board():
     today = getdate(nowdate())
     rows = _decorate(_rows(boards.PROCUREMENT_TYPES, scope, department), today)
     result = _result(boards.procurement_board(rows, today=today), scope, department)
-    if scope == "all":
+    if scope == "all" and can_access_request_type(REQUEST_PROCUREMENT_PAYMENT):
         # 按 PO 付款期次的真实状态统计（付款单上的到货 / 验收字段只有付款后才有值）。
         try:
             from rayher_hr_payroll.api import procurement_chain

@@ -198,19 +198,63 @@ def test_work_item_hides_registration_from_purchase_and_finance(monkeypatch):
     assert item["work_status"] == "可提交付款审批" and item["can_push_payment"] == 1
 
 
-def test_returned_draft_blocks_a_second_push_and_is_reported(monkeypatch):
+def test_returned_draft_is_reported_and_the_installment_can_be_pushed_again(monkeypatch):
     pc = patch_work(monkeypatch, production=False, purchase=True, draft="OA-2026-1")
     item = pc._payment_work_item(work_po(wl("A", 10, 10, "已通过")), work_row(trigger_condition="合同生效"))
     assert item["draft_request"] == "OA-2026-1"
-    assert item["can_push_payment"] == 0
+    assert item["can_push_payment"] == 1
+
+
+def test_push_reuses_the_returned_draft_instead_of_opening_a_second_request(monkeypatch):
+    pc = patch_work(monkeypatch, production=False, purchase=True, draft="OA-2026-1")
     po = NS(name="PO1", status="供应商制作中", contract_status="已生效", payment_plan=[work_row(name="PLAN-1")], lines=[wl("A", 10, 10, "已通过")])
+    po.payment_plan[0].trigger_condition = "合同生效"
     monkeypatch.setattr(pc, "_require_purchase", lambda: None)
-    monkeypatch.setattr(pc, "_fulfillment_records", lambda name: [])
+    monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: po)
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_save_draft(request_type, payload, name=None):
+        seen["name"] = name
+        raise Stop()
+
+    monkeypatch.setattr("rayher_hr_payroll.approval_center.save_draft", fake_save_draft)
+    with pytest.raises(Stop):
+        inspect.unwrap(pc.push_po_payment_request)("PO1", "PLAN-1")
+    assert seen["name"] == "OA-2026-1"
+
+
+def test_a_line_being_returned_does_not_count_as_received(monkeypatch):
+    pc = patch_work(monkeypatch, production=False, purchase=True)
+    po = work_po(wl("A", 10, 10, "退货中"))
+    item = pc._payment_work_item(po, work_row(trigger_condition="到货"))
+    assert item["can_push_payment"] == 0 and item["work_status"] == "待到货资料"
+    assert pc._line_received(wl("A", 10, 10, "待验收")) and not pc._line_received(wl("A", 10, 10, "退货中"))
+
+
+def test_receipt_and_inspection_refuse_lines_still_being_exchanged_or_returned(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain as pc
+    po = NS(name="PO1", status="到货验收中", lines=[wl("A", 10, 6, "换货中")])
+    monkeypatch.setattr(pc, "_require_gate", lambda *a, **kw: None)
+    monkeypatch.setattr(pc, "_require_production_receipt", lambda: None)
     monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: po)
     monkeypatch.setattr(pc.frappe, "throw", fail)
-    po.payment_plan[0].trigger_condition = "合同生效"
-    with pytest.raises(ValueError, match="已有被退回的采购付款 OA-2026-1"):
-        inspect.unwrap(pc.push_po_payment_request)("PO1", "PLAN-1")
+    with pytest.raises(ValueError, match="请先登记换货到货 / 退货发出，不能直接登记到货"):
+        inspect.unwrap(pc.record_po_receipt)("PO1", json.dumps([{"line": "A", "quantity": 4}]), "2026-10-01", "F1")
+    with pytest.raises(ValueError, match="请先登记换货到货 / 退货发出，再验收"):
+        inspect.unwrap(pc.record_po_inspection)("PO1", json.dumps([{"line": "A", "status": "已通过"}]), "2026-10-01", "F1")
+    with pytest.raises(ValueError, match="验收明细或验收结果无效"):
+        inspect.unwrap(pc.record_po_inspection)("PO1", json.dumps([{"line": "A", "status": "不合格", "reason": "x"}]), "2026-10-01", "F1")
+
+
+def test_exchange_and_return_quantity_compare_with_a_tolerance(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain as pc
+    monkeypatch.setattr(pc.frappe, "throw", fail)
+    po = NS(name="PO1", lines=[wl("A", 3.33333, 3.33333, "换货中")])
+    picked = pc._defect_lines(po, [{"line": "A", "quantity": 3.3333}], "换货中", "换货到货")
+    assert picked[0][0].name == "A"
 
 
 def test_regressed_conditions_are_flagged_on_an_in_flight_payment(monkeypatch):

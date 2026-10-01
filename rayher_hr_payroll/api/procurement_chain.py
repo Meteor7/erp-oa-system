@@ -119,8 +119,13 @@ def _invoice_document_count(request_name):
 
 # 决定（2026-10-01）：到货和验收都由生产主管登记；验收不是审批节点，只是付款期次的前置条件。
 FULFILMENT_STATUSES = {"供应商制作中", "到货验收中", "付款中"}
-INSPECTION_RESULTS = {"已通过", "不合格", "退货中", "换货中"}
-DEFECT_RESULTS = {"不合格", "退货中", "换货中"}
+INSPECTION_RESULTS = {"已通过", "退货中", "换货中"}
+DEFECT_RESULTS = {"退货中", "换货中"}
+
+
+def _line_received(line):
+    """这一项算不算"已到齐"：数量够了，而且没有被判退货（退货中的货实际上要退回去）。"""
+    return _decimal(line.received_quantity) >= _decimal(line.quantity) and _text(line.inspection_status) != "退货中"
 
 
 def _draft_payment_request(po_name, row_name):
@@ -663,7 +668,7 @@ def list_purchase_orders(status=None, limit=200):
 def _po_payment_blockers(po, row, *, records=None):
     """One eligibility rule for the workbench, submission and payment release."""
     lines = list(getattr(po, "lines", []) or [])
-    all_received = bool(lines) and all(_decimal(line.received_quantity) >= _decimal(line.quantity) for line in lines)
+    all_received = bool(lines) and all(_line_received(line) for line in lines)
     all_inspected = bool(lines) and all(_text(line.inspection_status) == "已通过" for line in lines)
     records = _fulfillment_records(po.name) if records is None else records
     has_receipt_evidence = any(record.get("record_type") == "到货" for record in records)
@@ -697,9 +702,7 @@ def _require_po_payment_ready(po, row):
 def _payment_work_item(po, row):
     contract_ready = _po_contract_ready(po)
     lines = list(getattr(po, "lines", []) or [])
-    all_received = bool(lines) and all(
-        _decimal(line.received_quantity) >= _decimal(line.quantity) for line in lines
-    )
+    all_received = bool(lines) and all(_line_received(line) for line in lines)
     all_inspected = bool(lines) and all(
         _text(line.inspection_status) == "已通过" for line in lines
     )
@@ -775,7 +778,7 @@ def _payment_work_item(po, row):
         "can_record_inspection": 1 if can_inspect else 0,
         "can_record_exchange": 1 if fulfilment_open and "换货中" in line_states else 0,
         "can_record_return": 1 if fulfilment_open and "退货中" in line_states else 0,
-        "can_push_payment": 1 if contract_ready and _can_purchase() and not blockers and not payment_request and not draft_request and row_status in {"待审批", "审批中"} else 0,
+        "can_push_payment": 1 if contract_ready and _can_purchase() and not blockers and not payment_request and row_status in {"待审批", "审批中"} else 0,
         "draft_request": draft_request,
         "invoice_documents": _invoice_document_count(payment_request),
         "conditions_regressed": conditions_regressed,
@@ -831,7 +834,7 @@ def po_work_summary():
         pos.append({
             "po": po.name, "supplier": _text(getattr(po, "supplier", None)), "status": _text(po.status),
             "lines": len(lines),
-            "received_lines": sum(1 for line in lines if _decimal(line.received_quantity) >= _decimal(line.quantity)),
+            "received_lines": sum(1 for line in lines if _line_received(line)),
             "passed_lines": sum(1 for line in lines if _text(line.inspection_status) == "已通过"),
             "paid_amount": float(getattr(po, "paid_amount", 0) or 0), "total_amount": float(po.total_amount or 0),
         })
@@ -1677,6 +1680,8 @@ def record_po_receipt(name, lines, arrival_date=None, file_ref=None, note=None):
         line = next((row for row in po.lines if row.name == _text(raw.get("line"))), None)
         if not line:
             frappe.throw("找不到 PO 明细。")
+        if _text(line.inspection_status) in DEFECT_RESULTS:
+            frappe.throw(f"物料 {line.material_serial} 当前是「{_text(line.inspection_status)}」，请先登记换货到货 / 退货发出，不能直接登记到货。")
         quantity = _decimal(raw.get("quantity"), "本次到货数量")
         if quantity <= 0:
             frappe.throw("本次到货数量必须大于零。")
@@ -1729,6 +1734,8 @@ def record_po_inspection(name, lines, inspection_date=None, file_ref=None, note=
         seen.add(line.name)
         if _decimal(line.received_quantity) <= 0:
             frappe.throw(f"物料 {line.material_serial} 尚未到货，不能验收。")
+        if _text(line.inspection_status) in DEFECT_RESULTS:
+            frappe.throw(f"物料 {line.material_serial} 当前是「{_text(line.inspection_status)}」，请先登记换货到货 / 退货发出，再验收。")
         reason = _text(raw.get("reason"))
         if status in DEFECT_RESULTS and not reason:
             frappe.throw(f"物料 {line.material_serial} 验收结果为「{status}」，请填写原因。")
@@ -1742,7 +1749,7 @@ def record_po_inspection(name, lines, inspection_date=None, file_ref=None, note=
             detail["reason"] = reason
         details.append(detail)
     _create_fulfillment_record(po, "验收", inspection_date, details, file_ref, note)
-    all_received = all(_decimal(line.received_quantity) >= _decimal(line.quantity) for line in po.lines)
+    all_received = all(_line_received(line) for line in po.lines)
     all_passed = all(_text(line.inspection_status) == "已通过" for line in po.lines)
     po.status = "付款中" if all_received and all_passed else "到货验收中"
     po.save(ignore_permissions=True)
@@ -1771,7 +1778,7 @@ def _defect_lines(po, values, expected_status, label):
         if _text(line.inspection_status) != expected_status:
             frappe.throw(f"物料 {line.material_serial} 当前不是「{expected_status}」，不能登记{label}。")
         quantity = _decimal(raw.get("quantity"), f"{label}数量")
-        if quantity != _decimal(line.received_quantity):
+        if abs(quantity - _decimal(line.received_quantity)) > _decimal("0.0001"):
             frappe.throw(f"物料 {line.material_serial} 需要一次{label}，数量应为 {line.received_quantity}。")
         picked.append((line, quantity))
     return picked
@@ -1855,9 +1862,8 @@ def push_po_payment_request(name, payment_plan_row):
     if _text(row.status) not in {"待审批", "审批中"} or _text(row.payment_request):
         frappe.throw("该付款期次当前不可下推，或已经生成采购付款。")
     _require_po_payment_ready(po, row)
+    # 这一期之前的付款单被驳回 / 撤回后会留下一张草稿：重新提交时沿用这张单据（按 PO 当前内容刷新），不再另开一张。
     existing_draft = _draft_payment_request(po.name, row.name)
-    if existing_draft:
-        frappe.throw(f"该付款期次已有被退回的采购付款 {existing_draft}，请在「付款审批单」里修改后重新提交，不要重复提交。")
     source_request = next((_text(line.source_request) for line in po.lines if _text(line.source_request)), "")
     from rayher_hr_payroll.approval_center import save_draft
     from rayher_hr_payroll.api.oa_entry import _save_document, _submit_draft, _sync_assignments_after_save
@@ -1877,7 +1883,7 @@ def push_po_payment_request(name, payment_plan_row):
         "expected_arrival_date": "",
         "prepayment_risk_note": "",
     }
-    payment_doc = save_draft("采购付款", payload)
+    payment_doc = save_draft("采购付款", payload, name=existing_draft or None)
     # The material lines preserve PO unit prices and totals for audit, while
     # the approval amount must be the selected installment rather than 100%
     # of the PO line total.
