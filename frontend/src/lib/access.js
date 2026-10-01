@@ -108,6 +108,18 @@ export function canEditProcurementPrice() {
     || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager'].includes(role));
 }
 
+// 到货、验收、换货到货、退货发出都由生产主管登记（决定 2026-10-01；服务端 _require_production_receipt）。
+// 采购不再登记验收，采购只负责合同、PO 和提交付款审批。
+export function canRecordPoFulfilment() {
+  return holdsPosition('production_asset_owner') || myRoles().includes('System Manager');
+}
+
+// 物料目录（分类、正式物料）由 PMC 和采购维护（服务端 procurement_materials.can_maintain_catalog）。
+export function canMaintainProcurementCatalog() {
+  return holdsPosition('pmc', 'procurement_manager')
+    || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager'].includes(role));
+}
+
 function accessPath(path) {
   for (const base of ['/approval/leave', '/approval/overtime', '/approval/comp-time']) {
     if (path.startsWith(base + '/')) return base;
@@ -121,6 +133,11 @@ function accessPath(path) {
 function canSeeMaterialProgress() {
   const user = String((typeof window !== 'undefined' && (window.user || window.full_name)) || '').toLowerCase();
   return myRoles().includes('System Manager') || holdsPosition('pmc', 'procurement_manager', 'vice_manager');
+}
+
+// 物料进度看板只对 PMC、采购经理、副总经理和系统管理员开放（服务端 material_progress._board_user）。
+export function canOpenMaterialBoard() {
+  return canSeeMaterialProgress();
 }
 
 export function canSee(path) {
@@ -163,13 +180,13 @@ export function firstVisiblePath() {
 
 export function roleLabel() {
   const roles = myRoles();
-  if (roles.includes('System Manager')) return '\u603b\u63a7';
+  if (roles.includes('System Manager')) return '总控';
   if (roles.includes('HR Manager') || roles.includes('HR User')) return 'HR';
-  if (roles.includes('Accounts User')) return '\u8d22\u52a1';
-  if (roles.includes('Project Owner')) return '\u9879\u76ee\u8d1f\u8d23\u4eba';
-  if (roles.includes('Department Manager')) return '\u90e8\u95e8\u4e3b\u7ba1';
-  if (roles.includes('Employee')) return '\u5458\u5de5';
-  return '\u666e\u901a\u8d26\u53f7';
+  if (roles.includes('Accounts User')) return '财务';
+  if (roles.includes('Project Owner')) return '项目负责人';
+  if (roles.includes('Department Manager')) return '部门主管';
+  if (roles.includes('Employee')) return '员工';
+  return '普通账号';
 }
 
 export function currentUser() {
