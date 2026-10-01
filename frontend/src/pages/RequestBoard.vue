@@ -1,17 +1,19 @@
 <script setup>
 // 申请看板：本月申请了什么、走到哪一步、批下来的额度用了多少、哪些卡在审批上、谁在出差。
-// 采购申请在"采购申请"页签单独看。
-import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+// 采购申请在"采购申请"页签单独看。页签放在地址里（?tab=main|procurement）；指标卡可点。
+import { computed, nextTick, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
+import '../styles/boardsUi.css';
 import DonutChart from '../components/expense-ui/DonutChart.vue';
 import HBars from '../components/expense-ui/HBars.vue';
 import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
-import { boardRoute, budgetBars, flowBars, requestKpis, scopeText, waitBars } from '../lib/expenseBoards.js';
+import { boardRoute, boardTab, budgetBars, flowBars, requestKpis, scopeText, waitBars } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 
+const route = useRoute();
 const router = useRouter();
-const tab = ref('main');
+const tab = computed(() => boardTab(route.query));
 const data = ref({});
 const loading = ref(true);
 const error = ref('');
@@ -27,8 +29,17 @@ const assetRows = computed(() => [
   ...(Number(data.value.non_fixed_amount || 0) ? [['非固定资产', data.value.non_fixed_amount]] : []),
 ]);
 
+function setTab(value) {
+  router.replace({ path: route.path, query: { ...route.query, tab: value } });
+}
+
 function open(row, requestType) {
   router.push({ path: boardRoute(requestType || row.request_type), query: { request: row.name } });
+}
+
+function openKpi(kpi) {
+  if (kpi.to?.path) router.push(kpi.to);
+  else if (kpi.to?.anchor) nextTick(() => document.getElementById(kpi.to.anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
 }
 
 onMounted(async () => {
@@ -43,29 +54,31 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="xp board">
+  <div class="xp board bd">
     <div class="ph">
       <div>
-        <h3>申请看板</h3>
+        <div class="crumb">审批中心 · 看板<template v-if="scopeText(data)"> · {{ scopeText(data) }}</template></div>
+        <h1 class="bd-title">申请看板</h1>
         <div class="muted">本月申请了什么、走到哪一步、批下来的额度用了多少、哪些卡在审批上。</div>
       </div>
-      <span class="muted">{{ scopeText(data) }}</span>
-    </div>
-    <div class="tabs" role="tablist">
-      <button role="tab" :aria-selected="tab === 'main'" @click="tab = 'main'">购买与出差</button>
-      <button role="tab" :aria-selected="tab === 'procurement'" @click="tab = 'procurement'">采购申请</button>
+      <div class="head-actions bd-tools">
+        <div class="seg" role="tablist">
+          <button type="button" role="tab" :aria-selected="tab === 'main'" :aria-pressed="tab === 'main'" @click="setTab('main')">购买与出差</button>
+          <button type="button" role="tab" :aria-selected="tab === 'procurement'" :aria-pressed="tab === 'procurement'" @click="setTab('procurement')">采购申请</button>
+        </div>
+      </div>
     </div>
 
     <ProcurementTab v-if="tab === 'procurement'" part="request" />
     <div v-else-if="loading" class="panel empty">正在加载看板数据…</div>
     <div v-else-if="error" class="banner err">{{ error }}</div>
     <template v-else>
-      <div class="grid g4">
-        <div v-for="kpi in kpis" :key="kpi.key" class="stat">
-          <div class="l">{{ kpi.label }}</div>
-          <div class="v num" :style="kpi.tone ? { color: kpi.tone } : null">{{ kpi.value }}</div>
-          <div class="l">{{ kpi.sub }}</div>
-        </div>
+      <div class="bd-kpis">
+        <button v-for="kpi in kpis" :key="kpi.key" type="button" class="bd-kpi" @click="openKpi(kpi)">
+          <span class="bd-kpi-top"><span>{{ kpi.label }}</span><em aria-hidden="true">›</em></span>
+          <b class="bd-kpi-value" :style="kpi.tone ? { color: kpi.tone } : null">{{ kpi.value }}</b>
+          <span class="bd-kpi-sub">{{ kpi.sub }}</span>
+        </button>
       </div>
 
       <div class="grid g57">
@@ -83,7 +96,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="panel">
+      <div id="bd-budget" class="panel">
         <div class="pt">
           <span>批下来的额度用了多少</span>
           <span class="muted">
@@ -106,7 +119,7 @@ onMounted(async () => {
         <div class="panel"><div class="pt"><span>批准的钱买了什么</span><span class="muted">固定资产按类别</span></div><DonutChart :rows="assetRows" center-label="已批准" empty="没有已批准的购买申请" /></div>
       </div>
 
-      <div class="panel">
+      <div id="bd-stuck" class="panel">
         <div class="pt"><span>卡住的申请</span><span class="muted">等待超过 {{ data.stuck_days }} 天的标出来，按等待时间排</span></div>
         <div v-for="row in stuck" :key="row.name" class="wait-row row-sel" @click="open(row)">
           <span class="num strong">{{ row.name }}</span>

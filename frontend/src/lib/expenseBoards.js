@@ -3,40 +3,133 @@ import { money } from './expenseClaims.js';
 
 const yuan = (value) => `¥ ${money(value)}`;
 
+// 指标卡可以点：to = { path, query } 跳到对应的列表或页面，to = { anchor } 滚动到本页的某一块。
+const page = (path, query) => ({ path, ...(query ? { query } : {}) });
+
 export function requestKpis(data = {}) {
   const s = data.summary || {};
   return [
-    { key: 'month', label: '本月通过的购买申请', value: yuan(s.month_approved_amount), sub: `${s.month_approved_count || 0} 张` },
-    { key: 'unpaid', label: '已批准未付出的额度', value: yuan(s.unpaid_amount), sub: '已通过但还没付出去的钱', tone: '#A35A17' },
-    { key: 'pending', label: '审批中', value: `${s.pending_count || 0} 张`, sub: `最久已等 ${s.longest_wait_days || 0} 天`, tone: (s.longest_wait_days || 0) > 3 ? '#B42318' : '' },
-    { key: 'trip', label: '出差中 / 本月出差', value: `${s.on_trip_count || 0} 人 / ${s.month_trip_count || 0} 次`, sub: '按出发、返回日期' },
+    { key: 'month', label: '本月通过的购买申请', value: yuan(s.month_approved_amount), sub: `${s.month_approved_count || 0} 张`, to: page('/approval/direct-purchase') },
+    { key: 'unpaid', label: '已批准未付出的额度', value: yuan(s.unpaid_amount), sub: '已通过但还没付出去的钱', tone: '#A35A17', to: { anchor: 'bd-budget' } },
+    { key: 'pending', label: '审批中', value: `${s.pending_count || 0} 张`, sub: `最久已等 ${s.longest_wait_days || 0} 天`, tone: (s.longest_wait_days || 0) > 3 ? '#B42318' : '', to: { anchor: 'bd-stuck' } },
+    { key: 'trip', label: '出差中 / 本月出差', value: `${s.on_trip_count || 0} 人 / ${s.month_trip_count || 0} 次`, sub: '按出发、返回日期', to: page('/approval/travel', { view: 'list', scope: 'all' }) },
   ];
 }
 
 export function paymentKpis(data = {}) {
   const s = data.summary || {};
   return [
-    { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期' },
-    { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付' },
-    { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#A35A17' },
-    { key: 'inv', label: '待补票', value: yuan(s.invoice_pending_amount), sub: `${s.invoice_pending_count || 0} 张，逾期 ${s.invoice_overdue_count || 0} 张`, tone: (s.invoice_overdue_count || 0) ? '#B42318' : '' },
+    { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期', to: page('/approval/claim', { view: 'list', scope: 'all' }) },
+    { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付', to: page('/approval/payment', { view: 'list', scope: 'all' }) },
+    { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#A35A17', to: { anchor: 'bd-cashier' } },
+    { key: 'inv', label: '待补票', value: yuan(s.invoice_pending_amount), sub: `${s.invoice_pending_count || 0} 张，逾期 ${s.invoice_overdue_count || 0} 张`, tone: (s.invoice_overdue_count || 0) ? '#B42318' : '', to: { anchor: 'bd-invoices' } },
   ];
 }
 
+// 采购页签的指标卡。采购付款优先用按 PO 付款期次汇总的 po_work；服务端还没有这一块时退回旧口径
+// （不再显示"待预付款核销"：PO 付款不走核销，永远是 0）。
 export function procurementKpis(data = {}, part = 'request') {
   const s = data.summary || {};
   if (part === 'request') {
     return [
-      { key: 'count', label: '采购申请', value: `${s.application_count || 0} 张`, sub: `审批中 ${s.application_pending || 0} 张` },
-      { key: 'amount', label: '采购申请金额', value: yuan(s.application_amount), sub: '批准金额，未批准的按申请金额' },
+      { key: 'count', label: '采购申请', value: `${s.application_count || 0} 张`, sub: `审批中 ${s.application_pending || 0} 张`, to: page('/approval/procurement') },
+      { key: 'amount', label: '采购申请金额', value: yuan(s.application_amount), sub: '批准金额，未批准的按申请金额', to: page('/approval/procurement') },
     ];
   }
+  if (hasPoWork(data)) return poWorkKpis(data.po_work);
+  const target = page('/approval/procurement-payment');
   return [
-    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `采购付款共 ${s.payment_count || 0} 张` },
-    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#E57A00' : '' },
-    { key: 'inspect', label: '待验收', value: `${s.pending_inspection || 0} 张`, sub: '已付款未验收' },
-    { key: 'writeoff', label: '待预付款核销', value: `${s.pending_writeoff || 0} 张`, sub: '100% 预付款', tone: (s.pending_writeoff || 0) ? '#B42318' : '' },
+    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `采购付款共 ${s.payment_count || 0} 张`, to: target },
+    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#E57A00' : '', to: target },
+    { key: 'inspect', label: '待验收', value: `${s.pending_inspection || 0} 张`, sub: '已付款未验收', to: target },
   ];
+}
+
+// ---------------------------------------------------------------- 采购付款：按 PO 付款期次的真实状态
+
+export const PO_STATUS_ORDER = Object.freeze(['待合同生效', '待到货资料', '待验收', '可提交付款审批', '付款审批中', '待实际付款', '已付款']);
+
+export function hasPoWork(data = {}) {
+  const work = data?.po_work;
+  return Boolean(work && typeof work === 'object' && (work.summary || Array.isArray(work.by_status) || Array.isArray(work.pos)));
+}
+
+export function poWorkKpis(work = {}) {
+  const s = work.summary || {};
+  const target = page('/approval/procurement-payment');
+  return [
+    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `${s.paid_count || 0} 期`, to: target },
+    { key: 'final', label: '等总经理确认付款', value: yuan(s.waiting_final_amount), sub: `${s.waiting_final_count || 0} 张 · 在总经理付款这一步`, tone: '#A35A17', to: target },
+    { key: 'approval', label: '付款审批中', value: yuan(s.in_approval_amount), sub: `${s.in_approval_count || 0} 张`, to: target },
+    { key: 'ready', label: '待提交付款审批', value: yuan(s.ready_amount), sub: `${s.ready_count || 0} 期 · 采购还没提交`, to: target },
+  ];
+}
+
+// 横条图用：[[ "待到货资料 · 3 期", 金额 ], ...]，按付款期次的处理顺序排。
+export function poStatusRows(work = {}) {
+  const rank = (status) => (PO_STATUS_ORDER.includes(status) ? PO_STATUS_ORDER.indexOf(status) : PO_STATUS_ORDER.length);
+  return [...(work.by_status || [])]
+    .map((row) => (Array.isArray(row) ? { status: row[0], count: Number(row[1] || 0), amount: Number(row[2] || 0) } : { status: row.status, count: Number(row.count || 0), amount: Number(row.amount || 0) }))
+    .sort((a, b) => rank(a.status) - rank(b.status))
+    .map((row) => [`${row.status} · ${row.count} 期`, row.amount]);
+}
+
+export function poStatusCount(work = {}) {
+  return (work.by_status || []).reduce((sum, row) => sum + Number(Array.isArray(row) ? row[1] : row.count || 0), 0);
+}
+
+export function poStatusTone(status) {
+  const value = String(status || '').trim();
+  if (['到货验收中', '待到货', '待验收', '部分到货'].includes(value)) return 'p-sun';
+  if (value === '供应商制作中') return 'p-brand';
+  if (['付款中', '待审批'].includes(value)) return 'p-cobalt';
+  if (['已关闭', '已付款', '已完成'].includes(value)) return 'p-jade';
+  if (['退货中', '换货中'].includes(value)) return 'p-red';
+  return 'p-gray';
+}
+
+// 各 PO 进度表的一行：到货 / 验收通过按"几项 / 共几项"，已付按金额条。
+export function poProgressRows(work = {}) {
+  return (work.pos || []).map((po) => {
+    const total = Number(po.total_amount || 0);
+    const paid = Number(po.paid_amount || 0);
+    const lines = Number(po.lines || 0);
+    return {
+      po: po.po, supplier: po.supplier || '—', status: po.status || '', tone: poStatusTone(po.status),
+      received: `${Number(po.received_lines || 0)} / ${lines} 项`, passed: `${Number(po.passed_lines || 0)} / ${lines} 项`,
+      receivedDone: lines > 0 && Number(po.received_lines || 0) >= lines, passedDone: lines > 0 && Number(po.passed_lines || 0) >= lines,
+      paidText: `${yuan(paid)} / ${yuan(total)}`,
+      paidWidth: total > 0 ? `${Math.min(100, (paid / total) * 100).toFixed(1)}%` : '0%',
+    };
+  });
+}
+
+// 到货 / 验收显示成状态标签，不是一串文字。
+export function fulfilTone(text) {
+  const value = String(text || '').trim();
+  if (!value) return 'p-gray';
+  if (/不合格|退货|换货/.test(value)) return 'p-red';
+  if (/^(已到货|验收通过|已通过|已验收|已完成)/.test(value)) return 'p-jade';
+  if (/部分|待|中/.test(value)) return 'p-sun';
+  return 'p-gray';
+}
+
+// 采购付款单那一行的到货 / 验收标签：能对上 PO 就用 PO 的进度（几项 / 共几项），对不上用单据上的状态。
+export function paymentFulfilment(row = {}, work = {}) {
+  const po = (work.pos || []).find((item) => item.po && item.po === row.source_purchase_order);
+  if (po) {
+    const lines = Number(po.lines || 0);
+    const received = Number(po.received_lines || 0);
+    const passed = Number(po.passed_lines || 0);
+    return {
+      arrival: { text: `到货 ${received}/${lines}`, tone: lines > 0 && received >= lines ? 'p-jade' : received > 0 ? 'p-sun' : 'p-gray' },
+      inspection: { text: `验收 ${passed}/${lines}`, tone: lines > 0 && passed >= lines ? 'p-jade' : passed > 0 ? 'p-sun' : 'p-gray' },
+    };
+  }
+  return {
+    arrival: { text: row.arrival_status || '—', tone: row.arrival_status ? fulfilTone(row.arrival_status) : 'p-gray' },
+    inspection: { text: row.inspection_status || '—', tone: row.inspection_status ? fulfilTone(row.inspection_status) : 'p-gray' },
+  };
 }
 
 // 横条图：按同组最大值给宽度百分比。
@@ -99,6 +192,16 @@ export function scopeText(data = {}) {
   return '';
 }
 
+// 看板页签放在地址里（?tab=main|procurement），刷新、分享链接、从别处跳回来都停在同一页签。
+export function boardTab(query = {}) {
+  return query.tab === 'procurement' ? 'procurement' : 'main';
+}
+
+// 底部一排卡片：部门范围没有"今年付给谁最多"，只剩两列，不留空列。
+export function bottomColumns(data = {}) {
+  return data.scope === 'department' ? 2 : 3;
+}
+
 // ---------------------------------------------------------------- 图表（2026-09-30 看板改版）
 
 // 看板统一用的低饱和配色：蓝、沙、绿灰、石板灰、浅灰。
@@ -145,6 +248,16 @@ export function agingColumns(queue = []) {
     const amount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
     return { label: bucket.label, value: rows.length, color: bucket.color, sub: rows.length ? `¥ ${money(amount)}` : '' };
   });
+}
+
+// 出纳待付款面板顶部的四个小方块：各等待区间几张、多少钱，条按张数最多的那一段算宽度。
+export function agingTiles(queue = []) {
+  const columns = agingColumns(queue);
+  const peak = Math.max(1, ...columns.map((column) => column.value));
+  return columns.map((column) => ({
+    label: column.label, count: column.value, amount: column.sub || '¥ 0.00', color: column.color,
+    width: `${((column.value / peak) * 100).toFixed(1)}%`,
+  }));
 }
 
 // "申请走到哪一步了"：各步按本月提交的张数算宽度。
