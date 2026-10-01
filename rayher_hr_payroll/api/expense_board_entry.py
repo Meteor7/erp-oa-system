@@ -191,4 +191,15 @@ def procurement_board():
     scope, department = _scope()
     today = getdate(nowdate())
     rows = _decorate(_rows(boards.PROCUREMENT_TYPES, scope, department), today)
-    return _result(boards.procurement_board(rows, today=today), scope, department)
+    result = _result(boards.procurement_board(rows, today=today), scope, department)
+    if scope == "all":
+        # 按 PO 付款期次的真实状态统计（付款单上的到货 / 验收字段只有付款后才有值）。
+        try:
+            from rayher_hr_payroll.api import procurement_chain
+            work = procurement_chain.po_work_summary()
+            work["summary"]["month_paid_amount"] = (result.get("summary") or {}).get("month_paid_amount", 0)
+            work["summary"]["paid_count"] = sum(1 for row in result.get("payments", []) if row.get("workflow_status") == "已付款")
+            result["po_work"] = work
+        except Exception:
+            frappe.log_error(title="采购付款看板：PO 付款进度汇总失败")
+    return result

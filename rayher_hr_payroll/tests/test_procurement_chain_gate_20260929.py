@@ -18,7 +18,7 @@ def _whitelisted_functions():
 
 def test_every_procurement_chain_endpoint_checks_its_feature_gate():
     functions = list(_whitelisted_functions())
-    assert len(functions) == 32
+    assert len(functions) == 34
     for node in functions:
         body = node.body[1:] if isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) else node.body
         first = ast.unparse(body[0])

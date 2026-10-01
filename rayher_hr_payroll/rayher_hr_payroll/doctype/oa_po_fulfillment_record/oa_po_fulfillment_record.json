@@ -8,7 +8,7 @@
   "field_order": ["purchase_order", "record_type", "record_date", "recorded_by", "details_json", "evidence_file", "original_filename", "file_sha256", "note"],
   "fields": [
     {"fieldname":"purchase_order","fieldtype":"Link","options":"OA Purchase Order","label":"Purchase Order","reqd":1,"read_only":1,"in_list_view":1},
-    {"fieldname":"record_type","fieldtype":"Select","options":"到货\n验收","label":"Record Type","reqd":1,"read_only":1,"in_list_view":1},
+    {"fieldname":"record_type","fieldtype":"Select","options":"到货\n验收\n换货到货\n退货","label":"Record Type","reqd":1,"read_only":1,"in_list_view":1},
     {"fieldname":"record_date","fieldtype":"Date","label":"Record Date","reqd":1,"read_only":1},
     {"fieldname":"recorded_by","fieldtype":"Link","options":"User","label":"Recorded By","reqd":1,"read_only":1},
     {"fieldname":"details_json","fieldtype":"Long Text","label":"Material Details","reqd":1,"read_only":1},
