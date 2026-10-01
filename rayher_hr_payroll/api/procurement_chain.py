@@ -98,7 +98,23 @@ def _fulfillment_records(po_name):
         return []
     for row in rows:
         row["details"] = _json(row.get("details_json"), [])
+        try:
+            row["recorded_by_name"] = frappe.utils.get_fullname(row.get("recorded_by")) or _text(row.get("recorded_by"))
+        except Exception:
+            row["recorded_by_name"] = _text(row.get("recorded_by"))
     return rows
+
+
+def _invoice_document_count(request_name):
+    """审批人、财务常常没有权限读这张付款单的资料清单，但"付款前须上传发票"这个条件他们也要看得到：
+    由服务端数一下有效的发票资料交给页面，不依赖当前用户能不能读资料。"""
+    if not _text(request_name):
+        return 0
+    try:
+        return int(frappe.db.count("OA Business Document", {
+            "request": request_name, "document_type": "发票", "status": ["!=", "已作废"]}) or 0)
+    except Exception:
+        return 0
 
 
 # 决定（2026-10-01）：到货和验收都由生产主管登记；验收不是审批节点，只是付款期次的前置条件。
@@ -761,6 +777,7 @@ def _payment_work_item(po, row):
         "can_record_return": 1 if fulfilment_open and "退货中" in line_states else 0,
         "can_push_payment": 1 if contract_ready and _can_purchase() and not blockers and not payment_request and not draft_request and row_status in {"待审批", "审批中"} else 0,
         "draft_request": draft_request,
+        "invoice_documents": _invoice_document_count(payment_request),
         "conditions_regressed": conditions_regressed,
         "requires_receipt": 1 if "到货" in trigger or "验收" in trigger else 0,
         "requires_inspection": 1 if "验收" in trigger else 0,

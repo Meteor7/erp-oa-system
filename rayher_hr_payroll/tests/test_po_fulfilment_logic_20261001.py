@@ -228,3 +228,15 @@ def test_regressed_conditions_are_flagged_on_an_in_flight_payment(monkeypatch):
     assert item["work_status"] == "付款审批中"
     assert item["conditions_regressed"] == 1
     assert "本期要求验收通过" in item["blockers"]
+
+
+def test_work_item_reports_invoice_documents_without_reading_the_documents(monkeypatch):
+    pc = patch_work(monkeypatch, production=False, purchase=True)
+    monkeypatch.setattr(pc, "_invoice_document_count", lambda request: 2 if request == "OA-9" else 0)
+    po = work_po(wl("A", 10, 10, "已通过"))
+    monkeypatch.setattr(pc.frappe, "db", NS(exists=lambda *a, **kw: True), raising=False)
+    monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: NS(
+        name="OA-9", workflow_status="待审批", business_status="待审批", current_step_index=5, current_step_label="总经理付款：某人"))
+    item = pc._payment_work_item(po, work_row(payment_request="OA-9", status="已下推", trigger_condition="合同生效"))
+    assert item["invoice_documents"] == 2
+    assert pc._payment_work_item(po, work_row(trigger_condition="合同生效"))["invoice_documents"] == 0
