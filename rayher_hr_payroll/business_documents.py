@@ -144,6 +144,10 @@ class FrappeBusinessDocumentStore:
         allowed = frappe.has_permission(
             "OA Approval Request", ptype=ptype, doc=doc, user=user
         )
+        if not allowed and ptype == "read":
+            # 审批人、财务常常带着自己的"员工"用户权限，Frappe 会因为单据的员工字段不是他自己就拒绝读取；
+            # 这张单据能不能看，以 OA 自己的行级规则（申请人、当前审批人、抄送、经手人、财务）为准。
+            allowed = oa_request_has_permission(doc, "read", user) is not False
         if not allowed and ptype == "write" and getattr(doc, "request_type", None) in {
             "采购申请", "购买申请", "采购付款",
         }:

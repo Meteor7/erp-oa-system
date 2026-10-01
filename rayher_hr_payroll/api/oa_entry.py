@@ -869,6 +869,28 @@ def _serialize_doc_step(step):
     }
 
 
+def _user_display_names(users):
+    users = sorted({_clean(user) for user in users if _clean(user)})
+    if not users:
+        return {}
+    try:
+        rows = frappe.get_all("User", filters={"name": ["in", users]}, fields=["name", "full_name"], limit_page_length=len(users))
+    except Exception:
+        rows = []
+    found = {row.get("name"): row.get("full_name") for row in rows}
+    return {user: found.get(user) or (user.split("@")[0] if "@" in user else user) for user in users}
+
+
+def _serialize_doc_steps(steps):
+    """审批进度：每一步多带上办理人和已同意的人的姓名，页面不用再显示邮箱。"""
+    items = [_serialize_doc_step(row) for row in steps]
+    names = _user_display_names([user for item in items for user in [item["action_by"], *item["approved_by"]]])
+    for item in items:
+        item["action_by_name"] = names.get(_clean(item["action_by"]), "")
+        item["approved_by_names"] = [names.get(_clean(user), _clean(user)) for user in item["approved_by"]]
+    return items
+
+
 def _source_value(source, fieldname, default=None):
     if isinstance(source, dict):
         return source.get(fieldname, default)
@@ -1633,7 +1655,7 @@ def _summarize_doc(doc, authorized_expense_lines=None):
             for row in (getattr(doc, "direct_purchase_lines", []) or [])
         ],
         "project_groups": _group_expense_sources(expense_lines),
-        "steps": [_serialize_doc_step(row) for row in doc.steps],
+        "steps": _serialize_doc_steps(doc.steps),
         "pmc_change_version": getattr(doc, "pmc_change_version", None) or 0,
         "travel_destination": getattr(doc, "travel_destination", None) or "",
         "travel_start_date": getattr(doc, "travel_start_date", None),

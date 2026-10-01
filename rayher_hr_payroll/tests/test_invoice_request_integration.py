@@ -4024,3 +4024,18 @@ def test_approval_note_is_length_limited(monkeypatch):
     # 审查 E5：通过时的意见原来没有长度限制。
     with pytest.raises(ValidationError):
         oa_entry.action_request("REQ-X", "approve", "x" * 1001)
+
+
+def test_serialized_steps_carry_display_names(monkeypatch):
+    monkeypatch.setattr(oa_entry.frappe, "get_all", lambda *args, **kwargs: [
+        {"name": "a@example.com", "full_name": "演示员工129"}, {"name": "b@example.com", "full_name": ""}])
+    steps = [
+        types.SimpleNamespace(step_index=1, step_key="k1", label="直属", mode="approve", approvers='["a@example.com"]',
+                              status="已通过", approved_by='["a@example.com", "b@example.com"]', action_by="a@example.com"),
+        types.SimpleNamespace(step_index=2, step_key="k2", label="终审", mode="approve", approvers='["c@example.com"]',
+                              status="待审批", approved_by="[]", action_by=""),
+    ]
+    first, second = oa_entry._serialize_doc_steps(steps)
+    assert first["action_by_name"] == "演示员工129"
+    assert first["approved_by_names"] == ["演示员工129", "b"]
+    assert second["action_by_name"] == "" and second["approved_by_names"] == []

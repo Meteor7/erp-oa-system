@@ -273,3 +273,18 @@ def test_document_controller_rejects_update_and_delete(monkeypatch):
         business_document_controller.OABusinessDocument.validate(existing)
     with pytest.raises(PermissionError, match="不允许删除"):
         business_document_controller.OABusinessDocument.on_trash(existing)
+
+def test_reading_documents_follows_the_oa_row_scope_when_user_permissions_block(monkeypatch):
+    parent = SimpleNamespace(name="OA-9", request_type="出差申请")
+    monkeypatch.setattr(documents.frappe, "get_doc", lambda *args, **kwargs: parent)
+    monkeypatch.setattr(documents.frappe, "session", SimpleNamespace(user="approver@example.com"), raising=False)
+    monkeypatch.setattr(documents.frappe, "has_permission", lambda *args, **kwargs: False)
+    store = documents.FrappeBusinessDocumentStore()
+    monkeypatch.setattr(documents, "oa_request_has_permission", lambda doc, ptype, user: None)
+    assert store.require_request("OA-9", "read") is parent
+    monkeypatch.setattr(documents, "oa_request_has_permission", lambda doc, ptype, user: False)
+    with pytest.raises(documents.BusinessDocumentError):
+        store.require_request("OA-9", "read")
+    monkeypatch.setattr(documents, "oa_request_has_permission", lambda doc, ptype, user: None)
+    with pytest.raises(documents.BusinessDocumentError):
+        store.require_request("OA-9", "write")
