@@ -200,3 +200,9 @@ test('payment styles stay under .xp and use the pay- prefix', () => {
     }
   }
 });
+
+test('the fulfilment success note survives the automatic switch to the next registration type', () => {
+  assert.match(fulfilment, /function selectMode\(key\) \{ mode\.value = key; ok\.value = ''; \}/);
+  assert.match(fulfilment, /@click="selectMode\(item\.key\)"/);
+  assert.doesNotMatch(fulfilment, /watch\(mode, \(\) => \{[^}]*ok\.value/);
+});

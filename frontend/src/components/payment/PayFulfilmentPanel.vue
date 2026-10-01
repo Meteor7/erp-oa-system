@@ -59,7 +59,9 @@ watch(() => props.group.po, () => {
   error.value = '';
   ok.value = '';
 });
-watch(mode, () => { error.value = ''; ok.value = ''; });
+watch(mode, () => { error.value = ''; });
+// 提示只在"自己点了别的登记类型"时清掉：登记完成后页面会自动切到下一个类型，那时提示还要留着。
+function selectMode(key) { mode.value = key; ok.value = ''; }
 
 function qtyValue(line) {
   const raw = drafts[mode.value][line.name];
@@ -109,7 +111,7 @@ async function submit() {
     </div>
 
     <div v-if="modes.length" class="pay-modes" role="tablist" aria-label="登记类型">
-      <button v-for="item in modes" :key="item.key" type="button" role="tab" :aria-selected="mode === item.key" :class="{ on: mode === item.key }" @click="mode = item.key">{{ item.label }}</button>
+      <button v-for="item in modes" :key="item.key" type="button" role="tab" :aria-selected="mode === item.key" :class="{ on: mode === item.key }" @click="selectMode(item.key)">{{ item.label }}</button>
     </div>
 
     <div class="tbl">
