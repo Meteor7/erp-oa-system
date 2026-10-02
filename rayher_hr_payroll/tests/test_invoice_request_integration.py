@@ -3580,8 +3580,12 @@ def test_procurement_payment_final_handle_posts_ledger_and_enters_arrival_lifecy
 def test_my_approval_summary_limits_executives_but_keeps_admin_global_queue(monkeypatch):
     step = Row(step_index=1, label="PMC：演示员工178", approvers='["person076@staff.example.invalid"]')
     doc = Row(name="OA-OTHER", request_type=oa_entry.REQUEST_PROCUREMENT, workflow_status=oa_entry.STATUS_PENDING, current_step_index=1, steps=[step])
-    monkeypatch.setattr(frappe_stub, "get_all", lambda *_args, **_kwargs: [{"name": doc.name}], raising=False)
-    monkeypatch.setattr(oa_entry, "_load_request", lambda _name: doc)
+    def get_all(doctype, *_args, **_kwargs):
+        if doctype == "OA Approval Step":
+            return [{"parent": doc.name, "step_index": 1, "approvers": step.approvers, "approved_by": "[]"}]
+        return [{"name": doc.name, "request_type": doc.request_type, "workflow_status": doc.workflow_status, "current_step_index": 1}]
+
+    monkeypatch.setattr(frappe_stub, "get_all", get_all, raising=False)
     monkeypatch.setattr(oa_entry, "_can_act_on_current_step", lambda _doc, user=None: True)
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: [])
 
@@ -3989,8 +3993,14 @@ def test_approval_summary_counts_new_claim_types_and_follows_feature_gates(monke
         "T-1": Row(name="T-1", request_type=oa_entry.REQUEST_TRAVEL, workflow_status=oa_entry.STATUS_PENDING, current_step_index=1, steps=[]),
     }
     seen = []
-    monkeypatch.setattr(frappe_stub, "get_all", lambda *_args, **kwargs: seen.append(kwargs["filters"]) or [{"name": name} for name in docs], raising=False)
-    monkeypatch.setattr(oa_entry, "_load_request", lambda name: docs[name])
+
+    def get_all(doctype, *_args, **kwargs):
+        if doctype == "OA Approval Step":
+            return []
+        seen.append(kwargs["filters"])
+        return [{"name": doc.name, "request_type": doc.request_type, "workflow_status": doc.workflow_status, "current_step_index": 1} for doc in docs.values()]
+
+    monkeypatch.setattr(frappe_stub, "get_all", get_all, raising=False)
     monkeypatch.setattr(oa_entry, "_current_step", lambda doc: Row(step_index=1))
     monkeypatch.setattr(oa_entry, "_matched_approvers", lambda _step, user=None: ["me@example.com"])
     monkeypatch.setattr(oa_entry, "visible_request_types", lambda types, user=None: [t for t in types if t != oa_entry.REQUEST_TRAVEL])
