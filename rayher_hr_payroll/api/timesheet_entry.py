@@ -237,7 +237,7 @@ def get_rd_options():
         ),
         "projects": frappe.get_all(
             "Project", filters={"allow_rd_timesheet": 1, "status": ["not in", ["Completed", "Cancelled"]]},
-            fields=["name", "project_name", "rd_project_code", "rd_project_key"], order_by="project_name",
+            fields=["name", "project_name", "rd_project_code", "rd_project_key", "project_owner_name"], order_by="project_name",
         ),
         "activity_types": [{"name": activity} for activity in RD_ACTIVITY_TYPES],
     }
