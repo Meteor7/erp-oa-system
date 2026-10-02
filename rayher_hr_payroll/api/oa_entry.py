@@ -3602,6 +3602,28 @@ def close_procurement(name, reason=None):
         return _apply_procurement_lifecycle_transition(doc, "close_procurement", {}, "关闭采购", note)
 
 
+def _light_pending_requests(rows):
+    """只带"谁在审批"所需字段的单据：名称、类型、状态、当前步骤序号，以及每一步的审批人 / 已同意的人。"""
+    from types import SimpleNamespace
+
+    names = [_result_name(row) for row in rows]
+    steps = {}
+    if names:
+        for step in frappe.get_all(
+            "OA Approval Step", filters={"parent": ["in", names], "parenttype": "OA Approval Request"},
+            fields=["parent", "step_index", "approvers", "approved_by"], limit_page_length=0,
+        ):
+            steps.setdefault(step["parent"], []).append(SimpleNamespace(
+                step_index=step.get("step_index"), approvers=step.get("approvers"), approved_by=step.get("approved_by")))
+    return [
+        SimpleNamespace(
+            name=row["name"], request_type=row.get("request_type"), workflow_status=row.get("workflow_status"),
+            current_step_index=row.get("current_step_index"), steps=steps.get(row["name"], []),
+        )
+        for row in rows
+    ]
+
+
 @frappe.whitelist()
 def get_my_approval_summary():
     if _clean(frappe.session.user) in {"", "Guest"}:
@@ -3631,14 +3653,14 @@ def get_my_approval_summary():
     names = frappe.get_all(
         "OA Approval Request",
         filters={"workflow_status": ["in", list(ACTIVE_STATUSES)], "request_type": ["in", list(routes)]},
-        fields=["name"],
+        fields=["name", "request_type", "workflow_status", "current_step_index"],
         order_by="modified desc",
         limit_page_length=500,
     )
     summary_user = _clean(frappe.session.user)
     global_queue = summary_user == "Administrator" or "System Manager" in set(frappe.get_roles(summary_user))
-    for row in names:
-        doc = _load_request(_result_name(row))
+    # 判断"轮到不轮到我"只需要单据的当前步骤，不用把每张待办单据整个加载（每张 6 条查询，待办越多越慢）。
+    for doc in _light_pending_requests(names):
         if global_queue:
             visible = _can_act_on_current_step(doc, summary_user)
         else:
