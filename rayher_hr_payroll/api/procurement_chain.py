@@ -133,6 +133,7 @@ def _fulfillment_records_bulk(po_names):
             continue
         row["details"] = _json(row.get("details_json"), [])
         row["recorded_by_name"] = names.get(_text(row.get("recorded_by"))) or _text(row.get("recorded_by"))
+        row.pop("purchase_order", None)
         bucket.append(row)
     return result
 
@@ -150,10 +151,11 @@ class _Row(dict):
         return dict(self)
 
 
-def _load_pos(limit, exclude_statuses=("已取消",)):
+def _load_pos(limit, exclude_statuses=("已取消",), status=None):
     """批量取 PO（含物料行、付款计划）：3 条查询，不再每个 PO 各查 3 次。"""
+    filters = {"status": _text(status)} if _text(status) else {"status": ["not in", list(exclude_statuses)]}
     pos = frappe.get_all(
-        "OA Purchase Order", filters={"status": ["not in", list(exclude_statuses)]}, fields=["*"],
+        "OA Purchase Order", filters=filters, fields=["*"],
         order_by="modified desc", limit_page_length=limit,
     )
     names = [row["name"] for row in pos]
@@ -162,10 +164,13 @@ def _load_pos(limit, exclude_statuses=("已取消",)):
         for doctype, bucket in children.items():
             for row in frappe.get_all(doctype, filters={"parent": ["in", names], "parenttype": "OA Purchase Order"},
                                       fields=["*"], order_by="idx asc", limit_page_length=0):
-                bucket.setdefault(row["parent"], []).append(_Row(row))
+                child = _Row(row)
+                child["doctype"] = doctype
+                bucket.setdefault(row["parent"], []).append(child)
     result = []
     for row in pos:
         item = _Row(row)
+        item["doctype"] = "OA Purchase Order"
         item["lines"] = children["OA Purchase Order Line"].get(row["name"], [])
         item["payment_plan"] = children["OA Procurement Payment Plan Row"].get(row["name"], [])
         result.append(item)
@@ -744,7 +749,17 @@ def list_materials_for_pr(search="", limit=500):
                 "item_name", "specification", "product_desc", "brand", "quantity", "unit", "expected_delivery_date"],
         order_by="modified desc", limit_page_length=2000,
     )
-    sources = {}
+    request_names = sorted({board.source_request for board in boards if board.source_request})
+    headers = {}
+    source_lines = {}
+    if request_names:
+        for row in frappe.get_all("OA Approval Request", filters={"name": ["in", request_names]},
+                                  fields=["name", "business_status", "workflow_status", "expected_delivery_date", "employee_name", "project"],
+                                  limit_page_length=0):
+            headers[row["name"]] = row
+        for row in frappe.get_all("OA Purchase Request Line", filters={"parent": ["in", request_names], "parenttype": "OA Approval Request"},
+                                  fields=["name", "parent", "material_serial", "quantity"], limit_page_length=0):
+            source_lines[(row["parent"], row["name"])] = row
     allocated = {}
     for row in frappe.db.sql(
         "SELECT l.source_request, l.source_line, SUM(l.quantity) AS qty FROM `tabOA Procurement Request Line` l "
@@ -753,12 +768,16 @@ def list_materials_for_pr(search="", limit=500):
     ):
         allocated[(row.get("source_request"), row.get("source_line"))] = _decimal(row.get("qty"))
     for board in boards:
-        try:
-            source, line = _source_line(board.source_request, board.source_line, sources.get(board.source_request))
-        except Exception:
+        source = headers.get(board.source_request)
+        line = source_lines.get((board.source_request, board.source_line))
+        if source is None or line is None:
             # 来源申请或物料行已经不存在（被改过 / 清理过）：只跳过这一行，不让整页打不开。
             continue
-        sources[board.source_request] = source
+        if not _text(line.get("material_serial")):
+            try:
+                source, line = _source_line(board.source_request, board.source_line)
+            except Exception:
+                continue
         if not _demand_approved(source):
             continue
         available = max(Decimal("0"), _decimal(line.quantity) - allocated.get((board.source_request, board.source_line), Decimal("0")))
@@ -813,11 +832,9 @@ def get_price_approval(name):
 def list_purchase_orders(status=None, limit=200):
     _require_gate(REQUEST_PROCUREMENT)
     _require_po_view()
-    filters = {"status": _text(status)} if _text(status) else {}
-    names = frappe.get_all("OA Purchase Order", filters=filters, fields=["name"],
-                           order_by="modified desc", limit_page_length=min(max(int(limit or 200), 1), 500))
-    steps = _approval_steps_bulk([row.name for row in names])
-    return [_po_summary(frappe.get_doc("OA Purchase Order", row.name), steps.get(row.name, [])) for row in names]
+    pos = _load_pos(min(max(int(limit or 200), 1), 500), exclude_statuses=(), status=status)
+    steps = _approval_steps_bulk([po.name for po in pos])
+    return [_po_summary(po, steps.get(po.name, [])) for po in pos]
 
 
 def _po_payment_blockers(po, row, *, records=None):
