@@ -873,12 +873,25 @@ def _user_display_names(users):
     users = sorted({_clean(user) for user in users if _clean(user)})
     if not users:
         return {}
-    try:
-        rows = frappe.get_all("User", filters={"name": ["in", users]}, fields=["name", "full_name"], limit_page_length=len(users))
-    except Exception:
-        rows = []
-    found = {row.get("name"): row.get("full_name") for row in rows}
-    return {user: found.get(user) or (user.split("@")[0] if "@" in user else user) for user in users}
+    local = getattr(frappe, "local", None)
+    cache = getattr(local, "_rayher_user_names", None) if local is not None else None
+    if cache is None:
+        cache = {}
+        if local is not None:
+            try:
+                setattr(local, "_rayher_user_names", cache)
+            except Exception:
+                pass
+    missing = [user for user in users if user not in cache]
+    if missing:
+        try:
+            rows = frappe.get_all("User", filters={"name": ["in", missing]}, fields=["name", "full_name"], limit_page_length=len(missing))
+        except Exception:
+            rows = []
+        found = {row.get("name"): row.get("full_name") for row in rows}
+        for user in missing:
+            cache[user] = found.get(user) or (user.split("@")[0] if "@" in user else user)
+    return {user: cache[user] for user in users}
 
 
 def _serialize_doc_steps(steps):

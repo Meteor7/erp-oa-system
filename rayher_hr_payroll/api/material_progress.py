@@ -121,12 +121,17 @@ def sync_material_progress_for_request(doc, method=None):
 def _ensure_all_rows():
     if not frappe.db.exists("DocType", "OA Material Progress"):
         return
-    names = frappe.get_all(
-        "OA Approval Request",
-        filters={"request_type": REQUEST_PROCUREMENT, "workflow_status": ["!=", "草稿"]},
-        pluck="name",
-        limit_page_length=0,
-    )
+    # 只处理还缺看板行（或物料编号还没补上）的申请；原来每次打开页面都把所有已批准的申请逐个加载一遍，
+    # 申请越多越慢。
+    names = [row.get("name") for row in frappe.db.sql(
+        "SELECT DISTINCT r.name FROM `tabOA Approval Request` r "
+        "JOIN `tabOA Purchase Request Line` l ON l.parent = r.name AND l.parenttype = 'OA Approval Request' "
+        "LEFT JOIN `tabOA Material Progress` m ON m.source_request = r.name AND m.source_line = l.name "
+        "WHERE r.request_type = %s AND r.workflow_status != '草稿' "
+        "AND (m.name IS NULL OR IFNULL(m.material_serial, '') = '' "
+        "OR IFNULL(l.material_serial, '') = '' OR l.material_serial LIKE '%%{YYYY}%%')",
+        (REQUEST_PROCUREMENT,), as_dict=True,
+    )]
     for name in names:
         try:
             sync_material_progress_for_request(frappe.get_doc("OA Approval Request", name))

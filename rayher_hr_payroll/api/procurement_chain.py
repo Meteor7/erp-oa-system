@@ -86,13 +86,15 @@ def _normalize_supplier_payment_plan(value, total_amount):
     return normalized
 
 
+RECORD_FIELDS = ["name", "record_type", "record_date", "recorded_by", "details_json",
+                 "evidence_file", "original_filename", "note", "creation"]
+
+
 def _fulfillment_records(po_name):
     try:
         rows = frappe.get_all(
             "OA PO Fulfillment Record", filters={"purchase_order": po_name},
-            fields=["name", "record_type", "record_date", "recorded_by", "details_json",
-                    "evidence_file", "original_filename", "note", "creation"],
-            order_by="creation desc", limit_page_length=500,
+            fields=RECORD_FIELDS, order_by="creation desc", limit_page_length=500,
         )
     except Exception:
         return []
@@ -103,6 +105,108 @@ def _fulfillment_records(po_name):
         except Exception:
             row["recorded_by_name"] = _text(row.get("recorded_by"))
     return rows
+
+
+def _fulfillment_records_bulk(po_names):
+    """{PO: [记录...]}，一次查出所有 PO 的到货 / 验收记录（每个 PO 最多 500 条，新的在前）。"""
+    result = {name: [] for name in po_names}
+    if not po_names:
+        return result
+    try:
+        rows = frappe.get_all(
+            "OA PO Fulfillment Record", filters={"purchase_order": ["in", list(po_names)]},
+            fields=RECORD_FIELDS + ["purchase_order"], order_by="creation desc", limit_page_length=0,
+        )
+    except Exception:
+        return result
+    users = {_text(row.get("recorded_by")) for row in rows if _text(row.get("recorded_by"))}
+    names = {}
+    if users:
+        try:
+            for item in frappe.get_all("User", filters={"name": ["in", sorted(users)]}, fields=["name", "full_name"], limit_page_length=0):
+                names[item.get("name")] = _text(item.get("full_name"))
+        except Exception:
+            names = {}
+    for row in rows:
+        bucket = result.get(row.get("purchase_order"))
+        if bucket is None or len(bucket) >= 500:
+            continue
+        row["details"] = _json(row.get("details_json"), [])
+        row["recorded_by_name"] = names.get(_text(row.get("recorded_by"))) or _text(row.get("recorded_by"))
+        bucket.append(row)
+    return result
+
+
+class _Row(dict):
+    """只读的一行数据：既能 row["x"] 也能 row.x，和 frappe 文档一样有 as_dict()。批量查出来的 PO 用它，不用逐个 get_doc。"""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    def as_dict(self):
+        return dict(self)
+
+
+def _load_pos(limit, exclude_statuses=("已取消",)):
+    """批量取 PO（含物料行、付款计划）：3 条查询，不再每个 PO 各查 3 次。"""
+    pos = frappe.get_all(
+        "OA Purchase Order", filters={"status": ["not in", list(exclude_statuses)]}, fields=["*"],
+        order_by="modified desc", limit_page_length=limit,
+    )
+    names = [row["name"] for row in pos]
+    children = {"OA Purchase Order Line": {}, "OA Procurement Payment Plan Row": {}}
+    if names:
+        for doctype, bucket in children.items():
+            for row in frappe.get_all(doctype, filters={"parent": ["in", names], "parenttype": "OA Purchase Order"},
+                                      fields=["*"], order_by="idx asc", limit_page_length=0):
+                bucket.setdefault(row["parent"], []).append(_Row(row))
+    result = []
+    for row in pos:
+        item = _Row(row)
+        item["lines"] = children["OA Purchase Order Line"].get(row["name"], [])
+        item["payment_plan"] = children["OA Procurement Payment Plan Row"].get(row["name"], [])
+        result.append(item)
+    return result
+
+
+def _work_context(pos):
+    """付款工作项要用的、按 PO / 付款单批量查好的数据：到货验收记录、付款单状态、被退回的草稿、发票份数。"""
+    names = [po.name for po in pos]
+    payment_names = sorted({_text(row.payment_request) for po in pos for row in po.payment_plan if _text(getattr(row, "payment_request", None))})
+    payments = {}
+    invoices = {}
+    if payment_names:
+        for row in frappe.get_all("OA Approval Request", filters={"name": ["in", payment_names]},
+                                  fields=["name", "workflow_status", "business_status", "current_step_index", "current_step_label"],
+                                  limit_page_length=0):
+            payments[row["name"]] = {
+                "name": row["name"], "workflow_status": _text(row.get("workflow_status")),
+                "business_status": _text(row.get("business_status")),
+                "current_step_index": int(row.get("current_step_index") or 0),
+                "current_step_label": _text(row.get("current_step_label")),
+            }
+        try:
+            for row in frappe.get_all("OA Business Document",
+                                      filters={"request": ["in", payment_names], "document_type": "发票", "status": ["!=", "已作废"]},
+                                      fields=["request", "count(name) as n"], group_by="request", limit_page_length=0):
+                invoices[row["request"]] = int(row.get("n") or 0)
+        except Exception:
+            invoices = {}
+    drafts = {}
+    if names:
+        try:
+            for row in frappe.get_all("OA Approval Request",
+                                      filters={"request_type": REQUEST_PROCUREMENT_PAYMENT, "workflow_status": "草稿",
+                                               "source_purchase_order": ["in", names]},
+                                      fields=["name", "source_purchase_order", "source_po_payment_plan_row"],
+                                      order_by="creation asc", limit_page_length=0):
+                drafts.setdefault((row["source_purchase_order"], row["source_po_payment_plan_row"]), row["name"])
+        except Exception:
+            drafts = {}
+    return {"records": _fulfillment_records_bulk(names), "payments": payments, "drafts": drafts, "invoices": invoices}
 
 
 def _invoice_document_count(request_name):
@@ -167,6 +271,25 @@ def _user():
     return _text(frappe.session.user).lower()
 
 
+def _request_memo(key, compute):
+    """同一次请求里同一个人的岗位判断只算一次：列表接口每一行都会问"你是不是采购 / 生产主管"，
+    每问一次要查 5 条岗位 / 员工 / 用户记录。没有请求上下文（单元测试、脚本）时不缓存。"""
+    local = getattr(frappe, "local", None)
+    if local is None:
+        return compute()
+    store = getattr(local, "_rayher_pc_memo", None)
+    if store is None:
+        store = {}
+        try:
+            setattr(local, "_rayher_pc_memo", store)
+        except Exception:
+            return compute()
+    full = (key, _text(getattr(getattr(frappe, "session", None), "user", "")))
+    if full not in store:
+        store[full] = compute()
+    return store[full]
+
+
 def _roles():
     return set(frappe.get_roles() or [])
 
@@ -191,6 +314,10 @@ def _require_po_view():
 
 
 def _can_purchase():
+    return _request_memo("can_purchase", _can_purchase_uncached)
+
+
+def _can_purchase_uncached():
     # PMC remains read-only here even when a legacy Purchase User role is assigned.
     # 修复（2026-09-29，审查 #10）：PMC 岗位空缺或绑定的人离职时原来直接抛错，
     # 采购经理和系统管理员也做不了任何采购操作。空缺时按"不是 PMC"处理。
@@ -205,7 +332,7 @@ def _require_purchase():
 
 
 def _can_record_receipt():
-    return _user() in position_users("production_asset_owner") or "System Manager" in _roles()
+    return _request_memo("can_record_receipt", lambda: _user() in position_users("production_asset_owner") or "System Manager" in _roles())
 
 
 def _can_record_inspection():
@@ -353,6 +480,21 @@ def _approval_steps(parent):
         fields=["name", "step_index", "label", "status", "approvers", "approved_by", "action_by", "acted_on", "note"],
         order_by="step_index asc, idx asc", limit_page_length=100,
     )
+
+
+def _approval_steps_bulk(parents):
+    result = {name: [] for name in parents}
+    if not parents:
+        return result
+    for row in frappe.get_all(
+        "OA Approval Step", filters={"parent": ["in", list(parents)]},
+        fields=["name", "parent", "step_index", "label", "status", "approvers", "approved_by", "action_by", "acted_on", "note"],
+        order_by="step_index asc, idx asc", limit_page_length=0,
+    ):
+        item = dict(row)
+        item.pop("parent", None)
+        result.setdefault(row["parent"], []).append(item)
+    return result
 
 
 def _html(value):
@@ -550,9 +692,9 @@ def _price_summary(doc):
     }
 
 
-def _po_summary(doc):
+def _po_summary(doc, steps=None):
     result = doc.as_dict()
-    result["steps"] = _approval_steps(doc.name)
+    result["steps"] = _approval_steps(doc.name) if steps is None else steps
     result["contract_status"] = _text(getattr(doc, "contract_status", None)) or "待补充信息"
     result["payment_plan"] = [row.as_dict() for row in (getattr(doc, "payment_plan", []) or [])]
     result["paid_amount"] = float(getattr(doc, "paid_amount", 0) or 0)
@@ -603,11 +745,24 @@ def list_materials_for_pr(search="", limit=500):
                 "item_name", "specification", "product_desc", "brand", "quantity", "unit", "expected_delivery_date"],
         order_by="modified desc", limit_page_length=2000,
     )
+    sources = {}
+    allocated = {}
+    for row in frappe.db.sql(
+        "SELECT l.source_request, l.source_line, SUM(l.quantity) AS qty FROM `tabOA Procurement Request Line` l "
+        "JOIN `tabOA Procurement Request` p ON p.name=l.parent WHERE p.status != '已取消' "
+        "GROUP BY l.source_request, l.source_line", as_dict=True,
+    ):
+        allocated[(row.get("source_request"), row.get("source_line"))] = _decimal(row.get("qty"))
     for board in boards:
-        source, line = _source_line(board.source_request, board.source_line)
+        try:
+            source, line = _source_line(board.source_request, board.source_line, sources.get(board.source_request))
+        except Exception:
+            # 来源申请或物料行已经不存在（被改过 / 清理过）：只跳过这一行，不让整页打不开。
+            continue
+        sources[board.source_request] = source
         if not _demand_approved(source):
             continue
-        available = _available(board.source_request, board.source_line, line.quantity)
+        available = max(Decimal("0"), _decimal(line.quantity) - allocated.get((board.source_request, board.source_line), Decimal("0")))
         if available <= 0:
             continue
         payload = {
@@ -662,7 +817,8 @@ def list_purchase_orders(status=None, limit=200):
     filters = {"status": _text(status)} if _text(status) else {}
     names = frappe.get_all("OA Purchase Order", filters=filters, fields=["name"],
                            order_by="modified desc", limit_page_length=min(max(int(limit or 200), 1), 500))
-    return [_po_summary(frappe.get_doc("OA Purchase Order", row.name)) for row in names]
+    steps = _approval_steps_bulk([row.name for row in names])
+    return [_po_summary(frappe.get_doc("OA Purchase Order", row.name), steps.get(row.name, [])) for row in names]
 
 
 def _po_payment_blockers(po, row, *, records=None):
@@ -699,7 +855,7 @@ def _require_po_payment_ready(po, row):
         frappe.throw("；".join(blockers))
 
 
-def _payment_work_item(po, row):
+def _payment_work_item(po, row, ctx=None):
     contract_ready = _po_contract_ready(po)
     lines = list(getattr(po, "lines", []) or [])
     all_received = bool(lines) and all(_line_received(line) for line in lines)
@@ -707,12 +863,14 @@ def _payment_work_item(po, row):
         _text(line.inspection_status) == "已通过" for line in lines
     )
     trigger = _text(getattr(row, "trigger_condition", None))
-    fulfillment_records = _fulfillment_records(po.name)
+    fulfillment_records = ctx["records"].get(po.name, []) if ctx else _fulfillment_records(po.name)
     blockers = _po_payment_blockers(po, row, records=fulfillment_records)
 
     payment_request = _text(getattr(row, "payment_request", None))
     payment_summary = {}
-    if payment_request and frappe.db.exists("OA Approval Request", payment_request):
+    if payment_request and ctx:
+        payment_summary = dict(ctx["payments"].get(payment_request) or {})
+    elif payment_request and frappe.db.exists("OA Approval Request", payment_request):
         payment_doc = frappe.get_doc("OA Approval Request", payment_request)
         payment_summary = {
             "name": payment_doc.name,
@@ -748,7 +906,12 @@ def _payment_work_item(po, row):
     fulfilment_open = contract_ready and _can_record_receipt() and po_status in FULFILMENT_STATUSES
     can_inspect = fulfilment_open and any(
         _decimal(line.received_quantity) > 0 and state not in {"换货中", "退货中"} for line, state in zip(lines, line_states))
-    draft_request = "" if payment_request or work_status == "已付款" else _draft_payment_request(po.name, row.name)
+    if payment_request or work_status == "已付款":
+        draft_request = ""
+    elif ctx:
+        draft_request = ctx["drafts"].get((po.name, row.name), "")
+    else:
+        draft_request = _draft_payment_request(po.name, row.name)
     conditions_regressed = 1 if work_status in {"付款审批中", "待实际付款"} and blockers else 0
     return {
         "key": f"{po.name}:{row.name}",
@@ -780,7 +943,7 @@ def _payment_work_item(po, row):
         "can_record_return": 1 if fulfilment_open and "退货中" in line_states else 0,
         "can_push_payment": 1 if contract_ready and _can_purchase() and not blockers and not payment_request and row_status in {"待审批", "审批中"} else 0,
         "draft_request": draft_request,
-        "invoice_documents": _invoice_document_count(payment_request),
+        "invoice_documents": ctx["invoices"].get(payment_request, 0) if ctx else _invoice_document_count(payment_request),
         "conditions_regressed": conditions_regressed,
         "requires_receipt": 1 if "到货" in trigger or "验收" in trigger else 0,
         "requires_inspection": 1 if "验收" in trigger else 0,
@@ -795,19 +958,13 @@ def list_payment_work_items(limit=500):
     _require_gate(REQUEST_PROCUREMENT_PAYMENT)
     _require_po_view()
     limit = min(max(int(limit or 500), 1), 1000)
-    names = frappe.get_all(
-        "OA Purchase Order",
-        filters={"status": ["not in", ["已取消"]]},
-        pluck="name",
-        order_by="modified desc",
-        limit_page_length=limit,
-    )
+    pos = _load_pos(limit)
+    ctx = _work_context(pos)
     result = []
-    for name in names:
-        po = frappe.get_doc("OA Purchase Order", name)
-        for row in list(getattr(po, "payment_plan", []) or []):
+    for po in pos:
+        for row in po.payment_plan:
             if getattr(row, "name", None):
-                result.append(_payment_work_item(po, row))
+                result.append(_payment_work_item(po, row, ctx))
     priority = {
         "可提交付款审批": 0, "待到货资料": 1, "待验收": 2,
         "付款审批中": 3, "待实际付款": 4, "待合同生效": 5, "已付款": 6,
@@ -817,17 +974,16 @@ def list_payment_work_items(limit=500):
 def po_work_summary():
     """采购付款看板：付款期次按状态汇总、各 PO 的到货 / 验收 / 付款进度。
     不做权限判断，调用方（看板接口）已经按看板范围限定。"""
-    names = frappe.get_all("OA Purchase Order", filters={"status": ["not in", ["已取消"]]},
-                           pluck="name", order_by="modified desc", limit_page_length=200)
+    loaded = _load_pos(1000)
+    ctx = _work_context(loaded)
     by_status = {}
     pos = []
-    for name in names:
-        po = frappe.get_doc("OA Purchase Order", name)
+    for po in loaded:
         lines = list(getattr(po, "lines", []) or [])
-        for row in list(getattr(po, "payment_plan", []) or []):
+        for row in po.payment_plan:
             if not getattr(row, "name", None):
                 continue
-            item = _payment_work_item(po, row)
+            item = _payment_work_item(po, row, ctx)
             entry = by_status.setdefault(item["work_status"], [item["work_status"], 0, 0.0])
             entry[1] += 1
             entry[2] += item["amount"]
