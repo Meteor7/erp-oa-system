@@ -274,17 +274,16 @@ def _user():
 def _request_memo(key, compute):
     """同一次请求里同一个人的岗位判断只算一次：列表接口每一行都会问"你是不是采购 / 生产主管"，
     每问一次要查 5 条岗位 / 员工 / 用户记录。没有请求上下文（单元测试、脚本）时不缓存。"""
-    local = getattr(frappe, "local", None)
-    if local is None:
+    try:
+        local = frappe.local
+        store = getattr(local, "_rayher_pc_memo", None)
+        if store is None:
+            store = {}
+            local._rayher_pc_memo = store
+        full = (key, _text(frappe.session.user))
+    except Exception:
+        # frappe.local 没有绑定（单元测试、脚本）：不缓存
         return compute()
-    store = getattr(local, "_rayher_pc_memo", None)
-    if store is None:
-        store = {}
-        try:
-            setattr(local, "_rayher_pc_memo", store)
-        except Exception:
-            return compute()
-    full = (key, _text(getattr(getattr(frappe, "session", None), "user", "")))
     if full not in store:
         store[full] = compute()
     return store[full]

@@ -873,15 +873,13 @@ def _user_display_names(users):
     users = sorted({_clean(user) for user in users if _clean(user)})
     if not users:
         return {}
-    local = getattr(frappe, "local", None)
-    cache = getattr(local, "_rayher_user_names", None) if local is not None else None
-    if cache is None:
+    try:
+        cache = getattr(frappe.local, "_rayher_user_names", None)
+        if cache is None:
+            cache = {}
+            frappe.local._rayher_user_names = cache
+    except Exception:
         cache = {}
-        if local is not None:
-            try:
-                setattr(local, "_rayher_user_names", cache)
-            except Exception:
-                pass
     missing = [user for user in users if user not in cache]
     if missing:
         try:
