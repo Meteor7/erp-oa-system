@@ -169,7 +169,7 @@ def _load_pos(limit, exclude_statuses=("已取消",), status=None):
                 bucket.setdefault(row["parent"], []).append(child)
     result = []
     for row in pos:
-        item = _Row(row)
+        item = _Row({key: value for key, value in row.items() if not key.startswith("_")})
         item["doctype"] = "OA Purchase Order"
         item["lines"] = children["OA Purchase Order Line"].get(row["name"], [])
         item["payment_plan"] = children["OA Procurement Payment Plan Row"].get(row["name"], [])
@@ -667,18 +667,42 @@ def _validate_supplier_comparisons(doc):
     return quotes
 
 
-def _price_summary(doc):
-    quotes = frappe.get_all(
-        "OA Price Approval Quote", filters={"price_approval": doc.name},
-        fields=["name", "price_line", "supplier", "unit_price", "total_price", "delivery_date",
-                "payment_method", "currency", "tax_rate", "contract_entity", "is_recommended", "note", "payment_plan_json"],
-        order_by="creation asc", limit_page_length=2000,
-    )
+QUOTE_FIELDS = ["name", "price_line", "supplier", "unit_price", "total_price", "delivery_date",
+                "payment_method", "currency", "tax_rate", "contract_entity", "is_recommended", "note", "payment_plan_json"]
+
+
+def _quotes_for(names):
+    """{价格审批: [报价...]}，一次查出。"""
+    result = {name: [] for name in names}
+    if not names:
+        return result
+    for row in frappe.get_all("OA Price Approval Quote", filters={"price_approval": ["in", list(names)]},
+                              fields=QUOTE_FIELDS + ["price_approval"], order_by="creation asc", limit_page_length=0):
+        result.setdefault(row["price_approval"], []).append(row)
+    return result
+
+
+def _source_headers(names):
+    names = sorted({_text(name) for name in names if _text(name)})
+    if not names:
+        return {}
+    return {row["name"]: row for row in frappe.get_all(
+        "OA Approval Request", filters={"name": ["in", names]}, fields=["name", "department", "employee_name"], limit_page_length=0)}
+
+
+def _price_summary(doc, quotes=None, steps=None, headers=None):
+    if quotes is None:
+        quotes = frappe.get_all(
+            "OA Price Approval Quote", filters={"price_approval": doc.name},
+            fields=QUOTE_FIELDS, order_by="creation asc", limit_page_length=2000,
+        )
     source_names = sorted({_text(row.source_request) for row in (doc.lines or []) if _text(row.source_request)})
-    source_docs = [frappe.get_doc("OA Approval Request", name) for name in source_names]
+    if headers is None:
+        headers = _source_headers(source_names)
+    source_docs = [headers[name] for name in source_names if name in headers]
     projects = sorted({_text(row.project) for row in (doc.lines or []) if _text(row.project)})
-    departments = sorted({_text(getattr(source, "department", None)) for source in source_docs if _text(getattr(source, "department", None))})
-    requesters = sorted({_text(getattr(source, "employee_name", None)) for source in source_docs if _text(getattr(source, "employee_name", None))})
+    departments = sorted({_text(source.get("department")) for source in source_docs if _text(source.get("department"))})
+    requesters = sorted({_text(source.get("employee_name")) for source in source_docs if _text(source.get("employee_name"))})
     return {
         "name": doc.name, "status": doc.status or "", "created_by": doc.created_by or "",
         "source_prs": doc.source_prs or "", "source_requests": ",".join(source_names),
@@ -691,8 +715,8 @@ def _price_summary(doc):
         "total_amount": float(doc.total_amount or 0),
         "lines": [row.as_dict() for row in (doc.lines or [])], "quotes": quotes,
         "supplier_comparisons": _supplier_comparisons(doc, quotes),
-        "steps": _approval_steps(doc.name), "modified": str(doc.modified or ""),
-        "can_select_quote": (_user() in position_users("vice_manager") or "System Manager" in _roles()) and doc.status == "待审批",
+        "steps": _approval_steps(doc.name) if steps is None else steps, "modified": str(doc.modified or ""),
+        "can_select_quote": bool(_request_memo("can_select_quote", lambda: _user() in position_users("vice_manager") or "System Manager" in _roles())) and doc.status == "待审批",
     }
 
 
@@ -818,7 +842,11 @@ def list_price_approvals(status=None, limit=200):
     filters = {"status": _text(status)} if _text(status) else {}
     names = frappe.get_all("OA Price Approval", filters=filters, fields=["name"],
                            order_by="modified desc", limit_page_length=min(max(int(limit or 200), 1), 500))
-    return [_price_summary(frappe.get_doc("OA Price Approval", row.name)) for row in names]
+    docs = [frappe.get_doc("OA Price Approval", row.name) for row in names]
+    quotes = _quotes_for([doc.name for doc in docs])
+    steps = _approval_steps_bulk([doc.name for doc in docs])
+    headers = _source_headers([_text(line.source_request) for doc in docs for line in (doc.lines or [])])
+    return [_price_summary(doc, quotes.get(doc.name, []), steps.get(doc.name, []), headers) for doc in docs]
 
 
 @frappe.whitelist()
