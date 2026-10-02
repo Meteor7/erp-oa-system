@@ -678,7 +678,7 @@ def _quotes_for(names):
         return result
     for row in frappe.get_all("OA Price Approval Quote", filters={"price_approval": ["in", list(names)]},
                               fields=QUOTE_FIELDS + ["price_approval"], order_by="creation asc", limit_page_length=0):
-        result.setdefault(row["price_approval"], []).append(row)
+        result.setdefault(row.pop("price_approval"), []).append(row)
     return result
 
 
