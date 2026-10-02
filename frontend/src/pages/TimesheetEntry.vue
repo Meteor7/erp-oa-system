@@ -1,10 +1,25 @@
 <script setup>
-import { computed, ref, watch } from "vue";
-import { Button, Spinner, createResource } from "frappe-ui";
-import { period } from "../lib/period";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { createResource } from "frappe-ui";
+import { period, setPeriodScope } from "../lib/period";
 import { canEditTimesheetEntry } from "../lib/access";
-import { importTimesheetWorkbookFile, parseTimesheetPaste } from "../lib/timesheetImport";
 import { exportTableWorkbook } from "../lib/tableExport";
+import {
+  HOURS_PER_DAY, capText, daysInMonth, deriveStatus, lastRemindedText, needsRemind, newRowKey,
+  previousPeriod, remindResultText, rosterItemsFromOptions, rosterItemsFromProgress, rowHours, rowsFromPrevious, round2,
+  serverMessage, statusMeta, sumDays, sumHours, trimDays, validateEntryRows,
+} from "../lib/timesheetEntryView";
+import RdPage from "../components/rd/RdPage.vue";
+import RdPeriod from "../components/rd/RdPeriod.vue";
+import RdSeg from "../components/rd/RdSeg.vue";
+import RdIcon from "../components/rd/RdIcon.vue";
+import EntryBoard from "../components/timesheet/EntryBoard.vue";
+import EntryRoster from "../components/timesheet/EntryRoster.vue";
+import EntrySheet from "../components/timesheet/EntrySheet.vue";
+import EntryImportDrawer from "../components/timesheet/EntryImportDrawer.vue";
+
+// 月度页：期间选择器固定按月。
+setPeriodScope("month");
 
 const options = createResource({
   url: "rayher_hr_payroll.api.monthly_timesheet_entry.get_monthly_options",
@@ -18,89 +33,114 @@ const monthly = createResource({
   method: "GET",
   makeParams: () => ({ period: period.value, employee: selectedEmployee.value }),
 });
+// 上月同一个人的记录：「复制上月」用，也决定添加项目时谁排在前面。
+const previous = createResource({
+  url: "rayher_hr_payroll.api.monthly_timesheet_entry.list_monthly_entries",
+  method: "GET",
+  makeParams: () => ({ period: previousPeriod(period.value), employee: selectedEmployee.value }),
+});
+// 全部可见员工的明细（不带 employee），只用于看板上的「导出明细」。
+const allMonthly = createResource({
+  url: "rayher_hr_payroll.api.monthly_timesheet_entry.list_monthly_entries",
+  method: "GET",
+  makeParams: () => ({ period: period.value }),
+});
+const progress = createResource({
+  url: "rayher_hr_payroll.api.monthly_timesheet_entry.get_fill_progress",
+  method: "GET",
+  makeParams: () => ({ period: period.value }),
+  auto: true,
+});
 const saver = createResource({ url: "rayher_hr_payroll.api.monthly_timesheet_entry.save_monthly_entries" });
+const reminder = createResource({ url: "rayher_hr_payroll.api.monthly_timesheet_entry.remind_timesheet_fill" });
 
 const canEdit = computed(() => canEditTimesheetEntry());
 const selectedEmployee = ref("");
-const selectedYear = ref(Number(String(period.value).slice(0, 4)) || new Date().getFullYear());
-const selectedMonth = ref(Number(String(period.value).slice(5, 7)) || new Date().getMonth() + 1);
+const tabChoice = ref("");
 const entries = ref([]);
 const loadedRevision = ref("");
+const dirty = ref(false);
 const saving = ref(false);
 const exporting = ref(false);
 const errMsg = ref("");
 const okMsg = ref("");
-const batchPasteText = ref("");
-const batchErrors = ref([]);
-const batchWorkbookInput = ref(null);
+const importOpen = ref(false);
+const previousEntries = ref([]);
+const previousKey = ref("");
+let okTimer = null;
+let loadSeq = 0;
+let previousSeq = 0;
 
 const employees = computed(() => options.data?.employees || []);
 const editableEmployees = computed(() => options.data?.editable_employees || []);
 const projects = computed(() => options.data?.projects || []);
-const dayLimit = computed(() => Number(monthly.data?.day_limit ?? (new Date(selectedYear.value, selectedMonth.value, 0).getDate() || 31)));
-const hourLimit = computed(() => Number(monthly.data?.hour_limit ?? dayLimit.value * 8));
+const progressData = computed(() => progress.data || null);
+const canRemind = computed(() => Boolean(progressData.value?.can_remind));
+const progressKind = computed(() => progressData.value?.kind || "");
+const rosterItems = computed(() => (
+  progressKind.value && progressKind.value !== "self" && progressData.value?.employees?.length
+    ? rosterItemsFromProgress(progressData.value.employees)
+    : rosterItemsFromOptions(employees.value)
+));
+// 只能看到自己时：不显示名单和看板，直接是个人工作表。
+const showRoster = computed(() => rosterItems.value.length > 1);
+const showBoard = computed(() => (progressKind.value ? progressKind.value !== "self" : employees.value.length > 1));
+const activeTab = computed(() => {
+  if (!showBoard.value) return "sheet";
+  return tabChoice.value || "board";
+});
+const tabOptions = computed(() => [
+  { value: "board", label: "填报进度" },
+  { value: "sheet", label: "个人填报" },
+]);
+
+const selectedPerson = computed(() => {
+  const id = selectedEmployee.value;
+  const item = rosterItems.value.find((entry) => entry.employee === id);
+  const option = employees.value.find((entry) => entry.name === id);
+  return { employee: id, name: item?.name || option?.employee_name || id, department: item?.department || "" };
+});
+const selectedStatus = computed(() => rosterItems.value.find((entry) => entry.employee === selectedEmployee.value)?.status || "");
+const monthNumber = computed(() => Number(String(period.value).slice(5, 7)) || new Date().getMonth() + 1);
+const dayLimit = computed(() => Number(monthly.data?.day_limit ?? daysInMonth(period.value)));
+const hourLimit = computed(() => Number(monthly.data?.hour_limit ?? dayLimit.value * HOURS_PER_DAY));
 const calendarSource = computed(() => String(monthly.data?.calendar_source || "weekday_fallback"));
 const usesWeekdayFallback = computed(() => calendarSource.value === "weekday_fallback");
-const isAllEmployees = computed(() => !selectedEmployee.value);
 const hasLegacySources = computed(() => Boolean(monthly.data?.has_legacy_sources));
 const canEditSelection = computed(() => Boolean(
   canEdit.value
   && editableEmployees.value.includes(selectedEmployee.value)
   && !hasLegacySources.value
 ));
-const employeeCount = computed(() => Number(monthly.data?.employee_count || 0));
-const totalDays = computed(() => Math.round(entries.value.reduce((sum, row) => sum + validDays(row.occurrence_days), 0) * 100) / 100);
-const totalHours = computed(() => Math.round(entries.value.reduce((sum, row) => sum + Number(row.hours ?? calculatedRowHours(row)), 0) * 100) / 100);
-const months = Array.from({ length: 12 }, (_, index) => index + 1);
+const readOnlyNote = computed(() => {
+  if (canEditSelection.value || hasLegacySources.value || !selectedEmployee.value) return "";
+  return `只读：当前账号只能查看 ${selectedPerson.value.name} 的工时，不能修改。`;
+});
+const totalDays = computed(() => sumDays(entries.value));
+const totalHours = computed(() => sumHours(entries.value));
+const overLimit = computed(() => totalDays.value > dayLimit.value + 1e-6);
+const capLine = computed(() => capText({
+  month: monthNumber.value,
+  dayLimit: dayLimit.value,
+  hourLimit: hourLimit.value,
+  baseHourLimit: monthly.data?.base_hour_limit,
+  leaveHours: monthly.data?.leave_hours,
+  joinedOn: monthly.data?.joined_on,
+  relievedOn: monthly.data?.relieved_on,
+}));
+const recentIds = computed(() => previousEntries.value.map((row) => row.project).filter(Boolean));
+const importOptions = computed(() => ({
+  employees: employees.value,
+  projects: projects.value,
+  period: period.value,
+  existingRows: entries.value,
+}));
+const saveStatus = computed(() => statusMeta(deriveStatus(totalDays.value, dayLimit.value)));
 
-function emptyRow() {
-  return {
-    key: `new-${Date.now()}-${Math.random()}`,
-    monthly_entry_id: "",
-    project: "",
-    project_code: "",
-    project_name: "",
-    occurrence_days: "",
-    hours: 0,
-    remark: "",
-  };
-}
-
-function validDays(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-function calculatedRowHours(row) {
-  const occurrenceDays = validDays(row.occurrence_days);
-  return Math.round(occurrenceDays * 8 * 100) / 100;
-}
-
-function formatNumber(value) {
-  return Number(value || 0).toFixed(2);
-}
-
-function filteredProjects() {
-  return projects.value;
-}
-
-function projectCode(project) {
-  return project?.rd_project_code || project?.project_code || project?.name || "";
-}
-
-function projectName(project) {
-  return project?.project_name || project?.name || "";
-}
-
-function chooseProject(row, projectId) {
-  const project = projects.value.find((item) => item.name === projectId);
-  row.project = project?.name || "";
-  row.project_code = projectCode(project);
-  row.project_name = projectName(project);
-}
-
-function recalculateRow(row) {
-  row.hours = calculatedRowHours(row);
+function notify(message) {
+  okMsg.value = message;
+  clearTimeout(okTimer);
+  okTimer = setTimeout(() => { okMsg.value = ""; }, 6000);
 }
 
 function hydrateEntries() {
@@ -108,57 +148,116 @@ function hydrateEntries() {
   entries.value = (monthly.data?.entries || []).map((row) => ({
     ...row,
     key: row.monthly_entry_id,
-    occurrence_days: formatNumber(row.occurrence_days),
+    employee: row.employee || selectedEmployee.value,
+    occurrence_days: trimDays(row.occurrence_days),
     hours: Number(row.hours || 0),
+    remark: row.remark || "",
   }));
+  dirty.value = false;
 }
 
 async function loadEntries() {
   errMsg.value = "";
   okMsg.value = "";
+  const seq = (loadSeq += 1);
+  if (!selectedEmployee.value) {
+    entries.value = [];
+    loadedRevision.value = "";
+    dirty.value = false;
+    return;
+  }
   try {
     await monthly.reload();
+    if (seq !== loadSeq) return;
     hydrateEntries();
   } catch (error) {
-    errMsg.value = serverMessage(error, "月度工时加载失败");
+    if (seq === loadSeq) errMsg.value = serverMessage(error, "月度工时加载失败");
+  }
+  loadPrevious();
+}
+
+async function loadPrevious() {
+  const key = `${previousPeriod(period.value)}|${selectedEmployee.value}`;
+  if (!selectedEmployee.value || previousKey.value === key) return;
+  const seq = (previousSeq += 1);
+  previousEntries.value = [];
+  try {
+    await previous.reload();
+    if (seq !== previousSeq) return;
+    previousEntries.value = previous.data?.entries || [];
+    previousKey.value = key;
+  } catch {
+    // 上月数据只是辅助，加载失败不打扰填报。
   }
 }
 
-function addRow() {
-  if (!canEditSelection.value) return;
-  entries.value.push(emptyRow());
+async function refreshProgress() {
+  try {
+    await progress.reload();
+  } catch {
+    // 看板自己会显示错误
+  }
 }
 
-function removeRow(_row, index) {
+function confirmDiscard() {
+  return !dirty.value || window.confirm("当前有未保存的修改，切换后会丢失，继续吗？");
+}
+
+function selectEmployee(id) {
+  if (!id || id === selectedEmployee.value) return true;
+  if (!confirmDiscard()) return false;
+  selectedEmployee.value = id;
+  return true;
+}
+
+function openEmployee(id) {
+  if (selectEmployee(id)) tabChoice.value = "sheet";
+}
+
+function setTab(value) {
+  tabChoice.value = value;
+  if (value === "sheet" && !selectedEmployee.value) {
+    selectedEmployee.value = editableEmployees.value[0] || employees.value[0]?.name || "";
+  }
+}
+
+function onRowsChange(rows) {
+  if (!canEditSelection.value) return;
+  entries.value = rows;
+  dirty.value = true;
+  errMsg.value = "";
+}
+
+function removeRow(index) {
   if (!canEditSelection.value) return;
   errMsg.value = "";
   entries.value.splice(index, 1);
-  okMsg.value = "该行已移出表格，点击保存后生效";
+  dirty.value = true;
+  notify("该行已移出表格，点击保存后生效");
 }
 
-function validateRows() {
-  if (!selectedEmployee.value) return "请选择研发人员";
-  if (hasLegacySources.value) return "历史按日记录不能在月度视图中直接修改";
-  const seenProjects = new Set();
-  let sum = 0;
-  for (let index = 0; index < entries.value.length; index += 1) {
-    const row = entries.value[index];
-    if (!row.project || !row.project_code || !row.project_name) return `第 ${index + 1} 行请选择项目`;
-    if (seenProjects.has(row.project)) return `第 ${index + 1} 行项目重复`;
-    seenProjects.add(row.project);
-    const text = String(row.occurrence_days ?? "").trim();
-    if (!/^\d+(?:\.\d{1,2})?$/.test(text)) return `第 ${index + 1} 行发生天数最多保留两位小数`;
-    const days = Number(text);
-    if (!Number.isFinite(days) || days <= 0) return `第 ${index + 1} 行发生天数必须大于 0`;
-    sum = Math.round((sum + days) * 100) / 100;
+async function copyPrevious() {
+  if (!canEditSelection.value) return;
+  errMsg.value = "";
+  const key = `${previousPeriod(period.value)}|${selectedEmployee.value}`;
+  if (previousKey.value !== key) await loadPrevious();
+  const { rows, skipped } = rowsFromPrevious(previousEntries.value, { employee: selectedEmployee.value, projects: projects.value });
+  if (!rows.length) {
+    errMsg.value = "上月没有可复制的项目记录";
+    return;
   }
-  if (sum > dayLimit.value) return `当月累计发生天数不能超过 ${formatNumber(dayLimit.value)} 天`;
-  return "";
+  entries.value = rows;
+  dirty.value = true;
+  notify(`已复制上月 ${rows.length} 个项目的天数，请确认后保存${skipped ? `（${skipped} 个项目已不可选，已跳过）` : ""}`);
 }
 
 async function saveRows() {
   if (!canEditSelection.value) return;
-  errMsg.value = validateRows();
+  errMsg.value = validateEntryRows(entries.value, {
+    employee: selectedEmployee.value,
+    hasLegacy: hasLegacySources.value,
+    dayLimit: dayLimit.value,
+  });
   okMsg.value = "";
   if (errMsg.value) return;
   saving.value = true;
@@ -178,7 +277,8 @@ async function saveRows() {
       expected_revision: loadedRevision.value,
     });
     await loadEntries();
-    okMsg.value = "月度工时保存成功";
+    notify("月度工时保存成功");
+    refreshProgress();
   } catch (error) {
     errMsg.value = serverMessage(error, "保存失败");
   } finally {
@@ -186,40 +286,31 @@ async function saveRows() {
   }
 }
 
-function timesheetImportOptions() {
-  return { employees: employees.value, projects: projects.value, period: period.value, existingRows: entries.value };
+function applyImport(rows) {
+  const stamp = newRowKey("import");
+  entries.value.push(...rows.map((row, index) => ({
+    ...row,
+    key: `${stamp}-${index}`,
+    monthly_entry_id: "",
+    occurrence_days: trimDays(row.occurrence_days),
+    hours: round2(Number(row.occurrence_days) * HOURS_PER_DAY),
+  })));
+  dirty.value = true;
+  notify(`已导入 ${rows.length} 行，请确认后保存`);
 }
 
-function applyImport(result) {
-  batchErrors.value = result.errors || [];
-  if (batchErrors.value.length) return;
-  const imported = result.rows || [];
-  if (imported.some((row) => row.employee !== selectedEmployee.value)) {
-    batchErrors.value = ["导入文件中的研发人员必须与当前选择一致"];
-    return;
-  }
-  entries.value.push(...imported.map((row) => ({ ...row, key: `import-${Date.now()}-${Math.random()}` })));
-  batchPasteText.value = "";
-  okMsg.value = `已导入 ${imported.length} 行，请确认后保存`;
-}
-
-function previewBatchPaste() {
-  applyImport(parseTimesheetPaste(batchPasteText.value, timesheetImportOptions()));
-}
-
-function chooseTimesheetWorkbook() {
-  batchWorkbookInput.value?.click();
-}
-
-async function importTimesheetWorkbookRows(event) {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  if (!file) return;
+async function remind(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!list.length || !canRemind.value) return;
+  if (list.length > 1 && !window.confirm(`确认向 ${list.length} 人发送工时填报催办？`)) return;
+  errMsg.value = "";
   try {
-    applyImport(await importTimesheetWorkbookFile(file, timesheetImportOptions()));
+    const result = await reminder.submit({ period: period.value, employees: JSON.stringify(list) });
+    notify(remindResultText(result));
   } catch (error) {
-    batchErrors.value = [serverMessage(error, "Excel 导入失败")];
+    errMsg.value = serverMessage(error, "催办失败");
   }
+  refreshProgress();
 }
 
 async function exportCurrent() {
@@ -230,14 +321,14 @@ async function exportCurrent() {
       sheetName: "月度研发工时",
       rows: entries.value.map((row) => ({
         ...row,
-        employee_name: row.employee_name || employees.value.find((item) => item.name === selectedEmployee.value)?.employee_name || selectedEmployee.value,
+        employee_name: row.employee_name || selectedPerson.value.name,
       })),
       columns: [
         { label: "研发人员", key: "employee_name", width: 18 },
         { label: "项目代码", key: "project_code", width: 14 },
         { label: "项目名称", key: "project_name", width: 28 },
         { label: "发生天数", value: (row) => Number(row.occurrence_days || 0), width: 12 },
-        { label: "工时(h)", value: (row) => Number(row.hours ?? calculatedRowHours(row)), width: 12 },
+        { label: "工时(h)", value: (row) => rowHours(row), width: 12 },
         { label: "备注", key: "remark", width: 36 },
       ],
     });
@@ -246,159 +337,131 @@ async function exportCurrent() {
   }
 }
 
-function parseFrappeServerMessages(raw) {
-  if (!raw) return [];
+// 看板：所有可见员工的月度明细（原来「全部员工」视图的内容）
+async function exportAllEmployees() {
+  exporting.value = true;
+  errMsg.value = "";
   try {
-    const items = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (!Array.isArray(items)) return [];
-    return items.map((message) => {
-      try {
-        const parsed = typeof message === "string" ? JSON.parse(message) : message;
-        return parsed.message || parsed.title || message;
-      } catch {
-        return message;
-      }
-    }).filter(Boolean);
-  } catch {
-    return [];
+    await allMonthly.reload();
+    await exportTableWorkbook({
+      filename: `研发工时明细-${period.value}`,
+      sheetName: "月度研发工时",
+      rows: allMonthly.data?.entries || [],
+      columns: [
+        { label: "研发人员", key: "employee_name", width: 18 },
+        { label: "工号", key: "employee", width: 14 },
+        { label: "项目代码", key: "project_code", width: 14 },
+        { label: "项目名称", key: "project_name", width: 28 },
+        { label: "发生天数", value: (row) => Number(row.occurrence_days || 0), width: 12 },
+        { label: "工时(h)", value: (row) => Number(row.hours ?? rowHours(row)), width: 12 },
+        { label: "备注", key: "remark", width: 36 },
+      ],
+    });
+  } catch (error) {
+    errMsg.value = serverMessage(error, "导出失败");
+  } finally {
+    exporting.value = false;
   }
 }
 
-function serverMessage(error, fallback) {
-  const messages = [...(error?.messages || []), ...parseFrappeServerMessages(error?._server_messages)]
-    .map((value) => String(value || "").replace(/<[^>]*>/g, "").trim()).filter(Boolean);
-  return messages.join("；") || String(error?._error_message || error?.message || fallback).replace(/<[^>]*>/g, "").trim();
+async function exportFollowUp(list) {
+  await exportTableWorkbook({
+    filename: `工时未填满名单-${period.value}`,
+    sheetName: "需要跟进",
+    rows: list,
+    columns: [
+      { label: "姓名", key: "employee_name", width: 14 },
+      { label: "工号", key: "employee", width: 14 },
+      { label: "部门", key: "department", width: 18 },
+      { label: "已填天数", value: (row) => Number(row.used_days || 0), width: 12 },
+      { label: "上限天数", value: (row) => Number(row.limit_days || 0), width: 12 },
+      { label: "状态", value: (row) => statusMeta(row.status).label, width: 10 },
+      { label: "上次催办", value: (row) => lastRemindedText(row.last_reminded) || "", width: 16 },
+    ],
+  });
 }
 
-watch([selectedYear, selectedMonth], ([year, month]) => {
-  const next = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
-  if (period.value !== next) period.value = next;
-});
-watch(period, (value) => {
-  const [year, month] = String(value || "").split("-").map(Number);
-  if (year) selectedYear.value = year;
-  if (month) selectedMonth.value = month;
-});
 watch(() => options.data?.employees, (items) => {
-  if (items?.length === 1 && !selectedEmployee.value) {
-    selectedEmployee.value = items[0].name;
+  if (!selectedEmployee.value && items?.length) {
+    const editable = options.data?.editable_employees || [];
+    selectedEmployee.value = items.length === 1 ? items[0].name : (editable[0] || items[0].name);
     return;
   }
-  if (selectedEmployee.value && !items?.some((item) => item.name === selectedEmployee.value)) {
+  if (selectedEmployee.value && items && !items.some((item) => item.name === selectedEmployee.value)) {
     selectedEmployee.value = "";
   }
 }, { immediate: true });
-watch(period, () => options.reload());
+watch(period, () => {
+  options.reload();
+  refreshProgress();
+});
 watch([period, selectedEmployee], loadEntries, { immediate: true });
-watch(() => monthly.data, hydrateEntries);
+onBeforeUnmount(() => clearTimeout(okTimer));
 </script>
 
 <template>
-  <section class="rounded-lg border border-gray-200 bg-white shadow-sm">
-    <div class="flex flex-col gap-4 border-b border-gray-200 px-5 py-5 xl:flex-row xl:items-center xl:justify-between">
-      <div class="flex flex-wrap items-center gap-3">
-        <h2 class="mr-2 text-xl font-semibold text-gray-900">工时录入（按月）</h2>
-        <label class="flex items-center gap-2 text-sm text-gray-600">
-          <span>研发人员</span>
-          <select v-model="selectedEmployee" class="min-w-[210px] rounded border border-gray-300 bg-white px-3 py-2 text-sm">
-            <option value="">全部员工</option>
-            <option v-for="employee in employees" :key="employee.name" :value="employee.name">{{ employee.employee_name }} - {{ employee.name }}</option>
-          </select>
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-600">
-          <span>年份</span>
-          <input v-model.number="selectedYear" type="number" min="2000" max="2100" class="w-28 rounded border border-gray-300 px-3 py-2 text-sm" />
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-600">
-          <span>月份</span>
-          <select v-model.number="selectedMonth" class="w-24 rounded border border-gray-300 bg-white px-3 py-2 text-sm">
-            <option v-for="item in months" :key="item" :value="item">{{ item }}</option>
-          </select>
-        </label>
-      </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <span v-if="isAllEmployees" class="text-sm text-gray-500">员工：<strong class="font-medium text-gray-800">{{ employeeCount }} 人</strong></span>
-        <span class="text-sm text-gray-500">当前已填：<strong class="font-medium text-gray-800">{{ formatNumber(totalDays) }} 天 / {{ formatNumber(totalHours) }} 小时</strong></span>
-        <span class="rounded-md bg-amber-50 px-3 py-1.5 text-sm text-amber-800">本月上限（扣假后）：<strong class="font-semibold">{{ formatNumber(dayLimit) }} 天 / {{ formatNumber(hourLimit) }} 小时</strong></span>
-        <Button v-if="canEditSelection" variant="subtle" @click="addRow">+ 新增一行</Button>
-        <Button v-if="canEditSelection" variant="solid" :loading="saving" @click="saveRows">保存</Button>
-        <Button variant="subtle" :loading="exporting" :disabled="!entries.length" @click="exportCurrent">导出Excel</Button>
+  <RdPage title="研发工时填报" subtitle="按月登记每位研发人员在各项目上发生的天数，1 天 = 8 小时。">
+    <template #ctl><RdPeriod /></template>
+
+    <div class="bar">
+      <RdSeg v-if="showBoard" :model-value="activeTab" :options="tabOptions" label="填报视图" @update:model-value="setTab" />
+      <span v-else></span>
+      <div class="row">
+        <button v-if="activeTab === 'sheet'" type="button" class="btn" :disabled="exporting || !entries.length" @click="exportCurrent"><RdIcon name="download" />导出 Excel</button>
+        <button v-else type="button" class="btn" :disabled="exporting" @click="exportAllEmployees"><RdIcon name="download" />导出明细 Excel</button>
       </div>
     </div>
 
-    <p v-if="usesWeekdayFallback" class="mx-5 mt-4 text-xs text-amber-700">未配置假日表，当前按周一至周五计算</p>
-    <p v-if="errMsg" class="mx-5 mt-4 text-sm text-red-600">{{ errMsg }}</p>
-    <p v-if="okMsg" class="mx-5 mt-4 text-sm text-green-700">{{ okMsg }}</p>
+    <div v-if="errMsg" class="note bad"><RdIcon name="alert" /><span class="grow">{{ errMsg }}</span></div>
+    <div v-if="okMsg" class="note ok"><RdIcon name="check" /><span class="grow">{{ okMsg }}</span></div>
 
-    <p v-if="!isAllEmployees" class="mb-3 text-sm text-gray-600">日历工时 {{ monthly.data?.base_hour_limit ?? hourLimit }} 小时 · 已批请假扣减 {{ monthly.data?.leave_hours || 0 }} 小时<template v-if="monthly.data?.joined_on"> · {{ monthly.data.joined_on }} 入职，之前的日子不计</template><template v-if="monthly.data?.relieved_on"> · {{ monthly.data.relieved_on }} 离职，之后的日子不计</template></p>
-    <p v-if="monthly.data?.over_limit_hours > 0" class="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">当前已填报工时超过上限 {{ monthly.data.over_limit_hours }} 小时，请调整后保存。</p>
-    <div v-if="monthly.loading" class="flex justify-center py-12"><Spinner class="h-6 w-6" /></div>
-    <div v-else class="overflow-x-auto px-5 py-4">
-      <table class="w-full min-w-[1080px] border-separate border-spacing-0 text-sm">
-        <thead class="bg-gray-50 text-gray-500">
-          <tr>
-            <th v-if="isAllEmployees" class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">研发人员</th>
-            <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">项目</th>
-            <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">发生天数</th>
-            <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">工时</th>
-            <th class="border-y border-l border-gray-200 px-4 py-3 text-left font-medium">备注</th>
-            <th class="border border-gray-200 px-4 py-3 text-left font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, index) in entries" :key="row.key || row.monthly_entry_id || index">
-            <td v-if="isAllEmployees" class="border-b border-l border-gray-200 px-4 py-3 whitespace-nowrap">
-              <div class="font-medium text-gray-800">{{ row.employee_name || row.employee }}</div>
-              <div class="text-xs text-gray-400">{{ row.employee }}</div>
-            </td>
-            <td class="border-b border-l border-gray-200 px-4 py-2">
-              <div v-if="!canEditSelection" class="px-2 py-2 text-gray-700">{{ row.project_name || row.project }}<span v-if="row.project_code" class="ml-2 text-xs text-gray-400">({{ row.project_code }})</span></div>
-              <select v-else v-model="row.project" class="w-full rounded border border-gray-300 bg-white px-3 py-2" @change="chooseProject(row, row.project)">
-                <option value="">请选择项目</option>
-                <option v-for="project in filteredProjects(row)" :key="project.name" :value="project.name">{{ projectName(project) }} ({{ projectCode(project) }})</option>
-              </select>
-              <p v-if="!projects.length" class="mt-1 text-xs text-amber-700">无匹配项目，请先在项目管理中新增</p>
-            </td>
-            <td class="border-b border-l border-gray-200 px-4 py-2">
-              <span v-if="!canEditSelection" class="block w-32 px-3 py-2 text-right tabular-nums">{{ formatNumber(row.occurrence_days) }}</span>
-              <input v-else v-model="row.occurrence_days" type="number" min="0.01" :max="dayLimit" step="0.01" class="w-32 rounded border border-gray-300 px-3 py-2 text-right tabular-nums" @input="recalculateRow(row)" />
-            </td>
-            <td class="border-b border-l border-gray-200 px-4 py-2">
-              <input :value="formatNumber(calculatedRowHours(row))" readonly class="w-32 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-right tabular-nums text-gray-600" />
-            </td>
-            <td class="border-b border-l border-gray-200 px-4 py-2">
-              <span v-if="!canEditSelection" class="block min-w-[220px] px-3 py-2 text-gray-600">{{ row.remark || '-' }}</span>
-              <input v-else v-model="row.remark" class="w-full rounded border border-gray-300 px-3 py-2" />
-            </td>
-            <td class="border-x border-b border-gray-200 px-4 py-2">
-              <button v-if="canEditSelection" type="button" class="text-red-600 hover:underline" @click="removeRow(row, index)">删除</button>
-              <span v-else class="text-gray-400">只读</span>
-            </td>
-          </tr>
-          <tr v-if="!entries.length">
-            <td :colspan="isAllEmployees ? 6 : 5" class="border-x border-b border-gray-200 px-4 py-10 text-center text-gray-400">本月暂无工时记录</td>
-          </tr>
-        </tbody>
-        <tfoot v-if="entries.length" class="bg-gray-50 font-medium text-gray-700">
-          <tr>
-            <td :colspan="isAllEmployees ? 2 : 1" class="border-x border-b border-gray-200 px-4 py-3 text-right">合计</td>
-            <td class="border-b border-gray-200 px-4 py-3 text-right tabular-nums">{{ formatNumber(totalDays) }}</td>
-            <td class="border-b border-gray-200 px-4 py-3 text-right tabular-nums">{{ formatNumber(totalHours) }}</td>
-            <td colspan="2" class="border-x border-b border-gray-200"></td>
-          </tr>
-        </tfoot>
-      </table>
+    <EntryBoard
+      v-if="activeTab === 'board'"
+      :progress="progressData"
+      :loading="progress.loading"
+      :error="progress.error ? serverMessage(progress.error, '填报进度加载失败') : ''"
+      :reminding="reminder.loading"
+      @open="openEmployee"
+      @remind="remind"
+      @export-list="exportFollowUp"
+      @retry="refreshProgress"
+    />
+
+    <div v-else class="split" :class="{ solo: !showRoster }">
+      <EntryRoster v-if="showRoster" :items="rosterItems" :selected="selectedEmployee" :kind="progressKind === 'all' ? 'all' : 'team'" @select="selectEmployee" />
+      <EntrySheet
+        :rows="entries"
+        :person="selectedPerson"
+        :day-limit="dayLimit"
+        :hour-limit="hourLimit"
+        :cap-line="capLine"
+        :editable="canEditSelection"
+        :read-only-note="readOnlyNote"
+        :legacy="hasLegacySources"
+        :weekday-fallback="usesWeekdayFallback"
+        :projects="projects"
+        :recent-ids="recentIds"
+        :loading="monthly.loading"
+        :can-remind="canRemind && needsRemind(selectedStatus)"
+        :reminding="reminder.loading"
+        @change="onRowsChange"
+        @remove="removeRow"
+        @copy="copyPrevious"
+        @import="importOpen = true"
+        @remind="remind"
+      />
     </div>
 
-    <div v-if="canEditSelection" class="border-t border-gray-200 px-5 py-4">
-      <div class="mb-2 flex flex-wrap items-center gap-2">
-        <span class="text-sm font-medium text-gray-700">批量粘贴 / Excel 导入</span>
-        <Button variant="subtle" @click="chooseTimesheetWorkbook">导入Excel</Button>
-        <input ref="batchWorkbookInput" type="file" accept=".xlsx,.xls" class="hidden" @change="importTimesheetWorkbookRows" />
+    <div v-if="activeTab === 'sheet' && canEditSelection" class="savebar">
+      <div class="row">
+        <span><b class="num">{{ totalDays.toFixed(1) }}</b> <span class="muted">天 · {{ totalHours.toFixed(0) }} h · {{ selectedPerson.name }}</span></span>
+        <span v-if="dirty" class="tag warn">有未保存的修改</span>
+        <span v-else class="tag ok">已保存</span>
+        <span v-if="overLimit" class="tag bad">{{ saveStatus.label }}</span>
       </div>
-      <textarea v-model="batchPasteText" rows="3" class="w-full rounded border border-gray-300 px-3 py-2 text-sm" placeholder="研发人员　项目代码　项目名称　发生天数　备注"></textarea>
-      <Button class="mt-2" variant="subtle" :disabled="!batchPasteText.trim()" @click="previewBatchPaste">预览并加入表格</Button>
-      <div v-if="batchErrors.length" class="mt-2 space-y-1 text-xs text-red-600"><p v-for="message in batchErrors" :key="message">{{ message }}</p></div>
+      <button type="button" class="btn pri" :disabled="saving || overLimit || !dirty" @click="saveRows">{{ saving ? "保存中…" : "保存" }}</button>
     </div>
-  </section>
+
+    <EntryImportDrawer :open="importOpen" :import-options="importOptions" :employee="selectedEmployee" @close="importOpen = false" @add="applyImport" />
+  </RdPage>
 </template>

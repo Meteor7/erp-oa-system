@@ -2,41 +2,59 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync(new URL("../src/pages/TimesheetEntry.vue", import.meta.url), "utf8");
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+const page = read("../src/pages/TimesheetEntry.vue");
+const sheet = read("../src/components/timesheet/EntrySheet.vue");
+const board = read("../src/components/timesheet/EntryBoard.vue");
+const roster = read("../src/components/timesheet/EntryRoster.vue");
+const drawer = read("../src/components/timesheet/EntryImportDrawer.vue");
+const view = read("../src/lib/timesheetEntryView.js");
+// 页面拆成了 页面 + 组件 + 纯函数，原来针对单个文件的断言改为针对整体。
+const source = [page, sheet, board, roster, drawer, view].join("\n");
 
 test("timesheet entry uses grouped monthly APIs and never asks for a work date", () => {
-  assert.match(source, /monthly_timesheet_entry\.list_monthly_entries/);
-  assert.match(source, /monthly_timesheet_entry\.save_monthly_entries/);
+  assert.match(page, /monthly_timesheet_entry\.list_monthly_entries/);
+  assert.match(page, /monthly_timesheet_entry\.save_monthly_entries/);
   assert.doesNotMatch(source, /type="date"/);
   assert.doesNotMatch(source, /work_date/);
   assert.doesNotMatch(source, /from_time/);
 });
 
 test("row removal is staged locally and persisted by the single atomic save", () => {
-  assert.match(source, /function removeRow\([^)]+\)[\s\S]+entries\.value\.splice/);
+  assert.match(page, /function removeRow\([^)]+\)[\s\S]+entries\.value\.splice/);
+  assert.ok(page.includes("该行已移出表格，点击保存后生效"));
   assert.doesNotMatch(source, /remover\.submit/);
 });
 
-test("timesheet entry follows the team-leader monthly table layout", () => {
-  assert.ok(source.includes("工时录入（按月）"));
-  assert.ok(source.includes("研发人员"));
-  assert.ok(source.includes("年份"));
-  assert.ok(source.includes("月份"));
-  assert.ok(source.includes("项目"));
-  assert.ok(source.includes("发生天数"));
-  assert.ok(source.includes("工时"));
-  assert.ok(source.includes("备注"));
-  assert.ok(source.includes("新增一行"));
-  assert.ok(source.includes("当前已填"));
-  assert.ok(source.includes("上限"));
+test("timesheet entry is a master-detail sheet with a searchable project picker", () => {
+  assert.ok(page.includes("研发工时填报"));
+  assert.ok(page.includes("个人填报"));
+  assert.ok(page.includes("填报进度"));
+  assert.ok(roster.includes("搜索姓名或工号"));
+  assert.ok(roster.includes("未填满"));
+  assert.ok(roster.includes("超上限"));
+  assert.ok(sheet.includes("项目分配"));
+  assert.ok(sheet.includes("已分配"));
+  assert.ok(sheet.includes("剩余"));
+  assert.ok(sheet.includes("备注"));
+  assert.ok(sheet.includes("添加项目"));
+  assert.ok(sheet.includes("复制上月"));
+  assert.ok(sheet.includes("把剩余平均分给现有项目"));
+  assert.ok(sheet.includes("清空"));
+  assert.match(page, /class="split"[^>]*solo/);
+  assert.match(page, /class="savebar"/);
+  // 项目可能有几十个：用搜索选择器，不再一排 chip
+  assert.match(sheet, /pickerOptions/);
+  assert.match(view, /limit = 8/);
 });
 
-test("occurrence days keep two decimals and hours are read-only days times eight", () => {
-  assert.match(source, /step="0\.01"/);
-  assert.match(source, /occurrence_days/);
-  assert.match(source, /occurrenceDays \* 8/);
-  assert.match(source, /toFixed\(2\)/);
-  assert.match(source, /readonly/);
+test("occurrence days keep two decimals, step by half a day and hours are days times eight", () => {
+  assert.match(view, /\\d\+\(\?:\\\.\\d\{1,2\}\)\?/);
+  assert.match(view, /DAY_STEP = 0\.5/);
+  assert.match(view, /HOURS_PER_DAY = 8/);
+  assert.match(view, /\* HOURS_PER_DAY/);
+  assert.match(page, /toFixed\(2\)/);
+  assert.match(sheet, /rowHours\(row\)/);
   assert.doesNotMatch(source, /v-model[^>]+hours/);
 });
 
@@ -45,49 +63,86 @@ test("activity type is supplied by the backend and hidden from the monthly form"
   assert.doesNotMatch(source, />活动类型</);
 });
 
-test("monthly rows keep resolved project identity and editable project search", () => {
-  assert.match(source, /project_code/);
-  assert.match(source, /project_name/);
-  assert.match(source, /function chooseProject/);
-  assert.match(source, /filteredProjects/);
-  assert.ok(source.includes("无匹配项目，请先在项目管理中新增"));
+test("monthly rows keep resolved project identity and the picker explains an empty project list", () => {
+  assert.match(view, /project_code/);
+  assert.match(view, /project_name/);
+  assert.match(view, /function rowFromProject/);
+  assert.match(view, /function pickerOptions/);
+  assert.ok(sheet.includes("无匹配项目，请先在项目管理中新增"));
 });
 
 test("entry mutations remain role-gated and show server validation messages", () => {
-  assert.match(source, /canEditTimesheetEntry/);
-  assert.match(source, /const canEdit = computed/);
-  assert.match(source, /v-if="canEditSelection"/);
-  assert.match(source, /function serverMessage/);
-  assert.match(source, /_server_messages/);
+  assert.match(page, /canEditTimesheetEntry/);
+  assert.match(page, /const canEdit = computed/);
+  assert.match(page, /const canEditSelection = computed/);
+  assert.match(page, /if \(!canEditSelection\.value\) return;/);
+  assert.match(sheet, /v-if="editable"/);
+  assert.match(view, /function serverMessage/);
+  assert.match(view, /_server_messages/);
+  assert.match(page, /serverMessage\(error/);
 });
 
 test("monthly import and export contain days and hours but no technical dates", () => {
-  assert.match(source, /parseTimesheetPaste/);
-  assert.match(source, /importTimesheetWorkbookFile/);
-  assert.match(source, /exportTableWorkbook/);
-  assert.ok(source.includes("发生天数"));
+  assert.match(drawer, /parseTimesheetPaste/);
+  assert.match(drawer, /importTimesheetWorkbookFile/);
+  assert.match(page, /exportTableWorkbook/);
+  assert.match(page, /async function exportCurrent/);
+  assert.ok(page.includes("发生天数"));
   assert.doesNotMatch(source, /label: "日期"/);
+  // 抽屉挂到 body，外层带 rd 类才能吃到样式；导入只收当前所选人员
+  assert.match(drawer, /<Teleport to="body">/);
+  assert.match(drawer, /class="rd"/);
+  assert.ok(drawer.includes("导入文件中的研发人员必须与当前选择一致"));
 });
 
-test("legacy daily data and all employees render through the unified monthly view", () => {
-  assert.match(source, /const isAllEmployees = computed/);
-  assert.match(source, /const canEditSelection = computed/);
-  assert.ok(source.includes('<option value="">全部员工</option>'));
-  assert.match(source, /employee_count/);
-  assert.match(source, /v-if="isAllEmployees"/);
+test("legacy daily data is read-only and everyone sees the employees they are allowed to", () => {
+  assert.match(page, /const hasLegacySources = computed/);
+  assert.match(page, /&& !hasLegacySources\.value/);
+  assert.match(page, /employees\.value\.length > 1/);
+  assert.match(page, /editable_employees/);
+  assert.match(page, /get_monthly_options/);
+  assert.ok(sheet.includes("历史按日记录不能在月度视图中直接修改"));
+  assert.ok(page.includes("只读："));
   assert.doesNotMatch(source, /该员工本月已有按日工时/);
-  assert.doesNotMatch(source, /entries\.value = \[\];\s*return;/);
 });
 
 test("monthly work limit shows days hours and calendar fallback", () => {
-  assert.match(source, /hour_limit/);
-  assert.match(source, /calendar_source/);
-  assert.ok(source.includes("本月上限"));
-  assert.ok(source.includes("未配置假日表，当前按周一至周五计算"));
+  assert.match(page, /hour_limit/);
+  assert.match(page, /calendar_source/);
+  assert.match(view, /可填/);
+  assert.match(view, /已批请假/);
+  assert.ok(sheet.includes("未配置假日表，当前按周一至周五计算"));
+  assert.ok(sheet.includes("超出本月上限"));
 });
 
 test("monthly saves submit the revision returned by the loaded snapshot", () => {
-  assert.match(source, /const loadedRevision = ref/);
-  assert.match(source, /loadedRevision\.value = String\(monthly\.data\?\.revision/);
-  assert.match(source, /expected_revision: loadedRevision\.value/);
+  assert.match(page, /const loadedRevision = ref/);
+  assert.match(page, /loadedRevision\.value = String\(monthly\.data\?\.revision/);
+  assert.match(page, /expected_revision: loadedRevision\.value/);
+});
+
+test("period is the shared global period and the page is month-only", () => {
+  assert.match(page, /from "\.\.\/lib\/period"/);
+  assert.match(page, /<RdPeriod/);
+  assert.match(page, /setPeriodScope\("month"\)/);
+});
+
+test("fill-progress board reads the progress endpoint and reminders go through the reminder endpoint", () => {
+  assert.match(page, /monthly_timesheet_entry\.get_fill_progress/);
+  assert.match(page, /monthly_timesheet_entry\.remind_timesheet_fill/);
+  assert.match(page, /employees: JSON\.stringify\(list\)/);
+  assert.match(page, /refreshProgress\(\)/);
+  assert.match(page, /defaultTab|tabChoice/);
+  assert.ok(board.includes("需要跟进的人"));
+  assert.ok(board.includes("一键催办"));
+  assert.ok(board.includes("导出名单"));
+  assert.ok(board.includes("填报完成率"));
+  assert.match(board, /v-if="canRemind"/);
+  assert.match(board, /showDepartment/);
+  assert.match(board, /kind\.value === 'all'/);
+});
+
+test("the page ships no demo-only controls", () => {
+  assert.doesNotMatch(source, /演示角色/);
+  assert.doesNotMatch(source, /保留与新增的功能/);
 });

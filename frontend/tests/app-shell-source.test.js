@@ -33,8 +33,8 @@ test('left navigation labels the personnel group as HR center', () => {
 });
 
 test('R&D ledger navigation uses the timesheet report and R&D expense import names', () => {
-  assert.ok(source.includes("to: '/timesheet', step: '05', label: '\\u7814\\u53d1\\u5de5\\u65f6\\u62a5\\u8868'"));
-  assert.ok(source.includes("to: '/expense', step: '06', label: '\\u7814\\u53d1\\u8d39\\u7528\\u5bfc\\u5165'"));
+  assert.ok(source.includes("to: '/timesheet', step: '03', label: '\\u7814\\u53d1\\u5de5\\u65f6\\u62a5\\u8868'"));
+  assert.ok(source.includes("to: '/expense', step: '04', label: '\\u7814\\u53d1\\u8d39\\u7528\\u5bfc\\u5165'"));
   assert.doesNotMatch(source, /\\u7814\\u53d1\\u5de5\\u65f6\\u8868/);
   assert.doesNotMatch(source, /\\u7814\\u53d1\\u5de5\\u65f6\\u62a5\\u544a/);
   assert.doesNotMatch(source, /\\u8d22\\u52a1\\u8d39\\u7528\\u5bfc\\u5165/);
@@ -43,7 +43,7 @@ test('R&D ledger navigation uses the timesheet report and R&D expense import nam
 test('app shell hides the redundant R and D personnel ledger', () => {
   assert.doesNotMatch(source, /to: ['"]\/ledger['"]/);
   assert.ok(source.includes("label: '\\u7814\\u53d1\\u5de5\\u65f6\\u586b\\u62a5'"));
-  assert.ok(source.includes("step: '04', label: '\\u7814\\u53d1\\u5de5\\u65f6\\u586b\\u62a5'"));
+  assert.ok(source.includes("step: '02', label: '\\u7814\\u53d1\\u5de5\\u65f6\\u586b\\u62a5'"));
 });
 
 test('dense finance pages get a wider workspace', () => {
@@ -80,8 +80,8 @@ test('nav puts overseas commissioned before total allocation', () => {
   assert.ok(foreignIndex > -1);
   assert.ok(allocationIndex > -1);
   assert.ok(foreignIndex < allocationIndex);
-  assert.ok(source.includes("to: '/foreign-rd', step: '07'"));
-  assert.ok(source.includes("to: '/allocation', step: '08'"));
+  assert.ok(source.includes("to: '/foreign-rd', step: '05'"));
+  assert.ok(source.includes("to: '/allocation', step: '07'"));
   assert.ok(source.includes("label: '\\u7814\\u53d1\\u8d39\\u7528\\u53f0\\u8d26'"));
 });
 
@@ -91,7 +91,7 @@ test('nav adds the allocation dashboard immediately after the allocation table',
   assert.ok(allocationIndex > -1);
   assert.ok(dashboardIndex > -1);
   assert.ok(allocationIndex < dashboardIndex);
-  assert.ok(source.includes("to: '/allocation-dashboard', step: '09'"));
+  assert.ok(source.includes("to: '/allocation-dashboard', step: '08'"));
   assert.ok(source.includes("label: '\\u7814\\u53d1\\u8d39\\u7528\\u6c47\\u603b'"));
   assert.match(source, /WIDE_PAGE_PATHS[\s\S]*['"]\/allocation-dashboard['"]/);
 });

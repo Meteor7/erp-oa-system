@@ -1,31 +1,36 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import { Card, Button, Spinner, createResource } from "frappe-ui";
+import { Spinner, createResource } from "frappe-ui";
+import RdPage from "../components/rd/RdPage.vue";
+import RdPeriod from "../components/rd/RdPeriod.vue";
+import RdSeg from "../components/rd/RdSeg.vue";
+import RdKpi from "../components/rd/RdKpi.vue";
+import RdIcon from "../components/rd/RdIcon.vue";
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
 import { exportTableWorkbook } from "../lib/tableExport";
+import { rankProjects } from "../lib/allocationGroups";
 
 const TEXT = {
-  title: "\u7814\u53d1\u8d39\u7528\u6c47\u603b",
-  subtitle: "\u6309\u4e8c\u7ea7\u8d39\u7528\u79d1\u76ee\u5c55\u5f00\u4e09\u7ea7\u8d39\u7528\uff0c\u6c47\u603b\u5404\u9879\u76ee\u627f\u62c5\u91d1\u989d",
-  accountingPeriod: "\u4f1a\u8ba1\u671f\u95f4",
-  viewScope: "\u53e3\u5f84",
-  refresh: "\u5237\u65b0",
-  exportExcel: "\u5bfc\u51faExcel",
-  totalAmount: "\u5206\u644a\u5408\u8ba1",
-  projectCount: "\u9879\u76ee\u6570",
-  secondLevelCount: "\u4e8c\u7ea7\u79d1\u76ee",
-  thirdLevelCount: "\u4e09\u7ea7\u8d39\u7528",
-  summaryTitle: "\u8d39\u7528\u6c47\u603b",
-  noData: "\u5f53\u524d\u8303\u56f4\u6682\u65e0\u5206\u644a\u770b\u677f\u6570\u636e\u3002",
-  level2: "2\u7ea7\u8d39\u7528\u79d1\u76ee",
-  level3: "3\u7ea7\u8d39\u7528\u79d1\u76ee",
-  total: "\u5408\u8ba1",
+  title: "研发费用汇总",
+  subtitle: "按二级费用科目展开三级费用，汇总各项目承担金额",
+  viewScope: "口径",
+  exportExcel: "导出 Excel",
+  totalAmount: "分摊合计",
+  projectCount: "项目数",
+  accountCount: "科目数",
+  summaryTitle: "费用汇总",
+  rankTitle: "各项目承担",
+  rankHint: "金额由大到小，最多显示 8 个，其余合并为「其他」",
+  noData: "当前范围暂无分摊看板数据。",
+  level2: "2级费用科目",
+  level3: "3级费用科目",
+  total: "合计",
 };
 
 const modeOptions = [
-  { value: "all", label: "\u6c47\u603b" },
-  { value: "capitalized", label: "\u8d44\u672c\u5316" },
-  { value: "expensed", label: "\u8d39\u7528\u5316" },
+  { value: "all", label: "汇总" },
+  { value: "capitalized", label: "资本化" },
+  { value: "expensed", label: "费用化" },
 ];
 
 const dashboardMode = ref("all");
@@ -45,24 +50,28 @@ const displayPeriod = computed(() => periodScopeLabel(period.value, periodScope.
 const cards = computed(() => {
   const data = dashboard.value || {};
   return [
-    { key: "total", label: TEXT.totalAmount, value: formatMoney(data.total_amount || 0), tone: "bg-emerald-50 text-emerald-700" },
-    { key: "project", label: TEXT.projectCount, value: data.project_count || 0, tone: "bg-blue-50 text-blue-700" },
-    { key: "l2", label: TEXT.secondLevelCount, value: data.second_level_count || 0, tone: "bg-amber-50 text-amber-700" },
-    { key: "l3", label: TEXT.thirdLevelCount, value: data.third_level_count || 0, tone: "bg-slate-100 text-slate-700" },
+    { key: "total", label: TEXT.totalAmount, value: formatMoney(data.total_amount || 0), unit: "元", sub: `${displayPeriod.value} · ${data.mode_label || ""}` },
+    { key: "project", label: TEXT.projectCount, value: data.project_count || 0, unit: "", sub: "参与分摊的项目" },
+    { key: "account", label: TEXT.accountCount, value: `${data.second_level_count || 0} / ${data.third_level_count || 0}`, unit: "", sub: "二级科目 / 三级科目" },
   ];
 });
+const ranking = computed(() => rankProjects({ rows: summaryRows.value, projectColumns: projectColumns.value, topN: 8, otherLabel: "其他" }));
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function projectAmount(row, project) {
-  const value = Number(row?.projects?.[project.project] || 0);
-  return value ? formatMoney(value) : "-";
+function percent(share) {
+  return `${(share * 100).toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 }
 
 function projectValue(row, project) {
   return Number(row?.projects?.[project.project] || 0);
+}
+
+function projectAmount(row, project) {
+  const value = projectValue(row, project);
+  return value ? formatMoney(value) : "·";
 }
 
 function cellText(value) {
@@ -75,6 +84,12 @@ function isSubtotal(row) {
 
 function isGrandTotal(row) {
   return row?.row_type === "grand_total";
+}
+
+function rowClass(row) {
+  if (isGrandTotal(row)) return "t";
+  if (isSubtotal(row)) return "g";
+  return "";
 }
 
 function secondLevelText(row, index) {
@@ -106,7 +121,7 @@ async function exportCurrentAllocationDashboard() {
       ],
     });
   } catch (error) {
-    msg.value = error?.message || "\u5bfc\u51fa\u5931\u8d25";
+    msg.value = error?.message || "导出失败";
   } finally {
     exporting.value = false;
   }
@@ -122,7 +137,8 @@ async function load() {
       mode: dashboardMode.value,
     });
   } catch (error) {
-    msg.value = (error && error.message) || "\u770b\u677f\u52a0\u8f7d\u5931\u8d25";
+    dashboard.value = null;
+    msg.value = (error && error.message) || "看板加载失败";
   } finally {
     loading.value = false;
   }
@@ -135,65 +151,78 @@ load();
 </script>
 
 <template>
-  <Card :title="TEXT.title" :subtitle="TEXT.subtitle">
-    <div class="mb-5 flex flex-wrap items-center gap-2">
-      <span class="text-sm text-gray-500">{{ TEXT.accountingPeriod }}</span>
-      <input type="month" v-model="period" class="rounded border border-gray-300 px-3 py-1.5 text-sm" />
-      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
-        <button v-for="scope in PERIOD_SCOPES" :key="scope.value" type="button" class="px-3 py-1.5 text-sm" :class="periodScope === scope.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="setPeriodScope(scope.value)">{{ scope.label }}</button>
-      </div>
-      <span class="ml-2 text-sm text-gray-500">{{ TEXT.viewScope }}</span>
-      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
-        <button v-for="option in modeOptions" :key="option.value" type="button" class="px-3 py-1.5 text-sm" :class="dashboardMode === option.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="dashboardMode = option.value">{{ option.label }}</button>
-      </div>
-      <Button variant="subtle" :loading="loading" @click="load">{{ TEXT.refresh }}</Button>
-      <Button variant="subtle" :loading="exporting" :disabled="!summaryRows.length" @click="exportCurrentAllocationDashboard">{{ TEXT.exportExcel }}</Button>
-      <span v-if="msg" class="text-xs text-red-600">{{ msg }}</span>
+  <RdPage :title="TEXT.title" :subtitle="TEXT.subtitle">
+    <template #ctl><RdPeriod /></template>
+
+    <div v-if="dashboard" class="kpis">
+      <RdKpi v-for="card in cards" :key="card.key" :label="card.label" :value="card.value" :unit="card.unit" :sub="card.sub" />
     </div>
 
-    <div v-if="dashboard" class="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <div v-for="card in cards" :key="card.key" class="rounded-lg border border-gray-200 bg-white p-3">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="text-xs text-gray-500">{{ card.label }}</div>
-            <div class="mt-1 text-xl font-semibold tabular-nums text-gray-900">{{ card.value }}</div>
-          </div>
-          <div :class="['h-9 w-9 rounded flex items-center justify-center text-xs font-semibold', card.tone]">{{ card.key.toUpperCase().slice(0, 2) }}</div>
-        </div>
+    <div class="bar">
+      <div class="row">
+        <span class="muted">{{ TEXT.viewScope }}</span>
+        <RdSeg v-model="dashboardMode" :options="modeOptions" label="口径" />
+        <RdSeg :model-value="periodScope" :options="PERIOD_SCOPES" label="期间范围" @update:model-value="setPeriodScope" />
       </div>
+      <button type="button" class="btn" :disabled="exporting || !summaryRows.length" @click="exportCurrentAllocationDashboard"><RdIcon name="download" />{{ exporting ? "导出中…" : TEXT.exportExcel }}</button>
     </div>
+
+    <div v-if="msg" class="note bad"><RdIcon name="alert" /><span class="grow">{{ msg }}</span></div>
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
-    <div v-else-if="!summaryRows.length" class="py-6 text-sm text-gray-500">{{ TEXT.noData }}</div>
+    <div v-else-if="!summaryRows.length" class="card"><div class="bd muted">{{ TEXT.noData }}</div></div>
     <template v-else>
-      <section>
-        <div class="mb-2 flex items-end justify-between gap-3">
-          <div>
-            <h3 class="text-base font-semibold text-gray-900">{{ TEXT.summaryTitle }}</h3>
-            <p class="text-xs text-gray-400">{{ displayPeriod }} · {{ dashboard?.mode_label }}</p>
+      <div v-if="ranking.items.length" class="card">
+        <div class="hd"><b>{{ TEXT.rankTitle }}</b><span class="muted">{{ TEXT.rankHint }}</span></div>
+        <div class="bd">
+          <div v-for="item in ranking.items" :key="item.key" class="rank wide" :title="`${item.code}${item.name ? ' ' + item.name : ''} · ${formatMoney(item.value)} 元 · ${percent(item.share)}`">
+            <span class="lbl"><b>{{ item.code }}</b> <span v-if="item.name" class="muted">{{ item.name }}</span></span>
+            <span class="t"><i :style="{ width: item.width + '%' }"></i></span>
+            <span class="val num"><b>{{ formatMoney(item.value) }}</b> <span class="muted">{{ percent(item.share) }}</span></span>
           </div>
         </div>
-        <div class="max-h-[72vh] overflow-auto rounded-lg border border-gray-200 bg-white">
-          <table class="w-full min-w-[1120px] border-separate border-spacing-0 text-sm">
-            <thead class="sticky top-0 z-30 bg-gray-100 text-gray-600 shadow-sm">
+      </div>
+
+      <div class="card">
+        <div class="hd"><b>{{ TEXT.summaryTitle }}</b><span class="muted">{{ displayPeriod }} · {{ dashboard?.mode_label }} · 单位：元</span></div>
+        <div class="tbl dash-tbl">
+          <table class="matrix">
+            <thead>
               <tr>
-                <th class="sticky left-0 z-40 w-[180px] min-w-[180px] bg-gray-100 px-3 py-2.5 text-left">{{ TEXT.level2 }}</th>
-                <th class="sticky left-[180px] z-40 w-[280px] min-w-[280px] bg-gray-100 px-3 py-2.5 text-left">{{ TEXT.level3 }}</th>
-                <th v-for="project in projectColumns" :key="project.project" :title="project.project_name" class="min-w-[86px] whitespace-nowrap px-2 py-2.5 text-right font-medium">{{ project.project_code || project.project }}</th>
-                <th class="sticky right-0 z-40 min-w-[120px] bg-gray-100 px-3 py-2.5 text-right">{{ TEXT.total }}</th>
+                <th class="c1">{{ TEXT.level2 }}</th>
+                <th class="c2">{{ TEXT.level3 }}</th>
+                <th v-for="project in projectColumns" :key="project.project" :title="project.project_name" class="r">{{ project.project_code || project.project }}</th>
+                <th class="ct r">{{ TEXT.total }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, index) in summaryRows" :key="index" :class="isGrandTotal(row) ? 'bg-gray-900 text-white font-semibold' : isSubtotal(row) ? 'bg-blue-50 font-semibold text-gray-900' : 'group hover:bg-gray-50'">
-                <td class="sticky left-0 z-10 w-[180px] min-w-[180px] border-b border-gray-100 px-3 py-2.5" :class="isGrandTotal(row) ? 'bg-gray-900' : isSubtotal(row) ? 'bg-blue-50' : 'bg-white group-hover:bg-gray-50'">{{ secondLevelText(row, index) }}</td>
-                <td class="sticky left-[180px] z-10 w-[280px] min-w-[280px] border-b border-gray-100 px-3 py-2.5" :class="isGrandTotal(row) ? 'bg-gray-900' : isSubtotal(row) ? 'bg-blue-50' : 'bg-white pl-6 group-hover:bg-gray-50'">{{ cellText(row.account_level_3) }}</td>
-                <td v-for="project in projectColumns" :key="project.project" class="whitespace-nowrap border-b border-gray-100 px-2 py-2.5 text-right tabular-nums">{{ projectAmount(row, project) }}</td>
-                <td class="sticky right-0 z-10 whitespace-nowrap border-b border-gray-100 px-3 py-2.5 text-right font-semibold tabular-nums" :class="isGrandTotal(row) ? 'bg-gray-900' : isSubtotal(row) ? 'bg-blue-50' : 'bg-white group-hover:bg-gray-50'">{{ formatMoney(row.total) }}</td>
+              <tr v-for="(row, index) in summaryRows" :key="index" :class="rowClass(row)">
+                <td class="c1">{{ secondLevelText(row, index) }}</td>
+                <td class="c2" :class="{ detail: !isSubtotal(row) && !isGrandTotal(row) }">{{ cellText(row.account_level_3) }}</td>
+                <td v-for="project in projectColumns" :key="project.project" class="r num nw" :class="{ zero: !projectValue(row, project) }">{{ projectAmount(row, project) }}</td>
+                <td class="ct r num nw">{{ formatMoney(row.total) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-      </section>
+      </div>
     </template>
-  </Card>
+  </RdPage>
 </template>
+
+<style scoped>
+.rd .dash-tbl { max-height: 72vh; }
+.rd .dash-tbl table { min-width: 1120px; }
+.rd .matrix .c1 { width: 180px; min-width: 180px; max-width: 180px; }
+.rd .matrix .c2, .rd .matrix .ct { position: sticky; background: var(--rd-surface); z-index: 1; }
+.rd .matrix th.c2, .rd .matrix th.ct { background: var(--rd-surface2); z-index: 3; }
+.rd .matrix .c2 { left: 180px; width: 280px; min-width: 280px; border-right: 1px solid var(--rd-line); }
+.rd .matrix .ct { right: 0; min-width: 120px; font-weight: 600; border-left: 1px solid var(--rd-line); }
+.rd .matrix td.detail { padding-left: 24px; }
+.rd .matrix tr.g td.c2, .rd .matrix tr.g td.ct, .rd .matrix tr.t td.c2, .rd .matrix tr.t td.ct { background: var(--rd-surface2); }
+.rd .matrix tr.t td { padding-top: 7px; padding-bottom: 7px; }
+.rd .rank.wide { grid-template-columns: minmax(110px, 200px) minmax(0, 1fr) minmax(150px, 220px); }
+.rd .rank.wide .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd .rank.wide .val { text-align: right; white-space: nowrap; }
+.rd .rank.wide .val b { font-weight: 600; }
+</style>

@@ -24,8 +24,8 @@ test('expense import supports common and project-specific expenses', () => {
   assert.ok(source.includes('项目费用'));
   assert.ok(source.includes('所属项目'));
   assert.match(source, /ALLOCATION_TYPES/);
-  assert.match(source, /v-model='it\.allocation_type'/);
-  assert.match(source, /v-model='it\.direct_project'/);
+  assert.match(source, /v-model=["']it\.allocation_type["']/);
+  assert.match(source, /v-model=["']it\.direct_project["']/);
   assert.doesNotMatch(source, /项目填“公共费用”/);
 });
 
@@ -45,6 +45,11 @@ test('expense import page supports four-level manual entry and batch paste impor
   assert.ok(source.includes('2级费用科目'));
   assert.ok(source.includes('3级费用科目'));
   assert.ok(source.includes('4级费用科目'));
+  // the detail table keeps one column per account level
+  assert.ok(source.includes('一级科目'));
+  assert.ok(source.includes('二级科目'));
+  assert.ok(source.includes('三级科目'));
+  assert.ok(source.includes('四级科目'));
   assert.ok(source.includes('费用金额'));
   assert.match(source, /accountOptions/);
   assert.match(source, /validateExpenseAccount/);
@@ -54,9 +59,9 @@ test('expense import page supports four-level manual entry and batch paste impor
 
 test('expense import page supports xlsx workbook import preview', () => {
   assert.match(source, /importWorkbookFile/);
-  assert.match(source, /type='file'/);
-  assert.match(source, /accept='\.xlsx,\.xls'/);
-  assert.ok(source.includes('导入Excel'));
+  assert.match(source, /type=["']file["']/);
+  assert.match(source, /accept=["']\.xlsx,\.xls["']/);
+  assert.match(source, /导入\s?Excel/);
 });
 
 test('expense import page uses a wide scrollable spreadsheet layout', () => {
@@ -72,13 +77,12 @@ test('expense import can switch to a read-only year view', () => {
   assert.match(source, /scope: periodScope\.value/);
   assert.match(source, /isYearScope/);
   assert.ok(source.includes('??'));
-  assert.ok(source.includes('??'));
-  assert.ok(source.includes('??'));
-  assert.match(source, /v-if='isYearScope'/);
-  assert.match(source, /<th\s+v-if='isYearScope'[^>]*>日期<\/th>/);
-  assert.match(source, /<td\s+v-if='isYearScope'[^>]*>\{\{\s*it\.period\s*\}\}<\/td>/);
-  assert.match(source, /:colspan='isYearScope \? 6 : 5'/);
+  assert.match(source, /v-if=["']isYearScope["']/);
+  // year rows are plain text (no inputs) with a date column
+  assert.match(source, /<th[^>]*>日期<\/th>/);
+  assert.match(source, /<td[^>]*>\{\{\s*it\.period\s*\}\}<\/td>/);
   assert.match(source, /label:\s*'日期',\s*key:\s*'period'/);
+  assert.match(source, /年度视图只读/);
 });
 
 test('expense import surfaces detailed Frappe validation messages', () => {

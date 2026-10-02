@@ -1,9 +1,9 @@
-const STAGE_TOTAL_HEADERS = ["\u4f1a\u8ba1\u671f\u95f4", "\u7c7b\u578b", "\u91d1\u989d"];
-const UNRECONCILED_LABEL = "\u672a\u5bf9\u8d26\u5dee\u989d\uff08\u9636\u6bb5\u5408\u8ba1\u2212\u5206\u644a\u660e\u7ec6\uff09";
+const STAGE_TOTAL_HEADERS = ["会计期间", "类型", "金额"];
+const UNRECONCILED_LABEL = "未对账差额（阶段合计−分摊明细）";
 const STAGE_SHEET_NAMES = {
-  all: "\u5206\u644a\u660e\u7ec6",
-  capitalized: "\u8d44\u672c\u5316\u5206\u644a",
-  expensed: "\u8d39\u7528\u5316\u5206\u644a",
+  all: "分摊明细",
+  capitalized: "资本化分摊",
+  expensed: "费用化分摊",
 };
 
 function fieldKey(column = {}) {
@@ -50,8 +50,17 @@ function matrixTotal(columns = [], result = []) {
     .reduce((sum, row) => sum + projectKeys.reduce((rowSum, key) => rowSum + amount(row[key]), 0), 0);
 }
 
+// 修复（2026-09-29，审查 X2-11-A）：阶段合计来自服务端汇总，明细来自矩阵报表，两边口径或舍入
+// 不一致时原来看不出来。差额 = 阶段合计（资本化 + 费用化 + 未判定）− 矩阵明细合计，保留两位小数。
+// 矩阵没有明细行时返回 null（没有东西可对账）。导出和台账页面的「对账」检查共用这一个算法。
+export function allocationReconcileDifference({ summary = {}, columns = [], result = [] } = {}) {
+  if (!result || !result.length) return null;
+  const stageTotal = amount(summary?.capitalized) + amount(summary?.expensed) + amount(summary?.unknown);
+  return Math.round((stageTotal - matrixTotal(columns || [], result)) * 100) / 100;
+}
+
 export function allocationExportFilename(period) {
-  return `\u7814\u53d1\u8d39\u7528\u53f0\u8d26-${period}.xlsx`;
+  return `研发费用台账-${period}.xlsx`;
 }
 
 export function buildAllocationExportSheets({
@@ -69,18 +78,18 @@ export function buildAllocationExportSheets({
   const expensedMatrix = stageMatrices.expensed;
   const stageTotals = [
     STAGE_TOTAL_HEADERS,
-    [period, "\u8d44\u672c\u5316\u5408\u8ba1", capitalized],
-    [period, "\u8d39\u7528\u5316\u5408\u8ba1", expensed],
-    [period, "\u8d44\u672c\u548c\u8d39\u7528\u5408\u8ba1", capitalized + expensed],
-    [period, "\u672a\u5224\u5b9a\u5408\u8ba1", unknown],
+    [period, "资本化合计", capitalized],
+    [period, "费用化合计", expensed],
+    [period, "资本和费用合计", capitalized + expensed],
+    [period, "未判定合计", unknown],
   ];
-  // 修复（2026-09-29，审查 X2-11-A）：阶段合计来自服务端汇总，明细来自矩阵报表，两边口径或舍入
-  // 不一致时原来看不出来。有差额就在合计表里多写一行，方便财务对账。
-  const allResult = allMatrix.result || [];
-  if (allResult.length) {
-    const difference = Math.round((capitalized + expensed + unknown - matrixTotal(allMatrix.columns || [], allResult)) * 100) / 100;
-    if (Math.abs(difference) >= 0.01) stageTotals.push([period, UNRECONCILED_LABEL, difference]);
-  }
+  // 阶段合计和明细对不上时，在合计表里多写一行，方便财务对账。
+  const difference = allocationReconcileDifference({
+    summary,
+    columns: allMatrix.columns || [],
+    result: allMatrix.result || [],
+  });
+  if (difference !== null && Math.abs(difference) >= 0.01) stageTotals.push([period, UNRECONCILED_LABEL, difference]);
 
   return {
     stageTotals,
@@ -106,7 +115,7 @@ export async function exportAllocationWorkbook(payload) {
   const workbook = XLSX.utils.book_new();
   const matrixWidths = (payload.columns || []).map((column) => (isStaticColumn(column) ? 20 : 14));
 
-  appendSheet(XLSX, workbook, "\u9636\u6bb5\u5408\u8ba1", sheets.stageTotals, [14, 16, 16]);
+  appendSheet(XLSX, workbook, "阶段合计", sheets.stageTotals, [14, 16, 16]);
   appendSheet(XLSX, workbook, STAGE_SHEET_NAMES.all, sheets.matrix, matrixWidths);
   appendSheet(XLSX, workbook, STAGE_SHEET_NAMES.capitalized, sheets.capitalizedMatrix, matrixWidths);
   appendSheet(XLSX, workbook, STAGE_SHEET_NAMES.expensed, sheets.expensedMatrix, matrixWidths);

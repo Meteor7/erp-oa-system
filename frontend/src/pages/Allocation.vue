@@ -1,39 +1,57 @@
 <script setup>
 import { ref, computed, watch } from "vue";
-import { Card, Button, Spinner, createResource } from "frappe-ui";
+import { Spinner, createResource } from "frappe-ui";
+import RdPage from "../components/rd/RdPage.vue";
+import RdPeriod from "../components/rd/RdPeriod.vue";
+import RdSeg from "../components/rd/RdSeg.vue";
+import RdKpi from "../components/rd/RdKpi.vue";
+import RdIcon from "../components/rd/RdIcon.vue";
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
-import { exportAllocationWorkbook } from "../lib/allocationExport";
+import { exportAllocationWorkbook, allocationReconcileDifference } from "../lib/allocationExport";
 import {
   allocationEmptyState,
   buildAllocationMatrixFilters,
   hasAllocationData,
   loadAllocationStageMatrices,
 } from "../lib/allocationView";
+import { groupAllocationRows, stageLabel } from "../lib/allocationGroups";
 
 const TEXT = {
-  title: "\u7814\u53d1\u8d39\u7528\u53f0\u8d26",
-  subtitle: "\u6309\u5de5\u65f6\u5206\u914d\u7387\u628a\u8d39\u7528\u6c60\u644a\u5230\u5404\u9879\u76ee\uff0c\u5e76\u6309\u9879\u76ee\u8d44\u672c\u5316\u9636\u6bb5\u6c47\u603b",
-  accountingPeriod: "\u4f1a\u8ba1\u671f\u95f4",
-  viewScope: "\u53e3\u5f84",
-  recalc: "\u91cd\u7b97\u5206\u644a",
-  cancel: "\u64a4\u9500\u672c\u671f\u5206\u644a",
-  exportExcel: "\u5bfc\u51faExcel",
-  capitalized: "\u8d44\u672c\u5316\u5408\u8ba1",
-  expensed: "\u8d39\u7528\u5316\u5408\u8ba1",
-  capitalExpense: "\u8d44\u672c\u548c\u8d39\u7528\u5408\u8ba1",
-  unknown: "\u672a\u5224\u5b9a\u5408\u8ba1",
-  projectTotal: "\u9879\u76ee\u6c47\u603b",
-  noBusinessData: "\u672c\u671f\u6682\u65e0\u6570\u636e\u3002",
-  noAllocationDetail: "\u5df2\u6709\u8d39\u7528\u6216\u4e1a\u52a1\u6570\u636e\uff0c\u4f46\u6682\u65e0\u53ef\u5c55\u793a\u7684\u9879\u76ee\u5206\u644a\u660e\u7ec6\u3002",
-  noDetailForMode: "\u5f53\u524d\u53e3\u5f84\u6682\u65e0\u53ef\u5c55\u793a\u7684\u5206\u644a\u660e\u7ec6\u3002",
-  confirmCancel: "\u786e\u5b9a\u64a4\u9500",
+  title: "研发费用台账",
+  subtitle: "按工时分配率把费用池摊到各项目，并按项目资本化阶段汇总",
+  view: "查看",
+  actions: "操作",
+  recalc: "重算分摊",
+  recalcing: "重算中…",
+  cancel: "撤销本期分摊",
+  exportExcel: "导出 Excel",
+  exporting: "导出中…",
+  capitalized: "资本化",
+  expensed: "费用化",
+  capitalExpense: "资本 + 费用 合计",
+  unknown: "未判定",
+  projectTotal: "项目汇总",
+  accountColumn: "科目（三级 › 四级）",
+  ungrouped: "（未分类）",
+  noBusinessData: "本期暂无数据。",
+  noAllocationDetail: "已有费用或业务数据，但暂无可展示的项目分摊明细。",
+  noDetailForMode: "当前口径暂无可展示的分摊明细。",
+  confirmCancel: "确定撤销",
+  confirmCancelTail: "的分摊吗？撤销后本期工时可以继续调整，调整后需要重新分摊。",
+  confirmYes: "确认撤销",
+  confirmNo: "返回",
+  statusTitle: "分摊状态与对账",
+  matrixTitle: "分摊明细矩阵",
 };
 
 const modeOptions = [
-  { value: "all", label: "\u6c47\u603b" },
-  { value: "capitalized", label: "\u8d44\u672c\u5316" },
-  { value: "expensed", label: "\u8d39\u7528\u5316" },
+  { value: "all", label: "汇总" },
+  { value: "capitalized", label: "资本化" },
+  { value: "expensed", label: "费用化" },
 ];
+
+// 服务端报表里 voucher_no 列的英文表头，页面里统一显示为中文。
+const COLUMN_LABELS = { "Voucher No": "凭证号" };
 
 const columns = ref([]);
 const result = ref([]);
@@ -43,8 +61,11 @@ const loading = ref(false);
 const recalcing = ref(false);
 const canceling = ref(false);
 const exporting = ref(false);
+const confirmingCancel = ref(false);
 const msg = ref("");
+const msgBad = ref(false);
 const allocationMode = ref("all");
+const collapsed = ref({});
 
 const allocRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.get_allocation", method: "GET" });
 const matrixRes = createResource({ url: "frappe.desk.query_report.run", method: "GET" });
@@ -86,13 +107,68 @@ const summaryCards = computed(() => {
   const data = viewSummary.value;
   const capitalized = Number(data.capitalized || 0);
   const expensed = Number(data.expensed || 0);
+  const unknown = Number(data.unknown || 0);
+  const allMode = allocationMode.value === "all";
   return [
-    { key: "capitalized", label: TEXT.capitalized, value: capitalized },
-    { key: "expensed", label: TEXT.expensed, value: expensed },
-    { key: "capitalExpense", label: TEXT.capitalExpense, value: capitalized + expensed },
-    { key: "unknown", label: TEXT.unknown, value: Number(data.unknown || 0) },
+    { key: "capitalized", label: TEXT.capitalized, value: capitalized, sub: "处于资本化阶段的项目", tone: "" },
+    { key: "expensed", label: TEXT.expensed, value: expensed, sub: "处于费用化阶段的项目", tone: "" },
+    { key: "capitalExpense", label: TEXT.capitalExpense, value: capitalized + expensed, sub: "= 资本化 + 费用化", tone: "" },
+    {
+      key: "unknown",
+      label: TEXT.unknown,
+      value: unknown,
+      sub: unknown > 0 ? "无法归属到项目，需处理" : allMode ? "没有未判定金额" : "当前口径不含",
+      tone: unknown > 0 ? "warn" : "",
+    },
   ];
 });
+
+// 对账：和导出 Excel 里「未对账差额」同一个算法（阶段合计 − 分摊明细合计）。
+const reconcileDiff = computed(() => {
+  if (!summary.value || !result.value.length) return null;
+  return allocationReconcileDifference({ summary: viewSummary.value, columns: columns.value, result: result.value });
+});
+const statusTag = computed(() => {
+  if (isYearScope.value) return { text: "年度 · 只读", cls: "" };
+  if (allocName.value) return { text: "已提交", cls: "ok" };
+  return { text: "未分摊", cls: "warn" };
+});
+const checks = computed(() => {
+  const list = [];
+  if (isYearScope.value) {
+    list.push({ key: "state", tone: "ok", icon: "check", text: "年度汇总各月已提交的分摊，只读，不能在这里重算或撤销" });
+  } else if (allocName.value) {
+    list.push({ key: "state", tone: "ok", icon: "check", text: `分摊单 ${allocName.value} 已提交` });
+  } else {
+    list.push({ key: "state", tone: "warn", icon: "alert", text: "本期尚未分摊，调整完工时后点「重算分摊」" });
+  }
+  if (summary.value) {
+    const diff = reconcileDiff.value;
+    if (diff !== null) {
+      if (Math.abs(diff) < 0.01) {
+        list.push({ key: "diff", tone: "ok", icon: "check", text: "分摊合计与费用池差额 0.00" });
+      } else {
+        list.push({ key: "diff", tone: "warn", icon: "alert", text: `分摊合计与费用池差额 ${fmt(diff)} 元（阶段合计与分摊明细对不上，请核对后重算）` });
+      }
+    }
+    const unknown = Number(summary.value.unknown || 0);
+    if (unknown > 0) {
+      list.push({ key: "unknown", tone: "warn", icon: "alert", text: `未判定 ${fmt(unknown)} 元（来自阶段未判定的项目）` });
+    } else {
+      list.push({ key: "unknown", tone: "ok", icon: "check", text: "没有未判定金额" });
+    }
+  }
+  return list;
+});
+
+const matrixView = computed(() => groupAllocationRows({ columns: columns.value, result: result.value }));
+const labelColumns = computed(() => columns.value.filter((c) => !isCur(c) && !["account_level_3", "account_level_4"].includes(colKey(c))));
+const moneyColumns = computed(() => columns.value.filter((c) => isCur(c)));
+
+function setMessage(text, bad = false) {
+  msg.value = text;
+  msgBad.value = bad;
+}
 
 async function loadMatrix() {
   columns.value = [];
@@ -105,7 +181,8 @@ async function loadMatrix() {
 
 async function load() {
   loading.value = true;
-  msg.value = "";
+  confirmingCancel.value = false;
+  setMessage("");
   try {
     const a = await allocRes.submit({ period: period.value, scope: periodScope.value });
     summary.value = hasAllocationData(a) ? a : null;
@@ -119,20 +196,21 @@ async function load() {
 async function recalc() {
   if (isYearScope.value) return;
   recalcing.value = true;
-  msg.value = "";
+  confirmingCancel.value = false;
+  setMessage("");
   try {
     const a = await recalcRes.submit({ period: period.value });
     if (recalcRes.error) {
       const er = recalcRes.error;
-      msg.value = (er.messages && er.messages.join("\uff1b")) || er.message || "\u91cd\u7b97\u5931\u8d25";
+      setMessage((er.messages && er.messages.join("；")) || er.message || "重算失败", true);
       return;
     }
     summary.value = hasAllocationData(a) ? a : null;
     allocName.value = a && a.name ? a.name : null;
     await loadMatrix();
-    msg.value = "\u5df2\u91cd\u7b97\uff1a" + period.value;
+    setMessage("已重算：" + period.value);
   } catch (e) {
-    msg.value = (e && e.message) || "\u91cd\u7b97\u5931\u8d25";
+    setMessage((e && e.message) || "重算失败", true);
   } finally {
     recalcing.value = false;
   }
@@ -140,21 +218,20 @@ async function recalc() {
 
 async function cancelAllocation() {
   if (!allocName.value || isYearScope.value) return;
-  const confirmed = window.confirm(`${TEXT.confirmCancel} ${period.value} \u7684\u5206\u644a\u5417\uff1f\u64a4\u9500\u540e\u672c\u671f\u5de5\u65f6\u53ef\u4ee5\u7ee7\u7eed\u8c03\u6574\uff0c\u8c03\u6574\u540e\u9700\u8981\u91cd\u65b0\u5206\u644a\u3002`);
-  if (!confirmed) return;
   canceling.value = true;
-  msg.value = "";
+  setMessage("");
   try {
     await cancelRes.submit({ period: period.value });
     if (cancelRes.error) {
       const er = cancelRes.error;
-      msg.value = (er.messages && er.messages.join("\uff1b")) || er.message || "\u64a4\u9500\u5931\u8d25";
+      setMessage((er.messages && er.messages.join("；")) || er.message || "撤销失败", true);
       return;
     }
+    confirmingCancel.value = false;
     await load();
-    msg.value = "\u5df2\u64a4\u9500\u672c\u671f\u5206\u644a\uff0c\u53ef\u7ee7\u7eed\u8c03\u6574\u5de5\u65f6";
+    setMessage("已撤销本期分摊，可继续调整工时");
   } catch (e) {
-    msg.value = (e && e.message) || "\u64a4\u9500\u5931\u8d25";
+    setMessage((e && e.message) || "撤销失败", true);
   } finally {
     canceling.value = false;
   }
@@ -163,7 +240,7 @@ async function cancelAllocation() {
 async function exportCurrentAllocation() {
   if (!canExport.value) return;
   exporting.value = true;
-  msg.value = "";
+  setMessage("");
   try {
     const stageMatrices = await loadAllocationStageMatrices({
       scope: periodScope.value,
@@ -181,9 +258,9 @@ async function exportCurrentAllocation() {
       result: result.value,
       stageMatrices,
     });
-    msg.value = "\u5df2\u5bfc\u51fa\uff1a" + filename;
+    setMessage("已导出：" + filename);
   } catch (e) {
-    msg.value = (e && e.message) || "\u5bfc\u51fa\u5931\u8d25";
+    setMessage((e && e.message) || "导出失败", true);
   } finally {
     exporting.value = false;
   }
@@ -191,15 +268,27 @@ async function exportCurrentAllocation() {
 
 const fmt = (n) => (typeof n === "number" ? n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n);
 const colKey = (c) => c.fieldname || c.id;
-const colLabel = (c) => c.label || c.fieldname;
+const colLabel = (c) => COLUMN_LABELS[c.label] || c.label || c.fieldname;
 const isCur = (c) => c.fieldtype === "Currency";
 function isTotalRow(row = {}) { return Boolean(row._is_total); }
+function moneyText(value) {
+  const n = Number(value || 0);
+  return Math.abs(n) < 0.005 ? "·" : fmt(n);
+}
+function isZero(value) { return Math.abs(Number(value || 0)) < 0.005; }
 function cellText(row, column) {
   const key = colKey(column);
   if (isTotalRow(row) && key === "account_level_3") return TEXT.projectTotal;
   const value = row[key];
-  return isCur(column) ? fmt(Number(value || 0)) : value;
+  return isCur(column) ? moneyText(value) : (value ?? "");
 }
+function projectTitle(column) {
+  const name = column.project_name || column.project || colLabel(column);
+  const stage = stageLabel(column.project_stage);
+  return stage ? `${name} · ${stage}` : String(name);
+}
+function isCollapsed(key) { return Boolean(collapsed.value[key]); }
+function toggleGroup(key) { collapsed.value = { ...collapsed.value, [key]: !collapsed.value[key] }; }
 
 watch(period, () => load());
 watch(periodScope, () => load());
@@ -208,48 +297,98 @@ load();
 </script>
 
 <template>
-  <Card :title="TEXT.title" :subtitle="TEXT.subtitle">
-    <div class="mb-4 flex flex-wrap items-center gap-2">
-      <span class="text-sm text-gray-500">{{ TEXT.accountingPeriod }}</span>
-      <input type="month" v-model="period" class="rounded border border-gray-300 px-3 py-1.5 text-sm" />
-      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
-        <button v-for="scope in PERIOD_SCOPES" :key="scope.value" type="button" class="px-3 py-1.5 text-sm" :class="periodScope === scope.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="setPeriodScope(scope.value)">{{ scope.label }}</button>
-      </div>
-      <span class="ml-2 text-sm text-gray-500">{{ TEXT.viewScope }}</span>
-      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
-        <button v-for="option in modeOptions" :key="option.value" type="button" class="px-3 py-1.5 text-sm" :class="allocationMode === option.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="allocationMode = option.value">{{ option.label }}</button>
-      </div>
-      <Button v-if="!isYearScope" variant="solid" :loading="recalcing" @click="recalc" class="ml-2">{{ TEXT.recalc }}</Button>
-      <Button v-if="allocName && !isYearScope" variant="subtle" :loading="canceling" @click="cancelAllocation">{{ TEXT.cancel }}</Button>
-      <Button v-if="summary" variant="subtle" :loading="exporting" :disabled="!canExport" @click="exportCurrentAllocation">{{ TEXT.exportExcel }}</Button>
-      <span v-if="msg" class="ml-1 text-xs text-green-600">{{ msg }}</span>
+  <RdPage :title="TEXT.title" :subtitle="TEXT.subtitle">
+    <template #ctl><RdPeriod /></template>
+
+    <div v-if="summary" class="kpis">
+      <RdKpi v-for="card in summaryCards" :key="card.key" :label="card.label" :value="fmt(card.value)" unit="元" :sub="card.sub" :tone="card.tone" />
     </div>
 
-    <div v-if="summary" class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <div v-for="card in summaryCards" :key="card.key" class="rounded-lg bg-gray-50 p-3">
-        <div class="text-xs text-gray-500">{{ card.label }}</div>
-        <div class="text-lg font-semibold tabular-nums">{{ fmt(card.value) }}</div>
+    <div class="bar">
+      <div class="row">
+        <span class="muted">{{ TEXT.view }}</span>
+        <RdSeg :model-value="periodScope" :options="PERIOD_SCOPES" label="期间范围" @update:model-value="setPeriodScope" />
+        <RdSeg v-model="allocationMode" :options="modeOptions" label="口径" />
+      </div>
+      <div class="row">
+        <span class="muted">{{ TEXT.actions }}</span>
+        <button type="button" class="btn pri" :disabled="isYearScope || recalcing || canceling" :title="isYearScope ? '年度为只读汇总，请切换到月度重算' : undefined" @click="recalc"><RdIcon name="refresh" />{{ recalcing ? TEXT.recalcing : TEXT.recalc }}</button>
+        <button v-if="summary" type="button" class="btn" :disabled="!canExport || exporting" @click="exportCurrentAllocation"><RdIcon name="download" />{{ exporting ? TEXT.exporting : TEXT.exportExcel }}</button>
+        <template v-if="allocName && !isYearScope">
+          <span v-if="confirmingCancel" class="note bad confirm">
+            <span>{{ TEXT.confirmCancel }} {{ period }} {{ TEXT.confirmCancelTail }}</span>
+            <button type="button" class="btn sm bad" :disabled="canceling" @click="cancelAllocation">{{ canceling ? TEXT.recalcing : TEXT.confirmYes }}</button>
+            <button type="button" class="btn sm" :disabled="canceling" @click="confirmingCancel = false">{{ TEXT.confirmNo }}</button>
+          </span>
+          <button v-else type="button" class="btn bad" :disabled="recalcing" @click="confirmingCancel = true">{{ TEXT.cancel }}</button>
+        </template>
       </div>
     </div>
+
+    <div v-if="msg" class="note" :class="msgBad ? 'bad' : 'ok'"><RdIcon :name="msgBad ? 'alert' : 'check'" /><span class="grow">{{ msg }}</span></div>
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
-    <div v-else-if="!result.length" class="py-6 text-sm text-gray-500">{{ emptyText }}</div>
     <template v-else>
-      <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-        <table class="w-full min-w-[1280px] text-sm">
-          <thead class="border-b bg-gray-50 text-gray-500">
-            <tr>
-              <th v-for="c in columns" :key="colKey(c)" class="whitespace-nowrap px-3 py-2" :class="isCur(c) ? 'text-right' : 'text-left'">{{ colLabel(c) }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, i) in result" :key="i" class="border-b last:border-0" :class="isTotalRow(row) ? 'bg-gray-50 font-semibold text-gray-900' : 'hover:bg-gray-50'">
-              <td v-for="c in columns" :key="colKey(c)" class="whitespace-nowrap px-3 py-2 tabular-nums" :class="isCur(c) ? 'text-right' : 'text-left'">{{ cellText(row, c) }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="card">
+        <div class="hd"><b>{{ TEXT.statusTitle }}</b><span class="tag" :class="statusTag.cls">{{ statusTag.text }}</span></div>
+        <div class="bd checks">
+          <div v-for="check in checks" :key="check.key" class="chk" :class="check.tone"><RdIcon :name="check.icon" /><span>{{ check.text }}</span></div>
+        </div>
       </div>
-      <p class="mt-3 text-xs text-gray-400">{{ displayPeriod }} ? {{ allocName || displayPeriod }} ? {{ totalRows }} rows</p>
+
+      <div v-if="!result.length" class="card"><div class="bd muted">{{ emptyText }}</div></div>
+      <div v-else class="card">
+        <div class="hd"><b>{{ TEXT.matrixTitle }}</b><span class="muted">{{ displayPeriod }} · {{ allocName || displayPeriod }} · {{ totalRows }} 行明细</span></div>
+        <div class="tbl alloc-tbl">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th class="c1">{{ TEXT.accountColumn }}</th>
+                <th v-for="c in labelColumns" :key="colKey(c)">{{ colLabel(c) }}</th>
+                <th v-for="c in moneyColumns" :key="colKey(c)" class="r" :title="projectTitle(c)">
+                  {{ colLabel(c) }}
+                  <small v-if="stageLabel(c.project_stage)">{{ stageLabel(c.project_stage) }}</small>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="group in matrixView.groups" :key="group.key">
+                <tr v-if="matrixView.grouped" class="g">
+                  <td class="c1">
+                    <button type="button" class="btn quiet sm tgl" :aria-expanded="!isCollapsed(group.key)" :aria-label="(isCollapsed(group.key) ? '展开 ' : '收起 ') + (group.label || TEXT.ungrouped)" @click="toggleGroup(group.key)"><RdIcon :name="isCollapsed(group.key) ? 'right' : 'down'" /></button>
+                    {{ group.label || TEXT.ungrouped }} <span class="muted">· {{ group.rows.length }} 行</span>
+                  </td>
+                  <td v-for="c in labelColumns" :key="colKey(c)"></td>
+                  <td v-for="c in moneyColumns" :key="colKey(c)" class="r num nw" :class="{ zero: isZero(group.totals[colKey(c)]) }">{{ moneyText(group.totals[colKey(c)]) }}</td>
+                </tr>
+                <template v-if="!matrixView.grouped || !isCollapsed(group.key)">
+                  <tr v-for="(row, i) in group.rows" :key="i">
+                    <td class="c1 detail">{{ (matrixView.grouped ? row.account_level_4 : row.account_level_3 || row.account_level_4) || "—" }}</td>
+                    <td v-for="c in labelColumns" :key="colKey(c)" class="nw num muted">{{ cellText(row, c) }}</td>
+                    <td v-for="c in moneyColumns" :key="colKey(c)" class="r num nw" :class="{ zero: isZero(row[colKey(c)]) }">{{ cellText(row, c) }}</td>
+                  </tr>
+                </template>
+              </template>
+              <tr v-if="matrixView.totalRow" class="t">
+                <td class="c1">{{ TEXT.projectTotal }}</td>
+                <td v-for="c in labelColumns" :key="colKey(c)"></td>
+                <td v-for="c in moneyColumns" :key="colKey(c)" class="r num nw">{{ cellText(matrixView.totalRow, c) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </template>
-  </Card>
+  </RdPage>
 </template>
+
+<style scoped>
+.rd .confirm { margin: 0; padding: 3px 10px; align-items: center; flex-wrap: wrap; }
+.rd .confirm svg { margin-top: 0; }
+.rd .checks { padding-top: 6px; }
+.rd .alloc-tbl { max-height: 560px; }
+.rd .alloc-tbl table { min-width: 1100px; }
+.rd .matrix th small { display: block; font-weight: 400; font-size: 11px; color: var(--rd-ink3); }
+.rd .matrix td.detail { padding-left: 40px; }
+.rd .matrix .tgl { padding: 0 5px; margin-right: 2px; }
+</style>

@@ -1,25 +1,37 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import { Card, Button, Spinner, createResource } from "frappe-ui";
-import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
+import { Spinner, createResource } from "frappe-ui";
+import { period, periodScope, periodYear, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
 import { exportTableWorkbook } from "../lib/tableExport";
 import { buildEmployeeProjectPivot, buildMonthlyProjectRatePivot } from "../lib/timesheetPivot";
+import { employeeShareRow, formatDelta, hoursDelta, previousPeriod, projectNames, sumHours, topProject } from "../lib/rdReportView";
+import RdPage from "../components/rd/RdPage.vue";
+import RdPeriod from "../components/rd/RdPeriod.vue";
+import RdSeg from "../components/rd/RdSeg.vue";
+import RdKpi from "../components/rd/RdKpi.vue";
+import RdIcon from "../components/rd/RdIcon.vue";
 
 const TEXT = {
-  title: "\u7814\u53d1\u5de5\u65f6\u62a5\u8868",
-  monthSubtitle: "\u7814\u53d1\u4eba\u5458\u6309\u9879\u76ee\u7684\u672c\u671f\u5de5\u65f6\u900f\u89c6\uff0c\u542b\u5206\u914d\u7387",
-  yearSubtitle: "\u6309\u6708\u67e5\u770b\u5168\u5e74\u5404\u9879\u76ee\u5de5\u65f6\u5206\u914d\u7387",
-  accountingPeriod: "\u4f1a\u8ba1\u671f\u95f4",
-  employee: "\u5458\u5de5",
-  month: "\u6708\u4efd",
-  total: "\u5408\u8ba1",
-  projectTotal: "\u9879\u76ee\u5408\u8ba1",
-  allocationRate: "\u5206\u914d\u7387%",
-  exportExcel: "\u5bfc\u51faExcel",
-  noData: "\u672c\u671f\u65e0\u5de5\u65f6\u6570\u636e",
+  title: "研发工时报表",
+  monthSubtitle: "研发人员按项目的本期工时透视，含分配率",
+  yearSubtitle: "按月查看全年各项目工时分配率",
+  employee: "员工",
+  month: "月份",
+  total: "合计",
+  projectTotal: "项目合计",
+  allocationRate: "分配率%",
+  exportExcel: "导出 Excel",
+  noData: "本期无工时数据",
 };
+const MODE_OPTIONS = [
+  { value: "hours", label: "工时" },
+  { value: "share", label: "个人占比" },
+];
 
 const exporting = ref(false);
+const mode = ref("hours");
+const focusId = ref("");
+
 const r = createResource({
   url: "rayher_hr_payroll.api.timesheet_entry.list_rd_hours",
   method: "GET",
@@ -29,6 +41,24 @@ const r = createResource({
 watch(period, () => r.reload());
 watch(periodScope, () => r.reload());
 
+// 较上月：同一个接口再取上一个月，只在月度视图用。
+const previous = createResource({ url: "rayher_hr_payroll.api.timesheet_entry.list_rd_hours", method: "GET" });
+const previousHours = ref(null);
+let previousToken = 0;
+async function loadPrevious() {
+  const token = ++previousToken;
+  previousHours.value = null;
+  const target = previousPeriod(period.value);
+  if (periodScope.value !== "month" || !target) return;
+  try {
+    const data = await previous.submit({ period: target, scope: "month" });
+    if (token === previousToken) previousHours.value = sumHours(data || []);
+  } catch (error) {
+    if (token === previousToken) previousHours.value = null;
+  }
+}
+watch([period, periodScope], loadPrevious, { immediate: true });
+
 const rows = computed(() => r.data || []);
 const isYearScope = computed(() => periodScope.value === "year");
 const viewLabel = computed(() => periodScopeLabel(period.value, periodScope.value));
@@ -36,16 +66,37 @@ const viewSubtitle = computed(() => isYearScope.value ? TEXT.yearSubtitle : TEXT
 const pivot = computed(() => buildEmployeeProjectPivot(rows.value));
 const yearlyPivot = computed(() => buildMonthlyProjectRatePivot(rows.value, Number(String(period.value).slice(0, 4))));
 const activePivot = computed(() => isYearScope.value ? yearlyPivot.value : pivot.value);
+const names = computed(() => projectNames(rows.value));
+const shareRows = computed(() => pivot.value.data.map((row) => ({ ...row, shares: employeeShareRow(row.vals, row.total) })));
+
+const totalHours = computed(() => sumHours(rows.value));
+const participants = computed(() => pivot.value.data.filter((row) => row.total > 0).length);
+const top = computed(() => topProject(pivot.value, names.value));
+const hoursLabel = computed(() => isYearScope.value ? "全年累计工时" : "本月总工时");
+const hoursSub = computed(() => isYearScope.value ? `${periodYear()} 年累计` : formatDelta(hoursDelta(totalHours.value, previousHours.value)));
 
 const fmt = (n) => Number(n || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPercent = (n) => `${Number(n || 0).toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 function fmtCell(n) {
-  return Number(n || 0) ? fmt(n) : "";
+  return Number(n || 0) ? fmt(n) : "–";
 }
 function fmtRate(n) {
-  return Number(n || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmt(n);
 }
 function fmtYearRate(n) {
+  return Number(n || 0) ? `${fmtRate(n)}%` : "–";
+}
+function exportYearRate(n) {
   return Number(n || 0) ? `${fmtRate(n)}%` : "";
+}
+function nameOf(id) {
+  return names.value[id] || "";
+}
+function toggleFocus(id) {
+  focusId.value = focusId.value === id ? "" : id;
+}
+function dimmed(id) {
+  return Boolean(focusId.value) && focusId.value !== id;
 }
 
 async function exportCurrentTimesheetPivot() {
@@ -55,8 +106,8 @@ async function exportCurrentTimesheetPivot() {
     const exportRows = isYearScope.value
       ? current.data.map((row) => ({
           ...row,
-          vals: row.vals.map((value) => fmtYearRate(value)),
-          total: fmtYearRate(row.total),
+          vals: row.vals.map((value) => exportYearRate(value)),
+          total: exportYearRate(row.total),
         }))
       : [
           ...current.data,
@@ -84,51 +135,87 @@ async function exportCurrentTimesheetPivot() {
 </script>
 
 <template>
-  <Card :title="TEXT.title" :subtitle="viewSubtitle">
-    <div class="mb-4 flex flex-wrap items-center gap-2">
-      <span class="text-sm text-gray-500">{{ TEXT.accountingPeriod }}</span>
-      <input type="month" v-model="period" class="rounded border border-gray-300 px-3 py-1.5 text-sm" />
-      <div class="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
-        <button v-for="scope in PERIOD_SCOPES" :key="scope.value" type="button" class="px-3 py-1.5 text-sm" :class="periodScope === scope.value ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'" @click="setPeriodScope(scope.value)">{{ scope.label }}</button>
+  <RdPage :title="TEXT.title" :subtitle="viewSubtitle">
+    <template #ctl><RdPeriod /></template>
+
+    <div class="bar">
+      <div class="row">
+        <RdSeg :model-value="periodScope" :options="PERIOD_SCOPES" label="统计范围" @update:model-value="setPeriodScope" />
+        <RdSeg v-if="!isYearScope" v-model="mode" :options="MODE_OPTIONS" label="显示方式" />
       </div>
-      <Button variant="subtle" :loading="exporting" :disabled="!activePivot.data.length" @click="exportCurrentTimesheetPivot">{{ TEXT.exportExcel }}</Button>
+      <button type="button" class="btn" :disabled="exporting || !activePivot.data.length" @click="exportCurrentTimesheetPivot"><RdIcon name="download" />{{ exporting ? "导出中…" : TEXT.exportExcel }}</button>
     </div>
-    <div v-if="r.loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
-    <div v-else-if="!activePivot.data.length" class="py-6 text-sm text-gray-500">{{ TEXT.noData }}</div>
-    <div v-else class="max-h-[70vh] overflow-auto overflow-x-auto rounded-lg border border-gray-100">
-      <table class="w-full min-w-max border-separate border-spacing-0 text-sm">
-        <thead class="sticky top-0 z-20 bg-white text-gray-500 shadow-sm">
-          <tr>
-            <th class="sticky left-0 z-30 min-w-[110px] bg-white px-3 py-3 text-left font-medium">{{ isYearScope ? TEXT.month : TEXT.employee }}</th>
-            <th v-for="project in activePivot.projects" :key="project.id" class="min-w-[96px] px-3 py-3 text-right text-xs font-medium">
-              {{ project.label }}
-            </th>
-            <th class="min-w-[96px] bg-white px-3 py-3 text-right font-medium">{{ TEXT.total }}</th>
-          </tr>
-        </thead>
-        <tbody v-if="isYearScope">
-          <tr v-for="row in yearlyPivot.data" :key="row.id" class="group hover:bg-gray-50">
-            <td class="sticky left-0 z-10 whitespace-nowrap border-b border-gray-100 bg-white px-3 py-2 font-medium group-hover:bg-gray-50">{{ row.month }}</td>
-            <td v-for="(value, index) in row.vals" :key="index" class="border-b border-gray-100 px-3 py-2 text-right tabular-nums">{{ fmtYearRate(value) }}</td>
-            <td class="border-b border-gray-100 px-3 py-2 text-right font-semibold tabular-nums">{{ fmtYearRate(row.total) }}</td>
-          </tr>
-        </tbody>
-        <tbody v-else>
-          <tr v-for="row in pivot.data" :key="row.id" class="group hover:bg-gray-50">
-            <td class="sticky left-0 z-10 whitespace-nowrap border-b border-gray-100 bg-white px-3 py-2 group-hover:bg-gray-50">{{ row.emp }}</td>
-            <td v-for="(v, i) in row.vals" :key="i" class="border-b border-gray-100 px-3 py-2 text-right tabular-nums">{{ fmtCell(v) }}</td>
-            <td class="border-b border-gray-100 px-3 py-2 text-right font-medium tabular-nums">{{ fmt(row.total) }}</td>
-          </tr>
-        </tbody>
-        <tfoot v-if="!isYearScope" class="sticky bottom-0 z-20 bg-gray-50 text-gray-600 shadow-[0_-1px_0_rgba(229,231,235,1)]">
-          <tr>
-            <td class="sticky left-0 z-30 whitespace-nowrap bg-gray-50 px-3 py-2 font-medium">{{ TEXT.allocationRate }}</td>
-            <td v-for="(rate, i) in pivot.rates" :key="i" class="px-3 py-2 text-right tabular-nums">{{ fmtRate(rate) }}%</td>
-            <td class="px-3 py-2 text-right font-semibold tabular-nums">{{ fmt(pivot.grand) }}h</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-    <p class="mt-3 text-xs text-gray-400">{{ viewLabel }} &middot; {{ isYearScope ? TEXT.yearSubtitle : TEXT.monthSubtitle }}</p>
-  </Card>
+
+    <div v-if="r.loading" class="card"><div class="bd" style="display:flex;justify-content:center"><Spinner class="w-6" /></div></div>
+    <template v-else>
+      <div class="kpis">
+        <RdKpi :label="hoursLabel" :value="fmt(totalHours)" unit="h" :sub="hoursSub" />
+        <RdKpi label="参与人数" :value="participants" unit="人" sub="本期有工时记录" />
+        <RdKpi label="占比最高项目" :value="top ? top.label : '–'" :sub="top ? `${top.name ? top.name + ' · ' : ''}${fmtPercent(top.percent)}` : ''" />
+      </div>
+
+      <div class="card">
+        <div class="hd">
+          <b>{{ isYearScope ? "各月项目分配率" : "员工 × 项目工时" }}</b>
+          <span class="muted">{{ isYearScope ? "每行合计 100%" : `${viewLabel} · 单位 ${mode === "hours" ? "小时" : "占该员工工时的百分比"}` }}</span>
+        </div>
+        <div v-if="!activePivot.data.length" class="bd muted">{{ TEXT.noData }}</div>
+        <div v-else class="tbl pv" style="max-height:70vh">
+          <table>
+            <thead>
+              <tr>
+                <th class="l">{{ isYearScope ? TEXT.month : TEXT.employee }}</th>
+                <th v-for="project in activePivot.projects" :key="project.id" class="r" :class="{ focus: focusId === project.id }">
+                  <button type="button" class="proj" :title="nameOf(project.id) || project.label" :aria-pressed="focusId === project.id" @click="toggleFocus(project.id)">
+                    <span>{{ project.label }}</span>
+                    <small v-if="nameOf(project.id) && nameOf(project.id) !== project.label">{{ nameOf(project.id) }}</small>
+                  </button>
+                </th>
+                <th class="r">{{ TEXT.total }}</th>
+              </tr>
+            </thead>
+            <tbody v-if="isYearScope">
+              <tr v-for="row in yearlyPivot.data" :key="row.id">
+                <td class="l nw">{{ row.month }}</td>
+                <td v-for="(value, index) in row.vals" :key="index" class="r num" :class="{ dim: dimmed(yearlyPivot.projects[index].id) }">{{ fmtYearRate(value) }}</td>
+                <td class="r num"><b>{{ fmtYearRate(row.total) }}</b></td>
+              </tr>
+            </tbody>
+            <tbody v-else-if="mode === 'share'">
+              <tr v-for="row in shareRows" :key="row.id">
+                <td class="l nw">{{ row.emp }}</td>
+                <td v-for="(value, index) in row.vals" :key="index" class="r num" :class="{ dim: dimmed(pivot.projects[index].id) }">{{ value ? fmtPercent(row.shares[index]) : "–" }}</td>
+                <td class="r num"><b>{{ row.total ? "100.0%" : "–" }}</b></td>
+              </tr>
+            </tbody>
+            <tbody v-else>
+              <tr v-for="row in pivot.data" :key="row.id">
+                <td class="l nw">{{ row.emp }}</td>
+                <td v-for="(v, i) in row.vals" :key="i" class="r num" :class="{ dim: dimmed(pivot.projects[i].id) }">{{ fmtCell(v) }}</td>
+                <td class="r num"><b>{{ fmt(row.total) }}</b></td>
+              </tr>
+            </tbody>
+            <tfoot v-if="!isYearScope">
+              <tr>
+                <td class="l">{{ TEXT.projectTotal }} h</td>
+                <td v-for="(value, i) in pivot.projTotals" :key="i" class="r num" :class="{ dim: dimmed(pivot.projects[i].id) }">{{ fmt(value) }}</td>
+                <td class="r num">{{ fmt(pivot.grand) }}</td>
+              </tr>
+              <tr>
+                <td class="l">{{ TEXT.allocationRate }}</td>
+                <td v-for="(rate, i) in pivot.rates" :key="i" class="r num" :class="{ dim: dimmed(pivot.projects[i].id) }">{{ fmtRate(rate) }}%</td>
+                <td class="r num">100.00%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </template>
+  </RdPage>
 </template>
+
+<style scoped>
+.pv th button.proj { display: flex; flex-direction: column; align-items: flex-end; width: 100%; max-width: 132px; margin-left: auto; text-align: right; line-height: 1.25; }
+.pv th button.proj small { max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; color: var(--rd-ink3); }
+.pv th button.proj:hover { color: var(--rd-brand-d); }
+</style>

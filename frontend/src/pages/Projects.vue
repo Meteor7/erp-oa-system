@@ -1,8 +1,12 @@
 <script setup>
-import { reactive, ref } from "vue";
-import { Card, Button, Badge, createResource } from "frappe-ui";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { createResource } from "frappe-ui";
 import { canAdministerProjects } from "../lib/access";
 import { exportTableWorkbook } from "../lib/tableExport";
+import { PROJECT_FILE_FIELDS, pendingProjectItems, pendingSummary, projectCode, projectStage, projectStats, stageTone, statusTone } from "../lib/rdProjects";
+import RdPage from "../components/rd/RdPage.vue";
+import RdKpi from "../components/rd/RdKpi.vue";
+import RdIcon from "../components/rd/RdIcon.vue";
 
 const STATUS_OPTIONS = [
   { value: "", label: "全部状态" },
@@ -22,6 +26,12 @@ const rows = createResource({
   url: "rayher_hr_payroll.api.project_entry.list_projects",
   method: "GET",
   makeParams: () => ({ search: filters.search, status: filters.status }),
+  auto: true,
+});
+// 指标卡和待处理提示按全部项目算，不随搜索、状态筛选变化
+const allRows = createResource({
+  url: "rayher_hr_payroll.api.project_entry.list_projects",
+  method: "GET",
   auto: true,
 });
 const owners = createResource({
@@ -53,11 +63,16 @@ const saving = ref(false);
 const exporting = ref(false);
 const uploadingField = ref("");
 const errMsg = ref("");
+const askCancelName = ref("");
 
-function statusTheme(status) {
-  if (status === "Completed") return "gray";
-  if (status === "Cancelled") return "red";
-  return "green";
+const loaded = computed(() => Array.isArray(allRows.data));
+const stats = computed(() => projectStats(allRows.data || []));
+const pending = computed(() => pendingProjectItems(allRows.data || []));
+const pendingText = computed(() => pendingSummary(pending.value, 3));
+
+function reloadAll() {
+  rows.reload();
+  allRows.reload();
 }
 
 function newProject() {
@@ -89,6 +104,12 @@ function edit(row) {
 function cancelEdit() {
   editing.value = false;
 }
+
+function onKeydown(event) {
+  if (event.key === "Escape" && editing.value && !uploadingField.value && !saving.value) cancelEdit();
+}
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
 function ownerLabel(ownerName, displayName = "") {
   if (displayName) return displayName;
@@ -155,7 +176,7 @@ async function save() {
   try {
     await saver.submit({ ...form });
     editing.value = false;
-    rows.reload();
+    reloadAll();
   } catch (error) {
     errMsg.value = error?.message || "保存失败";
   } finally {
@@ -167,7 +188,8 @@ async function cancelProject(name) {
   errMsg.value = "";
   try {
     await canceler.submit({ name });
-    rows.reload();
+    askCancelName.value = "";
+    reloadAll();
   } catch (error) {
     errMsg.value = error?.message || "取消失败";
   }
@@ -203,91 +225,143 @@ async function exportCurrentProjects() {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <Card title="项目管理">
-      <template #actions>
-        <div class="flex items-center gap-2">
-          <Button variant="subtle" :loading="exporting" :disabled="!(rows.data || []).length" @click="exportCurrentProjects">导出Excel</Button>
-          <Button v-if="canAdministerProjects()" variant="solid" @click="newProject">新增项目</Button>
-        </div>
-      </template>
+  <RdPage title="项目管理" subtitle="研发项目主数据：阶段、周期、附件。工时、费用、审批都引用这里。">
+    <div class="kpis">
+      <RdKpi label="项目总数" :value="loaded ? stats.total : '-'" sub="含已结束、已取消" />
+      <RdKpi label="进行中" :value="loaded ? stats.open : '-'" :sub="loaded ? `其中资本化 ${stats.capitalized} 个，费用化 ${stats.expensed} 个` : ''" />
+      <RdKpi label="待处理事项" :value="loaded ? pending.length : '-'" sub="缺报告、阶段未判定" :tone="pending.length ? 'warn' : ''" />
+    </div>
 
-      <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
-        <input v-model="filters.search" @input="rows.reload" class="w-full rounded border border-gray-300 px-3 py-2 text-sm md:w-72" placeholder="搜索名称/编号" />
-        <select v-model="filters.status" @change="rows.reload" class="w-full rounded border border-gray-300 px-3 py-2 text-sm md:w-44">
+    <div v-if="pending.length" class="note warn">
+      <RdIcon name="alert" />
+      <span class="grow"><b>待处理 {{ pendingText.count }} 项</b>　{{ pendingText.text }}<template v-if="pendingText.more">…</template></span>
+    </div>
+    <div v-if="errMsg && !editing" class="note bad"><RdIcon name="alert" /><span class="grow">{{ errMsg }}</span></div>
+
+    <div class="bar">
+      <div class="row">
+        <label class="input" style="width: 230px"><RdIcon name="search" /><input v-model="filters.search" placeholder="搜索名称/编号" @input="rows.reload" /></label>
+        <select v-model="filters.status" class="field" style="width: 130px" aria-label="状态筛选" @change="rows.reload">
           <option v-for="item in STATUS_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
       </div>
-
-      <div v-if="editing" class="mb-4 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">编号 *</label><input v-model="form.project_code" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">项目名称 *</label><input v-model="form.project_name" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">项目负责人</label><select v-if="canAdministerProjects()" v-model="form.project_owner" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="syncOwnerName"><option value="">未指定</option><option v-for="owner in owners.data || []" :key="owner.name" :value="owner.name">{{ owner.full_name || owner.name }} · {{ owner.name }}</option></select><div v-else class="rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">{{ ownerLabel(form.project_owner, form.project_owner_name) }}</div></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">研发阶段</label><select v-model="form.rd_stage" class="rounded border border-gray-300 px-3 py-2 text-sm"><option v-for="item in STAGE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">立项时间</label><input v-model="form.start_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">结项时间</label><input v-model="form.end_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></div>
-          <div class="flex flex-col"><label class="mb-1 text-xs text-gray-500">状态</label><select v-model="form.status" class="rounded border border-gray-300 px-3 py-2 text-sm"><option value="Open">进行中</option><option value="Completed">已结束</option><option v-if="canAdministerProjects() || form.status === 'Cancelled'" value="Cancelled">已取消</option></select></div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div v-for="fileField in [
-            { key: 'project_initiation_report', label: '立项报告' },
-            { key: 'project_completion_report', label: '结项报告' },
-            { key: 'capitalization_confirmation_file', label: '资本化确认书' },
-          ]" :key="fileField.key" class="rounded border border-gray-200 bg-white p-3">
-            <div class="mb-2 text-xs font-medium text-gray-600">{{ fileField.label }}</div>
-            <div class="flex min-h-8 flex-wrap items-center gap-2">
-              <a v-if="form[fileField.key]" :href="reportDownloadUrl(form, fileField.key)" target="_blank" rel="noopener" class="max-w-[220px] truncate text-xs text-blue-600 hover:underline">{{ fileName(form[fileField.key]) }}</a>
-              <span v-else class="text-xs text-gray-400">未上传</span>
-              <label class="cursor-pointer rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50">
-                {{ uploadingField === fileField.key ? '上传中…' : '上传' }}
-                <input type="file" class="hidden" :accept="FILE_ACCEPT" :disabled="Boolean(uploadingField)" @change="uploadProjectFile(fileField.key, $event)" />
-              </label>
-              <button v-if="form[fileField.key]" type="button" class="text-xs text-red-600 hover:underline" @click="form[fileField.key] = ''">清除</button>
-            </div>
-          </div>
-        </div>
-
-        <p v-if="errMsg" class="text-xs text-red-600">{{ errMsg }}</p>
-        <div class="flex gap-2"><Button variant="solid" :loading="saving" @click="save">保存</Button><Button variant="subtle" @click="cancelEdit">取消</Button></div>
+      <div class="row">
+        <button type="button" class="btn" :disabled="exporting || !(rows.data || []).length" @click="exportCurrentProjects"><RdIcon name="download" />{{ exporting ? "导出中…" : "导出 Excel" }}</button>
+        <button v-if="canAdministerProjects()" type="button" class="btn pri" @click="newProject"><RdIcon name="plus" />新增项目</button>
       </div>
+    </div>
 
-      <p v-if="errMsg && !editing" class="mb-3 text-xs text-red-600">{{ errMsg }}</p>
-      <div v-if="rows.loading" class="py-4 text-sm text-gray-500">加载中…</div>
-      <div v-else class="overflow-x-auto rounded border border-gray-200">
-        <table class="w-full min-w-[1700px] text-sm">
-          <thead class="sticky top-0 bg-gray-50 text-gray-500">
+    <div class="card">
+      <div v-if="rows.loading" class="bd muted">加载中…</div>
+      <div v-else class="tbl">
+        <table class="min-w-[1180px]">
+          <thead>
             <tr>
-              <th class="px-3 py-2 text-left">编号</th>
-              <th class="px-3 py-2 text-left">项目名称</th>
-              <th class="px-3 py-2 text-left">项目负责人</th>
-              <th class="px-3 py-2 text-left">立项时间</th>
-              <th class="px-3 py-2 text-left">结项时间</th>
-              <th class="px-3 py-2 text-left">研发阶段</th>
-              <th class="px-3 py-2 text-left">状态</th>
-              <th class="px-3 py-2 text-left">立项报告</th>
-              <th class="px-3 py-2 text-left">结项报告</th>
-              <th class="px-3 py-2 text-left">资本化确认书</th>
-              <th class="px-3 py-2 text-right">操作</th>
+              <th>编号</th>
+              <th>项目名称</th>
+              <th>项目负责人</th>
+              <th>立项时间</th>
+              <th>结项时间</th>
+              <th>研发阶段</th>
+              <th>状态</th>
+              <th>三类附件</th>
+              <th class="r">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in rows.data || []" :key="row.name" class="border-t hover:bg-gray-50">
-              <td class="whitespace-nowrap px-3 py-2 font-medium">{{ row.rd_project_code || row.name }}</td>
-              <td class="min-w-[220px] px-3 py-2">{{ row.project_name }}</td>
-              <td class="min-w-[220px] px-3 py-2">{{ ownerLabel(row.project_owner, row.project_owner_name) }}</td>
-              <td class="whitespace-nowrap px-3 py-2">{{ row.start_date || row.capitalization_start_date || '-' }}</td>
-              <td class="whitespace-nowrap px-3 py-2">{{ row.end_date || row.capitalization_end_date || '-' }}</td>
-              <td class="whitespace-nowrap px-3 py-2">{{ row.rd_stage_label || row.rd_stage || '未判定' }}</td>
-              <td class="whitespace-nowrap px-3 py-2"><Badge :theme="statusTheme(row.status)">{{ row.status_label || row.status }}</Badge></td>
-              <td v-for="field in ['project_initiation_report', 'project_completion_report', 'capitalization_confirmation_file']" :key="field" class="max-w-[180px] px-3 py-2"><a v-if="row[field]" :href="reportDownloadUrl(row, field)" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600 hover:underline" :title="fileName(row[field])">查看文件</a><span v-else class="text-gray-400">-</span></td>
-              <td class="whitespace-nowrap px-3 py-2 text-right"><button @click="edit(row)" class="mr-3 text-xs text-blue-600 hover:underline">编辑</button><button v-if="canAdministerProjects() && row.status !== 'Cancelled'" @click="cancelProject(row.name)" class="text-xs text-red-600 hover:underline">取消</button></td>
+            <tr v-for="row in rows.data || []" :key="row.name">
+              <td class="num nw"><b>{{ projectCode(row) }}</b></td>
+              <td>{{ row.project_name }}</td>
+              <td>{{ ownerLabel(row.project_owner, row.project_owner_name) }}</td>
+              <td class="num nw">{{ row.start_date || row.capitalization_start_date || '-' }}</td>
+              <td class="num nw">{{ row.end_date || row.capitalization_end_date || '-' }}</td>
+              <td><span class="tag" :class="stageTone(projectStage(row))">{{ projectStage(row) }}</span></td>
+              <td class="nw"><span class="tag" :class="statusTone(row.status)">{{ row.status_label || row.status }}</span></td>
+              <td>
+                <span class="ico3">
+                  <template v-for="field in PROJECT_FILE_FIELDS" :key="field.key">
+                    <a v-if="row[field.key]" :href="reportDownloadUrl(row, field.key)" target="_blank" rel="noopener" :title="field.label + '：' + fileName(row[field.key])"><span class="on"><RdIcon name="check" /></span></a>
+                    <span v-else :title="field.label + '：未上传'">{{ field.short }}</span>
+                  </template>
+                </span>
+              </td>
+              <td class="r nw">
+                <template v-if="askCancelName === row.name">
+                  <span class="muted">取消后不再出现在费用导入的项目下拉里</span>
+                  <button type="button" class="btn sm bad" @click="cancelProject(row.name)">确认取消</button>
+                  <button type="button" class="btn sm quiet" @click="askCancelName = ''">返回</button>
+                </template>
+                <template v-else>
+                  <button type="button" class="btn sm quiet" @click="edit(row)">编辑</button>
+                  <template v-if="canAdministerProjects() && row.status !== 'Cancelled'">
+                    <button type="button" class="btn sm quiet bad" @click="askCancelName = row.name">取消</button>
+                  </template>
+                </template>
+              </td>
             </tr>
-            <tr v-if="!(rows.data || []).length"><td colspan="11" class="py-6 text-center text-gray-400">暂无项目</td></tr>
+            <tr v-if="!(rows.data || []).length"><td colspan="9" class="muted" style="text-align: center; padding: 32px">暂无项目</td></tr>
           </tbody>
         </table>
       </div>
-    </Card>
-  </div>
+    </div>
+
+    <Teleport to="body">
+      <div v-if="editing" class="rd">
+        <div class="rd-drawer-bg" @click="cancelEdit"></div>
+        <aside class="rd-drawer" role="dialog" aria-modal="true" :aria-label="form.name ? '编辑项目' : '新增项目'">
+          <header>
+            {{ form.name ? "编辑项目" : "新增项目" }}
+            <button type="button" class="btn quiet sm" aria-label="关闭" @click="cancelEdit"><RdIcon name="x" /></button>
+          </header>
+          <div class="body">
+            <div class="two">
+              <div class="f"><label>编号 <b>*</b></label><input v-model="form.project_code" class="field" /></div>
+              <div class="f"><label>状态</label>
+                <select v-model="form.status" class="field">
+                  <option value="Open">进行中</option>
+                  <option value="Completed">已结束</option>
+                  <option v-if="canAdministerProjects() || form.status === 'Cancelled'" value="Cancelled">已取消</option>
+                </select>
+              </div>
+            </div>
+            <div class="f"><label>项目名称 <b>*</b></label><input v-model="form.project_name" class="field" /></div>
+            <div class="two">
+              <div class="f"><label>项目负责人</label>
+                <select v-if="canAdministerProjects()" v-model="form.project_owner" class="field" @change="syncOwnerName">
+                  <option value="">未指定</option>
+                  <option v-for="owner in owners.data || []" :key="owner.name" :value="owner.name">{{ owner.full_name || owner.name }} · {{ owner.name }}</option>
+                </select>
+                <input v-else class="field" readonly :value="ownerLabel(form.project_owner, form.project_owner_name)" />
+              </div>
+              <div class="f"><label>研发阶段</label>
+                <select v-model="form.rd_stage" class="field"><option v-for="item in STAGE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select>
+              </div>
+            </div>
+            <div class="two">
+              <div class="f"><label>立项时间</label><input v-model="form.start_date" type="date" class="field" /></div>
+              <div class="f"><label>结项时间</label><input v-model="form.end_date" type="date" class="field" /></div>
+            </div>
+            <div class="f">
+              <label>附件（pdf、office、图片）</label>
+              <div v-for="fileField in PROJECT_FILE_FIELDS" :key="fileField.key" class="file" :class="{ has: form[fileField.key] }">
+                <span style="min-width: 0">{{ fileField.label }}　<a v-if="form[fileField.key]" :href="reportDownloadUrl(form, fileField.key)" target="_blank" rel="noopener" :title="fileName(form[fileField.key])" style="display: inline-block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; color: #1F7A4D">{{ fileName(form[fileField.key]) }}</a><span v-else style="color: #8A93A3">未上传</span></span>
+                <span class="row" style="gap: 6px; flex-wrap: nowrap">
+                  <label class="btn sm" style="cursor: pointer">
+                    {{ uploadingField === fileField.key ? "上传中…" : form[fileField.key] ? "重新上传" : "上传" }}
+                    <input type="file" class="hidden" :accept="FILE_ACCEPT" :disabled="Boolean(uploadingField)" @change="uploadProjectFile(fileField.key, $event)" />
+                  </label>
+                  <button v-if="form[fileField.key]" type="button" class="btn sm quiet" @click="form[fileField.key] = ''">清除</button>
+                </span>
+              </div>
+            </div>
+            <div v-if="errMsg" class="note bad" style="margin: 0"><RdIcon name="alert" /><span class="grow">{{ errMsg }}</span></div>
+          </div>
+          <footer>
+            <button type="button" class="btn" @click="cancelEdit">取消</button>
+            <button type="button" class="btn pri" :disabled="saving" @click="save">{{ saving ? "保存中…" : "保存" }}</button>
+          </footer>
+        </aside>
+      </div>
+    </Teleport>
+  </RdPage>
 </template>
