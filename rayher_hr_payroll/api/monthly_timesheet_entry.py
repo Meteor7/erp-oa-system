@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import uuid
 from calendar import monthrange
 from datetime import datetime, timedelta
@@ -731,3 +732,163 @@ def delete_monthly_entry(monthly_entry_id):
         raise
     frappe.db.commit()
     return list_monthly_entries(period, employee=employee)
+
+
+# ---------------------------------------------------------------------------
+# 填报进度：部门主管看本部门成员有没有填，老板 / 财务 / 人事看全部人。
+# ---------------------------------------------------------------------------
+FILL_REMIND_ROLES = RD_MONTHLY_ADMIN_ROLES | {"Department Manager"}
+FILL_REMINDER_PREFIX = "rd-fill:"
+
+
+def _department_label(value) -> str:
+    """ERPNext 部门名带公司后缀（"研发一部 - RAY"），页面上只显示前面的部门名。"""
+    return re.sub(r"\s+-\s+[A-Za-z0-9]{1,8}$", "", str(value or "").strip())
+
+
+def _fill_status(used: float, limit: float) -> str:
+    """none 一天没填；over 超过上限；full 刚好填满；part 还没填满。"""
+    used, limit = round(float(used or 0), 2), round(float(limit or 0), 2)
+    if used <= 0:
+        return "none" if limit > 0 else "full"
+    diff = round(used - limit, 2)
+    if diff > 0:
+        return "over"
+    return "full" if diff == 0 else "part"
+
+
+def _fill_scope_kind(scope) -> str:
+    if scope is None:
+        return "all"
+    return "team" if "Department Manager" in _roles() else "self"
+
+
+def _fill_rows(year: int, month: int, scope) -> list[dict]:
+    period_text = _canonical_period(year, month)
+    start = _period_start(year, month)
+    employees = _employees_for_scope(scope, start)
+    names = [_row_name(row) for row in employees]
+    if not names:
+        return []
+    info = {
+        _row_name(row): row
+        for row in frappe.get_all(
+            "Employee", filters={"name": ["in", names]},
+            fields=["name", "employee_name", "department", "user_id"], limit_page_length=0,
+        )
+    }
+    used = {}
+    for row in _merge_monthly_entry_rows(
+        _query_monthly_entries(period_text), _query_legacy_monthly_entries(period_text), period_text
+    ):
+        used[row["employee"]] = round(used.get(row["employee"], 0) + float(row["occurrence_days"]), 2)
+    result = []
+    for name in names:
+        detail = info.get(name) or {}
+        limit = resolve_monthly_work_limit(year, month, employee=name)["day_limit"]
+        days = round(used.get(name, 0), 2)
+        result.append({
+            "employee": name,
+            "employee_name": str(_value(detail, "employee_name") or _value(next((r for r in employees if _row_name(r) == name), {}), "employee_name") or name),
+            "department": _department_label(_value(detail, "department")),
+            "user_id": str(_value(detail, "user_id") or ""),
+            "used_days": days,
+            "limit_days": round(float(limit or 0), 2),
+            "status": _fill_status(days, limit),
+        })
+    return result
+
+
+def _last_reminders(period_text: str, names: list[str]) -> dict:
+    if not names:
+        return {}
+    rows = frappe.get_all(
+        "Notification Log",
+        filters={"document_type": "Employee", "document_name": ["in", names], "subject": ["like", f"%[{FILL_REMINDER_PREFIX}{period_text}]"]},
+        fields=["document_name", "creation"], order_by="creation desc", limit_page_length=0,
+    )
+    latest = {}
+    for row in rows:
+        latest.setdefault(str(_value(row, "document_name")), str(_value(row, "creation") or "")[:16])
+    return latest
+
+
+@frappe.whitelist()
+def get_fill_progress(period):
+    require_rd_access(RD_MONTHLY_VIEW_ROLES)
+    year, month = parse_period(period)
+    period_text = _canonical_period(year, month)
+    scope = _monthly_employee_scope("view", _period_start(year, month))
+    kind = _fill_scope_kind(scope)
+    last_day = monthrange(year, month)[1]
+    result = {
+        "period": period_text, "kind": kind,
+        "can_remind": bool(kind != "self" and _roles() & FILL_REMIND_ROLES),
+        "deadline": f"{year:04d}-{month:02d}-{last_day:02d}",
+        "summary": {"total": 0, "full": 0, "part": 0, "none": 0, "over": 0, "rate": 0},
+        "employees": [],
+    }
+    if kind == "self":
+        return result
+    rows = _fill_rows(year, month, scope)
+    reminded = _last_reminders(period_text, [row["employee"] for row in rows])
+    for row in rows:
+        row.pop("user_id", None)
+        row["last_reminded"] = reminded.get(row["employee"], "")
+    counts = {key: sum(1 for row in rows if row["status"] == key) for key in ("full", "part", "none", "over")}
+    result["summary"] = {
+        "total": len(rows), **counts,
+        "rate": round(counts["full"] / len(rows) * 100, 1) if rows else 0,
+    }
+    result["employees"] = rows
+    return result
+
+
+@frappe.whitelist(methods=["POST"])
+def remind_timesheet_fill(period, employees):
+    require_rd_access(RD_MONTHLY_VIEW_ROLES)
+    if not _roles() & FILL_REMIND_ROLES:
+        frappe.throw(frappe._("只有部门主管、人事或管理员可以催办填报。"))
+    year, month = parse_period(period)
+    period_text = _canonical_period(year, month)
+    start = _period_start(year, month)
+    try:
+        wanted = json.loads(employees) if isinstance(employees, str) else list(employees or [])
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("催办名单格式无效。"))
+    wanted = [str(item).strip() for item in wanted if str(item).strip()]
+    if not wanted or len(wanted) > 500:
+        frappe.throw(frappe._("请选择 1 到 500 位需要催办的员工。"))
+    for name in wanted:
+        _require_monthly_employee(name, "view", start)
+    scope = _monthly_employee_scope("view", start)
+    rows = {row["employee"]: row for row in _fill_rows(year, month, scope)}
+    today = frappe.utils.nowdate() if hasattr(frappe.utils, "nowdate") else datetime.now().strftime("%Y-%m-%d")
+    already = {name: stamp for name, stamp in _last_reminders(period_text, wanted).items() if stamp.startswith(today)}
+    sender = frappe.utils.get_fullname(_session_user()) if hasattr(frappe.utils, "get_fullname") else _session_user()
+    last_day = monthrange(year, month)[1]
+    sent = skipped_today = skipped_done = 0
+    for name in wanted:
+        row = rows.get(name)
+        if not row or row["status"] not in {"none", "part"}:
+            skipped_done += 1
+            continue
+        if name in already:
+            skipped_today += 1
+            continue
+        user = row["user_id"]
+        if not user or not frappe.db.exists("User", {"name": user, "enabled": 1}):
+            skipped_done += 1
+            continue
+        frappe.get_doc({
+            "doctype": "Notification Log", "for_user": user, "type": "Alert",
+            "document_type": "Employee", "document_name": name,
+            "subject": f"请填报 {period_text} 研发工时 [{FILL_REMINDER_PREFIX}{period_text}]",
+            "email_content": (
+                f"{sender or '部门主管'} 提醒你：{period_text} 的研发工时还没填满"
+                f"（已填 {row['used_days']:g} / 上限 {row['limit_days']:g} 天），请在 {year:04d}-{month:02d}-{last_day:02d} 前完成。"
+            ),
+            "link": "/planck-semicon/entry",
+        }).insert(ignore_permissions=True)
+        sent += 1
+    return {"sent": sent, "skipped_today": skipped_today, "skipped_done": skipped_done}
