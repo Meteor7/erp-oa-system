@@ -86,3 +86,14 @@ test("allocation dashboard keeps the Excel export and the error and empty states
   assert.match(source, /看板加载失败/);
   assert.match(source, /noData/);
 });
+
+test("allocation dashboard shows the preview tag and the year-scope preview note from the payload", () => {
+  assert.match(source, /from "\.\.\/lib\/previewTags"/);
+  assert.match(source, /dashboardStatusTag\(dashboard\.value, periodScope\.value\)/);
+  assert.match(source, /yearPreviewNote\(dashboard\.value\)/);
+  assert.match(source, /<span class="tag" :class="statusTag\.cls">/);
+  assert.match(source, /class="note warn strip"/);
+  // the tag sits next to the period controls, and the empty-state wording is unchanged
+  assert.ok(source.indexOf('class="tag"') < source.indexOf("<RdPeriod />"));
+  assert.ok(source.includes('noData: "当前范围暂无分摊看板数据。"'));
+});

@@ -8,6 +8,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers';
 import { canSee, currentUser } from '../lib/access';
 import { period } from '../lib/period';
+import { costPreviewTag } from '../lib/previewTags';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
@@ -113,6 +114,9 @@ function openQueueItem(item) { router.push({ path: item.route, query: item.query
 const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: 'inbox' }) })));
 const pendingApprovalCategories = computed(() => todoCategories.value.filter((item) => Number(item.count || 0) > 0));
 const costVisible = computed(() => Boolean(cost.data?.visible));
+// 含未定版月份的预览数字时，成本区块显示小「含预览」标签；接口没返回 preview / preview_months 就什么都不显示
+const costPreview = computed(() => costPreviewTag(cost.data));
+const rdPreview = computed(() => costPreviewTag(d.data));
 const hrVisible = computed(() => Boolean(hr.data?.visible));
 const errorText = (resource) => resource.error?.messages?.[0] || resource.error?.message || String(resource.error || '');
 const costPending = computed(() => cost.loading || Boolean(cost.error));
@@ -444,7 +448,7 @@ const stages = [
       <template v-else-if="cost.data?.visible">
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div class="rounded-xl border-0 bg-gradient-to-br from-[#FF9B1F] to-[#F27A00] p-5 text-white">
-            <div class="text-sm text-white/85">费用合计</div>
+            <div class="flex flex-wrap items-center gap-2 text-sm text-white/85">费用合计<span v-if="costPreview" class="rounded-full bg-[#FBF1DF] px-2 py-0.5 text-[11px] font-medium text-[#8A5A1C]" :title="costPreview.title">{{ costPreview.text }}</span></div>
             <div class="mt-2 text-3xl font-semibold tabular-nums">{{ money(cost.data.totals.total) }}</div>
             <div class="mt-1 text-xs text-white/85">{{ deltaText(cost.data.deltas.total) }}</div>
           </div>
@@ -453,7 +457,7 @@ const stages = [
               { key: 'po', label: '采购（PO 金额）', color: '#3E63DD' },
               { key: 'expense', label: '报销', color: '#1FA58C' }]" :key="item.key"
             class="rounded-xl border border-gray-200 bg-white p-5">
-            <div class="flex items-center gap-2 text-sm text-gray-600"><span class="h-2.5 w-2.5 rounded-sm" :style="{ background: item.color }"></span>{{ item.label }}</div>
+            <div class="flex items-center gap-2 text-sm text-gray-600"><span class="h-2.5 w-2.5 rounded-sm" :style="{ background: item.color }"></span>{{ item.label }}<span v-if="item.key === 'rd' && costPreview" class="rounded-full bg-[#FBF1DF] px-2 py-0.5 text-[11px] font-medium text-[#8A5A1C]" :title="costPreview.title">{{ costPreview.text }}</span></div>
             <div class="mt-2 text-3xl font-semibold tabular-nums text-gray-900">{{ money(cost.data.totals[item.key]) }}</div>
             <div class="mt-1 text-xs text-gray-500">占 {{ share(cost.data.totals[item.key], cost.data.totals.total) }}% ·
               <span :class="deltaClass(cost.data.deltas[item.key])">{{ deltaText(cost.data.deltas[item.key]) }}</span></div>
@@ -589,7 +593,7 @@ const stages = [
           <div class="border-b border-gray-200 p-5 sm:border-r xl:border-b-0"><div class="flex items-center justify-between text-sm text-gray-500"><span>员工总数</span><FeatherIcon name="users" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ d.data.kpi.total }}<span class="ml-1 text-sm font-normal text-gray-400">人</span></div><div class="mt-2 text-xs text-gray-500">{{ d.data.kpi.confirmed }} 人已确认归档</div></div>
           <div class="border-b border-gray-200 p-5 xl:border-b-0 xl:border-r"><div class="flex items-center justify-between text-sm text-gray-500"><span>研发台账在册</span><FeatherIcon name="book-open" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ d.data.kpi.ledger }}<span class="ml-1 text-sm font-normal text-gray-400">人</span></div><div class="mt-2 text-xs text-gray-500">研发信息完整后自动归集</div></div>
           <div class="border-b border-gray-200 p-5 sm:border-b-0 sm:border-r"><div class="flex items-center justify-between text-sm text-gray-500"><span>本期研发工时</span><FeatherIcon name="clock" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ n0(d.data.kpi.hours) }}<span class="ml-1 text-sm font-normal text-gray-400">h</span></div><div class="mt-2 text-xs text-gray-500">分布于 {{ d.data.kpi.projects }} 个在研项目</div></div>
-          <div class="p-5"><div class="flex items-center justify-between text-sm text-gray-500"><span>本期待分摊费用</span><FeatherIcon name="pie-chart" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ n0(d.data.kpi.cost) }}<span class="ml-1 text-sm font-normal text-gray-400">元</span></div><div class="mt-2 text-xs text-gray-500">按工时分配率分摊</div></div>
+          <div class="p-5"><div class="flex items-center justify-between text-sm text-gray-500"><span class="flex items-center gap-2">本期待分摊费用<span v-if="rdPreview" class="rounded-full bg-[#FBF1DF] px-2 py-0.5 text-[11px] font-medium text-[#8A5A1C]" :title="rdPreview.title">{{ rdPreview.text }}</span></span><FeatherIcon name="pie-chart" class="h-4 w-4" /></div><div class="mt-3 text-3xl font-semibold tabular-nums text-gray-900">{{ n0(d.data.kpi.cost) }}<span class="ml-1 text-sm font-normal text-gray-400">元</span></div><div class="mt-2 text-xs text-gray-500">按工时分配率分摊</div></div>
         </div>
 
         <section class="grid gap-5 xl:grid-cols-[1.4fr_1fr]">

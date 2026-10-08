@@ -89,3 +89,12 @@ test('period params exist before any auto-fetching resource is created', () => {
   assert.ok(defined > -1 && firstResource > -1);
   assert.ok(defined < firstResource);
 });
+
+test('the cost block flags preview numbers with a small tag driven by the payload', () => {
+  assert.match(source, /from '\.\.\/lib\/previewTags'/);
+  assert.match(source, /costPreviewTag\(cost\.data\)/);
+  assert.match(source, /costPreviewTag\(d\.data\)/);
+  assert.match(source, /v-if="costPreview"/);
+  assert.match(source, /:title="costPreview\.title"/);
+  assert.match(source, /\{\{ costPreview\.text \}\}/);
+});

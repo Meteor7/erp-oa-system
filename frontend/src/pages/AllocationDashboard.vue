@@ -9,6 +9,7 @@ import RdIcon from "../components/rd/RdIcon.vue";
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
 import { exportTableWorkbook } from "../lib/tableExport";
 import { rankProjects } from "../lib/allocationGroups";
+import { dashboardStatusTag, yearPreviewNote } from "../lib/previewTags";
 
 const TEXT = {
   title: "研发费用汇总",
@@ -47,6 +48,13 @@ const dashboardRes = createResource({
 const projectColumns = computed(() => dashboard.value?.project_columns || []);
 const summaryRows = computed(() => dashboard.value?.summary_rows || []);
 const displayPeriod = computed(() => periodScopeLabel(period.value, periodScope.value));
+// 月度：预览 / 已定版标签；全年：包含预览月份的提示。后端没给这些字段时都为空。
+const statusTag = computed(() => dashboardStatusTag(dashboard.value, periodScope.value));
+const previewNote = computed(() => {
+  if (!dashboard.value) return "";
+  if (periodScope.value === "year") return yearPreviewNote(dashboard.value);
+  return statusTag.value?.hint || "";
+});
 const cards = computed(() => {
   const data = dashboard.value || {};
   return [
@@ -106,7 +114,7 @@ async function exportCurrentAllocationDashboard() {
   msg.value = "";
   try {
     await exportTableWorkbook({
-      filename: `研发费用看板-${displayPeriod.value}-${dashboard.value?.mode_label || "汇总"}`,
+      filename: `研发费用看板-${displayPeriod.value}${statusTag.value?.cls === "warn" ? "（预览）" : ""}-${dashboard.value?.mode_label || "汇总"}`,
       sheetName: "研发费用汇总",
       rows: summaryRows.value,
       columns: [
@@ -152,10 +160,20 @@ load();
 
 <template>
   <RdPage :title="TEXT.title" :subtitle="TEXT.subtitle">
-    <template #ctl><RdPeriod /></template>
+    <template #ctl>
+      <span v-if="!loading && statusTag" class="stat" aria-live="polite">
+        <span class="tag" :class="statusTag.cls"><RdIcon v-if="statusTag.cls === 'ok'" name="check" />{{ statusTag.text }}</span>
+      </span>
+      <RdPeriod />
+    </template>
 
     <div v-if="dashboard" class="kpis">
       <RdKpi v-for="card in cards" :key="card.key" :label="card.label" :value="card.value" :unit="card.unit" :sub="card.sub" />
+    </div>
+
+    <div v-if="!loading && previewNote" class="note warn strip" role="status">
+      <RdIcon name="alert" />
+      <span class="grow">{{ previewNote }}</span>
     </div>
 
     <div class="bar">
@@ -211,6 +229,9 @@ load();
 </template>
 
 <style scoped>
+.rd .stat { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rd .strip { align-items: center; }
+.rd .strip svg { margin-top: 0; }
 .rd .dash-tbl { max-height: 72vh; }
 .rd .dash-tbl table { min-width: 1120px; }
 .rd .matrix .c1 { width: 180px; min-width: 180px; max-width: 180px; }
