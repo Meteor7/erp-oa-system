@@ -55,6 +55,24 @@ def test_day_options_carry_the_taken_halves_and_a_default_that_fits(options):
     assert days["2026-10-16"]["conflict"]["request"] == "D"
 
 
+def test_custom_hours_on_a_day_leave_the_halves_free_and_cap_the_stepper(options):
+    # 自定义小时（不是 3 / 5 / 8）不占上午下午，只减少这天还能填的小时数（表单里自定义小时的上限）。
+    module, rows = options
+    rows += [row("A", att.REQUEST_LEAVE, "待审批", "2026-10-12", 2.5),
+             row("B", att.REQUEST_COMP_TIME, "已完成", "2026-10-13", 6),
+             row("C", att.REQUEST_LEAVE, "待审批", "2026-10-14", 4.5),
+             row("D", att.REQUEST_LEAVE, "已完成", "2026-10-15", 3)]
+    result = module.get_attendance_options(att.REQUEST_COMP_TIME, "2026-10-12", "2026-10-15")
+    days = {item["work_date"]: item for item in result["days"]}
+    assert [(d["hours"], d["max_hours"], d["am_taken"], d["pm_taken"], bool(d["conflict"])) for d in days.values()] == [
+        (5.0, 5.5, False, False, False),   # 12 日：自定义 2.5 小时，剩 5.5，默认下午 5
+        (0.0, 2.0, False, False, False),   # 13 日：自定义 6 小时，剩 2，没有整半天放得下，默认不请
+        (3.0, 3.5, False, False, False),   # 14 日：自定义 4.5 小时，剩 3.5，默认上午 3
+        (5.0, 5.0, True, False, False),    # 15 日：恰好 3 小时是上午，被占
+        (8.0, 8.0, False, False, False),   # 16 日：空着
+    ]
+
+
 def test_overtime_options_are_still_hours(options):
     module, rows = options
     rows.append(row("OT", att.REQUEST_OVERTIME, "已完成", "2026-10-17", 20))

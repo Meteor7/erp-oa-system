@@ -21,7 +21,10 @@ from rayher_hr_payroll.working_calendar import resolve_monthly_calendar, resolve
 
 REVIEW_LIMIT = 50
 REVIEWED_LIMIT = 30
+ALL_LIMIT = 100
 MAX_TEAM_DEPARTMENTS = 3
+# 人事和老板可以看到所有人的请假、加班、调休（只读）；其他人只看自己的和轮到自己审批的。
+ALL_VIEW_ROLES = {"System Manager", "HR Manager", "HR User", "Rayher Business Executive"}
 
 
 def _user():
@@ -41,6 +44,24 @@ def _require_types():
     if not types:
         frappe.throw(frappe._("当前审批功能暂未开放。"), frappe.PermissionError)
     return types
+
+
+def can_view_all():
+    """能不能看所有人的请假 / 加班 / 调休（页面上的"全部"栏目）。"""
+    user = str(frappe.session.user or "").strip()
+    if not user or user.lower() == "guest":
+        return False
+    return user == "Administrator" or bool(set(frappe.get_roles(user) or []) & ALL_VIEW_ROLES)
+
+
+def _days_of(raw):
+    """申请的逐日明细 [{work_date, hours}]；格式不对时给空列表。"""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
 def _employee():
@@ -102,7 +123,7 @@ def get_attendance_home(request_type=None, period=None):
     context, reason = _employee()
     result = {
         "request_type": request_type, "types": types, "period": f"{year}-{month:02d}", "employee": None,
-        "reason": reason, "leave_types": list(att.LEAVE_TYPES),
+        "reason": reason, "leave_types": list(att.LEAVE_TYPES), "can_view_all": can_view_all(),
     }
     if not context:
         return result
@@ -165,6 +186,10 @@ def get_attendance_request(name):
     _require_types()
     rows = oa_entry.list_requests(view="all", name=name, limit=1)
     row = rows[0] if rows else None
+    if not row and can_view_all():
+        # 人事和老板可以只读查看任何一张已提交的申请（草稿只有本人看得到）。
+        found = _load_summaries(_attendance_names(None, 1, name=name))
+        row = found[0] if found else None
     if not row or row.get("request_type") not in att.ATTENDANCE_TYPES:
         frappe.throw(frappe._("找不到这张申请，或你没有权限查看。"), frappe.DoesNotExistError)
     balances = _balances(row.get("employee"), {}) if row.get("employee") else {"annual": None, "comp": None}
@@ -176,6 +201,53 @@ def get_attendance_request(name):
         "names": _names(users),
         "impact": center.impact_text(row, annual=balances["annual"], comp=balances["comp"]),
     }
+
+
+def _attendance_names(request_types, limit, name=None):
+    """已提交的（不含草稿）请假 / 加班 / 调休单号，最近改过的在前。只给有"看全部"权限的人用。"""
+    types = tuple(request_types or att.ATTENDANCE_TYPES)
+    sql = ("SELECT name FROM `tabOA Approval Request` WHERE request_type IN %(types)s AND workflow_status <> '草稿'"
+           + (" AND name = %(name)s" if name else "") + " ORDER BY modified DESC, name DESC LIMIT %(limit)s")
+    rows = frappe.db.sql(sql, {"types": types, "limit": limit, "name": name}, as_dict=True)
+    return [row.get("name") for row in rows]
+
+
+def _load_summaries(names):
+    """和 oa_entry.list_requests 一样的单据摘要（审批人姓名、步骤、可执行的操作按当前登录人算）。"""
+    from rayher_hr_payroll.procurement_summary_cache import prepare_summaries
+    docs = [oa_entry._load_request(name) for name in names]
+    with prepare_summaries(docs, oa_entry._calculate_procurement_chain):
+        return [oa_entry._summarize_doc(doc) for doc in docs]
+
+
+def _people(rows):
+    """这些申请当前审批人和被退回时的操作人（用来显示姓名）。"""
+    users = []
+    for row in rows:
+        for step in row.get("steps") or []:
+            if step.get("step_index") == row.get("current_step_index"):
+                users += step.get("approvers") or []
+        rejection = _rejection(row)
+        if rejection:
+            users.append(rejection[0])
+    return users
+
+
+@frappe.whitelist()
+def list_attendance_all(request_type=None, limit=ALL_LIMIT):
+    """全部请假 / 加班 / 调休（只读；人事和老板才能看）：已提交的，最近有动静的在前。"""
+    _user()
+    types = _require_types()
+    if not can_view_all():
+        frappe.throw(frappe._("只有人事或管理员可以查看全部申请。"), frappe.PermissionError)
+    if request_type and request_type not in types:
+        frappe.throw(frappe._("不支持的申请类型。"))
+    try:
+        limit = max(1, min(int(limit or ALL_LIMIT), 200))
+    except (TypeError, ValueError):
+        frappe.throw(frappe._("查询数量格式无效。"))
+    rows = _load_summaries(_attendance_names([request_type] if request_type else types, limit))
+    return {"items": rows, "names": _names(_people(rows))}
 
 
 def _department_mates(employees):
@@ -300,13 +372,15 @@ def list_attendance_reviewed(limit=REVIEWED_LIMIT):
         frappe.throw(frappe._("查询数量格式无效。"))
     rows = frappe.db.sql(
         "SELECT p.name, p.request_type, p.leave_type, p.employee_name, p.department, p.from_date, p.to_date, "
-        "p.duration_hours, p.workflow_status, p.subject, s.label AS step_label, s.status AS my_status, "
-        "s.acted_on, s.note FROM `tabOA Approval Step` s JOIN `tabOA Approval Request` p ON p.name = s.parent "
+        "p.duration_hours, p.workflow_status, p.subject, p.attendance_days, p.creation, s.label AS step_label, "
+        "s.status AS my_status, s.acted_on, s.note FROM `tabOA Approval Step` s JOIN `tabOA Approval Request` p ON p.name = s.parent "
         "WHERE LOWER(s.action_by) = %(user)s AND p.request_type IN %(types)s "
         "ORDER BY s.acted_on DESC LIMIT %(limit)s",
         {"user": user, "types": tuple(att.ATTENDANCE_TYPES), "limit": limit}, as_dict=True,
     )
-    return {"items": [dict(row, department=department_label(row.get("department"))) for row in rows]}
+    return {"items": [
+        dict(row, department=department_label(row.get("department")), attendance_days=_days_of(row.get("attendance_days")))
+        for row in rows]}
 
 
 @frappe.whitelist()
@@ -322,12 +396,4 @@ def list_attendance_mine(request_type=None, limit=50):
         frappe.throw(frappe._("查询数量格式无效。"))
     rows = oa_entry.list_requests(view="mine", request_type=request_type, limit=limit)
     rows = [row for row in rows if row.get("request_type") in types]
-    users = []
-    for row in rows:
-        current = [step for step in row.get("steps") or [] if step.get("step_index") == row.get("current_step_index")]
-        for step in current:
-            users += step.get("approvers") or []
-        rejection = _rejection(row)
-        if rejection:
-            users.append(rejection[0])
-    return {"items": rows, "names": _names(users)}
+    return {"items": rows, "names": _names(_people(rows))}

@@ -14,13 +14,15 @@ ACTIVE = {"待审批", "待办理", "已完成", "已通过"}
 COMPLETED = {"已完成", "已通过"}
 ZERO = Decimal("0.00")
 
-# 公司规定（2026-10）：请假和调休每天 8 小时，上午 3 小时，下午 5 小时；加班按小时。
-# 历史上审批过的半天按 4 小时存储，读取、余额、月度上限都照存的小时数算，不迁移数据。
+# 公司规定（2026-10）：请假和调休每天 8 小时，上午 3 小时，下午 5 小时；也可以自定义小时（每次 0.5，
+# 0.5–8 小时）；加班按小时。历史上审批过的半天按 4 小时存储，读取、余额、月度上限都照存的小时数算，不迁移数据
+# （4 小时现在是一个合法的自定义小时数）。
 DAY_HOURS = Decimal("8")
 MORNING_HOURS = Decimal("3")
 AFTERNOON_HOURS = Decimal("5")
-LEAVE_DAY_HOURS = (MORNING_HOURS, AFTERNOON_HOURS, DAY_HOURS)
-LEAVE_DAY_MESSAGE = "请假和调休按天填：全天 8 小时、上午 3 小时、下午 5 小时。"
+LEAVE_DAY_HOURS = (MORNING_HOURS, AFTERNOON_HOURS, DAY_HOURS)  # 三个预设：上午 / 下午 / 全天
+LEAVE_HOURS_STEP = Decimal("0.5")
+LEAVE_DAY_MESSAGE = "请假和调休按天填：全天 8 小时、上午 3 小时、下午 5 小时，也可以自定义小时（每次 0.5）。"
 
 
 def value(row, field, default=None):
@@ -41,9 +43,16 @@ def date_range(start, end):
     return [start + timedelta(days=i) for i in range((end-start).days + 1)]
 
 
+def valid_leave_hours(hours):
+    """请假 / 调休一天的有效小时数：0.5 的倍数，0.5–8。"""
+    hours = Decimal(str(hours))
+    return hours.is_finite() and LEAVE_HOURS_STEP <= hours <= DAY_HOURS and hours % LEAVE_HOURS_STEP == 0
+
+
 def normalize_days(raw, start, end, *, overtime=False, work_dates=None):
     """校验并整理每日时长。加班按小时（最多两位小数、每天 ≤ 24）；
-    请假和调休每天只能是 全天 8 / 上午 3 / 下午 5 小时（0 表示这天不请，不进明细）。"""
+    请假和调休每天可以是任意 0.5 的倍数、0.5–8 小时（预设：全天 8 / 上午 3 / 下午 5 小时；
+    0 表示这天不请，不进明细）。"""
     dates = set(date_range(start, end))
     eligible = dates if overtime else dates & set(work_dates or [])
     if raw == "":
@@ -74,7 +83,7 @@ def normalize_days(raw, start, end, *, overtime=False, work_dates=None):
         if overtime:
             if not hours.is_finite() or hours < 0 or hours > 24 or hours != hours.quantize(Decimal("0.01")):
                 raise ValueError("小时数最多两位小数，加班每天最多24小时")
-        elif not hours.is_finite() or (hours != 0 and hours not in LEAVE_DAY_HOURS):
+        elif not hours.is_finite() or (hours != 0 and not valid_leave_hours(hours)):
             raise ValueError(LEAVE_DAY_MESSAGE)
         if hours:
             result.append({"work_date": day.isoformat(), "hours": float(hours)})
@@ -140,8 +149,9 @@ _STATUS_TEXT = {"待审批": "审批中", "待办理": "审批中", "已完成":
 def _taken_by_day(others, wanted):
     """这个员工其他有效申请在指定日期上已经占了多少：{日期: {absence, overtime, am, pm, row, am_row, pm_row}}。
 
-    am / pm：这天的上午、下午是否已被一张请假或调休占了（3 小时占上午，5 小时占下午，8 小时两个都占）。
-    历史上按 4 小时存的半天分不出上午下午，不标 am / pm，只按小时数占容量（见 find_day_conflict）。
+    am / pm：这天的上午、下午是否已被一张请假或调休占了（恰好 3 小时占上午，恰好 5 小时占下午，8 小时两个都占）。
+    其他小时数（自定义小时，包括历史上按 4 小时存的半天）分不出上午下午，不标 am / pm，只按小时数占当天 8 小时的容量
+    （见 find_day_conflict）。
     """
     taken = {}
     for row in others:
@@ -181,13 +191,14 @@ def find_day_conflict(request_type, days, others):
     修复（2026-09-29，审查 #56 P2）：三类申请之间原来没有任何日期冲突检查，
     同一天可以同时请假、调休、加班，加班一天还能报到 24 小时。规则：
     - 请假和调休：同一天合计不超过 8 小时（一天 8 小时）；
-    - 上午（3 小时）和下午（5 小时）各只能被占一次：两张申请不能都请同一天的上午，也不能都请下午，
-      全天（8 小时）和这天任何已有的请假、调休冲突；
+    - 上午（恰好 3 小时）和下午（恰好 5 小时）各只能被占一次：两张申请不能都请同一天的上午，也不能都请下午，
+      全天（8 小时）和这天任何已有的请假、调休冲突；其他小时数（自定义）只受上一条的 8 小时容量限制；
     - 加班：同一天已有的加班合计不超过 24 小时；
     - 同一天有请假或调休的，不能再申请加班，反过来也一样。
 
     历史上按 4 小时存的半天（审批通过的旧数据）不迁移，也不猜它是上午还是下午：
-    它只按 4 小时占这天的容量，新申请的小时数不超过 8 - 已占 即可（4 小时的旧半天之后只能再加上午 3 小时）。
+    它和任何自定义小时一样只按小时数占这天的容量，新申请的小时数不超过 8 - 已占 即可
+    （4 小时的旧半天之后只能再加上午 3 小时，或不超过 4 小时的自定义小时）。
     """
     wanted = {}
     for detail in days:
@@ -219,8 +230,9 @@ def day_limits(request_type, dates, others):
     """申请表里每一天还能填多少小时；这天已经被占满时给出是哪张申请占的：
     {日期: {max_hours, am_taken, pm_taken, conflict: None | {request, text}}}。
 
-    max_hours = 8（加班 24）- 已占小时数；am_taken / pm_taken 告诉表单上午、下午两个按钮要不要灰掉
-    （请假和调休才有意义，加班恒为 False）。这天被占满或被加班占着时 max_hours 为 0，上午下午都算被占。"""
+    max_hours = 8（加班 24）- 已占小时数，也是"自定义小时"能填的上限；am_taken / pm_taken 告诉表单上午、下午
+    两个按钮要不要灰掉（请假和调休才有意义，加班恒为 False；自定义小时不标上午下午，只减少 max_hours）。
+    这天被占满或被加班占着时 max_hours 为 0，上午下午都算被占。"""
     taken = _taken_by_day(others, set(dates))
     limits = {}
     for day in dates:
@@ -244,7 +256,8 @@ def day_limits(request_type, dates, others):
 
 def default_day_hours(request_type, limit):
     """申请表里这一天的默认时长：能全天就全天；这天已被占了一部分时给能填的那一半
-    （下午优先，其次上午）；填不了给 0。加班默认 8 小时，不超过当天上限。"""
+    （下午优先，其次上午，都是预设的整半天）；预设都放不下（比如已有自定义小时占了大半天）给 0，
+    用户可以再选不超过 max_hours 的自定义小时。加班默认 8 小时，不超过当天上限。"""
     max_hours = Decimal(str(limit["max_hours"]))
     if request_type == REQUEST_OVERTIME:
         return float(min(DAY_HOURS, max_hours))

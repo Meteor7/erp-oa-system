@@ -41,25 +41,36 @@ def test_legacy_leave_and_overlap_are_capped_at_workday():
     assert hr.leave_hours_by_date([leave(leave_type="调休")], [date(2026, 9, 1)]) == {}
 
 
-@pytest.mark.parametrize("hours", ["NaN", "Infinity", -1, 8.01, 0.001, True, 0.25, 1, 2.5, 4, 6, 7.5, 9, 24])
+LEAVE_DAY_RULE = "请假和调休按天填：全天 8 小时、上午 3 小时、下午 5 小时，也可以自定义小时（每次 0.5）。"
+
+
+@pytest.mark.parametrize("hours", ["NaN", "Infinity", -1, -0.5, 8.01, 8.5, 9, 24, 0.001, 0.25, 0.75, 1.25, 2.3, True])
 def test_invalid_daily_leave_hours_are_rejected(hours):
     with pytest.raises(ValueError):
         hr.normalize_days([{"work_date": "2026-09-01", "hours": hours}], "2026-09-01", "2026-09-01", work_dates=[date(2026, 9, 1)])
 
 
 @pytest.mark.parametrize("hours", [3, 5, 8, 3.0, "5", "8.00"])
-def test_leave_and_comp_time_days_are_full_8_morning_3_or_afternoon_5(hours):
-    # 公司规定：一天 8 小时，上午 3 小时，下午 5 小时。
+def test_leave_and_comp_time_presets_are_full_8_morning_3_or_afternoon_5(hours):
+    # 公司规定：一天 8 小时，上午 3 小时，下午 5 小时（预设不变）。
     result = hr.normalize_days([{"work_date": "2026-09-01", "hours": hours}], "2026-09-01", "2026-09-01", work_dates=[date(2026, 9, 1)])
     assert result == [{"work_date": "2026-09-01", "hours": float(hours)}]
     assert hr.LEAVE_DAY_HOURS == (Decimal("3"), Decimal("5"), Decimal("8"))
 
 
-@pytest.mark.parametrize("hours", [4, 2.5, 0.5, 6, 7])
-def test_old_style_half_days_and_other_hours_are_refused_for_new_leave_requests(hours):
-    # 旧的 4 小时半天只在已审批的历史数据里；新申请必须重新选全天 / 上午 / 下午。
-    with pytest.raises(ValueError, match="请假和调休按天填：全天 8 小时、上午 3 小时、下午 5 小时。"):
-        hr.normalize_days([{"work_date": "2026-09-01", "hours": hours}], "2026-09-01", "2026-09-01", work_dates=[date(2026, 9, 1)])
+@pytest.mark.parametrize("hours", [0.5, 1, 1.5, 2, 2.5, 4, 4.5, 6, 7, 7.5, "0.5", "6.50"])
+def test_leave_and_comp_time_days_can_be_any_multiple_of_half_an_hour_up_to_a_full_day(hours):
+    # 2026-10 起：自定义小时，每次 0.5，0.5–8 小时；旧的 4 小时半天现在也是合法的自定义小时。
+    result = hr.normalize_days([{"work_date": "2026-09-01", "hours": hours}], "2026-09-01", "2026-09-01", work_dates=[date(2026, 9, 1)])
+    assert result == [{"work_date": "2026-09-01", "hours": float(hours)}]
+
+
+def test_the_refusal_message_names_the_presets_and_the_custom_step():
+    with pytest.raises(ValueError) as caught:
+        hr.normalize_days([{"work_date": "2026-09-01", "hours": 8.5}], "2026-09-01", "2026-09-01", work_dates=[date(2026, 9, 1)])
+    assert str(caught.value) == LEAVE_DAY_RULE
+    assert hr.LEAVE_DAY_MESSAGE == LEAVE_DAY_RULE
+    assert [hr.valid_leave_hours(hours) for hours in (0, 0.5, 8, 8.5, 0.25, "NaN")] == [False, True, True, False, False, False]
 
 
 def test_zero_hours_means_the_day_is_not_taken_and_is_dropped():
@@ -273,6 +284,58 @@ def test_legacy_four_hour_half_days_only_take_capacity_and_do_not_claim_a_slot()
         assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(hours), legacy)
     # 旧半天 + 旧半天仍然是允许的（比如还没提交的老草稿按 4 小时提交时）
     assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(4), legacy[:1]) is None
+
+
+def test_custom_hours_only_count_against_the_8_hour_day_and_never_claim_a_slot():
+    # 自定义小时（不是恰好 3 / 5 / 8）只占当天的 8 小时容量，不占上午或下午。
+    day = "2026-10-13"
+    wanted = lambda hours: [{"work_date": day, "hours": hours}]  # noqa: E731
+    custom = [att_request("OA-C", hr.REQUEST_LEAVE, "待审批", [(day, 2.5)])]
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(3), custom) is None      # 上午没被占，剩 5.5 小时放得下
+    assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(5), custom) is None  # 下午也没被占
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(5.5), custom) is None    # 刚好填满 8 小时
+    assert "合计不能超过 8 小时" in hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(6), custom)
+    assert "合计不能超过 8 小时" in hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(8), custom)
+    # 反过来：已有上午 3 小时，新申请自定义小时不受"上午被占"限制，只看容量
+    morning = [att_request("OA-1", hr.REQUEST_LEAVE, "待审批", [(day, 3)])]
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(4), morning) is None
+    assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(5), morning) is None     # 恰好 5 小时是下午，下午没被占
+    assert "合计不能超过 8 小时" in hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(5.5), morning)
+    # 已有下午 5 小时：新申请恰好 5 小时（下午）被拒；4.5 这样的自定义小时只受容量限制（5 + 4.5 > 8）
+    afternoon = [att_request("OA-2", hr.REQUEST_LEAVE, "待审批", [(day, 5)])]
+    assert "下午已被占用" in hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(5), afternoon)
+    assert "合计不能超过 8 小时" in hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(4.5), afternoon)
+    assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(3), afternoon) is None
+    assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(2.5), afternoon) is None
+    # 两张自定义小时合起来满 8 小时：这天满了
+    pair = custom + [att_request("OA-D", hr.REQUEST_COMP_TIME, "已完成", [(day, 5.5)])]
+    for hours in (0.5, 3, 5):
+        assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(hours), pair)
+
+
+def test_day_limits_for_custom_hours_leave_the_half_days_free():
+    day = "2026-10-13"
+    days = [date(2026, 10, 13)]
+    limit = lambda *rows: hr.day_limits(hr.REQUEST_LEAVE, days, list(rows))[days[0]]  # noqa: E731
+    assert limit(att_request("A", hr.REQUEST_LEAVE, "待审批", [(day, 2.5)])) == {
+        "max_hours": 5.5, "am_taken": False, "pm_taken": False, "conflict": None}
+    assert limit(att_request("A", hr.REQUEST_LEAVE, "待审批", [(day, 6)])) == {
+        "max_hours": 2.0, "am_taken": False, "pm_taken": False, "conflict": None}
+    # 自定义小时加上一个预设：上午 3 + 自定义 2 = 剩 3，上午被占、下午没被占
+    both = limit(att_request("A", hr.REQUEST_LEAVE, "待审批", [(day, 3)]), att_request("B", hr.REQUEST_COMP_TIME, "已完成", [(day, 2)]))
+    assert both == {"max_hours": 3.0, "am_taken": True, "pm_taken": False, "conflict": None}
+    # 自定义小时把整天占满：和全天一样，上午下午都算被占
+    full = limit(att_request("A", hr.REQUEST_LEAVE, "待审批", [(day, 4.5)]), att_request("B", hr.REQUEST_COMP_TIME, "已完成", [(day, 3.5)]))
+    assert full["max_hours"] == 0 and full["am_taken"] and full["pm_taken"] and full["conflict"]["request"] == "B"
+
+
+def test_default_hours_never_pick_a_preset_that_does_not_fit():
+    days = [date(2026, 10, 12), date(2026, 10, 13), date(2026, 10, 14), date(2026, 10, 15)]
+    others = [att_request("A", hr.REQUEST_LEAVE, "待审批", [("2026-10-13", 2.5)]),   # 剩 5.5：默认下午 5
+              att_request("B", hr.REQUEST_LEAVE, "待审批", [("2026-10-14", 6)]),     # 剩 2：没有能放下的整半天，默认不请
+              att_request("C", hr.REQUEST_LEAVE, "待审批", [("2026-10-15", 4.5)])]   # 剩 3.5：默认上午 3
+    limits = hr.day_limits(hr.REQUEST_LEAVE, days, others)
+    assert [hr.default_day_hours(hr.REQUEST_LEAVE, limits[d]) for d in days] == [8.0, 5.0, 0.0, 3.0]
 
 
 def test_overtime_cannot_share_a_day_with_leave_or_comp_time_or_exceed_24_hours():
