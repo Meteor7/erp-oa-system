@@ -1,6 +1,7 @@
 import importlib
 import sys
 import types
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -36,13 +37,22 @@ def _load_allocation_entry(monkeypatch):
     sys.modules.pop("rayher_hr_payroll.api._guards", None)
     sys.modules.pop("rayher_hr_payroll.api.allocation_entry", None)
     mod = importlib.import_module("rayher_hr_payroll.api.allocation_entry")
+    # 财务主管岗位默认没有人；需要的用例自己指定。没有岗位人的普通财务账号不能定版。
+    monkeypatch.setattr(mod, "_finance_manager_users", lambda: set())
     return mod, frappe
+
+
+def _as_user(monkeypatch, mod, frappe, user, roles, finance_managers=()):
+    frappe.session = SimpleNamespace(user=user)
+    frappe.get_roles = lambda user=None: list(roles)
+    monkeypatch.setattr(mod, "_finance_manager_users", lambda: {name.lower() for name in finance_managers})
 
 
 def test_cancel_allocation_allows_finance_to_cancel_submitted_allocations(monkeypatch):
     mod, frappe = _load_allocation_entry(monkeypatch)
     captured = {"canceled": []}
 
+    monkeypatch.setattr(mod, "_can_finalize", lambda: True)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: captured.setdefault("lock_check", args))
     monkeypatch.setattr(mod, "lock_period_import", lambda year, month: captured.setdefault("import_lock", (year, month)) or "IMP-1")
@@ -89,6 +99,7 @@ def test_cancel_allocation_returns_empty_when_period_has_no_submitted_allocation
     mod, frappe = _load_allocation_entry(monkeypatch)
     captured = {}
 
+    monkeypatch.setattr(mod, "_can_finalize", lambda: True)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: captured.setdefault("lock_check", args))
     monkeypatch.setattr(mod, "lock_period_import", lambda year, month: captured.setdefault("import_lock", (year, month)))
@@ -161,6 +172,7 @@ def test_get_allocation_includes_project_and_stage_summaries(monkeypatch):
 def test_cancel_allocation_respects_period_allocation_lock(monkeypatch):
     mod, frappe = _load_allocation_entry(monkeypatch)
 
+    monkeypatch.setattr(mod, "_can_finalize", lambda: True)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: (_ for _ in ()).throw(RuleError("locked")))
     frappe.get_all = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("locked period should stop before query"))
@@ -512,3 +524,497 @@ def test_get_allocation_dashboard_builds_second_level_summary_with_grand_total(m
     assert filtered["total_amount"] == 70
     filtered_travel = next(row for row in filtered["summary_rows"] if row["account_level_3"] == "差旅费" and row["row_type"] == "detail")
     assert filtered_travel["projects"] == {"RD02": 60}
+
+
+# ---------------------------------------------------------------------------
+# 预览 + 定版（2026-10）：权限、定版、撤销、预览数据、定版检查
+# ---------------------------------------------------------------------------
+FINALIZE_DENIED = "只有财务主管可以定版本月分摊。"
+CANCEL_DENIED = "只有财务主管可以撤销定版。"
+ALREADY_FINALIZED = "本月分摊已定版。要重新定版，请先撤销定版。"
+
+
+def _forbid_db(frappe):
+    def boom(*args, **kwargs):
+        raise AssertionError("must stop before touching the database")
+
+    frappe.get_all = boom
+    frappe.get_doc = boom
+    frappe.db.get_value = boom
+    frappe.db.savepoint = boom
+    frappe.db.commit = boom
+
+
+@pytest.mark.parametrize(
+    "user, roles, managers, allowed",
+    [
+        ("Administrator", ["Administrator"], (), True),
+        ("boss@example.com", ["System Manager", "Accounts User"], (), True),
+        ("zhangmeng@example.com", ["Accounts User", "Department Manager"], ("ZhangMeng@example.com",), True),
+        ("clerk@example.com", ["Accounts User"], ("zhangmeng@example.com",), False),
+        ("clerk@example.com", ["Accounts User"], (), False),
+        ("", ["Accounts User"], ("",), False),
+    ],
+)
+def test_can_finalize_permission_matrix(monkeypatch, user, roles, managers, allowed):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, user, roles, managers)
+
+    assert mod._can_finalize() is allowed
+
+
+def test_finalize_allocation_is_refused_for_an_ordinary_finance_user_before_any_database_access(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "clerk@example.com", ["Accounts User"])
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "lock_period_import", lambda *args: (_ for _ in ()).throw(AssertionError("no lock")))
+    _forbid_db(frappe)
+
+    with pytest.raises(RuleError, match=FINALIZE_DENIED):
+        mod.finalize_allocation("2026-07")
+
+
+def test_cancel_allocation_is_refused_for_an_ordinary_finance_user_before_any_database_access(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "clerk@example.com", ["Accounts User"])
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "lock_period_import", lambda *args: (_ for _ in ()).throw(AssertionError("no lock")))
+    _forbid_db(frappe)
+
+    with pytest.raises(RuleError, match=CANCEL_DENIED):
+        mod.cancel_allocation("2026-07")
+
+
+def test_recalc_allocation_is_a_deprecated_alias_with_the_same_permission(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "clerk@example.com", ["Accounts User"])
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    _forbid_db(frappe)
+
+    with pytest.raises(RuleError, match=FINALIZE_DENIED):
+        mod.recalc_allocation("2026-07")
+
+    monkeypatch.setattr(mod, "finalize_allocation", lambda period: {"finalized": period})
+    assert mod.recalc_allocation("2026-07") == {"finalized": "2026-07"}
+
+
+def _prepare_finalize(monkeypatch, *, already_finalized=False, import_name="IMP-1", fail_in_calculate=False):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+    calls = []
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: calls.append(("roles", roles)))
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: calls.append(("lock_check", args)))
+    monkeypatch.setattr(mod, "lock_period_import", lambda year, month: calls.append(("import_lock", (year, month))) or import_name)
+    monkeypatch.setattr(mod, "period_has_submitted_allocation", lambda year, month: already_finalized)
+    monkeypatch.setattr(mod, "get_allocation", lambda period: {"name": "ALLOC-NEW", "period": period})
+
+    class ImportDoc:
+        name = "IMP-1"
+        docstatus = 0
+
+        def submit(self):
+            calls.append("import_submit")
+
+    class AllocationDoc:
+        def calculate(self):
+            calls.append("calculate")
+            if fail_in_calculate:
+                raise ValueError("duplicated labour")
+
+        def insert(self, ignore_permissions=False):
+            calls.append(("insert", ignore_permissions))
+
+        def submit(self):
+            calls.append("allocation_submit")
+
+    monkeypatch.setattr(
+        mod, "_new_allocation_doc",
+        lambda period, year, month, imp: calls.append(("new_allocation", period, year, month, imp)) or AllocationDoc(),
+    )
+    frappe.get_doc = lambda doctype, name: ImportDoc() if (doctype, name) == ("RD Expense Import", "IMP-1") else (_ for _ in ()).throw(AssertionError((doctype, name)))
+    frappe.get_all = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("finalize must not supersede anything"))
+    frappe.db.savepoint = lambda name: calls.append(("savepoint", name))
+    frappe.db.rollback = lambda save_point=None: calls.append(("rollback", save_point))
+    frappe.db.commit = lambda: calls.append("commit")
+    return mod, calls
+
+
+def test_finalize_allocation_submits_the_import_then_creates_and_submits_the_allocation(monkeypatch):
+    mod, calls = _prepare_finalize(monkeypatch)
+
+    result = mod.finalize_allocation("2026-07")
+
+    assert result == {"name": "ALLOC-NEW", "period": "2026-07"}
+    assert calls == [
+        ("roles", mod.RD_FINANCE_ROLES),
+        ("lock_check", ("2026-07", "lock_allocations", "分摊")),
+        ("import_lock", (2026, 7)),
+        ("savepoint", "rd_recalc"),
+        "import_submit",
+        ("new_allocation", "2026-07", 2026, 7, "IMP-1"),
+        "calculate",
+        ("insert", True),
+        "allocation_submit",
+        "commit",
+    ]
+
+
+def test_finalize_allocation_refuses_a_month_that_is_already_finalized(monkeypatch):
+    mod, calls = _prepare_finalize(monkeypatch, already_finalized=True)
+
+    with pytest.raises(RuleError, match=ALREADY_FINALIZED):
+        mod.finalize_allocation("2026-07")
+
+    assert "commit" not in calls
+    assert not any(isinstance(call, tuple) and call[0] in {"savepoint", "new_allocation"} for call in calls)
+
+
+def test_finalize_allocation_needs_an_expense_import(monkeypatch):
+    mod, calls = _prepare_finalize(monkeypatch, import_name=None)
+
+    with pytest.raises(RuleError, match="没有费用导入单"):
+        mod.finalize_allocation("2026-07")
+
+    assert "commit" not in calls
+
+
+def test_finalize_allocation_rolls_back_when_the_calculation_fails(monkeypatch):
+    mod, calls = _prepare_finalize(monkeypatch, fail_in_calculate=True)
+
+    with pytest.raises(ValueError, match="duplicated labour"):
+        mod.finalize_allocation("2026-07")
+
+    assert ("rollback", "rd_recalc") in calls
+    assert "commit" not in calls
+    assert "allocation_submit" not in calls
+
+
+def test_cancel_allocation_runs_for_a_finance_manager_position_holder(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+    canceled = []
+
+    class AllocationDoc:
+        flags = SimpleNamespace()
+
+        def cancel(self):
+            canceled.append("ALLOC-1")
+
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
+    monkeypatch.setattr(mod, "lock_period_import", lambda year, month: "IMP-1")
+    frappe.get_all = lambda *args, **kwargs: ["ALLOC-1"]
+    frappe.get_doc = lambda doctype, name: AllocationDoc()
+    frappe.db.savepoint = lambda name: None
+    frappe.db.commit = lambda: None
+
+    assert mod.cancel_allocation("2026-07") == {"ok": True, "period": "2026-07", "canceled": ["ALLOC-1"]}
+    assert canceled == ["ALLOC-1"]
+
+
+def _never_write():
+    def boom(*args, **kwargs):
+        raise AssertionError("a preview must not write")
+
+    return boom
+
+
+def _preview_doc(lines=None, totals=(70, 30, 0)):
+    if lines is None:
+        lines = [
+            SimpleNamespace(project="RD06", project_stage="capitalized", allocated_amount=Decimal("40.00"), basis_hours=10, ratio=20),
+            SimpleNamespace(project="RD06", project_stage="capitalized", allocated_amount=Decimal("30.00"), basis_hours=10, ratio=20),
+            SimpleNamespace(project="RD15", project_stage="expensed", allocated_amount=Decimal("30.00"), basis_hours=40, ratio=80),
+        ]
+    boom = _never_write()
+    return SimpleNamespace(
+        name=None, capitalized_total=totals[0], expensed_total=totals[1], unknown_total=totals[2], lines=lines,
+        insert=boom, submit=boom, save=boom, db_set=boom, cancel=boom,
+    )
+
+
+def _prepare_month(monkeypatch, *, foreign=None, has_foreign=False, submitted=None, preview=None):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    projects = []
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_foreign_period_state", lambda year, month: (foreign or mod._zero_stage_totals(), has_foreign))
+    frappe.db.get_value = lambda *args, **kwargs: submitted
+
+    def build_preview(period, year, month):
+        if isinstance(preview, Exception):
+            raise preview
+        return preview
+
+    monkeypatch.setattr(mod, "_build_preview", build_preview)
+
+    def get_all(doctype, **kwargs):
+        projects.append(doctype)
+        if doctype == "Project":
+            return [
+                SimpleNamespace(name="RD06", project_name="MUSHI 7546", rd_project_code="RD06"),
+                SimpleNamespace(name="RD15", project_name="DRAKENS 4482", rd_project_code="RD15"),
+            ]
+        raise AssertionError("a preview must not query allocation rows: " + doctype)
+
+    frappe.get_all = get_all
+    frappe.get_doc = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("a preview must not load or build documents"))
+    frappe.db.commit = _never_write()
+    return mod, frappe, projects
+
+
+def test_get_allocation_returns_a_read_only_preview_when_the_month_is_not_finalized(monkeypatch):
+    preview = SimpleNamespace(import_name="IMP-1", doc=_preview_doc(), warnings=["以下员工未计入：演示员工157"], error=None)
+    mod, frappe, queried = _prepare_month(
+        monkeypatch, foreign={"capitalized": 5, "expensed": 0, "unknown": 2}, has_foreign=True, preview=preview,
+    )
+    _as_user(monkeypatch, mod, frappe, "clerk@example.com", ["Accounts User"])
+
+    result = mod.get_allocation("2026-07")
+
+    assert result["preview"] is True
+    assert result["finalized"] is False
+    assert result["can_finalize"] is False
+    assert result["name"] is None
+    assert result["status"] == "预览"
+    assert result["period"] == "2026-07"
+    assert result["scope"] == "month"
+    assert result["has_data"] is True
+    assert result["has_domestic_data"] is True
+    assert result["has_foreign_data"] is True
+    assert result["lines"] == 3
+    assert (result["capitalized"], result["expensed"], result["unknown"]) == (75, 30, 2)
+    assert result["stage_summaries"] == [
+        {"stage": "capitalized", "label": "资本化", "total": 75},
+        {"stage": "expensed", "label": "费用化", "total": 30},
+        {"stage": "unknown", "label": "未判定", "total": 2},
+    ]
+    assert result["project_summaries"] == [
+        {
+            "project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546",
+            "project_stage": "capitalized", "stage_label": "资本化",
+            "basis_hours": 10, "ratio": 20, "allocated_amount": 70, "line_count": 2,
+        },
+        {
+            "project": "RD15", "project_code": "RD15", "project_name": "DRAKENS 4482",
+            "project_stage": "expensed", "stage_label": "费用化",
+            "basis_hours": 40, "ratio": 80, "allocated_amount": 30, "line_count": 1,
+        },
+    ]
+    assert result["preview_warnings"] == ["以下员工未计入：演示员工157"]
+    assert "preview_error" not in result
+    # 只查了项目名称；没有读分摊明细表，更没有写入（文档上的 insert/submit/save 一碰就报错）。
+    assert queried == ["Project"]
+
+
+def test_get_allocation_preview_tells_a_finance_manager_they_can_finalize(monkeypatch):
+    preview = SimpleNamespace(import_name="IMP-1", doc=_preview_doc(), warnings=[], error=None)
+    mod, frappe, _queried = _prepare_month(monkeypatch, preview=preview)
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+
+    result = mod.get_allocation("2026-07")
+
+    assert result["preview"] is True
+    assert result["can_finalize"] is True
+    assert result["preview_warnings"] == []
+
+
+def test_get_allocation_reports_preview_error_and_zero_domestic_totals(monkeypatch):
+    preview = SimpleNamespace(import_name="IMP-1", doc=None, warnings=["w"], error="本期同时存在「人工费」类导入费用")
+    mod, frappe, _queried = _prepare_month(
+        monkeypatch, foreign={"capitalized": 12, "expensed": 8, "unknown": 0}, has_foreign=True, preview=preview,
+    )
+
+    result = mod.get_allocation("2026-07")
+
+    assert result["preview"] is False
+    assert result["finalized"] is False
+    assert result["preview_error"] == "本期同时存在「人工费」类导入费用"
+    assert result["status"] is None
+    assert result["name"] is None
+    assert result["has_domestic_data"] is False
+    assert result["has_data"] is True
+    assert result["lines"] == 0
+    assert (result["capitalized"], result["expensed"], result["unknown"]) == (12, 8, 0)
+    assert result["project_summaries"] == []
+
+
+def test_get_allocation_without_an_import_is_neither_preview_nor_finalized(monkeypatch):
+    mod, _frappe, _queried = _prepare_month(monkeypatch, preview=None)
+
+    result = mod.get_allocation("2026-07")
+
+    assert result["preview"] is False
+    assert result["finalized"] is False
+    assert result["can_finalize"] is False
+    assert result["has_data"] is False
+    assert result["has_domestic_data"] is False
+    assert result["status"] is None
+    assert "preview_error" not in result
+
+
+def test_get_allocation_for_a_finalized_month_never_computes_a_preview(monkeypatch):
+    mod, frappe, _queried = _prepare_month(
+        monkeypatch, submitted="ALLOC-1",
+        preview=AssertionError("a finalized month must not be previewed"),
+    )
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+    frappe.get_doc = lambda doctype, name: SimpleNamespace(
+        name=name, status="Submitted", capitalized_total=70, expensed_total=30, unknown_total=0, lines=[1, 2, 3],
+    )
+    monkeypatch.setattr(mod, "_project_summaries", lambda name: [{"project": "RD06"}])
+
+    result = mod.get_allocation("2026-07")
+
+    assert result["finalized"] is True
+    assert result["preview"] is False
+    assert result["can_finalize"] is True
+    assert result["name"] == "ALLOC-1"
+    assert result["status"] == "Submitted"
+    assert result["lines"] == 3
+    assert result["project_summaries"] == [{"project": "RD06"}]
+    assert result["preview_warnings"] == []
+
+
+def test_get_allocation_year_scope_tells_whether_the_user_can_finalize(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_foreign_period_state", lambda year, month: (mod._zero_stage_totals(), False))
+    frappe.get_all = lambda doctype, **kwargs: []
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+
+    assert mod.get_allocation("2026-07", scope="year")["can_finalize"] is True
+
+    _as_user(monkeypatch, mod, frappe, "clerk@example.com", ["Accounts User"])
+    year = mod.get_allocation("2026-07", scope="year")
+    assert year["can_finalize"] is False
+    assert year["scope"] == "year"
+
+
+def test_aggregate_line_rows_matches_the_sql_grouping(monkeypatch):
+    mod, _frappe = _load_allocation_entry(monkeypatch)
+
+    rows = mod._aggregate_line_rows([
+        {"project": "RD15", "project_stage": "expensed", "allocated_amount": 5, "basis_hours": 2, "ratio": 10},
+        {"project": "RD06", "project_stage": "capitalized", "allocated_amount": 1, "basis_hours": 7, "ratio": 3},
+        {"project": "RD06", "project_stage": "capitalized", "allocated_amount": 2, "basis_hours": 9, "ratio": 1},
+        {"project": "RD06", "project_stage": "expensed", "allocated_amount": 4, "basis_hours": 1, "ratio": 1},
+        {"project": "RD15", "project_stage": None, "allocated_amount": None, "basis_hours": None, "ratio": None},
+    ])
+
+    assert rows == [
+        {"project": "RD06", "project_stage": "capitalized", "allocated_amount": 3.0, "basis_hours": 9.0, "ratio": 3.0, "line_count": 2},
+        {"project": "RD06", "project_stage": "expensed", "allocated_amount": 4.0, "basis_hours": 1.0, "ratio": 1.0, "line_count": 1},
+        {"project": "RD15", "project_stage": "expensed", "allocated_amount": 5.0, "basis_hours": 2.0, "ratio": 10.0, "line_count": 1},
+        {"project": "RD15", "project_stage": "unknown", "allocated_amount": 0.0, "basis_hours": 0.0, "ratio": 0.0, "line_count": 1},
+    ]
+
+
+def _install_check_sources(monkeypatch, *, fill_rows, unallocated=0):
+    api_package = importlib.import_module("rayher_hr_payroll.api")
+    monkeypatch.setattr(
+        api_package, "monthly_timesheet_entry",
+        SimpleNamespace(_fill_rows=lambda year, month, scope: (
+            calls_for_scope.append(scope) or [{"status": status} for status in fill_rows]
+        )),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_package, "foreign_rd_entry",
+        SimpleNamespace(_get_foreign_rd_month=lambda year, month: {"unallocated_common_amount": unallocated}),
+        raising=False,
+    )
+
+
+calls_for_scope = []
+
+
+def test_get_finalize_check_returns_the_checklist_for_a_preview(monkeypatch):
+    del calls_for_scope[:]
+    doc = _preview_doc(totals=(70, 30, 20), lines=[
+        SimpleNamespace(project="RD06", project_stage="capitalized", allocated_amount=70, basis_hours=1, ratio=1),
+        SimpleNamespace(project="RD15", project_stage="expensed", allocated_amount=30, basis_hours=1, ratio=1),
+        SimpleNamespace(project="RD15", project_stage="unknown", allocated_amount=20.5, basis_hours=1, ratio=1),
+    ])
+    preview = SimpleNamespace(import_name="IMP-1", doc=doc, warnings=["w1", "w2"], error=None)
+    mod, frappe, _queried = _prepare_month(
+        monkeypatch, foreign={"capitalized": 0, "expensed": 0, "unknown": 5}, has_foreign=True, preview=preview,
+    )
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+    _install_check_sources(
+        monkeypatch, fill_rows=["none", "none", "part", "over", "full", "full"], unallocated=12.5,
+    )
+
+    result = mod.get_finalize_check("2026-07")
+
+    assert result == {
+        "period": "2026-07",
+        "can_finalize": True,
+        "preview": True,
+        "finalized": False,
+        "unfilled_people": 2,
+        "underfilled_people": 1,
+        "over_limit_people": 1,
+        "unknown_amount": 25.0,
+        "unallocated_foreign_common_amount": 12.5,
+        "reconcile_diff": 0.5,
+        "warnings": ["w1", "w2"],
+    }
+    # 全部研发人员（scope=None），不受当前账号部门范围限制。
+    assert calls_for_scope == [None]
+
+
+def test_get_finalize_check_warns_when_there_is_no_import_or_the_preview_failed(monkeypatch):
+    del calls_for_scope[:]
+    mod, _frappe, _queried = _prepare_month(monkeypatch, preview=None)
+    _install_check_sources(monkeypatch, fill_rows=[])
+
+    no_import = mod.get_finalize_check("2026-07")
+
+    assert no_import["preview"] is False
+    assert no_import["warnings"] == ["本月还没有费用导入单，无法定版。"]
+    assert no_import["reconcile_diff"] == 0
+
+    failed = SimpleNamespace(import_name="IMP-1", doc=None, warnings=["w"], error="重复科目")
+    mod, _frappe, _queried = _prepare_month(monkeypatch, preview=failed)
+    _install_check_sources(monkeypatch, fill_rows=[])
+
+    result = mod.get_finalize_check("2026-07")
+
+    assert result["preview"] is False
+    assert result["preview_error"] == "重复科目"
+    assert result["warnings"] == ["w", "重复科目"]
+
+
+def test_get_finalize_check_warns_when_the_preview_has_nothing_to_allocate(monkeypatch):
+    del calls_for_scope[:]
+    preview = SimpleNamespace(import_name="IMP-1", doc=_preview_doc(lines=[], totals=(0, 0, 0)), warnings=[], error=None)
+    mod, _frappe, _queried = _prepare_month(monkeypatch, preview=preview)
+    _install_check_sources(monkeypatch, fill_rows=[])
+
+    result = mod.get_finalize_check("2026-07")
+
+    assert result["preview"] is True
+    assert result["warnings"] == ["没有可分摊的数据，不能定版。"]
+
+
+def test_get_finalize_check_on_a_finalized_month_reads_the_submitted_allocation(monkeypatch):
+    del calls_for_scope[:]
+    mod, frappe, _queried = _prepare_month(
+        monkeypatch, submitted="ALLOC-1", foreign={"capitalized": 0, "expensed": 0, "unknown": 1}, has_foreign=True,
+        preview=AssertionError("a finalized month must not be previewed"),
+    )
+    frappe.get_doc = lambda doctype, name: SimpleNamespace(
+        name=name, status="Submitted", capitalized_total=70, expensed_total=30, unknown_total=4,
+        lines=[SimpleNamespace(allocated_amount=104)],
+    )
+    monkeypatch.setattr(mod, "_project_summaries", lambda name: [])
+    _install_check_sources(monkeypatch, fill_rows=["full"])
+
+    result = mod.get_finalize_check("2026-07")
+
+    assert result["finalized"] is True
+    assert result["preview"] is False
+    assert result["unknown_amount"] == 5.0
+    assert result["reconcile_diff"] == 0
+    assert result["warnings"] == []

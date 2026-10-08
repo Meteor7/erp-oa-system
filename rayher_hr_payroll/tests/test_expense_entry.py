@@ -205,63 +205,120 @@ def test_save_expense_persists_sabri_overseas_commissioned_research_account(monk
     assert row["category"] == "other"
 
 
-def test_save_expense_reopens_allocated_import_by_canceling_allocation_and_creating_replacement(monkeypatch):
+FINALIZED_MESSAGE = "本月分摊已定版，费用不能修改。请财务主管先撤销定版。"
+
+
+def _prepare_save(monkeypatch, *, import_status, allocation_exists):
+    """save_expense 的公共替身：期间有一张导入单 EXP-OLD，状态和是否已有已提交分摊单由参数决定。"""
     mod, frappe = _load_expense_entry(monkeypatch)
-    captured = {"canceled": []}
+    captured = {"canceled": [], "get_doc": [], "ensure_paths": []}
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
     monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
-    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
-    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
+    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: ["NEW-PATH"])
+    monkeypatch.setattr(mod, "ensure_paths", lambda paths, **kwargs: captured["ensure_paths"].append(paths))
 
     def get_value(doctype, filters, fieldname=None, **kwargs):
-        if doctype == "RD Expense Import":
-            return "EXP-OLD"
-        return None
+        if doctype != "RD Expense Import":
+            return None
+        return import_status if fieldname == "status" else "EXP-OLD"
 
-    def get_all(doctype, filters=None, pluck=None, **kwargs):
+    def exists(doctype, name_or_filters=None):
         if doctype == "RD Cost Allocation":
-            assert filters == {"expense_import": "EXP-OLD", "docstatus": 1}
-            assert pluck == "name"
-            return ["ALLOC-OLD"]
-        return []
+            return allocation_exists
+        return doctype == "Project"
 
     class OldImport:
         name = "EXP-OLD"
-        docstatus = 1
-        status = "Allocated"
+        docstatus = 1 if import_status != "Draft" else 0
+        status = import_status
+        flags = SimpleNamespace()
+
+        def __init__(self):
+            self.items_set = None
+
         def cancel(self):
             captured["canceled"].append("EXP-OLD")
 
-    class OldAllocation:
-        flags = SimpleNamespace()
-        def cancel(self):
-            captured["canceled"].append("ALLOC-OLD")
+        def set(self, fieldname, value):
+            self.items_set = (fieldname, value)
+            captured["draft_items"] = value
+
+        def save(self, ignore_permissions=False):
+            captured["draft_saved"] = ignore_permissions
 
     def get_doc(arg, name=None):
+        captured["get_doc"].append((arg, name))
         if arg == "RD Expense Import" and name == "EXP-OLD":
             return OldImport()
-        if arg == "RD Cost Allocation" and name == "ALLOC-OLD":
-            return OldAllocation()
         if isinstance(arg, dict) and arg.get("doctype") == "RD Expense Import":
             captured["new_doc"] = arg
             return SimpleNamespace(insert=lambda ignore_permissions=False: captured.setdefault("insert", ignore_permissions))
         raise AssertionError((arg, name))
 
+    def get_all(*args, **kwargs):
+        raise AssertionError("save_expense must not look up or cancel allocations any more")
+
     frappe.db.get_value = get_value
-    frappe.db.exists = lambda doctype, name_or_filters=None: True if doctype == "Project" else False
+    frappe.db.exists = exists
     frappe.get_all = get_all
     frappe.get_doc = get_doc
     frappe.db.commit = lambda: captured.setdefault("committed", True)
+    return mod, captured
 
-    mod.save_expense("2026-07", json.dumps([
-        {"voucher_no": "V3", "account_level_3": "?????", "category": "direct_input", "amount": 200, "direct_project": "RD17"},
+
+def _save_one_row(mod):
+    return mod.save_expense("2026-07", json.dumps([
+        {"voucher_no": "V3", "account_level_3": "Cost", "category": "direct_input", "amount": 200, "direct_project": "RD17"},
     ]))
 
-    assert captured["canceled"] == ["ALLOC-OLD", "EXP-OLD"]
+
+def test_save_expense_refuses_when_month_has_a_submitted_allocation(monkeypatch):
+    mod, captured = _prepare_save(monkeypatch, import_status="Imported", allocation_exists=True)
+
+    with pytest.raises(RuleError, match=FINALIZED_MESSAGE):
+        _save_one_row(mod)
+
+    # 被拒绝时什么都不动：不建新科目、不取消导入单或分摊单、不新建导入单、不提交。
+    assert captured["ensure_paths"] == []
+    assert captured["get_doc"] == []
+    assert captured["canceled"] == []
+    assert "committed" not in captured
+
+
+def test_save_expense_refuses_when_import_is_marked_allocated(monkeypatch):
+    # 加锁后当前读：导入单已被并发定版标成 Allocated，即使快照里还看不到分摊单。
+    mod, captured = _prepare_save(monkeypatch, import_status="Allocated", allocation_exists=False)
+
+    with pytest.raises(RuleError, match=FINALIZED_MESSAGE):
+        _save_one_row(mod)
+
+    assert captured["get_doc"] == []
+    assert "committed" not in captured
+
+
+def test_save_expense_still_replaces_a_submitted_import_that_is_not_allocated(monkeypatch):
+    mod, captured = _prepare_save(monkeypatch, import_status="Imported", allocation_exists=False)
+
+    _save_one_row(mod)
+
+    assert captured["canceled"] == ["EXP-OLD"]
     assert captured["new_doc"]["items"][0]["direct_project"] == "RD17"
     assert captured["insert"] is True
+    assert captured["committed"] is True
+    assert captured["ensure_paths"] == [["NEW-PATH"]]
+
+
+def test_save_expense_keeps_editing_a_draft_import_in_place(monkeypatch):
+    mod, captured = _prepare_save(monkeypatch, import_status="Draft", allocation_exists=False)
+
+    _save_one_row(mod)
+
+    assert captured["canceled"] == []
+    assert captured["draft_items"][0]["voucher_no"] == "V3"
+    assert captured["draft_saved"] is True
+    assert "new_doc" not in captured
     assert captured["committed"] is True
 
 
@@ -285,64 +342,3 @@ def test_get_expense_returns_direct_project_and_allocation_type(monkeypatch):
     assert data["items"][0]["allocation_type"] == "project"
     assert data["items"][1]["direct_project"] is None
     assert data["items"][1]["allocation_type"] == "common"
-
-def test_save_expense_refetches_import_after_allocation_cancel_updates_timestamp(monkeypatch):
-    mod, frappe = _load_expense_entry(monkeypatch)
-    captured = {"canceled": [], "import_gets": 0}
-
-    class TimestampMismatchError(Exception):
-        pass
-
-    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mod, "get_expense", lambda period: {"period": period, "ok": True})
-    monkeypatch.setattr(mod, "confirmed_new_paths", lambda *args: [])
-    monkeypatch.setattr(mod, "ensure_paths", lambda *args, **kwargs: [])
-
-    frappe.db.get_value = lambda doctype, filters, fieldname=None, **kwargs: "EXP-OLD" if doctype == "RD Expense Import" else None
-    frappe.db.exists = lambda doctype, name_or_filters=None: True if doctype == "Project" else False
-    frappe.db.commit = lambda: captured.setdefault("committed", True)
-    frappe.get_all = lambda doctype, filters=None, pluck=None, **kwargs: ["ALLOC-OLD"] if doctype == "RD Cost Allocation" else []
-    frappe.TimestampMismatchError = TimestampMismatchError
-
-    class OldImport:
-        name = "EXP-OLD"
-        docstatus = 1
-        status = "Allocated"
-        flags = SimpleNamespace()
-
-        def __init__(self, stale):
-            self.stale = stale
-
-        def cancel(self):
-            if self.stale:
-                raise TimestampMismatchError("stale import object")
-            captured["canceled"].append("EXP-OLD")
-
-    class OldAllocation:
-        flags = SimpleNamespace()
-
-        def cancel(self):
-            captured["canceled"].append("ALLOC-OLD")
-
-    def get_doc(arg, name=None):
-        if arg == "RD Expense Import" and name == "EXP-OLD":
-            captured["import_gets"] += 1
-            return OldImport(stale=captured["import_gets"] == 1)
-        if arg == "RD Cost Allocation" and name == "ALLOC-OLD":
-            return OldAllocation()
-        if isinstance(arg, dict) and arg.get("doctype") == "RD Expense Import":
-            captured["new_doc"] = arg
-            return SimpleNamespace(insert=lambda ignore_permissions=False: captured.setdefault("insert", ignore_permissions))
-        raise AssertionError((arg, name))
-
-    frappe.get_doc = get_doc
-
-    mod.save_expense("2026-07", json.dumps([
-        {"voucher_no": "V4", "account_level_3": "Cost", "category": "other", "amount": 300},
-    ]))
-
-    assert captured["import_gets"] == 2
-    assert captured["canceled"] == ["ALLOC-OLD", "EXP-OLD"]
-    assert captured["insert"] is True
-    assert captured["committed"] is True

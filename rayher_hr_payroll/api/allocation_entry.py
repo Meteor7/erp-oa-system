@@ -1,6 +1,17 @@
 import frappe
 
-from rayher_hr_payroll.api._guards import lock_period_import, require_rd_access, parse_period, ensure_not_locked, RD_FINANCE_ROLES
+from rayher_hr_payroll.api._guards import (
+    lock_period_import, period_has_submitted_allocation, require_rd_access, parse_period, ensure_not_locked,
+    RD_FINANCE_ROLES,
+)
+
+# 预览 + 定版：没有定版（已提交）分摊单的月份，页面显示按当前数据现算的只读预览；
+# 只有财务主管 / System Manager / Administrator 能定版、撤销定版。
+FINALIZE_POSITION_KEY = "finance_manager"
+PREVIEW_STATUS = "预览"
+FINALIZE_DENIED = "只有财务主管可以定版本月分摊。"
+CANCEL_DENIED = "只有财务主管可以撤销定版。"
+ALREADY_FINALIZED = "本月分摊已定版。要重新定版，请先撤销定版。"
 
 
 STAGE_LABELS = {
@@ -114,6 +125,7 @@ def _project_info(project_names):
 
 
 def _project_summaries(allocation):
+    """已定版分摊单：数据库按项目、阶段汇总，再交给 _summaries_from_rows 生成页面行。"""
     rows = frappe.get_all(
         "RD Cost Allocation Line",
         filters={"parent": allocation},
@@ -128,6 +140,35 @@ def _project_summaries(allocation):
         group_by="project, project_stage",
         order_by="project",
     )
+    return _summaries_from_rows(rows)
+
+
+def _aggregate_line_rows(lines):
+    """内存里的分摊明细（预览）按项目、阶段汇总，口径和上面的 SQL 一致：金额求和，工时、占比取最大，行数计数。"""
+    groups = {}
+    for line in lines or []:
+        project = str(_value(line, "project") or "")
+        stage = _value(line, "project_stage") or "unknown"
+        group = groups.setdefault((project, stage), {
+            "project": project, "project_stage": stage,
+            "allocated_amount": 0.0, "basis_hours": 0.0, "ratio": 0.0, "line_count": 0,
+        })
+        group["allocated_amount"] += _number(_value(line, "allocated_amount"))
+        group["basis_hours"] = max(group["basis_hours"], _number(_value(line, "basis_hours")))
+        group["ratio"] = max(group["ratio"], _number(_value(line, "ratio")))
+        group["line_count"] += 1
+    rows = [groups[key] for key in sorted(groups)]
+    for row in rows:
+        row["allocated_amount"] = _money(row["allocated_amount"])
+    return rows
+
+
+def _project_summaries_from_lines(lines):
+    return _summaries_from_rows(_aggregate_line_rows(lines))
+
+
+def _summaries_from_rows(rows):
+    """按项目、阶段汇总后的行 -> 页面的项目汇总（已定版和预览共用）。"""
     projects = _project_info({str(_value(row, "project")) for row in rows if _value(row, "project")})
     summaries = []
     for row in rows:
@@ -535,48 +576,174 @@ def get_allocation_dashboard(period, scope="month", mode="all"):
     }
 
 
+def _finance_manager_users():
+    from rayher_hr_payroll.position_access import position_users
+
+    return position_users(FINALIZE_POSITION_KEY)
+
+
+def _can_finalize():
+    """财务主管（岗位持有人）、System Manager、Administrator 可以定版 / 撤销定版。"""
+    user = str(getattr(getattr(frappe, "session", None), "user", "") or "").strip()
+    if user == "Administrator" or "System Manager" in set(frappe.get_roles() or []):
+        return True
+    return bool(user) and user.lower() in _finance_manager_users()
+
+
+def _require_can_finalize(message):
+    if not _can_finalize():
+        frappe.throw(frappe._(message))
+
+
+def _build_preview(period, year, month):
+    from rayher_hr_payroll.rd_cost import allocation_preview
+
+    return allocation_preview.build_preview(period, year, month)
+
+
+def _new_allocation_doc(period, year, month, expense_import):
+    from rayher_hr_payroll.rd_cost import allocation_preview
+
+    return allocation_preview.new_allocation_doc(period, year, month, expense_import)
+
+
+def _submitted_allocation_name(year, month):
+    return frappe.db.get_value(
+        "RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
+        "name", order_by="creation desc",
+    )
+
+
+def _month_view(period, year, month):
+    """月份的分摊页数据：(响应, 分摊单文档)。
+
+    - 有已提交的分摊单：定版数据（preview False, finalized True）。
+    - 没有，但有费用导入且 calculate() 成功：只读预览（name None, status "预览"）。
+    - 其余：只有境外数据（预览不可用；导入存在但算不出来时带 preview_error）。
+    文档是已提交的分摊单或内存里算出的预览（没有则 None），定版检查用它核对明细和合计。"""
+    name = _submitted_allocation_name(year, month)
+    foreign_totals, has_foreign_data = _foreign_period_state(year, month)
+    base = {
+        "period": period, "scope": "month",
+        "has_foreign_data": has_foreign_data,
+        "can_finalize": _can_finalize(),
+        "preview_warnings": [],
+    }
+    if name:
+        d = frappe.get_doc("RD Cost Allocation", name)
+        capitalized, expensed, unknown = _add_foreign_totals(
+            d.capitalized_total, d.expensed_total, d.unknown_total, foreign_totals,
+        )
+        return {
+            **base,
+            "name": d.name, "status": d.status,
+            "has_data": True,
+            "has_domestic_data": True,
+            "capitalized": capitalized, "expensed": expensed,
+            "unknown": unknown, "lines": len(d.lines),
+            "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
+            "project_summaries": _project_summaries(d.name),
+            "preview": False, "finalized": True,
+        }, d
+
+    preview = _build_preview(period, year, month)
+    if preview is not None and preview.error is None:
+        d = preview.doc
+        lines = list(_value(d, "lines", []) or [])
+        capitalized, expensed, unknown = _add_foreign_totals(
+            d.capitalized_total, d.expensed_total, d.unknown_total, foreign_totals,
+        )
+        return {
+            **base,
+            "name": None, "status": PREVIEW_STATUS,
+            "has_data": True,
+            "has_domestic_data": True,
+            "capitalized": capitalized, "expensed": expensed,
+            "unknown": unknown, "lines": len(lines),
+            "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
+            "project_summaries": _project_summaries_from_lines(lines),
+            "preview": True, "finalized": False,
+            "preview_warnings": list(preview.warnings or []),
+        }, d
+
+    capitalized, expensed, unknown = _add_foreign_totals(0, 0, 0, foreign_totals)
+    payload = {
+        **base,
+        "name": None, "status": None,
+        "has_data": has_foreign_data,
+        "has_domestic_data": False,
+        "capitalized": capitalized, "expensed": expensed,
+        "unknown": unknown, "lines": 0,
+        "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
+        "project_summaries": [],
+        "preview": False, "finalized": False,
+    }
+    if preview is not None:
+        payload["preview_error"] = preview.error
+        payload["preview_warnings"] = list(preview.warnings or [])
+    return payload, None
+
+
 @frappe.whitelist()
 def get_allocation(period, scope="month"):
     require_rd_access(RD_FINANCE_ROLES)
     if str(scope or "month") == "year":
-        return _year_allocation(period)
+        result = _year_allocation(period)
+        result["can_finalize"] = _can_finalize()
+        return result
     year, month = parse_period(period)
-    name = frappe.db.get_value(
-        "RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
-        "name", order_by="creation desc",
-    )
-    foreign_totals, has_foreign_data = _foreign_period_state(year, month)
-    has_domestic_data = bool(name)
-    has_data = has_domestic_data or has_foreign_data
-    if not name:
-        capitalized, expensed, unknown = _add_foreign_totals(0, 0, 0, foreign_totals)
-        return {
-            "name": None, "status": None, "period": period, "scope": "month",
-            "has_data": has_data,
-            "has_domestic_data": has_domestic_data,
-            "has_foreign_data": has_foreign_data,
-            "capitalized": capitalized, "expensed": expensed,
-            "unknown": unknown, "lines": 0,
-            "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
-            "project_summaries": [],
-        }
-    d = frappe.get_doc("RD Cost Allocation", name)
-    capitalized, expensed, unknown = _add_foreign_totals(
-        d.capitalized_total,
-        d.expensed_total,
-        d.unknown_total,
-        foreign_totals,
-    )
-    return {
-        "name": d.name, "status": d.status, "period": period, "scope": "month",
-        "has_data": has_data,
-        "has_domestic_data": has_domestic_data,
-        "has_foreign_data": has_foreign_data,
-        "capitalized": capitalized, "expensed": expensed,
-        "unknown": unknown, "lines": len(d.lines),
-        "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
-        "project_summaries": _project_summaries(d.name),
+    payload, _doc = _month_view(period, year, month)
+    return payload
+
+
+def _reconcile_diff(doc):
+    """明细合计 - 三个阶段合计（应为 0）。"""
+    if doc is None:
+        return 0.0
+    line_total = sum(_number(_value(line, "allocated_amount")) for line in (_value(doc, "lines", []) or []))
+    stage_total = sum(_number(_value(doc, field)) for field in ("capitalized_total", "expensed_total", "unknown_total"))
+    return round(line_total - stage_total, 2)
+
+
+@frappe.whitelist()
+def get_finalize_check(period):
+    """定版前的检查清单：工时填报情况、未判定金额、境外公共费用、明细和合计的差额、预览警告。"""
+    require_rd_access(RD_FINANCE_ROLES)
+    year, month = parse_period(period)
+    payload, doc = _month_view(period, year, month)
+    from rayher_hr_payroll.api import foreign_rd_entry, monthly_timesheet_entry
+
+    # 和「工时填报进度」页同一份数据；scope=None 即全部研发人员，财务看全部，不受当前账号的部门范围限制。
+    fill_rows = monthly_timesheet_entry._fill_rows(year, month, None)
+
+    def count(status):
+        return sum(1 for row in fill_rows if _value(row, "status") == status)
+
+    foreign = foreign_rd_entry._get_foreign_rd_month(year, month)
+    warnings = list(payload.get("preview_warnings") or [])
+    preview_error = payload.get("preview_error")
+    if preview_error:
+        warnings.append(preview_error)
+    elif not payload["preview"] and not payload["finalized"]:
+        warnings.append("本月还没有费用导入单，无法定版。")
+    elif payload["preview"] and not payload["lines"]:
+        warnings.append("没有可分摊的数据，不能定版。")
+    result = {
+        "period": period,
+        "can_finalize": payload["can_finalize"],
+        "preview": payload["preview"],
+        "finalized": payload["finalized"],
+        "unfilled_people": count("none"),
+        "underfilled_people": count("part"),
+        "over_limit_people": count("over"),
+        "unknown_amount": _money(payload["unknown"]),
+        "unallocated_foreign_common_amount": _money(_value(foreign, "unallocated_common_amount")),
+        "reconcile_diff": _reconcile_diff(doc),
+        "warnings": warnings,
     }
+    if preview_error:
+        result["preview_error"] = preview_error
+    return result
 
 
 def _allow_ignore_permissions(doc):
@@ -587,7 +754,9 @@ def _allow_ignore_permissions(doc):
 
 @frappe.whitelist(methods=["POST"])
 def cancel_allocation(period):
+    """撤销定版。只有财务主管 / System Manager / Administrator。"""
     require_rd_access(RD_FINANCE_ROLES)
+    _require_can_finalize(CANCEL_DENIED)
     year, month = parse_period(period)
     ensure_not_locked(period, "lock_allocations", "分摊")
     lock_period_import(year, month)
@@ -612,8 +781,13 @@ def cancel_allocation(period):
 
 
 @frappe.whitelist(methods=["POST"])
-def recalc_allocation(period):
+def finalize_allocation(period):
+    """定版：创建并提交本月分摊单（原来的「重算分摊」）。只有财务主管 / System Manager / Administrator。
+
+    定版后工时（国内、境外）、费用导入、工资单等所有分摊输入都被冻结；要改先撤销定版。
+    已经定版的月份不能再定版（原来 System Manager 可以顶替旧分摊单，现在必须先撤销）。"""
     require_rd_access(RD_FINANCE_ROLES)
+    _require_can_finalize(FINALIZE_DENIED)
     year, month = parse_period(period)
     ensure_not_locked(period, "lock_allocations", "分摊")
     # Lock the period import row up front (same row every other path locks) so a
@@ -622,14 +796,9 @@ def recalc_allocation(period):
     imp = lock_period_import(year, month)
     if not imp:
         frappe.throw(frappe._("本期没有费用导入单，无法分摊。请先在「研发费用导入」录入费用。"))
-    # Existing submitted allocations must be cancelled explicitly first. This keeps
-    # the destructive step visible in the Rayher page instead of hiding it behind
-    # a regular recompute click.
-    submitted = frappe.get_all(
-        "RD Cost Allocation", filters={"year": year, "month": month, "docstatus": 1}, pluck="name",
-    )
-    if submitted and "System Manager" not in frappe.get_roles():
-        frappe.throw(frappe._("本期已有已提交的分摊单，请先撤销本期分摊后再重算。"))
+    # 加锁后当前读，和别的请求同时定版时第二个会看到第一个提交的分摊单。
+    if period_has_submitted_allocation(year, month):
+        frappe.throw(frappe._(ALREADY_FINALIZED))
     frappe.db.savepoint("rd_recalc")
     try:
         # Submit the draft import first: the hardened allocation before_submit
@@ -638,14 +807,7 @@ def recalc_allocation(period):
         impdoc = frappe.get_doc("RD Expense Import", imp)
         if impdoc.docstatus == 0:
             impdoc.submit()
-        # Supersede prior submitted allocations (only System Manager reaches here).
-        for n in submitted:
-            frappe.get_doc("RD Cost Allocation", n).cancel()
-        a = frappe.get_doc(dict(
-            doctype="RD Cost Allocation", period=period, year=year, month=month,
-            expense_import=impdoc.name, allocation_basis="rd_project_hours", scope="all",
-            calculation_version="v1",
-        ))
+        a = _new_allocation_doc(period, year, month, impdoc.name)
         a.calculate()
         a.insert(ignore_permissions=True)
         a.submit()  # on_submit marks the source import as Allocated (path-independent)
@@ -654,3 +816,9 @@ def recalc_allocation(period):
         raise
     frappe.db.commit()
     return get_allocation(period)
+
+
+@frappe.whitelist(methods=["POST"])
+def recalc_allocation(period):
+    """已弃用：等同于 finalize_allocation（权限同为财务主管；已定版的月份要先撤销，不再顶替）。"""
+    return finalize_allocation(period)

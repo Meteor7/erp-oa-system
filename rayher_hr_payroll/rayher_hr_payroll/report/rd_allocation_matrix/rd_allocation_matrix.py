@@ -414,6 +414,23 @@ def _foreign_periods_for_report(filters: Mapping[str, Any], allocation_docs: lis
     return periods
 
 
+def _truthy(value: Any) -> bool:
+    return _clean(value).lower() not in {"", "0", "false", "none", "no", "null"}
+
+
+def _preview_domestic_lines(frappe: Any, year: int, month: int) -> list[dict[str, Any]]:
+    """没有定版时的国内分摊明细：按当前数据现算，行格式和数据库路径一致（parent="PREVIEW"）。"""
+    from rayher_hr_payroll.rd_cost.allocation_preview import build_preview, preview_report_lines
+
+    period = "%04d-%02d" % (year, month)
+    preview = build_preview(period, year, month)
+    if preview is None:
+        return []
+    if preview.error:
+        frappe.throw(frappe._("预览计算失败：{0}").format(preview.error))
+    return preview_report_lines(preview.doc, period)
+
+
 def execute(filters=None):
     filters = filters or {}
     _require_finance_access()
@@ -471,6 +488,14 @@ def execute(filters=None):
         for line in enriched_lines:
             line["period"] = period_by_parent.get(_clean(line.get("parent")), "")
         lines.extend(enriched_lines)
+    elif (
+        not allocation
+        and filters.get("year")
+        and filters.get("month")
+        and _truthy(filters.get("preview"))
+    ):
+        # 预览：这个月没有定版（已提交）的分摊单，国内部分按当前数据现算（只读，不写库）。
+        lines.extend(_preview_domestic_lines(frappe, int(filters.get("year")), int(filters.get("month"))))
 
     for year, month in _foreign_periods_for_report(filters, allocation_docs):
         for foreign_line in _foreign_matrix_lines_for_month(year, month):

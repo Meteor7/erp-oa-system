@@ -29,15 +29,23 @@ def require_rd_access(roles=RD_MANAGE_ROLES):
     frappe.only_for(list(roles))
 
 
-def lock_period_import(year, month):
-    """Resolve the period's newest non-cancelled RD Expense Import and lock its row FOR
-    UPDATE, so every hour-mutation path (save/delete, the global Timesheet hook) and
-    recalc_allocation serialize on the SAME row. Returns the import name or None. The
-    order_by is fixed here so all callers resolve+lock an identical row (no drift)."""
-    name = frappe.db.get_value(
+def find_period_import(year, month):
+    """The period's newest non-cancelled RD Expense Import name (or None), WITHOUT locking.
+
+    Read-only callers (the allocation preview) use this; lock_period_import below resolves
+    the same row and then locks it, so both always agree on which import is meant."""
+    return frappe.db.get_value(
         "RD Expense Import", {"year": year, "month": month, "docstatus": ["<", 2]},
         "name", order_by="creation desc",
     )
+
+
+def lock_period_import(year, month):
+    """Resolve the period's newest non-cancelled RD Expense Import and lock its row FOR
+    UPDATE, so every hour-mutation path (save/delete, the global Timesheet hook) and
+    finalize_allocation serialize on the SAME row. Returns the import name or None. The
+    order_by is fixed in find_period_import so all callers resolve+lock an identical row (no drift)."""
+    name = find_period_import(year, month)
     if name:
         frappe.db.get_value("RD Expense Import", name, "name", for_update=True)
     # KNOWN CONCURRENCY RESIDUALS (narrow; opus-rated P3, codex-rated higher). Row-locking

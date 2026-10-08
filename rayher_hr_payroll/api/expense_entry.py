@@ -1,7 +1,9 @@
 import json
 import frappe
 
-from rayher_hr_payroll.api._guards import require_rd_access, parse_period, ensure_not_locked, RD_FINANCE_ROLES
+from rayher_hr_payroll.api._guards import (
+    require_rd_access, parse_period, ensure_not_locked, period_has_submitted_allocation, RD_FINANCE_ROLES,
+)
 from rayher_hr_payroll.rd_expense_accounts import (
     catalog_paths, confirmed_new_paths, ensure_paths, path_dict
 )
@@ -102,17 +104,6 @@ def _allow_ignore_permissions(doc):
         flags.ignore_permissions = True
 
 
-def _cancel_submitted_allocations(expense_import):
-    for allocation_name in frappe.get_all(
-        "RD Cost Allocation",
-        filters={"expense_import": expense_import, "docstatus": 1},
-        pluck="name",
-    ):
-        allocation = frappe.get_doc("RD Cost Allocation", allocation_name)
-        _allow_ignore_permissions(allocation)
-        allocation.cancel()
-
-
 def _needs_replacement(doc):
     status = getattr(doc, "status", None) or ""
     docstatus = int(getattr(doc, "docstatus", 0) or 0)
@@ -205,6 +196,11 @@ def get_expense_account_catalog():
 def save_expense(period, items, new_account_paths=None):
     require_rd_access(RD_FINANCE_ROLES)
     ensure_not_locked(period, "lock_gl_import", "费用导入")
+    year, month = parse_period(period)
+    # 本月分摊已定版：费用导入和工时一样冻结，不再悄悄撤销分摊、换一张新导入单。
+    # 先于新科目入库检查，被拒绝时不会留下新建的科目。加锁后当前读，和定版互斥。
+    if period_has_submitted_allocation(year, month):
+        frappe.throw(frappe._("本月分摊已定版，费用不能修改。请财务主管先撤销定版。"))
     if isinstance(items, str):
         items = json.loads(items)
     if isinstance(new_account_paths, str):
@@ -214,15 +210,13 @@ def save_expense(period, items, new_account_paths=None):
     except ValueError as error:
         frappe.throw(str(error))
     ensure_paths(paths_to_create, created_from="Excel确认")
-    year, month = parse_period(period)
     rows = _expense_rows(items)
 
     name = _active_import_name(year, month)
     if name:
         doc = frappe.get_doc("RD Expense Import", name)
         if _needs_replacement(doc):
-            _cancel_submitted_allocations(name)
-            doc = frappe.get_doc("RD Expense Import", name)
+            # 已提交（还没分摊）的导入单：作废后换一张新的。没有分摊单依赖它，不会牵连分摊。
             if int(getattr(doc, "docstatus", 0) or 0) == 1:
                 _allow_ignore_permissions(doc)
                 doc.cancel()

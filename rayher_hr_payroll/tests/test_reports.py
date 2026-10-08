@@ -560,3 +560,172 @@ def test_foreign_common_cost_without_hours_gets_its_own_column():
     assert [(row["project"], row["project_stage"], row["allocated_amount"]) for row in rows] == [
         ("\u672a\u5206\u644a\u5883\u5916\u516c\u5171\u8d39\u7528", "unknown", 100.0),
     ]
+
+
+# ---------------------------------------------------------------------------
+# \u9884\u89c8\u7b5b\u9009\u6761\u4ef6\uff082026-10\uff09\uff1a\u6ca1\u6709\u5b9a\u7248\u7684\u6708\u4efd\uff0c\u56fd\u5185\u90e8\u5206\u6309\u5f53\u524d\u6570\u636e\u73b0\u7b97
+# ---------------------------------------------------------------------------
+def _preview_lines():
+    return [
+        {"parent": "PREVIEW", "voucher_no": "V1", "expense_item_name": "Travel", "account_level_3": "Travel",
+         "account_level_4": "Hotel", "project": "RD01", "project_stage": "capitalized",
+         "allocated_amount": 60.0, "period": "2026-07"},
+        {"parent": "PREVIEW", "voucher_no": "V1", "expense_item_name": "Travel", "account_level_3": "Travel",
+         "account_level_4": "Hotel", "project": "RD02", "project_stage": "expensed",
+         "allocated_amount": 40.0, "period": "2026-07"},
+    ]
+
+
+def _matrix_with_preview(monkeypatch, filters, *, submitted=(), preview_calls=None):
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    preview_calls = preview_calls if preview_calls is not None else []
+    foreign_calls = []
+
+    class FakeDoc:
+        name = "ALLOC-1"
+        year = 2026
+        month = 7
+
+        def check_permission(self, ptype):
+            assert ptype == "read"
+
+    class FakeMeta:
+        def has_field(self, fieldname):
+            return fieldname in {"account_level_3", "account_level_4"}
+
+    class FakeFrappe:
+        _ = staticmethod(lambda text: text)
+
+        def get_list(self, doctype, **kwargs):
+            assert doctype == "RD Cost Allocation"
+            return [{"name": name} for name in submitted]
+
+        def get_doc(self, doctype, name):
+            return FakeDoc()
+
+        def get_meta(self, doctype):
+            return FakeMeta()
+
+        def get_all(self, doctype, **kwargs):
+            if doctype == "RD Cost Allocation Line":
+                return [{"parent": "ALLOC-1", "voucher_no": "REAL", "expense_item_name": "Real", "account_level_3": "Real",
+                         "account_level_4": "", "project": "RD09", "project_stage": "expensed", "allocated_amount": 5.0}]
+            return []
+
+    def preview_domestic_lines(frappe, year, month):
+        preview_calls.append((year, month))
+        return _preview_lines()
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None)
+    monkeypatch.setattr(mod, "_preview_domestic_lines", preview_domestic_lines)
+    monkeypatch.setattr(
+        mod, "_foreign_matrix_lines_for_month",
+        lambda year, month: foreign_calls.append((year, month)) or [
+            {"voucher_no": "F1", "account_level_3": "Foreign", "account_level_4": "", "project": "RD03",
+             "project_stage": "capitalized", "allocated_amount": 7.0},
+        ],
+    )
+    columns, rows = mod.execute(filters)
+    return columns, rows, preview_calls, foreign_calls
+
+
+def test_matrix_report_preview_filter_builds_domestic_rows_from_the_preview(monkeypatch):
+    columns, rows, preview_calls, foreign_calls = _matrix_with_preview(
+        monkeypatch, {"year": 2026, "month": 7, "preview": 1},
+    )
+
+    assert preview_calls == [(2026, 7)]
+    assert foreign_calls == [(2026, 7)]
+    assert [column["label"] for column in columns if column.get("project")] == ["RD01", "RD02", "RD03"]
+    detail = [row for row in rows if not row.get("_is_total")]
+    assert [(row["period"], row["voucher_no"], row["account_level_3"], row["account_level_4"], row["row_total"]) for row in detail] == [
+        ("2026-07", "F1", "Foreign", "", 7.0),
+        ("2026-07", "V1", "Travel", "Hotel", 100.0),
+    ]
+    assert rows[-1]["_is_total"] == 1
+    assert rows[-1]["row_total"] == 107.0
+
+
+def test_matrix_report_preview_filter_still_applies_the_stage_filter(monkeypatch):
+    columns, rows, _preview_calls, _foreign_calls = _matrix_with_preview(
+        monkeypatch, {"year": 2026, "month": 7, "preview": "1", "stage": "capitalized"},
+    )
+
+    assert [column["label"] for column in columns if column.get("project")] == ["RD01", "RD03"]
+
+
+@pytest.mark.parametrize("preview_value", [None, 0, "0", "", "false"])
+def test_matrix_report_without_a_truthy_preview_filter_never_previews(monkeypatch, preview_value):
+    filters = {"year": 2026, "month": 7}
+    if preview_value is not None:
+        filters["preview"] = preview_value
+
+    _columns, rows, preview_calls, foreign_calls = _matrix_with_preview(monkeypatch, filters)
+
+    assert preview_calls == []
+    assert foreign_calls == [(2026, 7)]
+    assert [row["voucher_no"] for row in rows if not row.get("_is_total")] == ["F1"]
+
+
+def test_matrix_report_preview_filter_is_ignored_when_the_month_is_finalized(monkeypatch):
+    _columns, rows, preview_calls, _foreign_calls = _matrix_with_preview(
+        monkeypatch, {"year": 2026, "month": 7, "preview": 1}, submitted=["ALLOC-1"],
+    )
+
+    assert preview_calls == []
+    assert {row["voucher_no"] for row in rows if not row.get("_is_total")} == {"REAL", "F1"}
+
+
+def test_matrix_report_preview_filter_needs_year_and_month(monkeypatch):
+    _columns, _rows, preview_calls, foreign_calls = _matrix_with_preview(
+        monkeypatch, {"year": 2026, "preview": 1},
+    )
+
+    assert preview_calls == []
+    assert len(foreign_calls) == 12
+
+
+def test_preview_domestic_lines_builds_rows_from_the_calculated_document_and_refuses_failed_previews(monkeypatch):
+    from rayher_hr_payroll.rd_cost import allocation_preview
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    class Boom(Exception):
+        pass
+
+    class FakeFrappe:
+        _ = staticmethod(lambda text: text)
+
+        @staticmethod
+        def throw(message):
+            raise Boom(message)
+
+    doc = SimpleNamespace(
+        lines=[SimpleNamespace(voucher_no="V1", expense_item_name="Hotel", project="RD01", project_stage="capitalized",
+                               allocated_amount=Decimal("10.00"), account_level_3="", account_level_4="")],
+        expense_snapshots=[SimpleNamespace(voucher_no="V1", expense_item="Hotel", account_level_1="R", account_level_2="O",
+                                           account_level_3="Travel", account_level_4="Hotel")],
+    )
+    seen = []
+
+    def ok(period, year, month):
+        seen.append((period, year, month))
+        return SimpleNamespace(doc=doc, error=None)
+
+    monkeypatch.setattr(allocation_preview, "build_preview", ok)
+    rows = mod._preview_domestic_lines(FakeFrappe(), 2026, 7)
+    assert seen == [("2026-07", 2026, 7)]
+    assert rows[0]["parent"] == "PREVIEW"
+    assert rows[0]["period"] == "2026-07"
+    assert (rows[0]["account_level_3"], rows[0]["account_level_4"]) == ("Travel", "Hotel")
+
+    monkeypatch.setattr(allocation_preview, "build_preview", lambda period, year, month: None)
+    assert mod._preview_domestic_lines(FakeFrappe(), 2026, 7) == []
+
+    monkeypatch.setattr(
+        allocation_preview, "build_preview",
+        lambda period, year, month: SimpleNamespace(doc=None, error="duplicated labour"),
+    )
+    with pytest.raises(Boom, match="duplicated labour"):
+        mod._preview_domestic_lines(FakeFrappe(), 2026, 7)
