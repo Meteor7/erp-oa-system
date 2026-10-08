@@ -1224,7 +1224,10 @@ def exclude_invoice(invoice_name, reason):
         _throw("排除原因过长。")
     name = str(invoice_name)
     with _transaction_lock("record", name):
-        record = _require_record(name, write=True, current=True)
+        record = _current_doc(RECORD_DOCTYPE, name)
+        # 财务可以排除"疑似重复"的发票（和"解除疑似重复"同权限）；其他状态仍只有发票所有人、申请人和系统管理员能排除。
+        if not (_roles(_user()) & FINANCE_ROLES and _get(record, "recognition_status") == "疑似重复"):
+            record = _require_record(name, write=True, current=True)
         # 修复（2026-09-28）：卡住（排队或识别超过 15 分钟）的发票也可以排除。
         if _get(record, "recognition_status") not in {"待确认", "疑似重复", "失败"} and not _recognition_stuck(record):
             _throw("当前发票状态不允许排除。")

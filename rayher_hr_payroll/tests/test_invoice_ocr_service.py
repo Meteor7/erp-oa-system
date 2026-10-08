@@ -573,6 +573,18 @@ def test_retry_and_exclude_have_explicit_state_rules(env):
     assert pending.processing_claim_id == ""
 
 
+def test_finance_can_exclude_a_suspected_duplicate_but_not_other_pending_records(env):
+    env.add_batch()
+    duplicate = env.add_record(name="INV-DUP", recognition_status="疑似重复", duplicate_of="INV-OLD", duplicate_reason="same")
+    pending = env.add_record(name="INV-PEND", recognition_status="待确认")
+    frappe_stub_module.session.user = "finance@example.com"
+    with pytest.raises(ValidationError, match="无权"):
+        service.exclude_invoice(pending.name, "不是重复票")
+    service.exclude_invoice(duplicate.name, "确认是重复票")
+    assert duplicate.recognition_status == "已排除"
+    frappe_stub_module.session.user = "alice@example.com"
+
+
 def test_link_validates_line_ownership_and_allows_many_invoices_per_line(env):
     env.add_batch()
     request = Doc(
