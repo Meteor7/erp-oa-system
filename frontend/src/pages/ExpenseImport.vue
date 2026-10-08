@@ -180,8 +180,12 @@ const saveReason = computed(() => saveBlockReason({
   errorRows: errorRowCount.value,
   newPending: newAccountsPending.value,
 }));
-const saveBlocked = computed(() => Boolean(saveReason.value));
-const saveTip = computed(() => saveReason.value || '保存会整月覆盖本月已有费用');
+// 本月分摊已定版：费用不能再改（服务端也会拒绝），要改先让财务主管在台账页撤销定版。
+const finalized = computed(() => !isYearScope.value && status.value === 'Allocated');
+const FINALIZED_TEXT = '本月分摊已定版，费用不能修改。请财务主管先在「研发费用台账」撤销定版。';
+const statusText = computed(() => (status.value === 'Allocated' ? '已定版' : status.value));
+const saveBlocked = computed(() => finalized.value || Boolean(saveReason.value));
+const saveTip = computed(() => (finalized.value ? FINALIZED_TEXT : saveReason.value || '保存会整月覆盖本月已有费用'));
 
 function pathText(path) {
   return [path.account_level_1, path.account_level_2, path.account_level_3, path.account_level_4].filter(Boolean).join(' → ');
@@ -597,7 +601,7 @@ watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true 
 <template>
   <RdPage title="研发费用导入" subtitle="录入或导入本期研发费用。公共费用按工时比例分摊，项目费用直接归属。">
     <template #ctl>
-      <span v-if="status" class="tag">状态：{{ status }}</span>
+      <span v-if="status" class="tag" :class="{ warn: finalized }">状态：{{ statusText }}</span>
       <RdSeg :model-value="periodScope" :options="scopeOptions" label="统计范围" @update:model-value="setPeriodScope" />
       <RdPeriod />
       <button v-if="!isYearScope" type="button" class="btn pri" :disabled="saveBlocked" :title="saveTip" @click="save">{{ saving ? '保存中…' : '保存本月费用' }}</button>
@@ -637,7 +641,13 @@ watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true 
         </div>
       </template>
 
-      <div v-if="stripState" ref="stripRef" class="ei-stripwrap">
+      <div v-if="finalized" class="ei-strip bad" role="status">
+        <RdIcon name="lock" />
+        <b>本月分摊已定版</b>
+        <span class="ei-strip-sum">费用不能修改。请财务主管先在「研发费用台账」撤销定版。</span>
+      </div>
+
+      <div v-else-if="stripState" ref="stripRef" class="ei-stripwrap">
         <div class="ei-strip" :class="stripState.tone" role="status">
           <RdIcon :name="stripState.tone === 'ok' ? 'check' : 'alert'" />
           <b>{{ stripState.title }}</b>
