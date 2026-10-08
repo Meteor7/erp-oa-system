@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  PROJECT_COLORS, REMIND_CLOSED_TEXT, barColor, departmentBars, followUpCounts, followUpRows, gapDays, gapText, gapTone, matchesDepartment,
+  projectColor, remainingMeta, remindClosed, sharePercent, stackedSegments,
   projectOwner,
   averageFill, capText, daysLeft, deadlineLabel, deadlineTone, defaultNewDays, deriveStatus, filterRoster, followUpList,
   groupByDepartment, lastRemindedText, namesText, pickerOptions, previousPeriod, remindResultText, rosterCounts,
@@ -224,6 +226,108 @@ test('server messages are parsed from frappe payloads and stripped of html', () 
   assert.equal(serverMessage({ messages: ['a', 'b'] }, 'x'), 'a；b');
   assert.equal(serverMessage({}, '保存失败'), '保存失败');
   assert.equal(serverMessage({ _error_message: '<i>出错</i>' }, 'x'), '出错');
+});
+
+const board = [
+  { employee: 'A', employee_name: '甲', department: '研发软件部', used_days: 5, limit_days: 22, status: 'part' },
+  { employee: 'B', employee_name: '乙', department: '研发软件部', used_days: 0, limit_days: 22, status: 'none' },
+  { employee: 'C', employee_name: '丙', department: '研发算法部', used_days: 20, limit_days: 22, status: 'part' },
+  { employee: 'D', employee_name: '丁', department: '研发算法部', used_days: 22, limit_days: 22, status: 'full' },
+  { employee: 'E', employee_name: '戊', department: '', used_days: 23, limit_days: 22, status: 'over' },
+  { employee: 'F', employee_name: '己', department: '研发软件部', used_days: 16, limit_days: 22, status: 'part' },
+];
+
+test('board follow-up rows: gap descending, full people left out, over included', () => {
+  assert.deepEqual(followUpRows(board).map((p) => p.employee), ['B', 'A', 'F', 'C', 'E']);
+  assert.deepEqual(followUpRows([]), []);
+});
+
+test('board follow-up rows: department and status filters, blank department is its own bucket', () => {
+  assert.deepEqual(followUpRows(board, { department: '研发软件部' }).map((p) => p.employee), ['B', 'A', 'F']);
+  assert.deepEqual(followUpRows(board, { department: '研发软件部', status: 'part' }).map((p) => p.employee), ['A', 'F']);
+  assert.deepEqual(followUpRows(board, { department: '研发算法部', status: 'none' }), []);
+  assert.deepEqual(followUpRows(board, { department: '未分配部门' }).map((p) => p.employee), ['E']);
+  assert.deepEqual(followUpRows(board, { department: 'all', status: 'over' }).map((p) => p.employee), ['E']);
+  assert.equal(matchesDepartment(board[4], '未分配部门'), true);
+  assert.equal(matchesDepartment(board[0], 'all'), true);
+  assert.equal(matchesDepartment(board[0], '研发算法部'), false);
+});
+
+test('board chip counts are computed inside the selected department', () => {
+  assert.deepEqual(followUpCounts(board), { all: 5, none: 1, part: 3, over: 1 });
+  assert.deepEqual(followUpCounts(board, '研发软件部'), { all: 3, none: 1, part: 2, over: 0 });
+  assert.deepEqual(followUpCounts(board, '研发算法部'), { all: 1, none: 0, part: 1, over: 0 });
+});
+
+test('board department bars: filled / total in order of appearance, percent of full people', () => {
+  assert.deepEqual(departmentBars(board), [
+    { department: '研发软件部', total: 3, full: 0, percent: 0 },
+    { department: '研发算法部', total: 2, full: 1, percent: 50 },
+    { department: '未分配部门', total: 1, full: 0, percent: 0 },
+  ]);
+  assert.deepEqual(departmentBars([]), []);
+});
+
+test('gap helpers: remaining days, over shown as 超, red from 10 days', () => {
+  assert.equal(gapDays(board[0]), 17);
+  assert.equal(gapDays(board[3]), 0);
+  assert.equal(gapDays(board[4]), 0);
+  assert.equal(gapText(board[0]), '−17.0');
+  assert.equal(gapText(board[2]), '−2.0');
+  assert.equal(gapText(board[4]), '超 1.0');
+  assert.equal(gapTone(board[0]), 'bad');
+  assert.equal(gapTone(board[5]), '');
+  assert.equal(gapTone({ status: 'part', used_days: 12, limit_days: 22 }), 'bad');
+  assert.equal(gapTone(board[4]), 'bad');
+  assert.equal(barColor('over'), 'var(--rd-bad)');
+  assert.equal(barColor('part'), 'var(--rd-ok)');
+});
+
+test('reminders are closed once the deadline has passed, open on the deadline day and before', () => {
+  assert.equal(remindClosed('2026-06-30', new Date(2026, 9, 8)), true);
+  assert.equal(remindClosed('2026-06-30', new Date(2026, 6, 1)), true);
+  assert.equal(remindClosed('2026-06-30', new Date(2026, 5, 30, 23, 59)), false);
+  assert.equal(remindClosed('2026-10-31', new Date(2026, 9, 8)), false);
+  assert.equal(remindClosed('', new Date()), false);
+  assert.equal(remindClosed(undefined, new Date()), false);
+  assert.equal(REMIND_CLOSED_TEXT, '该月已截止/已分摊，无需催办');
+});
+
+test('stacked meter: one segment per project with days, width over max(limit, total), colour by row index', () => {
+  const rows = [row('A', 8), row('B', 0), row('C', 6.4), row('D', 'x'), row('E', 5)];
+  const segs = stackedSegments(rows, 22);
+  assert.deepEqual(segs.map((s) => s.code), ['C-A', 'C-C', 'C-E']);
+  assert.deepEqual(segs.map((s) => s.index), [0, 2, 4]);
+  assert.deepEqual(segs.map((s) => s.color), [PROJECT_COLORS[0], PROJECT_COLORS[2], PROJECT_COLORS[4]]);
+  assert.deepEqual(segs.map((s) => s.pct), [36, 29, 23]);
+  assert.equal(segs[0].width, 36.36);
+  // 合计超过上限时，分母换成合计，分段加起来正好铺满
+  const over = stackedSegments([row('A', 20), row('B', 5)], 22);
+  assert.equal(Math.round(over.reduce((s, g) => s + g.width, 0)), 100);
+  assert.equal(over[0].pct, 91);
+  assert.deepEqual(stackedSegments([], 22), []);
+  assert.deepEqual(stackedSegments([row('A', 3)], 0).map((s) => s.width), [100]);
+});
+
+test('project colours cycle through five muted colours', () => {
+  assert.equal(PROJECT_COLORS.length, 5);
+  assert.equal(projectColor(0), PROJECT_COLORS[0]);
+  assert.equal(projectColor(5), PROJECT_COLORS[0]);
+  assert.equal(projectColor(7), PROJECT_COLORS[2]);
+  assert.equal(projectColor(-1), PROJECT_COLORS[4]);
+  assert.equal(sharePercent(8, 22), 36);
+  assert.equal(sharePercent('x', 22), 0);
+  assert.equal(sharePercent(5, 0), 0);
+});
+
+test('remaining text: amber when short, green when full, red when over', () => {
+  assert.deepEqual(remainingMeta(19.4, 22), { tone: 'warn', text: '还差 2.6 天' });
+  assert.deepEqual(remainingMeta(22, 22), { tone: 'ok', text: '已分配满 ✓' });
+  assert.deepEqual(remainingMeta(21.995, 22), { tone: 'ok', text: '已分配满 ✓' });
+  assert.equal(remainingMeta(0, 22).text, '还差 22.0 天');
+  const over = remainingMeta(23.5, 22);
+  assert.equal(over.tone, 'bad');
+  assert.ok(over.text.startsWith('超出上限 1.5 天'));
 });
 
 test('the project owner shown in the picker prefers the display name from the server', () => {

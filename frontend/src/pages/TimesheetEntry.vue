@@ -5,10 +5,11 @@ import { period, setPeriodScope } from "../lib/period";
 import { canEditTimesheetEntry } from "../lib/access";
 import { exportTableWorkbook } from "../lib/tableExport";
 import {
-  HOURS_PER_DAY, capText, daysInMonth, deriveStatus, lastRemindedText, needsRemind, newRowKey,
-  previousPeriod, remindResultText, rosterItemsFromOptions, rosterItemsFromProgress, rowHours, rowsFromPrevious, round2,
-  serverMessage, statusMeta, sumDays, sumHours, trimDays, validateEntryRows,
+  HOURS_PER_DAY, capText, daysInMonth, lastRemindedText, needsRemind, newRowKey,
+  previousPeriod, remindClosed, remindResultText, rosterItemsFromOptions, rosterItemsFromProgress, rowHours, rowsFromPrevious, round2,
+  serverMessage, statusMeta, sumDays, trimDays, validateEntryRows,
 } from "../lib/timesheetEntryView";
+import "../styles/rdTimesheet.css";
 import RdPage from "../components/rd/RdPage.vue";
 import RdPeriod from "../components/rd/RdPeriod.vue";
 import RdSeg from "../components/rd/RdSeg.vue";
@@ -75,7 +76,9 @@ const employees = computed(() => options.data?.employees || []);
 const editableEmployees = computed(() => options.data?.editable_employees || []);
 const projects = computed(() => options.data?.projects || []);
 const progressData = computed(() => progress.data || null);
-const canRemind = computed(() => Boolean(progressData.value?.can_remind));
+// 催办：有权限，并且该月还没过截止日（过了截止日月度工时已锁定 / 进入分摊，催了也没人能补）。
+const remindIsClosed = computed(() => remindClosed(progressData.value?.deadline));
+const canRemind = computed(() => Boolean(progressData.value?.can_remind) && !remindIsClosed.value);
 const progressKind = computed(() => progressData.value?.kind || "");
 const rosterItems = computed(() => (
   progressKind.value && progressKind.value !== "self" && progressData.value?.employees?.length
@@ -117,7 +120,6 @@ const readOnlyNote = computed(() => {
   return `只读：当前账号只能查看 ${selectedPerson.value.name} 的工时，不能修改。`;
 });
 const totalDays = computed(() => sumDays(entries.value));
-const totalHours = computed(() => sumHours(entries.value));
 const overLimit = computed(() => totalDays.value > dayLimit.value + 1e-6);
 const capLine = computed(() => capText({
   month: monthNumber.value,
@@ -135,7 +137,7 @@ const importOptions = computed(() => ({
   period: period.value,
   existingRows: entries.value,
 }));
-const saveStatus = computed(() => statusMeta(deriveStatus(totalDays.value, dayLimit.value)));
+const saveDisabled = computed(() => saving.value || overLimit.value || !dirty.value);
 
 function notify(message) {
   okMsg.value = message;
@@ -427,7 +429,7 @@ onBeforeUnmount(() => clearTimeout(okTimer));
       @retry="refreshProgress"
     />
 
-    <div v-else class="split" :class="{ solo: !showRoster }">
+    <div v-else class="split ts-split" :class="{ solo: !showRoster }">
       <EntryRoster v-if="showRoster" :items="rosterItems" :selected="selectedEmployee" :kind="progressKind === 'all' ? 'all' : 'team'" @select="selectEmployee" />
       <EntrySheet
         :rows="entries"
@@ -444,22 +446,16 @@ onBeforeUnmount(() => clearTimeout(okTimer));
         :loading="monthly.loading"
         :can-remind="canRemind && needsRemind(selectedStatus)"
         :reminding="reminder.loading"
+        :dirty="dirty"
+        :saving="saving"
+        :save-disabled="saveDisabled"
         @change="onRowsChange"
         @remove="removeRow"
         @copy="copyPrevious"
         @import="importOpen = true"
         @remind="remind"
+        @save="saveRows"
       />
-    </div>
-
-    <div v-if="activeTab === 'sheet' && canEditSelection" class="savebar">
-      <div class="row">
-        <span><b class="num">{{ totalDays.toFixed(1) }}</b> <span class="muted">天 · {{ totalHours.toFixed(0) }} h · {{ selectedPerson.name }}</span></span>
-        <span v-if="dirty" class="tag warn">有未保存的修改</span>
-        <span v-else class="tag ok">已保存</span>
-        <span v-if="overLimit" class="tag bad">{{ saveStatus.label }}</span>
-      </div>
-      <button type="button" class="btn pri" :disabled="saving || overLimit || !dirty" @click="saveRows">{{ saving ? "保存中…" : "保存" }}</button>
     </div>
 
     <EntryImportDrawer :open="importOpen" :import-options="importOptions" :employee="selectedEmployee" @close="importOpen = false" @add="applyImport" />

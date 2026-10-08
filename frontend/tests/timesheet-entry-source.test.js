@@ -37,15 +37,37 @@ test("timesheet entry is a master-detail sheet with a searchable project picker"
   assert.ok(sheet.includes("已分配"));
   assert.ok(sheet.includes("剩余"));
   assert.ok(sheet.includes("备注"));
-  assert.ok(sheet.includes("添加项目"));
+  assert.ok(sheet.includes("搜索项目"));
+  assert.ok(sheet.includes("上月用过"));
   assert.ok(sheet.includes("复制上月"));
+  assert.ok(sheet.includes("批量导入"));
   assert.ok(sheet.includes("把剩余平均分给现有项目"));
   assert.ok(sheet.includes("清空"));
-  assert.match(page, /class="split"[^>]*solo/);
-  assert.match(page, /class="savebar"/);
+  assert.match(page, /class="split ts-split"[^>]*solo/);
   // 项目可能有几十个：用搜索选择器，不再一排 chip
   assert.match(sheet, /pickerOptions/);
   assert.match(view, /limit = 8/);
+});
+
+test("the save button lives in the sheet header and the bottom savebar is gone", () => {
+  assert.doesNotMatch(page, /savebar/);
+  assert.match(page, /@save="saveRows"/);
+  assert.match(page, /const saveDisabled = computed\(\(\) => saving\.value \|\| overLimit\.value \|\| !dirty\.value\)/);
+  assert.match(page, /:save-disabled="saveDisabled"/);
+  assert.match(sheet, /emit\('save'\)/);
+  assert.match(sheet, /:disabled="saveDisabled"/);
+  assert.ok(sheet.includes("有未保存的修改"));
+  assert.ok(sheet.includes("已保存"));
+  assert.ok(sheet.includes("保存中…"));
+  // 超上限提示仍在
+  assert.ok(sheet.includes("超出本月上限"));
+});
+
+test("the sheet shows a stacked per-project meter with remaining text", () => {
+  assert.match(sheet, /stackedSegments/);
+  assert.match(sheet, /remainingMeta/);
+  assert.match(sheet, /projectColor\(index\)/);
+  assert.match(sheet, /aria-label="删除|:aria-label="`删除/);
 });
 
 test("occurrence days keep two decimals, step by half a day and hours are days times eight", () => {
@@ -134,12 +156,26 @@ test("fill-progress board reads the progress endpoint and reminders go through t
   assert.match(page, /refreshProgress\(\)/);
   assert.match(page, /defaultTab|tabChoice/);
   assert.ok(board.includes("需要跟进的人"));
-  assert.ok(board.includes("一键催办"));
+  assert.ok(board.includes("催办所选"));
+  assert.ok(board.includes("催办全部未填"));
+  assert.ok(board.includes("批量催办"));
   assert.ok(board.includes("导出名单"));
-  assert.ok(board.includes("填报完成率"));
-  assert.match(board, /v-if="canRemind"/);
+  assert.match(board, /followUpRows/);
+  assert.match(board, /remindOpen/);
+  assert.match(board, /REMIND_CLOSED_TEXT/);
   assert.match(board, /showDepartment/);
   assert.match(board, /kind\.value === 'all'/);
+  // 旧的红色截止横幅和四张指标卡已经换成一张汇总卡
+  assert.doesNotMatch(board, /RdKpi|deadlineTone/);
+  assert.doesNotMatch(board, /一键催办|填报完成率/);
+});
+
+test("reminders are locked once the month is past its deadline", () => {
+  assert.match(page, /remindClosed\(progressData\.value\?\.deadline\)/);
+  assert.match(page, /Boolean\(progressData\.value\?\.can_remind\) && !remindIsClosed\.value/);
+  assert.match(board, /remindClosed\(props\.progress\?\.deadline\)/);
+  assert.match(board, /disabled :title="REMIND_CLOSED_TEXT"/);
+  assert.ok(view.includes("该月已截止/已分摊，无需催办"));
 });
 
 test("the page ships no demo-only controls", () => {

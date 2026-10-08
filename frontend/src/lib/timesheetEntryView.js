@@ -420,6 +420,127 @@ export function remindResultText(result) {
   return parts.join('，');
 }
 
+// ---- 填报进度看板（部门筛选 / 还差排序 / 催办是否还有意义） ----
+const FOLLOW_STATUSES = new Set(['none', 'part', 'over']);
+
+// 进度条只表达「填了多少」：统一绿色，超上限用红色；状态由「还差」和标签表达。
+export function barColor(status) {
+  return status === 'over' ? 'var(--rd-bad)' : 'var(--rd-ok)';
+}
+
+export function avatarText(name) {
+  return String(name || '').trim().slice(-2);
+}
+
+// 还差多少天（超上限和已填满都是 0）
+export function gapDays(item) {
+  return Math.max(0, round2((Number(item?.limit_days) || 0) - (Number(item?.used_days) || 0)));
+}
+
+export function gapText(item) {
+  if (item?.status === 'over') return `超 ${fmtDays((Number(item.used_days) || 0) - (Number(item.limit_days) || 0), 1)}`;
+  return `−${fmtDays(gapDays(item), 1)}`;
+}
+
+// 超上限、或差 10 天以上标红
+export function gapTone(item) {
+  return item?.status === 'over' || gapDays(item) >= 10 ? 'bad' : '';
+}
+
+export function matchesDepartment(item, department = 'all') {
+  if (!department || department === 'all') return true;
+  return (item?.department || UNASSIGNED_DEPARTMENT) === department;
+}
+
+// 左侧部门列表：已填满 / 总人数，条形 = 已填满占比（保持名单里出现的先后顺序）。
+export function departmentBars(employees) {
+  return groupByDepartment(employees).map((group) => ({
+    department: group.department,
+    total: group.total,
+    full: group.full,
+    percent: group.total ? Math.round((group.full / group.total) * 1000) / 10 : 0,
+  }));
+}
+
+// 「需要跟进的人」：未填 / 未填满 / 超上限；可按部门和状态筛选；按「还差」从多到少排（同样多保持原顺序）。
+export function followUpRows(employees, { department = 'all', status = 'all' } = {}) {
+  return (employees || [])
+    .filter((item) => FOLLOW_STATUSES.has(item.status))
+    .filter((item) => matchesDepartment(item, department))
+    .filter((item) => !status || status === 'all' || item.status === status)
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => gapDays(b.item) - gapDays(a.item) || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+// 筛选按钮上的数字：在所选部门范围内统计。
+export function followUpCounts(employees, department = 'all') {
+  const list = followUpRows(employees, { department });
+  return {
+    all: list.length,
+    none: list.filter((item) => item.status === 'none').length,
+    part: list.filter((item) => item.status === 'part').length,
+    over: list.filter((item) => item.status === 'over').length,
+  };
+}
+
+// 催办规则：该月已过截止日（截止日 = 当月最后一天，进度接口给出）就不再催办，
+// 此时月度工时已被锁定 / 进入分摊，催了也没人能补。进度接口没有给出「已分摊」字段，所以只按截止日判断。
+export const REMIND_CLOSED_TEXT = '该月已截止/已分摊，无需催办';
+
+export function remindClosed(deadline, today = new Date()) {
+  const days = daysLeft(deadline, today);
+  return days !== null && days < 0;
+}
+
+// ---- 个人填报：项目配色、分段进度条、剩余文案 ----
+// 5 色低饱和调色板，项目行的色点和分段条用同一个下标取色。
+export const PROJECT_COLORS = ['#4C6A92', '#5E9C8F', '#C98B3C', '#8A6BA8', '#B5586B'];
+
+export function projectColor(index) {
+  const size = PROJECT_COLORS.length;
+  const n = Number(index) || 0;
+  return PROJECT_COLORS[((n % size) + size) % size];
+}
+
+// 占本月上限的百分比（四舍五入到整数，上限 0 时为 0）
+export function sharePercent(days, limit) {
+  const l = Number(limit) || 0;
+  if (l <= 0) return 0;
+  return Math.round((validDays(days) / l) * 100);
+}
+
+// 分段条：每个天数 > 0 的项目一段，宽度 = 天数 / max(上限, 合计)，颜色按它在表格里的行号取。
+export function stackedSegments(rows, limit) {
+  const list = rows || [];
+  const denom = Math.max(Number(limit) || 0, sumDays(list)) || 1;
+  const segments = [];
+  list.forEach((row, index) => {
+    const days = validDays(row?.occurrence_days);
+    if (days <= 0) return;
+    segments.push({
+      key: row.key || row.monthly_entry_id || row.project || String(index),
+      index,
+      code: row.project_code || row.project || '',
+      name: row.project_name || '',
+      days,
+      color: projectColor(index),
+      width: Math.round((days / denom) * 10000) / 100,
+      pct: sharePercent(days, limit),
+    });
+  });
+  return segments;
+}
+
+// 「还差 2.6 天」（琥珀）/「已分配满 ✓」（绿）/「超出上限 X 天…」（红）
+export function remainingMeta(used, limit) {
+  const status = deriveStatus(used, limit);
+  const left = round2((Number(limit) || 0) - (Number(used) || 0));
+  if (status === 'over') return { tone: 'bad', text: `超出上限 ${fmtDays(-left, 1)} 天，请调整后再保存` };
+  if (status === 'full') return { tone: 'ok', text: '已分配满 ✓' };
+  return { tone: 'warn', text: `还差 ${fmtDays(left, 1)} 天` };
+}
+
 // ---- 服务器报错 ----
 export function parseFrappeServerMessages(raw) {
   if (!raw) return [];

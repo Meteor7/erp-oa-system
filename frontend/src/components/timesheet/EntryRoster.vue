@@ -1,8 +1,9 @@
 <script setup>
-// 工时填报：左侧名单（搜索 + 全部 / 未填满 / 超上限 + 每人进度条）。只负责选人，不改数据。
+// 工时填报：左侧名单（搜索 + 部门 + 全部 / 未填满 / 超上限 + 每人一条细进度条 + 已填 / 上限）。只负责选人，不改数据。
 import { computed, ref } from 'vue';
 import RdIcon from '../rd/RdIcon.vue';
-import { departmentsOf, filterRoster, fmtDays, progressPercent, rosterCounts, statusFill } from '../../lib/timesheetEntryView.js';
+import '../../styles/rdTimesheet.css';
+import { avatarText, barColor, departmentsOf, filterRoster, fmtDays, progressPercent, rosterCounts } from '../../lib/timesheetEntryView.js';
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -28,7 +29,7 @@ const hasProgress = computed(() => props.items.some((item) => item.status));
 </script>
 
 <template>
-  <aside class="card roster">
+  <aside class="card roster ts-roster">
     <div class="hd">
       <b>{{ kind === 'all' ? '研发人员' : '本部门成员' }}</b>
       <span v-if="hasProgress" class="muted">{{ counts.full }} / {{ counts.all }} 人已填满</span>
@@ -45,13 +46,13 @@ const hasProgress = computed(() => props.items.some((item) => item.status));
       </div>
       <div v-else style="height: 8px"></div>
       <button v-for="item in visible" :key="item.employee" type="button" class="r-item" :aria-current="item.employee === selected" @click="emit('select', item.employee)">
-        <span class="av">{{ item.name.slice(-2) }}</span>
-        <span>
+        <span class="av">{{ avatarText(item.name) }}</span>
+        <span style="min-width: 0">
           <b style="font-weight: 500">{{ item.name }}</b>
           <span class="muted"> {{ kind === 'all' && item.department ? item.department : item.employee }}</span>
-          <div v-if="item.status" class="meter"><i :style="{ width: progressPercent(item.used, item.limit) + '%', background: statusFill(item.status) }"></i></div>
+          <div v-if="item.status" class="meter"><i :style="{ width: progressPercent(item.used, item.limit) + '%', background: barColor(item.status) }"></i></div>
         </span>
-        <span v-if="item.status" class="num muted" style="text-align: right">{{ fmtDays(item.used, 1) }}<br />/ {{ fmtDays(item.limit, 1) }}</span>
+        <span v-if="item.status" class="num muted" style="text-align: right; font-size: 12px">{{ fmtDays(item.used, 1) }}<br />/ {{ fmtDays(item.limit, 1) }}</span>
         <span v-else></span>
       </button>
       <div v-if="!visible.length" class="muted" style="padding: 20px; text-align: center">没有符合条件的员工</div>
