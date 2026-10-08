@@ -201,7 +201,6 @@ function fillEvenly() {
           <span class="muted">上月用过：</span>
           <button v-for="project in suggestions" :key="project.name" type="button" class="ts-suggest" @click="addProject(project)">＋ {{ projectCode(project) }} {{ projectName(project) }}</button>
         </template>
-        <span v-else-if="!recentIds.length" class="muted ts-norecent">上月没有工时记录，所以没有“上月用过”的快捷项目</span>
         <span class="quiets">
           <button type="button" class="btn quiet sm" @click="emit('copy')"><RdIcon name="copy" />复制上月</button>
           <button type="button" class="btn quiet sm" @click="emit('import')"><RdIcon name="upload" />批量导入…</button>

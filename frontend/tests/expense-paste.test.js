@@ -124,6 +124,84 @@ test('skips rows already present while preserving repeated rows inside one new i
 });
 
 
+test('the Excel template header row is recognised by the same header detection the importer uses', () => {
+  const [detail, guide] = expensePaste.buildExpenseTemplateSheets();
+  assert.equal(detail.name, '费用明细');
+  assert.equal(guide.name, '填写说明');
+
+  const header = detail.rows[0];
+  assert.deepEqual(header, expensePaste.EXPENSE_TEMPLATE_HEADERS);
+  const map = expensePaste.detectExpenseHeader(header);
+  assert.ok(map, 'template header must be detected');
+  for (const field of ['voucher_no', 'account_level_1', 'account_level_2', 'account_level_3', 'account_level_4', 'amount', 'project_text']) {
+    assert.ok(map[field] !== undefined, field + ' column is mapped');
+  }
+  // the header row alone parses to an empty, error-free result
+  const headerOnly = parseExpenseTableRows([header], projects);
+  assert.deepEqual(headerOnly.errors, []);
+  assert.deepEqual(headerOnly.rows, []);
+  assert.equal(headerOnly.dataRows, 0);
+  // a random row is not a header
+  assert.equal(expensePaste.detectExpenseHeader(['研发支出', '其他相关费用', '差旅费', '', 100, '公共费用']), null);
+});
+
+test('template example rows are placeholders: the first parses, the second needs a real project', () => {
+  const [detail, guide] = expensePaste.buildExpenseTemplateSheets();
+  const [, first, second] = detail.rows;
+  assert.match(String(first[0]), /示例/);
+  assert.match(String(second[0]), /示例/);
+
+  const parsed = parseExpenseTableRows(detail.rows, projects);
+  assert.equal(parsed.dataRows, 2);
+  assert.equal(parsed.validRows.length, 1);
+  assert.equal(parsed.validRows[0].allocation_type, 'common');
+  assert.equal(parsed.badRows, 1);
+  assert.match(parsed.errors.join('\n'), /项目“RDxx”未匹配到有效项目/);
+  assert.deepEqual(parsed.rows, []);
+
+  // the second sheet explains every column and the attribution rule
+  const guideText = guide.rows.map((row) => row.join(' ')).join('\n');
+  for (const label of expensePaste.EXPENSE_TEMPLATE_HEADERS) assert.ok(guideText.includes(label), label);
+  assert.ok(guideText.includes('公共费用'));
+  assert.ok(guideText.includes('项目费用'));
+});
+
+test('import preview counts rows, total, problems and new accounts without touching the table', () => {
+  const rows = [
+    ['1级费用科目', '2级费用科目', '3级费用科目', '4级费用科目', '费用金额', '项目'],
+    ['研发支出', '其他相关费用', '差旅费', '', 100.5, '公共费用'],
+    ['研发支出', '其他相关费用', '年终一次性礼品', '', 20, 'RD16'],
+  ];
+  const good = parseExpenseTableRows(rows, projects);
+  const existing = [{ voucher_no: '', account_level_1: '研发支出', account_level_2: '其他相关费用', account_level_3: '差旅费', account_level_4: '', amount: 100.5, direct_project: '' }];
+
+  const replace = expensePaste.summarizeExpenseImport(good, { existingRows: existing, replace: true });
+  assert.equal(replace.dataRows, 2);
+  assert.equal(replace.addCount, 2);
+  assert.equal(replace.total, 120.5);
+  assert.equal(replace.badRows, 0);
+  assert.equal(replace.newAccountCount, 1);
+  assert.equal(replace.existingCount, 1);
+  assert.equal(replace.blocked, false);
+
+  const append = expensePaste.summarizeExpenseImport(good, { existingRows: existing, replace: false });
+  assert.equal(append.skipped, 1);
+  assert.equal(append.addCount, 1);
+  assert.equal(append.total, 20);
+  assert.equal(append.existingCount, 0);
+
+  const bad = parseExpenseTableRows([...rows, ['研发支出', '其他相关费用', '差旅费', '', 'abc', '公共费用']], projects);
+  const blocked = expensePaste.summarizeExpenseImport(bad, { existingRows: existing, replace: true });
+  assert.equal(blocked.dataRows, 3);
+  assert.equal(blocked.badRows, 1);
+  assert.equal(blocked.errors.length, 1);
+  assert.equal(blocked.blocked, true);
+
+  const allDuplicates = expensePaste.summarizeExpenseImport(parseExpenseTableRows(rows.slice(0, 2), projects), { existingRows: existing, replace: false });
+  assert.equal(allDuplicates.addCount, 0);
+  assert.equal(allDuplicates.blocked, true);
+});
+
 test('accepts an unknown third-level account for confirmation when fixed levels are valid', () => {
   const result = parseExpensePaste('研发支出\t人员人工费用\t年终一次性奖金\t\t100\t公共费用', projects, []);
   assert.deepEqual(result.errors, []);

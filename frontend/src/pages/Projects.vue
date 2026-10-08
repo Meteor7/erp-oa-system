@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { createResource } from "frappe-ui";
 import { canAdministerProjects } from "../lib/access";
 import { exportTableWorkbook } from "../lib/tableExport";
@@ -68,6 +68,9 @@ const exporting = ref(false);
 const uploadingField = ref("");
 const errMsg = ref("");
 const askCancelName = ref("");
+// 点「缺…报告」药丸：打开编辑抽屉，定位到对应附件并短暂高亮
+const highlightField = ref("");
+let highlightTimer = null;
 
 const loaded = computed(() => Array.isArray(allRows.data));
 const stats = computed(() => projectStats(allRows.data || []));
@@ -111,15 +114,36 @@ function edit(row) {
   errMsg.value = "";
 }
 
+// 补传只走抽屉里的完整保存（save_project 会清空没带上的字段，不能单独传一个附件）
+async function editAttachment(row, fieldKey) {
+  edit(row);
+  await nextTick();
+  const holder = document.querySelector(`[data-file-field="${fieldKey}"]`);
+  if (!holder) return;
+  holder.scrollIntoView({ block: "center" });
+  holder.querySelector("[data-file-pick]")?.focus({ preventScroll: true });
+  highlightField.value = fieldKey;
+  clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => { highlightField.value = ""; }, 2200);
+}
+
+function pickFile(event) {
+  event.currentTarget.querySelector("input[type=file]")?.click();
+}
+
 function cancelEdit() {
   editing.value = false;
+  highlightField.value = "";
 }
 
 function onKeydown(event) {
   if (event.key === "Escape" && editing.value && !uploadingField.value && !saving.value) cancelEdit();
 }
 onMounted(() => window.addEventListener("keydown", onKeydown));
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+  clearTimeout(highlightTimer);
+});
 
 function ownerLabel(ownerName, displayName = "") {
   if (displayName) return displayName;
@@ -148,7 +172,7 @@ function reportDownloadUrl(row, fieldname) {
 
 function pillTitle(pill) {
   if (pill.state === "up") return pill.label + "：" + fileName(pill.file);
-  if (pill.state === "miss") return pill.label + "：需要，还没上传";
+  if (pill.state === "miss") return pill.label + "：需要，还没上传。点击打开编辑，补传后保存";
   return pill.label + "：这个项目不需要";
 }
 
@@ -306,7 +330,7 @@ async function exportCurrentProjects() {
                 <div class="pills">
                   <template v-for="pill in pills" :key="pill.key">
                     <a v-if="pill.state === 'up'" class="pill up" :href="reportDownloadUrl(row, pill.key)" target="_blank" rel="noopener" :title="pillTitle(pill)"><RdIcon name="check" />{{ pill.text }}</a>
-                    <span v-else-if="pill.state === 'miss'" class="pill miss" :title="pillTitle(pill)"><RdIcon name="alert" />{{ pill.text }}</span>
+                    <button v-else-if="pill.state === 'miss'" type="button" class="pill miss" :title="pillTitle(pill)" :aria-label="pill.text + '，点击打开编辑补传'" @click="editAttachment(row, pill.key)"><RdIcon name="alert" />{{ pill.text }}</button>
                     <span v-else class="pill na" :title="pillTitle(pill)">{{ pill.text }}<span class="sr">（不需要）</span></span>
                   </template>
                 </div>
@@ -331,7 +355,7 @@ async function exportCurrentProjects() {
       </div>
       <div class="att-legend">
         <span class="pill up"><RdIcon name="check" />已上传</span><span>点开可下载，悬停看文件名</span>
-        <span class="pill miss"><RdIcon name="alert" />缺附件</span><span>需要但还没传</span>
+        <span class="pill miss"><RdIcon name="alert" />缺附件</span><span>需要但还没传，点击打开编辑补传</span>
         <span class="pill na">不需要</span><span>立项报告：进行中、已结束都要 · 结项报告：已结束才要 · 资本化确认书：资本化项目才要 · 已取消的都不要</span>
       </div>
     </div>
@@ -374,10 +398,10 @@ async function exportCurrentProjects() {
             </div>
             <div class="f">
               <label>附件（pdf、office、图片）</label>
-              <div v-for="fileField in PROJECT_FILE_FIELDS" :key="fileField.key" class="file" :class="{ has: form[fileField.key] }">
+              <div v-for="fileField in PROJECT_FILE_FIELDS" :key="fileField.key" class="file" :class="{ has: form[fileField.key], hl: highlightField === fileField.key }" :data-file-field="fileField.key">
                 <span style="min-width: 0">{{ fileField.label }}　<a v-if="form[fileField.key]" :href="reportDownloadUrl(form, fileField.key)" target="_blank" rel="noopener" :title="fileName(form[fileField.key])" style="display: inline-block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; color: #1F7A4D">{{ fileName(form[fileField.key]) }}</a><span v-else style="color: #8A93A3">未上传</span></span>
                 <span class="row" style="gap: 6px; flex-wrap: nowrap">
-                  <label class="btn sm" style="cursor: pointer">
+                  <label class="btn sm" style="cursor: pointer" tabindex="0" data-file-pick @keydown.enter.prevent="pickFile" @keydown.space.prevent="pickFile">
                     {{ uploadingField === fileField.key ? "上传中…" : form[fileField.key] ? "重新上传" : "上传" }}
                     <input type="file" class="hidden" :accept="FILE_ACCEPT" :disabled="Boolean(uploadingField)" @change="uploadProjectFile(fileField.key, $event)" />
                   </label>
@@ -410,6 +434,13 @@ async function exportCurrentProjects() {
 .rd .pill.up { background: var(--rd-ok-soft); color: var(--rd-ok); }
 .rd a.pill.up:hover { border-color: var(--rd-ok); }
 .rd .pill.miss { background: var(--rd-warn-soft); color: var(--rd-warn); border-color: #E8C48A; font-weight: 600; }
+.rd button.pill.miss { cursor: pointer; font-family: inherit; }
+.rd button.pill.miss:hover { border-color: var(--rd-warn); }
+.rd button.pill.miss:focus-visible, .rd .file label.btn:focus-visible { outline: 2px solid var(--rd-brand); outline-offset: 2px; }
+/* 从缺附件药丸进来时，对应的附件行短暂高亮 */
+.rd .file.hl { border-color: var(--rd-warn); box-shadow: 0 0 0 3px var(--rd-warn-soft); animation: file-hl 2.2s ease-out forwards; }
+@keyframes file-hl { 0%, 60% { box-shadow: 0 0 0 3px #E8C48A; } 100% { box-shadow: 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) { .rd .file.hl { animation: none; } }
 .rd .pill.na { background: transparent; color: var(--rd-ink3); border: 1px dashed var(--rd-line2); }
 .rd .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .rd .att-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 18px; border-top: 1px solid var(--rd-line); font-size: 12px; color: var(--rd-ink3); }

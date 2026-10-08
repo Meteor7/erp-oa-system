@@ -3,13 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { createResource } from 'frappe-ui';
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from '../lib/period';
 import { EXPENSE_ACCOUNT_PATHS, clearInvalidLowerLevels, accountOptions, unknownExpenseAccountPaths, validateExpenseAccount } from '../lib/expenseAccounts';
-import { deriveExpenseCategory, filterNewExpenseRows, importWorkbookFile, parseExpensePaste, resolveProjectValue } from '../lib/expensePaste';
+import { buildExpenseTemplateSheets, deriveExpenseCategory, filterNewExpenseRows, importWorkbookFile, parseExpensePaste, resolveProjectValue, summarizeExpenseImport } from '../lib/expensePaste';
 import {
   SORT_OPTIONS, STATUS_FILTERS, account2Options, accountPathKey, activeFilterChips, ariaSort, buildDisplayRows, computeStripState,
   duplicateVoucherRows, emptyFilters, errorFields, expenseTotals, filterExpenseEntries, groupTitle, isProjectRow,
   nextSort, projectFilterOptions, pruneAcks, saveBlockReason, scopeCounts, sortExpenseEntries, sortIndicator, statusCounts, stripLinePrefix, sumAmounts,
 } from '../lib/rdExpense';
-import { exportTableWorkbook } from '../lib/tableExport';
+import { exportSheetsWorkbook, exportTableWorkbook } from '../lib/tableExport';
 import RdPage from '../components/rd/RdPage.vue';
 import RdPeriod from '../components/rd/RdPeriod.vue';
 import RdSeg from '../components/rd/RdSeg.vue';
@@ -42,7 +42,8 @@ const pasteOpen = ref(false);
 const workbookInput = ref(null);
 const workbookReplace = ref(false);
 const confirmNewAccounts = ref(false);
-const confirmWorkbookOverwrite = ref(false);
+// Excel 导入预览：选好文件、解析完先停在这里，确认后才真正放进表格 { parsed, replace, fileName }
+const importPreview = ref(null);
 const confirmPasteOverwrite = ref(false);
 
 // 工具栏状态：筛选、排序、按凭证号分组
@@ -100,8 +101,13 @@ const visiblePasteErrors = computed(() => pasteErrors.value.slice(0, 5));
 const remainingPasteErrorCount = computed(() => Math.max(pasteErrors.value.length - visiblePasteErrors.value.length, 0));
 const dataLoading = computed(() => loader.loading || accountCatalog.loading);
 
-// 每一行的问题：校验错误（会挡住保存）+ 完全相同的行（只提醒，不挡保存）+ 目录里没有的新科目。年度视图只读，不做检查。
-const duplicates = computed(() => (isYearScope.value ? { groups: [], keys: [], indexes: new Map() } : duplicateVoucherRows(items.value)));
+// 本月分摊已定版：费用不能再改（服务端也会拒绝），要改先让财务主管在台账页撤销定版。
+const finalized = computed(() => !isYearScope.value && status.value === 'Allocated');
+// 年度视图和已定版的月份都是只读：明细显示成纯文字，不出现任何编辑 / 导入入口，也不做问题检查。
+const readOnlyView = computed(() => isYearScope.value || finalized.value);
+
+// 每一行的问题：校验错误（会挡住保存）+ 完全相同的行（只提醒，不挡保存）+ 目录里没有的新科目。只读视图不做检查。
+const duplicates = computed(() => (readOnlyView.value ? { groups: [], keys: [], indexes: new Map() } : duplicateVoucherRows(items.value)));
 const noticeGroups = computed(() => duplicates.value.groups.map((indexes, g) => {
   const key = duplicates.value.keys[g];
   return { key, indexes, acked: ackedKeys.value.has(key), lineText: indexes.map((n) => n + 1).join('、') };
@@ -115,7 +121,7 @@ const pendingNoticeGroups = computed(() => noticeGroups.value.filter((group) => 
 const ackedNoticeCount = computed(() => noticeGroups.value.filter((group) => group.acked).length);
 const newPathKeys = computed(() => new Set(pendingAccountPaths.value.map(accountPathKey)));
 const entries = computed(() => items.value.map((row, index) => {
-  const errors = isYearScope.value ? [] : rowValidationErrors(row, index).map(stripLinePrefix);
+  const errors = readOnlyView.value ? [] : rowValidationErrors(row, index).map(stripLinePrefix);
   const group = noticeByIndex.value.get(index);
   const others = group ? group.indexes.filter((n) => n !== index) : [];
   return {
@@ -128,7 +134,7 @@ const entries = computed(() => items.value.map((row, index) => {
       acked: group.acked,
       text: '与第 ' + others.map((n) => n + 1).join('、') + ' 行完全相同（凭证号、科目、金额、项目），请确认不是重复录入；不影响保存',
     } : null,
-    isNew: !isYearScope.value && newPathKeys.value.has(accountPathKey(row)),
+    isNew: !readOnlyView.value && newPathKeys.value.has(accountPathKey(row)),
     projectText: isProjectRow(row) && row.direct_project ? projectLabelByName(row.direct_project) : '',
   };
 }));
@@ -160,10 +166,21 @@ const displayRows = computed(() => buildDisplayRows(shownEntries.value, {
   keyOf: frozen.value ? (entry) => frozen.value.vouchers.get(entry.index) ?? String(entry.row.voucher_no ?? '').trim() : undefined,
 }));
 const shownTotal = computed(() => sumAmounts(shownEntries.value));
-const colCount = computed(() => (isYearScope.value ? 9 : 10));
+const colCount = computed(() => (readOnlyView.value ? 9 : 10));
+
+// Excel 导入预览：按页面里现在的明细算（追加时要跳过已有的行），所以编辑表格时预览也跟着变
+const importSummary = computed(() => (importPreview.value && !readOnlyView.value
+  ? summarizeExpenseImport(importPreview.value.parsed, {
+    existingRows: items.value,
+    replace: importPreview.value.replace,
+    accountPaths: expenseAccountPaths.value,
+  })
+  : null));
+const importProblems = computed(() => (importSummary.value ? importSummary.value.errors.slice(0, 5) : []));
+const importProblemsMore = computed(() => (importSummary.value ? Math.max(importSummary.value.errors.length - importProblems.value.length, 0) : 0));
 
 // 检查状态条与保存
-const stripState = computed(() => (isYearScope.value || !items.value.length ? null : computeStripState({
+const stripState = computed(() => (readOnlyView.value || !items.value.length ? null : computeStripState({
   errorRows: errorRowCount.value,
   newCount: pendingAccountPaths.value.length,
   newConfirmed: confirmNewAccounts.value,
@@ -180,8 +197,6 @@ const saveReason = computed(() => saveBlockReason({
   errorRows: errorRowCount.value,
   newPending: newAccountsPending.value,
 }));
-// 本月分摊已定版：费用不能再改（服务端也会拒绝），要改先让财务主管在台账页撤销定版。
-const finalized = computed(() => !isYearScope.value && status.value === 'Allocated');
 const FINALIZED_TEXT = '本月分摊已定版，费用不能修改。请财务主管先在「研发费用台账」撤销定版。';
 const statusText = computed(() => (status.value === 'Allocated' ? '已定版' : status.value));
 const saveBlocked = computed(() => finalized.value || Boolean(saveReason.value));
@@ -268,6 +283,7 @@ function normalizeRows(rows) {
 function resetEditingSession() {
   ackedKeys.value = new Set();
   frozen.value = null;
+  importPreview.value = null;
 }
 
 function resetFilters() {
@@ -279,6 +295,7 @@ function clearFilter(key) {
 }
 
 function addRow() {
+  if (readOnlyView.value) return;
   resetFilters();
   sortKey.value = 'line';
   groupOn.value = false;
@@ -293,6 +310,7 @@ function addRow() {
 }
 
 function delRow(i) {
+  if (readOnlyView.value) return;
   frozen.value = null;
   items.value.splice(i, 1);
 }
@@ -310,6 +328,7 @@ function dismissImportMessages() {
 }
 
 function openPaste() {
+  if (readOnlyView.value) return;
   confirmPasteOverwrite.value = false;
   pasteOpen.value = true;
 }
@@ -351,6 +370,7 @@ function applyImportedRows(result, replace = false, source = '导入') {
 }
 
 function importPastedRows(replace = false) {
+  if (readOnlyView.value) return;
   errMsg.value = '';
   confirmPasteOverwrite.value = false;
   const result = parseExpensePaste(pasteText.value, projectOptions.value, expenseAccountPaths.value);
@@ -368,21 +388,12 @@ function requestPasteReplace() {
 }
 
 function chooseWorkbook(replace = false) {
+  if (readOnlyView.value) return;
   workbookReplace.value = replace;
   workbookInput.value?.click();
 }
 
-function requestWorkbookReplace() {
-  if (items.value.length) confirmWorkbookOverwrite.value = true;
-  else chooseWorkbook(true);
-}
-
-function confirmWorkbookReplace() {
-  confirmWorkbookOverwrite.value = false;
-  chooseWorkbook(true);
-}
-
-// “导入 Excel”下拉菜单的两项
+// “导入 Excel”下拉菜单的三项：追加、覆盖（都是先选文件、看预览、再确认）、下载模板
 function closeImportMenu(refocus = false) {
   importMenuOpen.value = false;
   if (refocus) importBtn.value?.focus();
@@ -400,20 +411,52 @@ function importAppend() {
 
 function importOverwrite() {
   closeImportMenu();
-  requestWorkbookReplace();
+  chooseWorkbook(true);
 }
 
+async function downloadTemplate() {
+  closeImportMenu();
+  errMsg.value = '';
+  try {
+    await exportSheetsWorkbook({ filename: '研发费用导入模板', sheets: buildExpenseTemplateSheets() });
+  } catch (error) {
+    errMsg.value = (error && error.message) || '模板下载失败';
+  }
+}
+
+// 选好文件只解析、不改表格：先出预览卡，点“确认覆盖 / 确认追加”才真正放进去
 async function importWorkbookRows(event) {
   errMsg.value = '';
   const file = event.target.files?.[0];
   event.target.value = '';
-  if (!file) return;
+  if (!file || readOnlyView.value) return;
+  const replace = workbookReplace.value;
+  importPreview.value = null;
+  dismissImportMessages();
   try {
-    const result = await importWorkbookFile(file, projectOptions.value, expenseAccountPaths.value);
-    applyImportedRows(result, workbookReplace.value, 'Excel 已导入');
+    const parsed = await importWorkbookFile(file, projectOptions.value, expenseAccountPaths.value);
+    if (readOnlyView.value) return;
+    if (!(parsed.dataRows > 0)) {
+      pasteErrors.value = parsed.errors?.length ? parsed.errors : ['请导入至少一行费用'];
+      return;
+    }
+    importPreview.value = { parsed, replace, fileName: file.name };
   } catch (error) {
     pasteErrors.value = [(error && error.message) || 'Excel 导入失败'];
   }
+}
+
+function cancelImportPreview() {
+  importPreview.value = null;
+}
+
+function confirmImportPreview() {
+  const preview = importPreview.value;
+  const summary = importSummary.value;
+  if (!preview || !summary || summary.blocked || readOnlyView.value) return;
+  errMsg.value = '';
+  importPreview.value = null;
+  applyImportedRows({ errors: [], rows: preview.parsed.validRows }, preview.replace, 'Excel 已导入');
 }
 
 function accountDatalistId(index, level) {
@@ -464,7 +507,7 @@ function payloadRows() {
 }
 
 async function save() {
-  if (isYearScope.value || !catalogReady.value || dataLoading.value) return;
+  if (readOnlyView.value || !catalogReady.value || dataLoading.value) return;
   errMsg.value = '';
   const errors = items.value.flatMap((row, index) => rowValidationErrors(row, index));
   if (errors.length) {
@@ -566,6 +609,7 @@ function onKeydown(event) {
   if (event.key !== 'Escape') return;
   if (pasteOpen.value) closePaste();
   else if (importMenuOpen.value) closeImportMenu(true);
+  else if (importPreview.value) cancelImportPreview();
   else if (popOpen.value) {
     popOpen.value = false;
     popBtn.value?.focus();
@@ -587,8 +631,17 @@ onBeforeUnmount(() => {
   clearTimeout(flashTimer);
 });
 
-watch(period, () => loader.reload());
-watch(periodScope, () => { confirmWorkbookOverwrite.value = false; loader.reload(); });
+watch(period, () => { importPreview.value = null; loader.reload(); });
+watch(periodScope, () => { importPreview.value = null; loader.reload(); });
+// 变成只读（定版 / 切到年度）：收起所有导入入口，免得之前开着的面板还能改表格
+watch(readOnlyView, (now) => {
+  if (!now) return;
+  importPreview.value = null;
+  importMenuOpen.value = false;
+  popOpen.value = false;
+  pasteOpen.value = false;
+  confirmPasteOverwrite.value = false;
+});
 watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|')).join('||'), () => { confirmNewAccounts.value = false; });
 // 改过内容、不再“完全相同”的组，它的确认无误就作废
 watch(() => noticeGroups.value.map((group) => group.key).join('\u0001'), () => {
@@ -619,11 +672,33 @@ watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true 
 
       <div v-if="errMsg" class="note bad" role="alert"><RdIcon name="alert" /><span class="grow">{{ errMsg }}</span></div>
 
-      <div v-if="confirmWorkbookOverwrite" class="note bad">
-        <RdIcon name="alert" />
-        <span class="grow"><b>覆盖当前表格？</b> 会清空现有 {{ items.length }} 行明细，再放入 Excel 里的内容。</span>
-        <button type="button" class="btn sm bad" @click="confirmWorkbookReplace">确认覆盖</button>
-        <button type="button" class="btn sm" @click="confirmWorkbookOverwrite = false">返回</button>
+      <div v-if="importSummary" class="ei-preview" :class="{ bad: importSummary.blocked, replace: importSummary.replace }" role="region" aria-label="Excel 导入预览">
+        <div class="ei-pv-head">
+          <RdIcon name="upload" />
+          <b>{{ importSummary.replace ? '覆盖导入预览' : '追加导入预览' }}</b>
+          <span class="muted ei-pv-file">{{ importPreview.fileName }}</span>
+        </div>
+        <p class="ei-pv-sum">
+          将导入 <b class="num">{{ importSummary.dataRows }}</b> 行
+          · 合计 <b class="num">{{ fmt(importSummary.total) }}</b> 元
+          · 其中 <b class="num" :class="{ 'ei-pv-bad': importSummary.badRows }">{{ importSummary.badRows }}</b> 行有问题
+          · 新科目 <b class="num">{{ importSummary.newAccountCount }}</b> 个
+        </p>
+        <p v-if="importSummary.replace && importSummary.existingCount" class="ei-pv-line">现有 <b class="num">{{ importSummary.existingCount }}</b> 行会被清空，换成 Excel 里的内容。</p>
+        <p v-if="!importSummary.replace && importSummary.skipped" class="ei-pv-line">其中 {{ importSummary.skipped }} 行和页面已有明细完全相同，会跳过，实际新增 {{ importSummary.addCount }} 行。</p>
+        <p v-if="!importSummary.badRows && !importSummary.addCount" class="ei-pv-line">Excel 里的行页面上都已有，没有可追加的内容。</p>
+        <p v-if="importSummary.newAccountCount" class="ei-pv-line">新科目导入后还要在“处理清单”里确认，保存时才会创建。</p>
+        <template v-if="importSummary.errors.length">
+          <ul class="ei-pv-errs">
+            <li v-for="(message, idx) in importProblems" :key="idx">{{ message }}</li>
+            <li v-if="importProblemsMore">还有 {{ importProblemsMore }} 条问题</li>
+          </ul>
+          <p class="ei-pv-line">有问题的行不会单独导入，请先在 Excel 里改好，再重新选择文件。</p>
+        </template>
+        <div class="ei-pv-act">
+          <button type="button" class="btn sm pri" :disabled="importSummary.blocked" @click="confirmImportPreview">{{ importSummary.replace ? '确认覆盖' : '确认追加' }}</button>
+          <button type="button" class="btn sm" @click="cancelImportPreview">取消</button>
+        </div>
       </div>
 
       <template v-if="!pasteOpen">
@@ -704,12 +779,14 @@ watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true 
             </select>
             <label class="ei-switch"><input v-model="groupOn" type="checkbox" role="switch" /><b aria-hidden="true"></b>按凭证号分组</label>
             <div class="ei-actions">
-              <template v-if="!isYearScope">
+              <template v-if="!readOnlyView">
                 <div ref="importMenuRef" class="ei-menuwrap">
                   <button ref="importBtn" type="button" class="btn" aria-haspopup="menu" :aria-expanded="importMenuOpen" @click="toggleImportMenu"><RdIcon name="upload" />导入 Excel ▾</button>
                   <div v-if="importMenuOpen" class="ei-menu" role="menu" aria-label="导入 Excel">
-                    <button type="button" role="menuitem" class="ei-mi" @click="importAppend"><b>追加到现有费用</b><span>Excel 里的行加到下面，原来的保留</span></button>
-                    <button type="button" role="menuitem" class="ei-mi" @click="importOverwrite"><b>覆盖现有费用…</b><span>先清空现有明细，再放入 Excel 的内容（会再确认一次）</span></button>
+                    <button type="button" role="menuitem" class="ei-mi" @click="importAppend"><b>追加到现有费用</b><span>Excel 里的行加到下面，原来的保留；先看预览再确认</span></button>
+                    <button type="button" role="menuitem" class="ei-mi" @click="importOverwrite"><b>覆盖现有费用…</b><span>先看预览，确认后才清空现有明细，再放入 Excel 的内容</span></button>
+                    <div class="ei-sep" role="separator"></div>
+                    <button type="button" role="menuitem" class="ei-mi" @click="downloadTemplate"><b>下载 Excel 模板</b><span>带表头和示例行，另附填写说明</span></button>
                   </div>
                 </div>
                 <input ref="workbookInput" type="file" accept=".xlsx,.xls" class="hidden" @change="importWorkbookRows" />
@@ -728,11 +805,12 @@ watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true 
           </div>
         </div>
 
-        <div v-if="isYearScope" ref="tableScroll" class="tbl overflow-x-auto ei-scroll">
+        <div v-if="readOnlyView" ref="tableScroll" class="tbl overflow-x-auto ei-scroll ei-readonly">
           <table class="min-w-[1500px] whitespace-nowrap">
             <thead>
               <tr>
-                <th class="w-28">日期</th>
+                <th v-if="isYearScope" class="w-28">日期</th>
+                <th v-else style="width: 34px">#</th>
                 <th class="w-28" :aria-sort="ariaSort(sortKey, 'voucher')"><button type="button" class="ei-thbtn" @click="clickSort('voucher')">凭证号 {{ sortIndicator(sortKey, 'voucher') }}</button></th>
                 <th class="min-w-[180px]">一级科目</th>
                 <th class="min-w-[220px]">二级科目</th>
@@ -749,7 +827,8 @@ watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true 
                   <td :colspan="colCount"><b>{{ groupTitle(group) }}</b><span>{{ group.count }} 行</span><span class="num">小计 {{ fmt(group.subtotal) }} 元</span></td>
                 </tr>
                 <tr v-else>
-                  <td class="num muted">{{ it.period }}</td>
+                  <td v-if="isYearScope" class="num muted">{{ it.period }}</td>
+                  <td v-else class="num muted">{{ i + 1 }}</td>
                   <td class="num">{{ it.voucher_no }}</td>
                   <td>{{ it.account_level_1 }}</td>
                   <td>{{ it.account_level_2 }}</td>

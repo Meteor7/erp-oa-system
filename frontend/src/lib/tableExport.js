@@ -15,6 +15,20 @@ export function buildExportRows(rows = [], columns = []) {
   });
 }
 
+// 多工作表导出：sheets = [{ name, rows: 二维数组（第一行可以是表头）, widths: [列宽…] }]，顺序即工作表顺序。
+export async function exportSheetsWorkbook({ filename, sheets = [] } = {}) {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.utils.book_new();
+  for (const sheet of sheets) {
+    const worksheet = XLSX.utils.aoa_to_sheet(sheet.rows || []);
+    if (Array.isArray(sheet.widths)) worksheet["!cols"] = sheet.widths.map((wch) => ({ wch }));
+    XLSX.utils.book_append_sheet(workbook, worksheet, String(sheet.name || "Sheet").slice(0, 31));
+  }
+  const output = normalizeExportFilename(filename);
+  XLSX.writeFile(workbook, output);
+  return output;
+}
+
 export async function exportTableWorkbook({ filename, sheetName = "Data", columns = [], rows = [] } = {}) {
   const XLSX = await import("xlsx");
   const exportRows = buildExportRows(rows, columns);

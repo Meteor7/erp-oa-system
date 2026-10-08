@@ -121,7 +121,7 @@ const emptyText = computed(() => {
 
     <div class="ts-cols" :class="{ solo: !showDepartment }">
       <div v-if="showDepartment" class="card" style="overflow: hidden">
-        <div class="hd"><b>部门</b><span class="muted">点一个部门，右边只看它</span></div>
+        <div class="hd"><b>部门</b><span class="muted">按部门筛选名单</span></div>
         <button type="button" class="ts-dept" :aria-pressed="activeDept === 'all'" @click="dept = 'all'">
           <b>全部</b>
           <span class="cnt"><b>{{ summary.full }}</b> / {{ summary.total }}</span>
@@ -149,7 +149,7 @@ const emptyText = computed(() => {
             <button v-else-if="canRemind" type="button" class="btn sm" disabled :title="REMIND_CLOSED_TEXT"><RdIcon name="bell" />批量催办</button>
           </div>
         </div>
-        <div class="tbl">
+        <div class="tbl ts-scroll">
           <table class="ts-table" aria-label="需要跟进的人">
             <thead>
               <tr>
@@ -187,7 +187,7 @@ const emptyText = computed(() => {
             </tbody>
           </table>
         </div>
-        <div class="ts-foot">按“还差”从多到少排 · 共 {{ rows.length }} 人<template v-if="closed"> · {{ REMIND_CLOSED_TEXT }}</template></div>
+        <div class="ts-foot">共 {{ rows.length }} 人 · 还差天数最多的排在前面<template v-if="closed"> · {{ REMIND_CLOSED_TEXT }}</template></div>
       </div>
     </div>
   </div>

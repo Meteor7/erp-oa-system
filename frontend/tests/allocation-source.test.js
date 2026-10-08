@@ -9,7 +9,7 @@ test("allocation page can cancel the finalized allocation with an inline confirm
   assert.match(source, /const canceling = ref\(false\)/);
   assert.ok(source.includes("cancelAllocation"));
   assert.ok(source.includes("confirmCancel"));
-  assert.match(source, /cancelRes\.submit\(\{ period: period\.value \}\)/);
+  assert.match(source, /cancelRes\.submit\(\{ period: period\.value, reason: cancelReasonText\.value \}\)/);
   assert.match(source, /await load\(\)/);
   // 不再用 window.confirm，改成「确认撤销 / 返回」的行内确认
   assert.doesNotMatch(source, /window\.confirm/);
@@ -21,7 +21,33 @@ test("allocation page can cancel the finalized allocation with an inline confirm
   // 只有月度、已定版时才出现撤销按钮；不是财务主管时按钮禁用
   assert.match(source, /v-if="actionState\.showCancel"/);
   assert.match(source, /:disabled="actionState\.cancelDisabled \|\| canceling"/);
-  assert.match(source, /if \(!isFinalized\.value \|\| isYearScope\.value\) return/);
+  assert.match(source, /if \(!isFinalized\.value \|\| isYearScope\.value \|\| !canSubmitCancel\.value\) return/);
+});
+
+test("revoking a finalized allocation needs a written reason (1-200 chars) that is sent and recorded", () => {
+  assert.ok(source.includes("撤销原因（必填，会记录在这张分摊单上）"));
+  assert.match(source, /const CANCEL_REASON_MAX = 200/);
+  assert.match(source, /<textarea v-model="cancelReason"[^>]*:maxlength="CANCEL_REASON_MAX"/);
+  // live counter
+  assert.match(source, /\{\{ cancelReason\.length \}\} \/ \{\{ CANCEL_REASON_MAX \}\}/);
+  // the confirm button stays disabled until the trimmed reason is non-empty
+  assert.match(source, /const cancelReasonText = computed\(\(\) => cancelReason\.value\.trim\(\)\)/);
+  assert.match(source, /cancelReasonText\.value\.length >= 1 && cancelReasonText\.value\.length <= CANCEL_REASON_MAX/);
+  assert.match(source, /class="btn sm bad" :disabled="!canSubmitCancel" @click="cancelAllocation"/);
+  // the server error is shown next to the form, which stays open
+  assert.match(source, /cancelError\.value = errorText\(cancelRes, e, "撤销失败"\)/);
+  assert.match(source, /<span v-if="cancelError" class="cancel-err" role="alert">/);
+  // opening / closing / reloading clears the reason
+  assert.match(source, /function openCancelConfirm\(\) \{\s*cancelReason\.value = "";/);
+  assert.match(source, /function resetConfirms\(\) \{\s*confirmingCancel\.value = false;\s*cancelReason\.value = "";/);
+});
+
+test("the preview error is rendered as plain text with the timesheet page name turned into a link", () => {
+  assert.match(source, /const ENTRY_LINK_TEXT = "研发工时填报"/);
+  assert.match(source, /\{ text: ENTRY_LINK_TEXT, to: "\/entry" \}/);
+  assert.match(source, /<router-link v-if="part\.to" :to="part\.to" class="pe-link">\{\{ part\.text \}\}<\/router-link>/);
+  // never injected as HTML
+  assert.doesNotMatch(source, /v-html/);
 });
 
 test("allocation page no longer recalculates; it previews and finalizes in month scope only", () => {

@@ -30,6 +30,8 @@
 
 .rd .ts-follow-hd { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 13px 16px; border-bottom: 1px solid var(--rd-line); }
 .rd .ts-follow-hd .acts { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* 人多时（50+）名单自己滚动，表头固定（th 的 sticky 来自 rdUi.css），卡片底部的“共 N 人”一直可见 */
+.rd .ts-scroll { max-height: 560px; overflow: auto; }
 .rd .ts-table { min-width: 640px; }
 .rd .ts-table td, .rd .ts-table th { padding: 8px 12px; }
 .rd .ts-table td.pick, .rd .ts-table th.pick { width: 34px; padding-right: 0; }
@@ -76,7 +78,6 @@
 .rd .ts-pop .pitem { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--rd-line); background: none; width: 100%; text-align: left; font-size: 13px; }
 .rd .ts-pop .pitem:last-of-type { border-bottom: 0; }
 .rd .ts-pop .pitem .muted { margin-left: 8px; font-size: 12px; }
-.rd .ts-norecent { font-size: 12px; }
 .rd .ts-pop .pitem[aria-selected="true"] { background: var(--rd-surface2); }
 .rd .ts-pop .hint { padding: 8px 12px; font-size: 12px; color: var(--rd-ink3); }
 .rd .ts-suggest { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 99px; border: 1px dashed var(--rd-line2); background: var(--rd-surface); font-size: 12px; color: var(--rd-ink); }

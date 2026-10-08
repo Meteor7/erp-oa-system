@@ -159,6 +159,22 @@ test('three attachments are shown as labelled pills; uploaded ones link to the s
   assert.match(page, /pillTitle\(pill\)/);
 });
 
+test('a missing-attachment pill is a button that opens the edit drawer on the matching field; there is no separate upload path', () => {
+  assert.match(page, /<button v-else-if="pill\.state === 'miss'" type="button" class="pill miss"/);
+  assert.match(page, /@click="editAttachment\(row, pill\.key\)"/);
+  // the drawer's own full save stays the only way to persist a file (save_project clears omitted fields)
+  assert.match(page, /async function editAttachment\(row, fieldKey\) \{\s*edit\(row\);\s*await nextTick\(\);/);
+  assert.match(page, /querySelector\(`\[data-file-field="\$\{fieldKey\}"\]`\)/);
+  assert.match(page, /:data-file-field="fileField\.key"/);
+  assert.match(page, /hl: highlightField === fileField\.key/);
+  assert.equal((page.match(/\/api\/method\/upload_file/g) || []).length, 1);
+  assert.equal((page.match(/saver\.submit/g) || []).length, 1);
+  // uploaded pills keep downloading
+  assert.match(page, /<a v-if="pill\.state === 'up'" class="pill up" :href="reportDownloadUrl\(row, pill\.key\)"/);
+  // keyboard access to the upload button inside the drawer
+  assert.match(page, /data-file-pick @keydown\.enter\.prevent="pickFile" @keydown\.space\.prevent="pickFile"/);
+});
+
 test('project page has an attachment filter and a legend under the table', () => {
   assert.match(page, /v-model="filters\.attachment"/);
   assert.match(page, /aria-label="附件筛选"/);

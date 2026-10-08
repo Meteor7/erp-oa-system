@@ -49,6 +49,8 @@ const TEXT = {
   confirmCancelTail: "的定版吗？撤销后本月回到预览，工时和费用可以再修改。",
   confirmYes: "确认撤销",
   confirmNo: "返回",
+  cancelReasonLabel: "撤销原因（必填，会记录在这张分摊单上）",
+  cancelReasonHint: "例如：发现 6 月有一笔费用录错了项目，改完后重新定版",
   yearHint: "年度汇总各月已定版的分摊，只读",
   previewNote: "这是按当前费用和工时算出的预览，还没有定版。财务主管点「定版本月分摊」后，本月的工时和费用都会锁定。",
   finalizeLock: "定版后本月工时和费用都不能再改，要改需先撤销定版。",
@@ -63,6 +65,11 @@ const modeOptions = [
   { value: "expensed", label: "费用化" },
 ];
 
+// 撤销定版必须写原因（服务端要求 1-200 字，并记录在分摊单上）。
+const CANCEL_REASON_MAX = 200;
+// 预览算不出来的提示里出现这个词时，把它做成去工时填报页的链接。
+const ENTRY_LINK_TEXT = "研发工时填报";
+
 // 服务端报表里 voucher_no 列的英文表头，页面里统一显示为中文。
 const COLUMN_LABELS = { "Voucher No": "凭证号" };
 
@@ -76,6 +83,8 @@ const finalizing = ref(false);
 const canceling = ref(false);
 const exporting = ref(false);
 const confirmingCancel = ref(false);
+const cancelReason = ref("");
+const cancelError = ref("");
 const confirmingFinalize = ref(false);
 const checking = ref(false);
 const checkData = ref(null);
@@ -101,6 +110,21 @@ const isFinalized = computed(() => viewState.value === "finalized");
 const actionState = computed(() => allocationActionState({ state: viewState.value, payload: payload.value }));
 const statusTag = computed(() => allocationStatusTag(viewState.value));
 const previewError = computed(() => (isPreviewError.value ? String(payload.value?.preview_error || "") : ""));
+// 服务端的中文提示原样显示；其中的「研发工时填报」变成链接（文本始终按普通文字渲染，不会被当成 HTML）
+const previewErrorParts = computed(() => {
+  const text = previewError.value;
+  const at = text.indexOf(ENTRY_LINK_TEXT);
+  if (at < 0) return [{ text }];
+  return [
+    { text: text.slice(0, at) },
+    { text: ENTRY_LINK_TEXT, to: "/entry" },
+    { text: text.slice(at + ENTRY_LINK_TEXT.length) },
+  ].filter((part) => part.text);
+});
+const cancelReasonText = computed(() => cancelReason.value.trim());
+const canSubmitCancel = computed(() => (
+  cancelReasonText.value.length >= 1 && cancelReasonText.value.length <= CANCEL_REASON_MAX && !canceling.value
+));
 const previewWarnings = computed(() => (isPreview.value ? previewWarningTexts(payload.value) : []));
 const displayPeriod = computed(() => periodScopeLabel(period.value, periodScope.value));
 const matrixTag = computed(() => allocName.value || (isPreview.value ? "预览" : displayPeriod.value));
@@ -184,6 +208,8 @@ function errorText(res, e, fallback) {
 
 function resetConfirms() {
   confirmingCancel.value = false;
+  cancelReason.value = "";
+  cancelError.value = "";
   confirmingFinalize.value = false;
   checkData.value = null;
   checkError.value = "";
@@ -263,17 +289,30 @@ async function finalizeAllocation() {
   }
 }
 
+function openCancelConfirm() {
+  cancelReason.value = "";
+  cancelError.value = "";
+  confirmingCancel.value = true;
+}
+
+function closeCancelConfirm() {
+  confirmingCancel.value = false;
+  cancelReason.value = "";
+  cancelError.value = "";
+}
+
 async function cancelAllocation() {
-  if (!isFinalized.value || isYearScope.value) return;
+  if (!isFinalized.value || isYearScope.value || !canSubmitCancel.value) return;
   canceling.value = true;
+  cancelError.value = "";
   setMessage("");
   try {
-    await cancelRes.submit({ period: period.value });
+    await cancelRes.submit({ period: period.value, reason: cancelReasonText.value });
     confirmingCancel.value = false;
     await load();
     setMessage("已撤销定版，本月回到预览，可继续调整工时和费用");
   } catch (e) {
-    setMessage(errorText(cancelRes, e, "撤销失败"), true);
+    cancelError.value = errorText(cancelRes, e, "撤销失败");
   } finally {
     canceling.value = false;
   }
@@ -360,7 +399,7 @@ load();
     </div>
     <div v-if="!loading && isPreviewError" class="note bad strip" role="alert">
       <RdIcon name="alert" />
-      <span class="grow"><b>预览算不出来：</b>{{ previewError }}</span>
+      <span class="grow"><b>预览算不出来：</b><template v-for="(part, i) in previewErrorParts" :key="i"><router-link v-if="part.to" :to="part.to" class="pe-link">{{ part.text }}</router-link><template v-else>{{ part.text }}</template></template></span>
     </div>
     <details v-if="!loading && previewWarnings.length" class="pw">
       <summary class="muted">预览提示 {{ previewWarnings.length }} 条</summary>
@@ -386,12 +425,20 @@ load();
         <button v-if="actionState.showFinalize" type="button" class="btn pri" :disabled="actionState.finalizeDisabled || finalizing || confirmingFinalize" :title="actionState.finalizeDisabled ? actionState.finalizeTitle : undefined" @click="openFinalize"><RdIcon name="check" />{{ finalizing ? TEXT.finalizing : TEXT.finalize }}</button>
         <button v-if="summary" type="button" class="btn" :disabled="!canExport || exporting" @click="exportCurrentAllocation"><RdIcon name="download" />{{ exporting ? TEXT.exporting : TEXT.exportExcel }}</button>
         <template v-if="actionState.showCancel">
-          <span v-if="confirmingCancel" class="note bad confirm">
+          <div v-if="confirmingCancel" class="note bad confirm cancel-form" role="group" aria-label="撤销定版">
             <span>{{ TEXT.confirmCancel }} {{ period }} {{ TEXT.confirmCancelTail }}</span>
-            <button type="button" class="btn sm bad" :disabled="canceling" @click="cancelAllocation">{{ canceling ? TEXT.canceling : TEXT.confirmYes }}</button>
-            <button type="button" class="btn sm" :disabled="canceling" @click="confirmingCancel = false">{{ TEXT.confirmNo }}</button>
-          </span>
-          <button v-else type="button" class="btn bad" :disabled="actionState.cancelDisabled || canceling" :title="actionState.cancelDisabled ? actionState.cancelTitle : undefined" @click="confirmingCancel = true">{{ TEXT.cancel }}</button>
+            <label class="cancel-reason">
+              <span class="cancel-label">{{ TEXT.cancelReasonLabel }}</span>
+              <textarea v-model="cancelReason" class="field" rows="2" :maxlength="CANCEL_REASON_MAX" :placeholder="TEXT.cancelReasonHint" :disabled="canceling" aria-required="true"></textarea>
+              <span class="cancel-count" :class="{ full: cancelReason.length >= CANCEL_REASON_MAX }" aria-live="polite">{{ cancelReason.length }} / {{ CANCEL_REASON_MAX }}</span>
+            </label>
+            <span v-if="cancelError" class="cancel-err" role="alert"><RdIcon name="alert" />{{ cancelError }}</span>
+            <span class="cancel-act">
+              <button type="button" class="btn sm bad" :disabled="!canSubmitCancel" @click="cancelAllocation">{{ canceling ? TEXT.canceling : TEXT.confirmYes }}</button>
+              <button type="button" class="btn sm" :disabled="canceling" @click="closeCancelConfirm">{{ TEXT.confirmNo }}</button>
+            </span>
+          </div>
+          <button v-else type="button" class="btn bad" :disabled="actionState.cancelDisabled || canceling" :title="actionState.cancelDisabled ? actionState.cancelTitle : undefined" @click="openCancelConfirm">{{ TEXT.cancel }}</button>
         </template>
       </div>
     </div>
@@ -479,6 +526,17 @@ load();
 .rd .confirm { margin: 0; padding: 3px 10px; align-items: center; flex-wrap: wrap; }
 .rd .confirm svg { margin-top: 0; }
 .rd .stat { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rd .pe-link { color: inherit; font-weight: 600; text-decoration: underline; }
+.rd .pe-link:hover { text-decoration-thickness: 2px; }
+.rd .cancel-form { flex-direction: column; align-items: stretch; gap: 8px; width: min(560px, 100%); padding: 10px 12px; }
+.rd .cancel-reason { display: flex; flex-direction: column; gap: 4px; }
+.rd .cancel-label { font-weight: 600; }
+.rd .cancel-form textarea.field { min-height: 56px; font-family: inherit; font-size: 13px; color: var(--rd-ink); resize: vertical; }
+.rd .cancel-count { align-self: flex-end; font-size: 12px; color: var(--rd-ink3); font-variant-numeric: tabular-nums; }
+.rd .cancel-count.full { color: var(--rd-bad); }
+.rd .cancel-err { display: flex; gap: 6px; align-items: flex-start; font-weight: 600; }
+.rd .cancel-err svg { margin-top: 3px; flex: none; }
+.rd .cancel-act { display: flex; gap: 8px; }
 .rd .strip { align-items: center; }
 .rd .strip svg { margin-top: 0; }
 .rd .pw { margin: -4px 0 12px; font-size: 12.5px; }

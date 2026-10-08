@@ -42,6 +42,24 @@
 .rd .ei-mi:hover, .rd .ei-mi:focus-visible { background: var(--rd-surface2); }
 .rd .ei-mi span { font-size: 12px; color: var(--rd-ink3); }
 
+.rd .ei-sep { height: 1px; margin: 4px 6px; background: var(--rd-line); }
+
+/* Excel 导入预览卡：选好文件后先停在这里，确认后才改表格 */
+.rd .ei-preview { margin-bottom: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--rd-line2); background: var(--rd-surface); font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.rd .ei-preview.replace { border-color: #E8C48A; background: var(--rd-warn-soft); }
+.rd .ei-preview.bad { border-color: #F3C9C4; background: var(--rd-bad-soft); }
+.rd .ei-preview p { margin: 0; }
+.rd .ei-pv-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rd .ei-pv-file { font-size: 12px; overflow-wrap: anywhere; }
+.rd .ei-pv-sum b { font-weight: 650; }
+.rd .ei-pv-sum .ei-pv-bad { color: var(--rd-bad); }
+.rd .ei-pv-line { color: var(--rd-ink2); }
+.rd .ei-pv-errs { margin: 0; padding-left: 18px; list-style: disc; color: var(--rd-bad); }
+.rd .ei-pv-act { display: flex; gap: 8px; margin-top: 4px; }
+
+/* 只读（已定版 / 年度）：明细是纯文字，数字列右对齐，不出现输入框 */
+.rd .ei-readonly td { white-space: nowrap; }
+
 /* 明细表：固定表头 + 内部滚动 */
 .rd .ei-scroll { max-height: 60vh; overflow: auto; }
 .rd .ei-thbtn { border: 0; background: none; padding: 0; font: inherit; color: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }

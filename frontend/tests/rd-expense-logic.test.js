@@ -333,16 +333,57 @@ test('toolbar filters, sorting and grouping all keep edits bound to the original
   assert.match(page, /ei-scroll/);
 });
 
-test('replacing the table asks for an inline confirmation first', () => {
+test('replacing the table shows an inline preview first; nothing changes until it is confirmed', () => {
   assert.ok(page.includes('确认覆盖'));
+  assert.ok(page.includes('确认追加'));
   assert.ok(page.includes('覆盖现有费用…'));
   assert.ok(page.includes('追加到现有费用'));
-  assert.match(page, /confirmWorkbookOverwrite/);
   assert.match(page, /confirmPasteOverwrite/);
-  assert.match(page, /@click="confirmWorkbookReplace"/);
-  // the Excel replace menu item only asks; it does not open the file picker directly
-  assert.match(page, /function importOverwrite\(\) \{\s*closeImportMenu\(\);\s*requestWorkbookReplace\(\);/);
+  // choosing a file only parses it into importPreview; applyImportedRows runs from confirmImportPreview
+  assert.match(page, /function importOverwrite\(\) \{\s*closeImportMenu\(\);\s*chooseWorkbook\(true\);/);
   assert.doesNotMatch(page, /@click="chooseWorkbook\(true\)"/);
+  const picked = page.slice(page.indexOf('async function importWorkbookRows'), page.indexOf('function cancelImportPreview'));
+  assert.match(picked, /importPreview\.value = \{ parsed, replace, fileName: file\.name \}/);
+  assert.doesNotMatch(picked, /applyImportedRows/);
+  assert.match(page, /function confirmImportPreview\(\) \{[\s\S]*?applyImportedRows\(\{ errors: \[\], rows: preview\.parsed\.validRows \}, preview\.replace/);
+  assert.match(page, /@click="confirmImportPreview"/);
+  assert.match(page, /@click="cancelImportPreview"/);
+  assert.match(page, /:disabled="importSummary\.blocked"/);
+  // preview wording: row count, total, problem rows, new accounts, rows that will be cleared
+  assert.ok(page.includes('将导入'));
+  assert.ok(page.includes('行有问题'));
+  assert.ok(page.includes('新科目 <b'));
+  assert.ok(page.includes('行会被清空'));
+  assert.match(page, /importSummary\.errors\.slice\(0, 5\)|errors\.slice\(0, 5\)/);
+  // unreadable files keep the error path
+  assert.match(page, /pasteErrors\.value = \[\(error && error\.message\) \|\| 'Excel 导入失败'\]/);
+});
+
+test('Excel menu offers a template download built client-side', () => {
+  assert.ok(page.includes('下载 Excel 模板'));
+  assert.match(page, /role="menuitem" class="ei-mi" @click="downloadTemplate"/);
+  assert.match(page, /exportSheetsWorkbook\(\{ filename: '研发费用导入模板', sheets: buildExpenseTemplateSheets\(\) \}\)/);
+});
+
+test('a finalized month is truly read-only: plain-text rows, no edit or import entry points, no check strip', () => {
+  assert.match(page, /const readOnlyView = computed\(\(\) => isYearScope\.value \|\| finalized\.value\)/);
+  // the plain-text table is used for year view and finalized months
+  assert.match(page, /<div v-if="readOnlyView" ref="tableScroll"/);
+  // import / paste / add-row controls live inside the editable-only block
+  assert.match(page, /<template v-if="!readOnlyView">\s*<div ref="importMenuRef"/);
+  const readonlyTable = page.slice(page.indexOf('<div v-if="readOnlyView" ref="tableScroll"'), page.indexOf('<div v-else ref="tableScroll"'));
+  assert.doesNotMatch(readonlyTable, /<input|<select|v-model|delRow/);
+  // no validation / duplicate notices, no strip, and every mutator bails out
+  assert.match(page, /const stripState = computed\(\(\) => \(readOnlyView\.value \|\| !items\.value\.length \? null/);
+  assert.match(page, /const errors = readOnlyView\.value \? \[\]/);
+  for (const fn of ['addRow', 'delRow', 'openPaste', 'importPastedRows', 'chooseWorkbook']) {
+    assert.match(page, new RegExp('function ' + fn + '\\([^)]*\\) \\{\\s*if \\(readOnlyView\\.value\\) return;'));
+  }
+  assert.match(page, /if \(readOnlyView\.value \|\| !catalogReady\.value \|\| dataLoading\.value\) return;/);
+  // filters, sort, group and export stay available
+  assert.ok(page.includes('导出 Excel'));
+  assert.ok(page.includes('按凭证号分组'));
+  assert.match(page, /<div v-if="finalized" class="ei-strip bad"/);
 });
 
 test('paste import lives in a teleported drawer and Excel import is a two-item menu', () => {

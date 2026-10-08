@@ -182,3 +182,27 @@ test("the page ships no demo-only controls", () => {
   assert.doesNotMatch(source, /演示角色/);
   assert.doesNotMatch(source, /保留与新增的功能/);
 });
+
+test("the follow-up list scrolls inside its card with a sticky header and a head-count footer", () => {
+  assert.match(board, /<div class="tbl ts-scroll">/);
+  assert.match(board, /共 \{\{ rows\.length \}\} 人/);
+  const css = read("../src/styles/rdTimesheet.css");
+  assert.match(css, /\.rd \.ts-scroll \{ max-height: 560px; overflow: auto; \}/);
+  // the sticky header comes from the shared table style
+  assert.match(read("../src/styles/rdUi.css"), /\.rd th \{[^}]*position: sticky; top: 0;/);
+  // the department list is untouched (no scroll box)
+  assert.doesNotMatch(board, /class="card ts-scroll/);
+});
+
+test("redesigned pages carry product copy, not design commentary", () => {
+  const pages = [
+    source,
+    read("../src/pages/Projects.vue"),
+    read("../src/pages/ExpenseImport.vue"),
+    read("../src/pages/Allocation.vue"),
+  ].join("\n");
+  for (const phrase of ["点一个部门，右边只看它", "是默认状态", "不再每行都贴标签", "表头固定", "点单元格直接编辑", "为示意", "演示", "上月没有工时记录，所以没有"]) {
+    assert.ok(!pages.includes(phrase), phrase);
+  }
+  assert.doesNotMatch(pages, /[Dd]emo|示意/);
+});
