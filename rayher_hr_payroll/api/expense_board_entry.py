@@ -29,7 +29,7 @@ ROW_FIELDS = [
     "fixed_asset_category", "urgency", "paid_on", "payee_name", "invoice_followup_status",
     "expected_invoice_date", "travel_destination", "travel_start_date", "travel_end_date",
     "travel_days", "current_step_label", "current_step_index", "arrival_status", "inspection_status",
-    "prepayment_writeoff_status", "creation", "modified", "project",
+    "prepayment_writeoff_status", "creation", "modified", "project", "source_purchase_order",
 ]
 REMINDER_KEY = re.compile(r"\[invoice-due:([^:\]]+):")
 

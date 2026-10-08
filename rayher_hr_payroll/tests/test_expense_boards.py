@@ -201,6 +201,16 @@ def test_procurement_numbers_stay_separate():
     }
 
 
+def test_procurement_payment_rows_carry_their_purchase_order():
+    rows = [
+        {"name": "PP1", "request_type": "采购付款", "workflow_status": "已付款", "amount": 100, "paid_on": "2026-09-05",
+         "source_purchase_order": "PO-1"},
+        {"name": "PP2", "request_type": "采购付款", "workflow_status": "已付款", "amount": 100, "paid_on": "2026-09-05"},
+    ]
+    payments = boards.procurement_board(rows, today=TODAY)["payments"]
+    assert [row["source_purchase_order"] for row in payments] == ["PO-1", ""]
+
+
 def test_recent_months_crosses_the_year_boundary():
     assert boards.recent_months(date(2026, 2, 15), 4) == ["2025-11", "2025-12", "2026-01", "2026-02"]
     assert boards.month_key("2026-09-23 10:00:00") == "2026-09"

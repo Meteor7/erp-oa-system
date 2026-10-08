@@ -367,6 +367,7 @@ def procurement_board(rows, *, today):
             "workflow_status": _get(row, "workflow_status"), "business_status": _get(row, "business_status") or "",
             "arrival_status": _get(row, "arrival_status") or "", "inspection_status": _get(row, "inspection_status") or "",
             "prepayment_writeoff_status": _get(row, "prepayment_writeoff_status") or "",
+            "source_purchase_order": _get(row, "source_purchase_order") or "",
             "waited_days": int(_get(row, "waited_days") or 0),
         }
 
