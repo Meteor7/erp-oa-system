@@ -92,7 +92,26 @@ test("allocation page finalize button and inline confirm card", () => {
 test("allocation page matrix is filled from the preview while the month is not finalized", () => {
   assert.match(source, /preview: isPreview\.value/);
   assert.match(source, /const matrixTag = computed\(\(\) => allocName\.value \|\| \(isPreview\.value \? "预览" : displayPeriod\.value\)\)/);
-  assert.ok(source.includes("（预览）"));
+  // 导出文件名 / 期间列带「已定版-定版人」或「预览」标记（allocationExportLabel）
+  assert.match(source, /period: allocationExportLabel\(\{\s*period: displayPeriod\.value,\s*state: viewState\.value,\s*finalizedByName: finalizedBy,/);
+});
+
+test("allocation page shows who finalized and when next to the status tag, and the last revoke in preview", () => {
+  assert.match(source, /const finalizedInfo = computed\(\(\) => \(isFinalized\.value \? finalizedStamp\(payload\.value\) : null\)\)/);
+  assert.match(source, /const revokeInfo = computed\(\(\) => \(isPreview\.value \|\| isPreviewError\.value \? lastRevokeLine\(payload\.value\) : null\)\)/);
+  // 定版人和时间紧跟在状态标签后面，完整时间在悬停提示里
+  assert.match(source, /<span v-if="finalizedInfo" class="muted stamp" :title="finalizedInfo\.title">\{\{ finalizedInfo\.text \}\}<\/span>/);
+  // 上次撤销放在状态标签下面一行（不是同一行的 inline）
+  assert.match(source, /<div v-if="!loading && statusTag" class="stat-col">[\s\S]*<span v-if="revokeInfo" class="muted revoke" :title="revokeInfo\.title">\{\{ revokeInfo\.text \}\}<\/span>/);
+  // 纯文本渲染，不用 v-html（撤销原因是用户输入）
+  assert.doesNotMatch(source, /v-html/);
+});
+
+test("allocation export carries the info sheet with status, finalizer and last revoke", () => {
+  assert.match(source, /info: buildAllocationInfoRows\(\{/);
+  assert.match(source, /finalizedOn: data\.finalized_on/);
+  assert.match(source, /lastRevoke: isPreview\.value \? data\.last_revoke : null/);
+  assert.match(source, /exportedAt: exportTimestamp\(\)/);
 });
 
 test("allocation page supports month and year views with four top totals", () => {
@@ -177,8 +196,12 @@ test("allocation matrix groups rows under collapsible level-3 account headers", 
   assert.match(source, /aria-expanded/);
   assert.match(source, /class="g"/);
   assert.match(source, /group\.totals\[colKey\(c\)\]/);
-  assert.match(source, /stageLabel\(c\.project_stage\)/);
-  assert.match(source, /:title="projectTitle\(c\)"/);
+  // 项目列头：编号一行、项目名称小字一行（省略号）、阶段一行，悬停显示 "RD13 · KIBO 5895H · 费用化"
+  assert.match(source, /projectColumnHeader\(c\)/);
+  assert.match(source, /<th v-for="h in moneyHeaders" :key="h\.key" class="r ph" :title="h\.title">/);
+  assert.match(source, /<small v-if="h\.name" class="ph-name">\{\{ h\.name \}\}<\/small>/);
+  assert.match(source, /<small v-if="h\.stage" class="ph-stage">\{\{ h\.stage \}\}<\/small>/);
+  assert.match(source, /\.ph-name \{[^}]*text-overflow: ellipsis/);
 });
 
 test("allocation page can export the current allocation workbook", () => {

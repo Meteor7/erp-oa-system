@@ -83,11 +83,20 @@ def _project_stage_by_project(lines: list[Any]) -> dict[str, str]:
     return stages
 
 
+def _project_labels(project: str, project_info: Mapping[str, Any] | None) -> tuple[str, str]:
+    """列头用的 (项目编号, 项目名称)：Project 上的 rd_project_code / project_name，没有就用项目键本身。"""
+    info = (project_info or {}).get(project) or {}
+    code = _clean(_value(info, "rd_project_code")) or project
+    name = _clean(_value(info, "project_name")) or project
+    return code, name
+
+
 def build_allocation_matrix(
     lines: Iterable[Any],
     *,
     translate: Callable[[str], str] = _identity,
     include_total: bool = True,
+    project_info: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     line_rows = list(lines)
     has_period = any(_clean(_value(row, "period")) for row in line_rows)
@@ -102,17 +111,19 @@ def build_allocation_matrix(
         {"label": translate("\u0033\u7ea7\u8d39\u7528\u79d1\u76ee"), "fieldname": "account_level_3", "fieldtype": "Data", "width": 220},
         {"label": translate("\u0034\u7ea7\u8d39\u7528\u79d1\u76ee"), "fieldname": "account_level_4", "fieldtype": "Data", "width": 180},
     ])
-    columns.extend(
-        {
+    for project in projects:
+        project_code, project_name = _project_labels(project, project_info)
+        columns.append({
             "label": project,
             "fieldname": project_fieldnames[project],
             "fieldtype": "Currency",
             "width": 130,
             "project": project,
             "project_stage": project_stages.get(project, "unknown"),
-        }
-        for project in projects
-    )
+            # 页面和导出的列头显示项目名称；label / project 仍是原来的项目键。
+            "project_code": project_code,
+            "project_name": project_name,
+        })
     columns.append(
         {
             "label": translate("\u6c47\u603b"),
@@ -371,6 +382,24 @@ def _allocation_line_query_fields(frappe) -> tuple[list[str], str]:
     return fields, order_by
 
 
+def _project_info_for_lines(frappe: Any, lines: Iterable[Any]) -> dict[str, Any]:
+    """矩阵里出现的所有项目，一次查出名称和编号（"未分摊境外公共费用"不是 Project，不查）。"""
+    names = sorted({
+        str(_value(line, "project"))
+        for line in lines
+        if _value(line, "project") and str(_value(line, "project")) != UNALLOCATED_FOREIGN_COMMON
+    })
+    if not names:
+        return {}
+    rows = frappe.get_all(
+        "Project",
+        filters={"name": ["in", names]},
+        fields=["name", "project_name", "rd_project_code"],
+        limit_page_length=len(names),
+    )
+    return {str(_value(row, "name")): row for row in rows or []}
+
+
 def _foreign_matrix_lines_for_month(year: Any, month: Any) -> list[dict[str, Any]]:
     if not year or not month:
         return []
@@ -508,4 +537,4 @@ def execute(filters=None):
             lines.append(row)
 
     lines = filter_allocation_lines_by_stage(lines, filters.get("stage"))
-    return build_allocation_matrix(lines, translate=frappe._)
+    return build_allocation_matrix(lines, translate=frappe._, project_info=_project_info_for_lines(frappe, lines))

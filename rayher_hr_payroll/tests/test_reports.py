@@ -307,7 +307,7 @@ def test_matrix_report_adds_allocation_period_to_domestic_rows(monkeypatch):
                     "project_stage": "expensed",
                     "allocated_amount": Decimal("10.00"),
                 }]
-            if doctype == "RD Allocation Source Expense":
+            if doctype in ("RD Allocation Source Expense", "Project"):
                 return []
             raise AssertionError(doctype)
 
@@ -319,6 +319,93 @@ def test_matrix_report_adds_allocation_period_to_domestic_rows(monkeypatch):
 
     assert columns[0]["fieldname"] == "period"
     assert rows[0]["period"] == "2026-06"
+
+
+# ---------------------------------------------------------------------------
+# 矩阵列头带项目名称（2026-10）
+# ---------------------------------------------------------------------------
+def test_build_allocation_matrix_columns_carry_project_names_and_codes():
+    lines = [
+        {"voucher_no": "V1", "account_level_3": "A", "account_level_4": "", "project": "PROJ-0001", "project_stage": "expensed", "allocated_amount": 5},
+        {"voucher_no": "V1", "account_level_3": "A", "account_level_4": "", "project": "RD13", "project_stage": "expensed", "allocated_amount": 6},
+        {"voucher_no": "V1", "account_level_3": "A", "account_level_4": "", "project": "RD99", "project_stage": "capitalized", "allocated_amount": 7},
+        {"voucher_no": "V1", "account_level_3": "A", "account_level_4": "", "project": "未分摊境外公共费用", "project_stage": "unknown", "allocated_amount": 8},
+    ]
+    info = {
+        "PROJ-0001": {"project_name": "KIBO 5895H", "rd_project_code": "RD13"},
+        "RD13": SimpleNamespace(project_name="KIBO 5895H", rd_project_code=None),
+        "RD99": {"project_name": "", "rd_project_code": ""},
+    }
+
+    columns, _rows = build_allocation_matrix(lines, include_total=False, project_info=info)
+
+    by_label = {column["label"]: column for column in columns if column.get("project")}
+    # 原有键不变：label / project 仍是项目键
+    assert by_label["PROJ-0001"]["project"] == "PROJ-0001"
+    assert by_label["PROJ-0001"]["project_stage"] == "expensed"
+    assert (by_label["PROJ-0001"]["project_code"], by_label["PROJ-0001"]["project_name"]) == ("RD13", "KIBO 5895H")
+    # 没有 rd_project_code：编号退回项目键
+    assert (by_label["RD13"]["project_code"], by_label["RD13"]["project_name"]) == ("RD13", "KIBO 5895H")
+    # Project 上名称、编号都是空：都退回项目键
+    assert (by_label["RD99"]["project_code"], by_label["RD99"]["project_name"]) == ("RD99", "RD99")
+    # 境外公共费用伪项目没有 Project：用它自己的名字
+    pseudo = by_label["未分摊境外公共费用"]
+    assert (pseudo["project_code"], pseudo["project_name"]) == ("未分摊境外公共费用",) * 2
+    # 非项目列不带这两个键
+    assert all("project_name" not in column for column in columns if not column.get("project"))
+
+
+def test_build_allocation_matrix_without_project_info_falls_back_to_the_project_key():
+    lines = [{"voucher_no": "V1", "account_level_3": "A", "project": "RD01", "allocated_amount": 1}]
+
+    columns, _rows = build_allocation_matrix(lines, include_total=False)
+
+    column = next(column for column in columns if column.get("project"))
+    assert (column["label"], column["project_code"], column["project_name"]) == ("RD01", "RD01", "RD01")
+
+
+def test_matrix_report_looks_up_all_project_names_in_one_query(monkeypatch):
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    project_queries = []
+
+    class FakeFrappe:
+        _ = staticmethod(lambda text: text)
+
+        def get_list(self, doctype, **kwargs):
+            return []
+
+        def get_all(self, doctype, **kwargs):
+            assert doctype == "Project"
+            project_queries.append(kwargs)
+            return [
+                {"name": "RD13", "project_name": "KIBO 5895H", "rd_project_code": "RD13"},
+                {"name": "RD15", "project_name": "DRAKENS 4482", "rd_project_code": "RD15"},
+            ]
+
+    monkeypatch.setattr(mod, "_get_frappe", lambda: FakeFrappe())
+    monkeypatch.setattr(mod, "_require_finance_access", lambda: None)
+    monkeypatch.setattr(
+        mod, "_foreign_matrix_lines_for_month",
+        lambda year, month: [
+            {"voucher_no": "F1", "account_level_3": "Foreign", "account_level_4": "", "project": "RD13",
+             "project_stage": "expensed", "allocated_amount": 1.0},
+            {"voucher_no": "F1", "account_level_3": "Foreign", "account_level_4": "", "project": "RD15",
+             "project_stage": "capitalized", "allocated_amount": 2.0},
+            {"voucher_no": "F2", "account_level_3": "Foreign", "account_level_4": "", "project": mod.UNALLOCATED_FOREIGN_COMMON,
+             "project_stage": "unknown", "allocated_amount": 3.0},
+        ],
+    )
+
+    columns, _rows = mod.execute({"year": 2026, "month": 7})
+
+    assert len(project_queries) == 1
+    assert project_queries[0]["filters"] == {"name": ["in", ["RD13", "RD15"]]}
+    names = {column["label"]: column["project_name"] for column in columns if column.get("project")}
+    assert names == {
+        "RD13": "KIBO 5895H", "RD15": "DRAKENS 4482",
+        mod.UNALLOCATED_FOREIGN_COMMON: mod.UNALLOCATED_FOREIGN_COMMON,
+    }
 
 
 def test_matrix_report_year_month_loads_only_requested_foreign_month(monkeypatch):

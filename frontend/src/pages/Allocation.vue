@@ -7,7 +7,13 @@ import RdSeg from "../components/rd/RdSeg.vue";
 import RdKpi from "../components/rd/RdKpi.vue";
 import RdIcon from "../components/rd/RdIcon.vue";
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
-import { exportAllocationWorkbook, allocationReconcileDifference } from "../lib/allocationExport";
+import {
+  allocationExportLabel,
+  allocationReconcileDifference,
+  buildAllocationInfoRows,
+  exportAllocationWorkbook,
+  exportTimestamp,
+} from "../lib/allocationExport";
 import {
   allocationActionState,
   allocationEmptyState,
@@ -16,12 +22,15 @@ import {
   buildAllocationMatrixFilters,
   buildFinalizeCheckLines,
   finalizeCheckIssueCount,
+  finalizedStamp,
   hasAllocationData,
+  lastRevokeLine,
   loadAllocationStageMatrices,
   previewWarningTexts,
+  projectColumnHeader,
 } from "../lib/allocationView";
 import { extractFrappeError } from "../lib/frappeError";
-import { groupAllocationRows, stageLabel } from "../lib/allocationGroups";
+import { groupAllocationRows } from "../lib/allocationGroups";
 
 const TEXT = {
   title: "研发费用台账",
@@ -121,6 +130,9 @@ const previewErrorParts = computed(() => {
     { text: text.slice(at + ENTRY_LINK_TEXT.length) },
   ].filter((part) => part.text);
 });
+// 已定版：谁、什么时候定的版；预览：上次撤销定版的人、时间、原因（本月为什么回到预览）
+const finalizedInfo = computed(() => (isFinalized.value ? finalizedStamp(payload.value) : null));
+const revokeInfo = computed(() => (isPreview.value || isPreviewError.value ? lastRevokeLine(payload.value) : null));
 const cancelReasonText = computed(() => cancelReason.value.trim());
 const canSubmitCancel = computed(() => (
   cancelReasonText.value.length >= 1 && cancelReasonText.value.length <= CANCEL_REASON_MAX && !canceling.value
@@ -196,6 +208,14 @@ const canConfirmFinalize = computed(() => Boolean(
 const matrixView = computed(() => groupAllocationRows({ columns: columns.value, result: result.value }));
 const labelColumns = computed(() => columns.value.filter((c) => !isCur(c) && !["account_level_3", "account_level_4"].includes(colKey(c))));
 const moneyColumns = computed(() => columns.value.filter((c) => isCur(c)));
+// 金额列的列头：项目列 = 编号 + 项目名称（小字）+ 阶段；「汇总」这类非项目列只有标题。
+const moneyHeaders = computed(() => moneyColumns.value.map((c) => {
+  if (!c.project) {
+    const label = colLabel(c);
+    return { key: colKey(c), code: label, name: "", stage: "", title: label };
+  }
+  return { key: colKey(c), ...projectColumnHeader(c) };
+}));
 
 function setMessage(text, bad = false) {
   msg.value = text;
@@ -333,8 +353,26 @@ async function exportCurrentAllocation() {
         filters: JSON.stringify(filters),
       }),
     });
+    const data = payload.value || {};
+    const finalizedBy = data.finalized_by_name || data.finalized_by || "";
     const filename = await exportAllocationWorkbook({
-      period: `${displayPeriod.value}${isPreview.value ? "（预览）" : ""}-${allocationModeLabel.value}`,
+      // 文件名和「阶段合计」表的期间列：2026-06-已定版-演示员工16-汇总 / 2026-06-预览-汇总
+      period: allocationExportLabel({
+        period: displayPeriod.value,
+        state: viewState.value,
+        finalizedByName: finalizedBy,
+        modeLabel: allocationModeLabel.value,
+      }),
+      info: buildAllocationInfoRows({
+        period: displayPeriod.value,
+        state: viewState.value,
+        allocationName: allocName.value,
+        finalizedBy,
+        finalizedOn: data.finalized_on,
+        lastRevoke: isPreview.value ? data.last_revoke : null,
+        modeLabel: allocationModeLabel.value,
+        exportedAt: exportTimestamp(),
+      }),
       summary: summary.value,
       columns: columns.value,
       result: result.value,
@@ -364,11 +402,6 @@ function cellText(row, column) {
   const value = row[key];
   return isCur(column) ? moneyText(value) : (value ?? "");
 }
-function projectTitle(column) {
-  const name = column.project_name || column.project || colLabel(column);
-  const stage = stageLabel(column.project_stage);
-  return stage ? `${name} · ${stage}` : String(name);
-}
 function isCollapsed(key) { return Boolean(collapsed.value[key]); }
 function toggleGroup(key) { collapsed.value = { ...collapsed.value, [key]: !collapsed.value[key] }; }
 
@@ -381,11 +414,15 @@ load();
 <template>
   <RdPage :title="TEXT.title" :subtitle="TEXT.subtitle">
     <template #ctl>
-      <span v-if="!loading && statusTag" class="stat" aria-live="polite">
-        <span class="tag" :class="statusTag.cls"><RdIcon v-if="statusTag.cls === 'ok'" name="check" />{{ statusTag.text }}</span>
-        <span v-if="isYearScope" class="muted">{{ TEXT.yearHint }}</span>
-        <span v-else-if="isFinalized && allocName" class="muted">分摊单 {{ allocName }}</span>
-      </span>
+      <div v-if="!loading && statusTag" class="stat-col">
+        <span class="stat" aria-live="polite">
+          <span class="tag" :class="statusTag.cls"><RdIcon v-if="statusTag.cls === 'ok'" name="check" />{{ statusTag.text }}</span>
+          <span v-if="finalizedInfo" class="muted stamp" :title="finalizedInfo.title">{{ finalizedInfo.text }}</span>
+          <span v-if="isYearScope" class="muted">{{ TEXT.yearHint }}</span>
+          <span v-else-if="isFinalized && allocName" class="muted">分摊单 {{ allocName }}</span>
+        </span>
+        <span v-if="revokeInfo" class="muted revoke" :title="revokeInfo.title">{{ revokeInfo.text }}</span>
+      </div>
       <RdPeriod />
     </template>
 
@@ -485,9 +522,10 @@ load();
               <tr>
                 <th class="c1">{{ TEXT.accountColumn }}</th>
                 <th v-for="c in labelColumns" :key="colKey(c)">{{ colLabel(c) }}</th>
-                <th v-for="c in moneyColumns" :key="colKey(c)" class="r" :title="projectTitle(c)">
-                  {{ colLabel(c) }}
-                  <small v-if="stageLabel(c.project_stage)">{{ stageLabel(c.project_stage) }}</small>
+                <th v-for="h in moneyHeaders" :key="h.key" class="r ph" :title="h.title">
+                  <span class="ph-code">{{ h.code }}</span>
+                  <small v-if="h.name" class="ph-name">{{ h.name }}</small>
+                  <small v-if="h.stage" class="ph-stage">{{ h.stage }}</small>
                 </th>
               </tr>
             </thead>
@@ -549,6 +587,11 @@ load();
 .rd .alloc-tbl { max-height: 560px; }
 .rd .alloc-tbl table { min-width: 1100px; }
 .rd .matrix th small { display: block; font-weight: 400; font-size: 11px; color: var(--rd-ink3); }
+/* 项目名称：小字单行，太长用省略号（完整内容在列头的悬停提示里） */
+.rd .matrix th.ph .ph-name { max-width: 9em; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd .stat-col { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; max-width: min(520px, 100%); }
+.rd .stamp { white-space: nowrap; }
+.rd .revoke { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .rd .matrix td.detail { padding-left: 40px; }
 .rd .matrix .tgl { padding: 0 5px; margin-right: 2px; }
 </style>

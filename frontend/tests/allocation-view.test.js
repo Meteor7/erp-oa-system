@@ -240,3 +240,108 @@ test("preview warnings are plain texts without empties", () => {
   assert.deepEqual(previewWarningTexts({}), []);
   assert.deepEqual(previewWarningTexts(null), []);
 });
+
+// ---- 矩阵列头、定版人、上次撤销 ----
+
+test("project column header shows the code, the project name and the stage; the title joins them", () => {
+  const { projectColumnHeader } = allocationView;
+  assert.deepEqual(
+    projectColumnHeader({ label: "RD13", project: "RD13", project_code: "RD13", project_name: "KIBO 5895H", project_stage: "expensed" }),
+    { code: "RD13", name: "KIBO 5895H", stage: "费用化", title: "RD13 · KIBO 5895H · 费用化", exportLabel: "RD13 KIBO 5895H" },
+  );
+  // 项目键和编号不同（验收站 PROJ-0001）：显示编号，名称仍显示
+  const keyed = projectColumnHeader({ label: "PROJ-0001", project: "PROJ-0001", project_code: "RD13", project_name: "KIBO 5895H", project_stage: "capitalized" });
+  assert.equal(keyed.code, "RD13");
+  assert.equal(keyed.title, "RD13 · KIBO 5895H · 资本化");
+  assert.equal(keyed.exportLabel, "RD13 KIBO 5895H");
+});
+
+test("project column header hides a name that only repeats the code or the project key", () => {
+  const { projectColumnHeader } = allocationView;
+  const same = projectColumnHeader({ label: "RD13", project_code: "RD13", project_name: "RD13", project_stage: "unknown" });
+  assert.equal(same.name, "");
+  assert.equal(same.title, "RD13 · 未判定");
+  assert.equal(same.exportLabel, "RD13");
+  // 服务端把没有名称的项目的名称退回项目键，编号是 rd_project_code
+  const keyName = projectColumnHeader({ label: "PROJ-7", project_code: "RD07", project_name: "PROJ-7" });
+  assert.equal(keyName.name, "");
+  assert.equal(keyName.code, "RD07");
+});
+
+test("project column header works for old columns without code or name, and for the foreign pseudo project", () => {
+  const { projectColumnHeader } = allocationView;
+  assert.deepEqual(
+    projectColumnHeader({ label: "RD06", project_stage: "capitalized" }),
+    { code: "RD06", name: "", stage: "资本化", title: "RD06 · 资本化", exportLabel: "RD06" },
+  );
+  const pseudo = projectColumnHeader({
+    label: "未分摊境外公共费用", project: "未分摊境外公共费用", project_code: "未分摊境外公共费用",
+    project_name: "未分摊境外公共费用", project_stage: "unknown",
+  });
+  assert.equal(pseudo.code, "未分摊境外公共费用");
+  assert.equal(pseudo.name, "");
+  assert.equal(pseudo.title, "未分摊境外公共费用 · 未判定");
+  assert.deepEqual(projectColumnHeader(), { code: "", name: "", stage: "", title: "", exportLabel: "" });
+});
+
+test("short and full date-times are read from the server's datetime strings without time zones", () => {
+  const { shortDateTime, fullDateTime } = allocationView;
+  assert.equal(shortDateTime("2026-10-08 15:20:33"), "10-08 15:20");
+  assert.equal(shortDateTime("2026-10-08T15:20:33.123456"), "10-08 15:20");
+  assert.equal(shortDateTime(null), "");
+  assert.equal(shortDateTime("昨天"), "");
+  assert.equal(fullDateTime("2026-10-08 15:20:33.123456"), "2026-10-08 15:20:33");
+  assert.equal(fullDateTime("2026-10-08T15:20"), "2026-10-08 15:20");
+  assert.equal(fullDateTime("昨天"), "昨天");
+  assert.equal(fullDateTime(undefined), "");
+});
+
+test("finalized stamp says who finalized and when, with the full time in the title", () => {
+  const { finalizedStamp } = allocationView;
+  const payload = {
+    finalized: true, finalized_by: "zhangmeng@example.com", finalized_by_name: "演示员工16", finalized_on: "2026-10-08 15:20:33",
+  };
+  assert.deepEqual(finalizedStamp(payload), {
+    text: "演示员工16 · 10-08 15:20 定版",
+    title: "演示员工16 于 2026-10-08 15:20:33 定版",
+  });
+  // 没有姓名用账号
+  assert.equal(finalizedStamp({ ...payload, finalized_by_name: null }).text, "zhangmeng@example.com · 10-08 15:20 定版");
+  // 只有人 / 只有时间
+  assert.deepEqual(finalizedStamp({ finalized: true, finalized_by_name: "演示员工16" }), { text: "演示员工16 定版", title: "演示员工16 定版" });
+  assert.deepEqual(finalizedStamp({ finalized: true, finalized_on: "2026-10-08 15:20:33" }), {
+    text: "10-08 15:20 定版", title: "2026-10-08 15:20:33 定版",
+  });
+});
+
+test("finalized stamp is null when the month is not finalized or nothing is known", () => {
+  const { finalizedStamp } = allocationView;
+  assert.equal(finalizedStamp(null), null);
+  assert.equal(finalizedStamp({ finalized: false, finalized_by_name: "演示员工16", finalized_on: "2026-10-08 15:20:33" }), null);
+  assert.equal(finalizedStamp({ finalized: true, finalized_by: null, finalized_by_name: null, finalized_on: null }), null);
+});
+
+test("last revoke line shows who, when and the reason; the title keeps the full time and reason", () => {
+  const { lastRevokeLine } = allocationView;
+  const payload = {
+    last_revoke: { by: "zhangmeng@example.com", by_name: "演示员工16", on: "2026-10-08 15:20:33", reason: "补录一笔费用" },
+  };
+  assert.deepEqual(lastRevokeLine(payload), {
+    text: "上次撤销：演示员工16 · 10-08 15:20 · 原因：补录一笔费用",
+    title: "演示员工16 于 2026-10-08 15:20:33 撤销定版\n原因：补录一笔费用",
+  });
+  // 姓名缺了用账号；原因缺了就不写原因
+  const bare = lastRevokeLine({ last_revoke: { by: "zhangmeng@example.com", by_name: null, on: "2026-10-08 15:20:33", reason: "" } });
+  assert.equal(bare.text, "上次撤销：zhangmeng@example.com · 10-08 15:20");
+  assert.equal(bare.title, "zhangmeng@example.com 于 2026-10-08 15:20:33 撤销定版");
+  // 只有原因
+  assert.equal(lastRevokeLine({ last_revoke: { reason: "录错了" } }).text, "上次撤销：原因：录错了");
+  assert.equal(lastRevokeLine({ last_revoke: {} }).text, "上次撤销");
+});
+
+test("last revoke line is null without a revoke record", () => {
+  const { lastRevokeLine } = allocationView;
+  assert.equal(lastRevokeLine(null), null);
+  assert.equal(lastRevokeLine({}), null);
+  assert.equal(lastRevokeLine({ last_revoke: null }), null);
+});

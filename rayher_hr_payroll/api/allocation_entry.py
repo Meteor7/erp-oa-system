@@ -1,3 +1,5 @@
+import re
+
 import frappe
 
 from rayher_hr_payroll.api._guards import (
@@ -713,6 +715,104 @@ def _submitted_allocation_name(year, month):
     )
 
 
+def _datetime_text(value):
+    """datetime / 字符串 -> "YYYY-MM-DD HH:MM:SS"（去掉小数秒）；空值返回 None。"""
+    if not value:
+        return None
+    strftime = getattr(value, "strftime", None)
+    if callable(strftime):
+        return strftime("%Y-%m-%d %H:%M:%S")
+    return str(value).strip()[:19] or None
+
+
+def _user_display_name(user):
+    """账号 -> 姓名（没有姓名就用账号本身）。"""
+    user = _clean(user)
+    if not user:
+        return ""
+    try:
+        return _clean(frappe.utils.get_fullname(user)) or user
+    except Exception:
+        return user
+
+
+def _finalized_info(doc):
+    """谁、什么时候定版：定版是同一个请求里创建并提交分摊单，所以已提交单据的 modified_by / modified 就是提交那一刻。"""
+    user = _clean(_value(doc, "modified_by")) or _clean(_value(doc, "owner"))
+    return {
+        "finalized_by": user or None,
+        "finalized_by_name": _user_display_name(user) or None,
+        "finalized_on": _datetime_text(_value(doc, "modified")) or _datetime_text(_value(doc, "creation")),
+    }
+
+
+# 备注格式：撤销定版：{原因}（{姓名或账号}，YYYY-MM-DD HH:MM:SS）。原因里可以有括号和逗号，所以原因取最后一组括号之前的全部内容。
+_REVOKE_PREFIXES = ("撤销定版：", "撤销定版:")
+_REVOKE_COMMENT_RE = re.compile(
+    r"^撤销定版[：:]\s*(?P<reason>.*)[（(](?P<by>[^（）()]*?)[，,]\s*(?P<on>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})\s*[）)]\s*$",
+    re.S,
+)
+
+
+def _parse_revoke_comment(content):
+    """撤销备注 -> {"reason", "by_name", "on"}；格式不对时整段当作原因，姓名和时间为空。"""
+    text = _clean(content)
+    match = _REVOKE_COMMENT_RE.match(text)
+    if match:
+        return {
+            "reason": match.group("reason").strip(),
+            "by_name": match.group("by").strip(),
+            "on": match.group("on").replace("T", " "),
+        }
+    for prefix in _REVOKE_PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    return {"reason": text.strip(), "by_name": "", "on": ""}
+
+
+def _last_revoke(year, month):
+    """这个月最近一次撤销定版：{by, by_name, on, reason}，没有（或查不到）返回 None。
+
+    撤销时每张被撤销的分摊单都写了一条「撤销定版：…」Info 备注；取已取消分摊单上最新的一条，
+    操作人、时间优先用备注自己的 owner / creation，缺了再用备注文字里的姓名和时间。
+    这只是页面上的辅助信息，查询失败不影响主流程。"""
+    try:
+        names = frappe.get_all(
+            "RD Cost Allocation",
+            filters={"year": year, "month": month, "docstatus": 2},
+            pluck="name",
+            limit_page_length=0,
+        )
+        if not names:
+            return None
+        rows = frappe.get_all(
+            "Comment",
+            filters={
+                "reference_doctype": "RD Cost Allocation",
+                "reference_name": ["in", list(names)],
+                "comment_type": "Info",
+                "content": ["like", "撤销定版%"],
+            },
+            fields=["content", "owner", "creation"],
+            order_by="creation desc",
+            limit_page_length=1,
+        )
+    except Exception:
+        return None
+    if not rows:
+        return None
+    row = rows[0]
+    parsed = _parse_revoke_comment(_value(row, "content"))
+    by = _clean(_value(row, "owner"))
+    return {
+        "by": by or None,
+        "by_name": parsed["by_name"] or _user_display_name(by) or None,
+        "on": _datetime_text(_value(row, "creation")) or parsed["on"] or None,
+        "reason": parsed["reason"],
+    }
+
+
 def _month_view(period, year, month):
     """月份的分摊页数据：(响应, 分摊单文档)。
 
@@ -727,6 +827,7 @@ def _month_view(period, year, month):
         "has_foreign_data": has_foreign_data,
         "can_finalize": _can_finalize(),
         "preview_warnings": [],
+        "finalized_by": None, "finalized_by_name": None, "finalized_on": None,
     }
     if name:
         d = frappe.get_doc("RD Cost Allocation", name)
@@ -743,6 +844,7 @@ def _month_view(period, year, month):
             "stage_summaries": _stage_summary_values(capitalized, expensed, unknown),
             "project_summaries": _project_summaries(d.name),
             "preview": False, "finalized": True,
+            **_finalized_info(d),
         }, d
 
     preview = _build_preview(period, year, month)
@@ -792,6 +894,8 @@ def get_allocation(period, scope="month"):
         return result
     year, month = parse_period(period)
     payload, _doc = _month_view(period, year, month)
+    # 本月最近一次撤销定版（谁、什么时候、为什么）；预览状态下页面用它说明本月为什么回到预览。
+    payload["last_revoke"] = _last_revoke(year, month)
     return payload
 
 

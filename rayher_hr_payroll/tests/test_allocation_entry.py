@@ -842,6 +842,8 @@ def _prepare_month(monkeypatch, *, foreign=None, has_foreign=False, submitted=No
     mod, frappe = _load_allocation_entry(monkeypatch)
     projects = []
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    # 撤销记录的查询有自己的用例；这里的 get_all 只允许查 Project。
+    monkeypatch.setattr(mod, "_last_revoke", lambda year, month: None)
     monkeypatch.setattr(mod, "_foreign_period_state", lambda year, month: (foreign or mod._zero_stage_totals(), has_foreign))
     frappe.db.get_value = lambda *args, **kwargs: submitted
 
@@ -978,6 +980,210 @@ def test_get_allocation_for_a_finalized_month_never_computes_a_preview(monkeypat
     assert result["lines"] == 3
     assert result["project_summaries"] == [{"project": "RD06"}]
     assert result["preview_warnings"] == []
+
+
+def test_get_allocation_finalized_month_says_who_finalized_and_when(monkeypatch):
+    mod, frappe, _queried = _prepare_month(
+        monkeypatch, submitted="ALLOC-1",
+        preview=AssertionError("a finalized month must not be previewed"),
+    )
+    frappe.utils = SimpleNamespace(get_fullname=lambda user: {"zhangmeng@example.com": "演示员工16"}.get(user, user))
+    frappe.get_doc = lambda doctype, name: SimpleNamespace(
+        name=name, status="Submitted", capitalized_total=70, expensed_total=30, unknown_total=0, lines=[1, 2, 3],
+        owner="creator@example.com", creation=datetime(2026, 10, 8, 15, 19, 58),
+        modified_by="zhangmeng@example.com", modified=datetime(2026, 10, 8, 15, 20, 33, 123456),
+    )
+    monkeypatch.setattr(mod, "_project_summaries", lambda name: [])
+    monkeypatch.setattr(mod, "_last_revoke", lambda year, month: {"by": "a", "by_name": "A", "on": "2026-10-07 09:00:00", "reason": "r"})
+
+    result = mod.get_allocation("2026-10")
+
+    # 提交那一刻（modified_by / modified），不是创建人
+    assert result["finalized_by"] == "zhangmeng@example.com"
+    assert result["finalized_by_name"] == "演示员工16"
+    assert result["finalized_on"] == "2026-10-08 15:20:33"
+    # 重新定版后上次撤销的记录仍然带出来（页面只在预览时显示）
+    assert result["last_revoke"]["reason"] == "r"
+
+
+def test_get_allocation_finalized_info_falls_back_to_owner_creation_and_account(monkeypatch):
+    mod, frappe, _queried = _prepare_month(monkeypatch, submitted="ALLOC-1")
+    frappe.get_doc = lambda doctype, name: SimpleNamespace(
+        name=name, status="Submitted", capitalized_total=1, expensed_total=0, unknown_total=0, lines=[],
+        owner="creator@example.com", creation="2026-10-08 15:19:58.500000", modified_by=None, modified=None,
+    )
+    monkeypatch.setattr(mod, "_project_summaries", lambda name: [])
+
+    result = mod.get_allocation("2026-10")
+
+    # frappe.utils 不可用 / 没有姓名时显示账号
+    assert result["finalized_by"] == "creator@example.com"
+    assert result["finalized_by_name"] == "creator@example.com"
+    assert result["finalized_on"] == "2026-10-08 15:19:58"
+
+
+def test_get_allocation_preview_and_empty_month_have_no_finalized_info_but_carry_last_revoke(monkeypatch):
+    preview = SimpleNamespace(import_name="IMP-1", doc=_preview_doc(), warnings=[], error=None)
+    mod, _frappe, _queried = _prepare_month(monkeypatch, preview=preview)
+    revoke = {"by": "zhangmeng@example.com", "by_name": "演示员工16", "on": "2026-10-08 15:20:33", "reason": "补录一笔费用"}
+    monkeypatch.setattr(mod, "_last_revoke", lambda year, month: revoke if (year, month) == (2026, 10) else None)
+
+    result = mod.get_allocation("2026-10")
+
+    assert result["preview"] is True
+    assert (result["finalized_by"], result["finalized_by_name"], result["finalized_on"]) == (None, None, None)
+    assert result["last_revoke"] == revoke
+    assert mod.get_allocation("2026-09")["last_revoke"] is None
+
+    empty_mod, _f, _q = _prepare_month(monkeypatch, preview=None)
+    empty = empty_mod.get_allocation("2026-10")
+    assert empty["last_revoke"] is None
+    assert empty["finalized_by"] is None
+
+
+def test_get_allocation_year_scope_has_no_finalized_info_or_last_revoke(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_foreign_period_state", lambda year, month: (mod._zero_stage_totals(), False))
+    frappe.get_all = lambda doctype, **kwargs: []
+
+    result = mod.get_allocation("2026-07", scope="year")
+
+    assert "last_revoke" not in result
+    assert "finalized_by" not in result
+
+
+@pytest.mark.parametrize("content,expected", [
+    (
+        "撤销定版：补录一笔费用（演示员工16，2026-10-08 15:20:33）",
+        {"reason": "补录一笔费用", "by_name": "演示员工16", "on": "2026-10-08 15:20:33"},
+    ),
+    (
+        # 原因里自己带括号、逗号：只认最后一组「（姓名，时间）」
+        "撤销定版：6 月（含补录）有一笔费用，项目录错了（zhangmeng@example.com，2026-10-08 15:20:33）",
+        {"reason": "6 月（含补录）有一笔费用，项目录错了", "by_name": "zhangmeng@example.com", "on": "2026-10-08 15:20:33"},
+    ),
+    (
+        # 半角冒号、括号、逗号也认
+        "撤销定版: wrong project (Zhang Meng, 2026-10-08 15:20:33)",
+        {"reason": "wrong project", "by_name": "Zhang Meng", "on": "2026-10-08 15:20:33"},
+    ),
+    (
+        "撤销定版：第一行\n第二行（演示员工16，2026-10-08 15:20:33）\n",
+        {"reason": "第一行\n第二行", "by_name": "演示员工16", "on": "2026-10-08 15:20:33"},
+    ),
+    (
+        # 没有姓名和时间尾巴：整段当原因
+        "撤销定版：只有原因",
+        {"reason": "只有原因", "by_name": "", "on": ""},
+    ),
+    ("撤销定版：", {"reason": "", "by_name": "", "on": ""}),
+    (None, {"reason": "", "by_name": "", "on": ""}),
+])
+def test_parse_revoke_comment_is_tolerant(monkeypatch, content, expected):
+    mod, _frappe = _load_allocation_entry(monkeypatch)
+
+    assert mod._parse_revoke_comment(content) == expected
+
+
+def test_parse_revoke_comment_reads_what_cancel_allocation_writes(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    frappe.session = SimpleNamespace(user="zhangmeng@example.com")
+    frappe.utils = SimpleNamespace(get_fullname=lambda user: "演示员工16", now_datetime=lambda: datetime(2026, 10, 8, 15, 20, 33))
+
+    text = mod._cancel_comment_text("发现（6 月）一笔费用录错了项目，改完重新定版")
+
+    assert mod._parse_revoke_comment(text) == {
+        "reason": "发现（6 月）一笔费用录错了项目，改完重新定版", "by_name": "演示员工16", "on": "2026-10-08 15:20:33",
+    }
+
+
+def _revoke_frappe(frappe, *, cancelled, comments, calls=None):
+    calls = calls if calls is not None else []
+
+    def get_all(doctype, **kwargs):
+        calls.append((doctype, kwargs))
+        if doctype == "RD Cost Allocation":
+            return list(cancelled)
+        assert doctype == "Comment"
+        return list(comments)
+
+    frappe.get_all = get_all
+    frappe.utils = SimpleNamespace(get_fullname=lambda user: {"zhangmeng@example.com": "演示员工16"}.get(user, user))
+    return calls
+
+
+def test_last_revoke_is_none_without_cancelled_allocations(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    calls = _revoke_frappe(frappe, cancelled=[], comments=[{"content": "撤销定版：x（A，2026-10-08 15:20:33）"}])
+
+    assert mod._last_revoke(2026, 10) is None
+    # 没有已取消的分摊单就不再查备注
+    assert [doctype for doctype, _kwargs in calls] == ["RD Cost Allocation"]
+    assert calls[0][1]["filters"] == {"year": 2026, "month": 10, "docstatus": 2}
+
+
+def test_last_revoke_is_none_when_cancelled_allocations_have_no_revoke_comment(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    calls = _revoke_frappe(frappe, cancelled=["ALLOC-1", "ALLOC-2"], comments=[])
+
+    assert mod._last_revoke(2026, 10) is None
+    comment_filters = calls[1][1]["filters"]
+    assert comment_filters == {
+        "reference_doctype": "RD Cost Allocation",
+        "reference_name": ["in", ["ALLOC-1", "ALLOC-2"]],
+        "comment_type": "Info",
+        "content": ["like", "撤销定版%"],
+    }
+    # 最新的一条
+    assert calls[1][1]["order_by"] == "creation desc"
+    assert calls[1][1]["limit_page_length"] == 1
+
+
+def test_last_revoke_uses_the_comment_owner_and_creation_and_parses_the_reason(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _revoke_frappe(frappe, cancelled=["ALLOC-1"], comments=[{
+        "content": "撤销定版：补录一笔费用（演示员工16，2026-10-08 15:20:30）",
+        "owner": "zhangmeng@example.com",
+        "creation": datetime(2026, 10, 8, 15, 20, 31, 456000),
+    }])
+
+    assert mod._last_revoke(2026, 10) == {
+        "by": "zhangmeng@example.com", "by_name": "演示员工16", "on": "2026-10-08 15:20:31", "reason": "补录一笔费用",
+    }
+
+
+def test_last_revoke_falls_back_to_the_text_when_the_comment_has_no_owner_or_creation(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _revoke_frappe(frappe, cancelled=["ALLOC-1"], comments=[{
+        "content": "撤销定版：补录一笔费用（演示员工16，2026-10-08 15:20:30）", "owner": None, "creation": None,
+    }])
+
+    assert mod._last_revoke(2026, 10) == {
+        "by": None, "by_name": "演示员工16", "on": "2026-10-08 15:20:30", "reason": "补录一笔费用",
+    }
+
+
+def test_last_revoke_with_an_unparseable_comment_keeps_the_text_as_the_reason(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _revoke_frappe(frappe, cancelled=["ALLOC-1"], comments=[{
+        "content": "撤销定版：手工备注", "owner": "zhangmeng@example.com", "creation": "2026-10-08 15:20:31.000000",
+    }])
+
+    assert mod._last_revoke(2026, 10) == {
+        "by": "zhangmeng@example.com", "by_name": "演示员工16", "on": "2026-10-08 15:20:31", "reason": "手工备注",
+    }
+
+
+def test_last_revoke_never_breaks_the_page_when_the_lookup_fails(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    frappe.get_all = boom
+
+    assert mod._last_revoke(2026, 10) is None
 
 
 def test_get_allocation_year_scope_tells_whether_the_user_can_finalize(monkeypatch):

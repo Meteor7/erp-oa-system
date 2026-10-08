@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { allocationExportFilename, buildAllocationExportSheets } from "../src/lib/allocationExport.js";
+import {
+  allocationExportFilename,
+  allocationExportLabel,
+  buildAllocationExportSheets,
+  buildAllocationInfoRows,
+  exportTimestamp,
+} from "../src/lib/allocationExport.js";
 
 const columns = [
   { fieldname: "period", label: "\u65e5\u671f" },
@@ -130,4 +136,123 @@ test("stage totals that match the matrix add no reconciliation row", () => {
     result,
   });
   assert.equal(sheets.stageTotals.length, 5);
+});
+
+// ---- 项目名称列头、定版/预览标记、导出信息（2026-10） ----
+
+const namedColumns = [
+  { fieldname: "period", label: "日期" },
+  { fieldname: "voucher_no", label: "凭证号" },
+  { fieldname: "account_level_3", label: "3级费用科目" },
+  { fieldname: "account_level_4", label: "4级费用科目" },
+  { fieldname: "project_1", label: "RD13", fieldtype: "Currency", project: "RD13", project_code: "RD13", project_name: "KIBO 5895H", project_stage: "expensed" },
+  { fieldname: "project_2", label: "RD15", fieldtype: "Currency", project: "RD15", project_code: "RD15", project_name: "RD15", project_stage: "capitalized" },
+  { fieldname: "project_3", label: "未分摊境外公共费用", fieldtype: "Currency", project: "未分摊境外公共费用", project_code: "未分摊境外公共费用", project_name: "未分摊境外公共费用", project_stage: "unknown" },
+  { fieldname: "row_total", label: "汇总", fieldtype: "Currency" },
+];
+const namedResult = [
+  { period: "2026-06", voucher_no: "118", account_level_3: "差旅费", account_level_4: "", project_1: 10, project_2: 20, project_3: 5, row_total: 35 },
+];
+
+test("export matrix header carries the project name in one header row, so the sheet stays machine-readable", () => {
+  const sheets = buildAllocationExportSheets({
+    period: "2026-06", summary: { capitalized: 20, expensed: 10, unknown: 5 }, columns: namedColumns, result: namedResult,
+  });
+
+  assert.deepEqual(sheets.matrix[0], [
+    "日期", "凭证号", "3级费用科目", "4级费用科目", "RD13 KIBO 5895H", "RD15", "未分摊境外公共费用", "汇总",
+  ]);
+  // 仍然只有一行表头：第二行是数据
+  assert.deepEqual(sheets.matrix[1], ["2026-06", "118", "差旅费", "", 10, 20, 5, 35]);
+  assert.equal(sheets.matrix.length, 2);
+  // 按阶段拆开的两张表同样带名称，数据列不变
+  assert.deepEqual(sheets.expensedMatrix[0].slice(-2), ["RD13 KIBO 5895H", "汇总"]);
+  assert.equal(sheets.expensedMatrix[1].at(-2), 10);
+  assert.deepEqual(sheets.capitalizedMatrix[0].slice(-2), ["RD15", "汇总"]);
+});
+
+test("export header uses the project code when the project key differs, and falls back to the label for old columns", () => {
+  const sheets = buildAllocationExportSheets({
+    columns: [
+      { fieldname: "voucher_no", label: "凭证号" },
+      { fieldname: "project_1", label: "PROJ-0001", fieldtype: "Currency", project: "PROJ-0001", project_code: "RD13", project_name: "KIBO 5895H", project_stage: "expensed" },
+      { fieldname: "project_2", label: "RD06", fieldtype: "Currency", project_stage: "capitalized" },
+    ],
+    result: [],
+  });
+
+  assert.deepEqual(sheets.matrix[0], ["凭证号", "RD13 KIBO 5895H", "RD06"]);
+});
+
+test("export label marks a finalized allocation with who finalized it, and a preview as preview", () => {
+  assert.equal(
+    allocationExportLabel({ period: "2026-06", state: "finalized", finalizedByName: "演示员工16", modeLabel: "汇总" }),
+    "2026-06-已定版-演示员工16-汇总",
+  );
+  assert.equal(allocationExportLabel({ period: "2026-06", state: "finalized", modeLabel: "资本化" }), "2026-06-已定版-资本化");
+  assert.equal(allocationExportLabel({ period: "2026-06", state: "preview", modeLabel: "汇总" }), "2026-06-预览-汇总");
+  assert.equal(allocationExportLabel({ period: "2026-06", state: "preview-error", modeLabel: "费用化" }), "2026-06-预览-费用化");
+  // 年度汇总不加定版/预览标记
+  assert.equal(allocationExportLabel({ period: "2026年", state: "year", modeLabel: "汇总" }), "2026年-汇总");
+  assert.equal(allocationExportLabel({ period: "2026-06" }), "2026-06");
+});
+
+test("export filename keeps the prefix, carries the label and drops characters Windows file names cannot hold", () => {
+  assert.equal(
+    allocationExportFilename(allocationExportLabel({ period: "2026-06", state: "finalized", finalizedByName: "演示员工16", modeLabel: "汇总" })),
+    "研发费用台账-2026-06-已定版-演示员工16-汇总.xlsx",
+  );
+  assert.equal(
+    allocationExportFilename(allocationExportLabel({ period: "2026-06", state: "preview", modeLabel: "汇总" })),
+    "研发费用台账-2026-06-预览-汇总.xlsx",
+  );
+  assert.equal(
+    allocationExportFilename(allocationExportLabel({ period: "2026-06", state: "finalized", finalizedByName: 'a/b:c*"d', modeLabel: "汇总" })),
+    "研发费用台账-2026-06-已定版-a_b_c_d-汇总.xlsx",
+  );
+});
+
+test("export info rows list period, status, finalizer and time for a finalized month", () => {
+  assert.deepEqual(
+    buildAllocationInfoRows({
+      period: "2026-06", state: "finalized", allocationName: "ALLOC-1", finalizedBy: "演示员工16",
+      finalizedOn: "2026-10-08 15:20:33.500000", modeLabel: "汇总", exportedAt: "2026-10-09 09:00:00",
+    }),
+    [
+      ["项目", "内容"],
+      ["会计期间", "2026-06"],
+      ["状态", "已定版"],
+      ["分摊单", "ALLOC-1"],
+      ["定版人", "演示员工16"],
+      ["定版时间", "2026-10-08 15:20:33"],
+      ["口径", "汇总"],
+      ["导出时间", "2026-10-09 09:00:00"],
+    ],
+  );
+});
+
+test("export info rows of a preview say it is a preview and show the last revoke", () => {
+  const rows = buildAllocationInfoRows({
+    period: "2026-06", state: "preview", modeLabel: "费用化", exportedAt: "2026-10-09 09:00:00",
+    lastRevoke: { by: "zhangmeng@example.com", by_name: "演示员工16", on: "2026-10-08 15:20:33", reason: "补录一笔费用" },
+  });
+
+  assert.deepEqual(rows, [
+    ["项目", "内容"],
+    ["会计期间", "2026-06"],
+    ["状态", "预览（未定版，数字会随费用和工时变化）"],
+    ["上次撤销", "演示员工16 2026-10-08 15:20:33"],
+    ["撤销原因", "补录一笔费用"],
+    ["口径", "费用化"],
+    ["导出时间", "2026-10-09 09:00:00"],
+  ]);
+  // 没有撤销记录就没有这两行；年度汇总有自己的状态说明
+  const plain = buildAllocationInfoRows({ period: "2026-06", state: "preview" });
+  assert.equal(plain.some((row) => row[0] === "上次撤销"), false);
+  assert.equal(buildAllocationInfoRows({ period: "2026年", state: "year" })[2][1].startsWith("年度汇总"), true);
+});
+
+test("export timestamp is a local YYYY-MM-DD HH:mm:ss string", () => {
+  assert.equal(exportTimestamp(new Date(2026, 9, 8, 5, 4, 3)), "2026-10-08 05:04:03");
+  assert.match(exportTimestamp(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
 });

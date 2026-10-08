@@ -1,3 +1,5 @@
+import { stageLabel } from "./allocationGroups.js";
+
 export function hasAllocationData(payload) {
   return Boolean(payload && payload.has_data);
 }
@@ -160,6 +162,77 @@ export function buildFinalizeCheckLines(check) {
 
 export function finalizeCheckIssueCount(lines = []) {
   return lines.filter((line) => line.tone === "warn").length;
+}
+
+// ---- 矩阵列头：项目编号 + 项目名称 ----
+
+// 项目列的页面列头和 Excel 列头。服务端列里 label 是项目键，project_code / project_name 是编号和名称
+// （旧数据没有这两个字段时退回 label）。名称和编号/项目键相同时不重复显示。
+// 返回 { code, name, stage, title, exportLabel }：
+//   页面：code 一行，name 小字一行（单行省略），stage（资本化 / 费用化 / 未判定）小字一行，悬停 title；
+//   title："RD13 · KIBO 5895H · 费用化"；Excel 列头 exportLabel："RD13 KIBO 5895H"（单行表头，导出仍可被程序读取）。
+export function projectColumnHeader(column = {}) {
+  const label = String(column.label ?? column.fieldname ?? column.id ?? "").trim();
+  const code = String(column.project_code || label).trim();
+  let name = String(column.project_name || "").trim();
+  if (name === code || name === label) name = "";
+  const stage = stageLabel(column.project_stage);
+  return {
+    code,
+    name,
+    stage,
+    title: [code, name, stage].filter(Boolean).join(" · "),
+    exportLabel: name ? `${code} ${name}` : code,
+  };
+}
+
+// ---- 定版人、撤销记录 ----
+
+const DATETIME_RE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?/;
+
+// "2026-10-08 15:20:33" -> "10-08 15:20"（页面上的短时间）；认不出来返回空串。
+export function shortDateTime(value) {
+  const m = DATETIME_RE.exec(String(value ?? "").trim());
+  return m ? `${m[1].slice(5)} ${m[2]}` : "";
+}
+
+// "2026-10-08T15:20:33.123456" -> "2026-10-08 15:20:33"（悬停和导出里的完整时间）；认不出来原样返回。
+export function fullDateTime(value) {
+  const text = String(value ?? "").trim();
+  const m = DATETIME_RE.exec(text);
+  return m ? `${m[1]} ${m[2]}${m[3] || ""}` : text;
+}
+
+function personName(by_name, by) {
+  return String(by_name || by || "").trim();
+}
+
+// 已定版时页头状态标签旁的小字："演示员工16 · 10-08 15:20 定版"；title 是完整时间。没有定版人和时间返回 null。
+export function finalizedStamp(payload) {
+  if (!payload || !payload.finalized) return null;
+  const who = personName(payload.finalized_by_name, payload.finalized_by);
+  const short = shortDateTime(payload.finalized_on);
+  if (!who && !short) return null;
+  const full = fullDateTime(payload.finalized_on);
+  const text = `${[who, short].filter(Boolean).join(" · ")} 定版`;
+  const title = who && full ? `${who} 于 ${full} 定版` : who ? `${who} 定版` : `${full} 定版`;
+  return { text, title };
+}
+
+// 预览状态下状态标签下面的小字："上次撤销：演示员工16 · 10-08 15:20 · 原因：补录一笔费用"。没有撤销记录返回 null。
+export function lastRevokeLine(payload) {
+  const revoke = payload && payload.last_revoke;
+  if (!revoke) return null;
+  const who = personName(revoke.by_name, revoke.by);
+  const short = shortDateTime(revoke.on);
+  const reason = String(revoke.reason || "").trim();
+  const parts = [who, short, reason && `原因：${reason}`].filter(Boolean);
+  const full = fullDateTime(revoke.on);
+  const head = who && full ? `${who} 于 ${full} 撤销定版` : who ? `${who} 撤销定版` : full ? `${full} 撤销定版` : "撤销定版";
+  return {
+    text: parts.length ? `上次撤销：${parts.join(" · ")}` : "上次撤销",
+    title: reason ? `${head}\n原因：${reason}` : head,
+  };
 }
 
 // 预览提示（preview_warnings）：字符串或 {message}，去掉空项。
