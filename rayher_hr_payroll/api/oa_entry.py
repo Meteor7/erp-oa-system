@@ -386,6 +386,14 @@ def _append_request_event(doc, action, from_status, to_status, note="", details=
     return event
 
 
+def _last_submitted_on(events):
+    """最近一次"提交申请"的时间：草稿放多久都不算等待，被驳回再提交的单据从重新提交算起。"""
+    for event in reversed(events or []):
+        if isinstance(event, dict) and event.get("action") == "提交申请":
+            return str(event.get("acted_on") or "")
+    return ""
+
+
 def _invoice_names(value):
     rows = _parse_json(value, None)
     if not isinstance(rows, list) or not rows or len(rows) > 100:
@@ -1639,6 +1647,7 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "invoice_numbers": invoice_summary.get("invoice_numbers", []),
         "no_invoice_reason": getattr(doc, "no_invoice_reason", None) or "",
         "operation_log": _operation_events(doc),
+        "submitted_on": _last_submitted_on(_operation_events(doc)),
         "attachments": _request_attachments(doc),
         "can_submit_procurement_quote": _can_submit_procurement_quote(doc, step),
         "can_modify_procurement_request": bool(

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 
@@ -76,7 +77,7 @@ def _rows(request_types, scope, department, statuses=None):
 
 
 def _decorate(rows, today):
-    """waited_days = days since the current step started; approved_on = when the last step was signed."""
+    """waited_days = days since the current step started (or since the last submission); approved_on = when the last step was signed."""
     names = [row["name"] for row in rows]
     stamps = {}
     if names:
@@ -88,8 +89,21 @@ def _decorate(rows, today):
             acted = boards.as_date(step.get("acted_on"))
             if acted and (step["parent"] not in stamps or acted > stamps[step["parent"]]):
                 stamps[step["parent"]] = acted
+    # 还没有人处理过的单据：从最近一次提交算起，不是从草稿创建日算起。
+    missing = [name for name in names if name not in stamps]
+    submitted = {}
+    if missing:
+        for doc in frappe.get_all(
+            "OA Approval Request", filters={"name": ["in", missing]}, fields=["name", "operation_log"],
+            limit_page_length=0,
+        ):
+            try:
+                events = json.loads(doc.get("operation_log") or "[]")
+            except (TypeError, ValueError):
+                events = []
+            submitted[doc["name"]] = oa_entry._last_submitted_on(events)
     for row in rows:
-        started = stamps.get(row["name"]) or boards.as_date(row.get("creation"))
+        started = stamps.get(row["name"]) or boards.as_date(submitted.get(row["name"])) or boards.as_date(row.get("creation"))
         row["waited_days"] = max(0, (today - started).days) if started else 0
         row["approved_on"] = stamps.get(row["name"]) or boards.as_date(row.get("modified"))
     return rows

@@ -4049,3 +4049,15 @@ def test_serialized_steps_carry_display_names(monkeypatch):
     assert first["action_by_name"] == "演示员工129"
     assert first["approved_by_names"] == ["演示员工129", "b"]
     assert second["action_by_name"] == "" and second["approved_by_names"] == []
+
+
+def test_last_submitted_on_uses_the_latest_submission_event():
+    events = [
+        {"action": "创建草稿", "acted_on": "2026-07-01 09:00:00"},
+        {"action": "提交申请", "acted_on": "2026-07-10 09:00:00"},
+        {"action": "驳回", "acted_on": "2026-07-11 09:00:00"},
+        {"action": "提交申请", "acted_on": "2026-07-15 08:30:00"},
+    ]
+    assert oa_entry._last_submitted_on(events) == "2026-07-15 08:30:00"
+    assert oa_entry._last_submitted_on([{"action": "创建草稿"}]) == ""
+    assert oa_entry._last_submitted_on(None) == ""
