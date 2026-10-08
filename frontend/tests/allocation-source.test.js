@@ -4,7 +4,7 @@ import test from "node:test";
 
 const source = readFileSync(new URL("../src/pages/Allocation.vue", import.meta.url), "utf8");
 
-test("allocation page can cancel the current submitted allocation with an inline confirmation", () => {
+test("allocation page can cancel the finalized allocation with an inline confirmation", () => {
   assert.match(source, /rayher_hr_payroll\.api\.allocation_entry\.cancel_allocation/);
   assert.match(source, /const canceling = ref\(false\)/);
   assert.ok(source.includes("cancelAllocation"));
@@ -16,14 +16,57 @@ test("allocation page can cancel the current submitted allocation with an inline
   assert.match(source, /const confirmingCancel = ref\(false\)/);
   assert.ok(source.includes("确认撤销"));
   assert.ok(source.includes("返回"));
-  // 只有月度、且已有分摊单时才出现撤销按钮
-  assert.match(source, /v-if="allocName && !isYearScope"/);
+  assert.ok(source.includes("撤销定版"));
+  assert.ok(source.includes("撤销后本月回到预览，工时和费用可以再修改。"));
+  // 只有月度、已定版时才出现撤销按钮；不是财务主管时按钮禁用
+  assert.match(source, /v-if="actionState\.showCancel"/);
+  assert.match(source, /:disabled="actionState\.cancelDisabled \|\| canceling"/);
+  assert.match(source, /if \(!isFinalized\.value \|\| isYearScope\.value\) return/);
 });
 
-test("allocation page recalculates only in month scope", () => {
-  assert.match(source, /rayher_hr_payroll\.api\.allocation_entry\.recalc_allocation/);
-  assert.match(source, /if \(isYearScope\.value\) return/);
-  assert.match(source, /:disabled="isYearScope \|\| recalcing/);
+test("allocation page no longer recalculates; it previews and finalizes in month scope only", () => {
+  assert.doesNotMatch(source, /recalc/);
+  assert.doesNotMatch(source, /重算/);
+  assert.match(source, /rayher_hr_payroll\.api\.allocation_entry\.finalize_allocation/);
+  assert.match(source, /rayher_hr_payroll\.api\.allocation_entry\.get_finalize_check/);
+  assert.match(source, /finalizeRes\.submit\(\{ period: period\.value \}\)/);
+  assert.match(source, /checkRes\.submit\(\{ period: requested \}\)/);
+  assert.match(source, /if \(isYearScope\.value \|\| !canConfirmFinalize\.value\) return/);
+  assert.match(source, /extractFrappeError/);
+});
+
+test("allocation page shows an amber preview strip, a red preview error and collapsible warnings", () => {
+  assert.ok(source.includes("这是按当前费用和工时算出的预览，还没有定版。财务主管点「定版本月分摊」后，本月的工时和费用都会锁定。"));
+  assert.match(source, /v-if="!loading && isPreview" class="note warn strip"/);
+  assert.ok(source.includes("预览算不出来："));
+  assert.match(source, /v-if="!loading && isPreviewError" class="note bad strip" role="alert"/);
+  assert.match(source, /previewWarningTexts\(payload\.value\)/);
+  assert.match(source, /<details v-if="!loading && previewWarnings\.length"/);
+  // 预览算不出来时不再取矩阵
+  assert.match(source, /if \(!summary\.value \|\| isPreviewError\.value\) return/);
+});
+
+test("allocation page finalize button and inline confirm card", () => {
+  assert.ok(source.includes('finalize: "定版本月分摊"'));
+  assert.match(source, /v-if="actionState\.showFinalize"/);
+  assert.match(source, /:disabled="actionState\.finalizeDisabled/);
+  assert.match(source, /:title="actionState\.finalizeDisabled \? actionState\.finalizeTitle : undefined"/);
+  assert.match(source, /v-if="confirmingFinalize" class="card fin"/);
+  assert.ok(source.includes("定版后本月工时和费用都不能再改，要改需先撤销定版。"));
+  assert.ok(source.includes('confirmFinalize: "确认定版"'));
+  assert.ok(source.includes('confirmFinalizeNo: "取消"'));
+  assert.match(source, /buildFinalizeCheckLines\(checkData\.value\)/);
+  // 服务端错误用红色提示显示
+  assert.match(source, /finalizeError/);
+  assert.match(source, /checkError/);
+  // 定版成功后重新加载
+  assert.match(source, /await load\(\);\s*setMessage\("已定版：" \+ done\)/);
+});
+
+test("allocation page matrix is filled from the preview while the month is not finalized", () => {
+  assert.match(source, /preview: isPreview\.value/);
+  assert.match(source, /const matrixTag = computed\(\(\) => allocName\.value \|\| \(isPreview\.value \? "预览" : displayPeriod\.value\)\)/);
+  assert.ok(source.includes("（预览）"));
 });
 
 test("allocation page supports month and year views with four top totals", () => {
@@ -37,14 +80,14 @@ test("allocation page supports month and year views with four top totals", () =>
   assert.match(source, /hasAllocationData\(a\)/);
   assert.match(source, /buildAllocationMatrixFilters/);
   assert.match(source, /allocationEmptyState/);
-  assert.match(source, /if \(!summary\.value\) return/);
-  assert.match(source, /allocName \|\| displayPeriod/);
+  assert.match(source, /allocName\.value \|\| \(isPreview/);
   assert.match(source, /loadAllocationStageMatrices/);
   assert.match(source, /const exportMatrixRes = createResource/);
   assert.match(source, /stageMatrices = await loadAllocationStageMatrices/);
   assert.match(source, /stageMatrices,/);
   // 未判定大于 0 时卡片用「需处理」色调
   assert.match(source, /tone: unknown > 0 \? "warn" : ""/);
+  assert.ok(source.includes("本期没有费用导入，先在「研发费用导入」录入费用"));
 });
 
 test("allocation ledger uses the shared summary capitalized and expensed views", () => {
@@ -76,22 +119,19 @@ test("allocation page has no status-and-reconcile card; status is a tag by the t
   assert.doesNotMatch(source, /statusTitle/);
   assert.doesNotMatch(source, /const checks = computed/);
   assert.doesNotMatch(source, /class="chk"/);
-  // 状态标签放在页头右侧
+  // 状态标签放在页头右侧（状态文字来自 allocationStatusTag：已定版 / 预览 · 未定版 / 年度 · 只读）
   assert.match(source, /<template #ctl>[\s\S]*statusTag\.text[\s\S]*<RdPeriod \/>/);
-  assert.ok(source.includes('"年度 · 只读"'));
-  assert.ok(source.includes('"已提交"'));
-  assert.ok(source.includes('"未分摊"'));
-  assert.ok(source.includes("年度汇总各月已提交的分摊，只读"));
+  assert.match(source, /allocationStatusTag\(viewState\.value\)/);
+  assert.ok(source.includes("年度汇总各月已定版的分摊，只读"));
+  assert.match(source, /isFinalized && allocName/);
+  assert.ok(source.includes("分摊单 {{ allocName }}"));
   // 矩阵卡片头里的对账标签
   assert.ok(source.includes("已对账 · 差额 0.00"));
   assert.match(source, /差额 \{\{ fmt\(reconcileDiff\) \}\} 元/);
-  // 差额异常条和未分摊条都带「重算分摊」按钮
+  // 差额异常条：已定版时让用户撤销定版，没有重算按钮
   assert.match(source, /v-if="showDiffStrip" class="note warn strip" role="alert"/);
-  assert.ok(source.includes("请核对后重算"));
-  assert.ok(source.includes("本期尚未分摊，调整完工时后点「重算分摊」"));
+  assert.ok(source.includes("请撤销定版后重新定版。"));
   assert.match(source, /const showDiffStrip = computed\(\(\) => !loading\.value && !isYearScope\.value && reconcileOff\.value\)/);
-  assert.match(source, /const showNotAllocated = computed\(\(\) => !loading\.value && !isYearScope\.value && !allocName\.value\)/);
-  assert.equal((source.match(/@click="recalc"/g) || []).length, 3);
   // 未判定的重复检查行已去掉
   assert.ok(!source.includes("来自阶段未判定的项目"));
 });

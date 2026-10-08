@@ -9,11 +9,18 @@ import RdIcon from "../components/rd/RdIcon.vue";
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
 import { exportAllocationWorkbook, allocationReconcileDifference } from "../lib/allocationExport";
 import {
+  allocationActionState,
   allocationEmptyState,
+  allocationStatusTag,
+  allocationViewState,
   buildAllocationMatrixFilters,
+  buildFinalizeCheckLines,
+  finalizeCheckIssueCount,
   hasAllocationData,
   loadAllocationStageMatrices,
+  previewWarningTexts,
 } from "../lib/allocationView";
+import { extractFrappeError } from "../lib/frappeError";
 import { groupAllocationRows, stageLabel } from "../lib/allocationGroups";
 
 const TEXT = {
@@ -21,9 +28,10 @@ const TEXT = {
   subtitle: "按工时分配率把费用池摊到各项目，并按项目资本化阶段汇总",
   view: "查看",
   actions: "操作",
-  recalc: "重算分摊",
-  recalcing: "重算中…",
-  cancel: "撤销本期分摊",
+  finalize: "定版本月分摊",
+  finalizing: "定版中…",
+  cancel: "撤销定版",
+  canceling: "撤销中…",
   exportExcel: "导出 Excel",
   exporting: "导出中…",
   capitalized: "资本化",
@@ -33,15 +41,19 @@ const TEXT = {
   projectTotal: "项目汇总",
   accountColumn: "科目（三级 › 四级）",
   ungrouped: "（未分类）",
-  noBusinessData: "本期暂无数据。",
+  noBusinessData: "本期没有费用导入，先在「研发费用导入」录入费用。",
+  noYearData: "本年还没有已定版的月份。",
   noAllocationDetail: "已有费用或业务数据，但暂无可展示的项目分摊明细。",
   noDetailForMode: "当前口径暂无可展示的分摊明细。",
   confirmCancel: "确定撤销",
-  confirmCancelTail: "的分摊吗？撤销后本期工时可以继续调整，调整后需要重新分摊。",
+  confirmCancelTail: "的定版吗？撤销后本月回到预览，工时和费用可以再修改。",
   confirmYes: "确认撤销",
   confirmNo: "返回",
-  yearHint: "年度汇总各月已提交的分摊，只读",
-  notAllocated: "本期尚未分摊，调整完工时后点「重算分摊」",
+  yearHint: "年度汇总各月已定版的分摊，只读",
+  previewNote: "这是按当前费用和工时算出的预览，还没有定版。财务主管点「定版本月分摊」后，本月的工时和费用都会锁定。",
+  finalizeLock: "定版后本月工时和费用都不能再改，要改需先撤销定版。",
+  confirmFinalize: "确认定版",
+  confirmFinalizeNo: "取消",
   matrixTitle: "分摊明细矩阵",
 };
 
@@ -57,31 +69,48 @@ const COLUMN_LABELS = { "Voucher No": "凭证号" };
 const columns = ref([]);
 const result = ref([]);
 const summary = ref(null);
+const payload = ref(null);
 const allocName = ref(null);
 const loading = ref(false);
-const recalcing = ref(false);
+const finalizing = ref(false);
 const canceling = ref(false);
 const exporting = ref(false);
 const confirmingCancel = ref(false);
+const confirmingFinalize = ref(false);
+const checking = ref(false);
+const checkData = ref(null);
+const checkError = ref("");
+const finalizeError = ref("");
 const msg = ref("");
 const msgBad = ref(false);
 const allocationMode = ref("all");
 const collapsed = ref({});
 
 const allocRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.get_allocation", method: "GET" });
+const checkRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.get_finalize_check", method: "GET" });
 const matrixRes = createResource({ url: "frappe.desk.query_report.run", method: "GET" });
 const exportMatrixRes = createResource({ url: "frappe.desk.query_report.run", method: "GET" });
-const recalcRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.recalc_allocation" });
+const finalizeRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.finalize_allocation" });
 const cancelRes = createResource({ url: "rayher_hr_payroll.api.allocation_entry.cancel_allocation" });
 
 const isYearScope = computed(() => periodScope.value === "year");
+const viewState = computed(() => allocationViewState({ payload: payload.value, scope: periodScope.value }));
+const isPreview = computed(() => viewState.value === "preview");
+const isPreviewError = computed(() => viewState.value === "preview-error");
+const isFinalized = computed(() => viewState.value === "finalized");
+const actionState = computed(() => allocationActionState({ state: viewState.value, payload: payload.value }));
+const statusTag = computed(() => allocationStatusTag(viewState.value));
+const previewError = computed(() => (isPreviewError.value ? String(payload.value?.preview_error || "") : ""));
+const previewWarnings = computed(() => (isPreview.value ? previewWarningTexts(payload.value) : []));
 const displayPeriod = computed(() => periodScopeLabel(period.value, periodScope.value));
+const matrixTag = computed(() => allocName.value || (isPreview.value ? "预览" : displayPeriod.value));
 const allocationModeLabel = computed(() => modeOptions.find((option) => option.value === allocationMode.value)?.label || modeOptions[0].label);
 const matrixFilters = computed(() => buildAllocationMatrixFilters({
   scope: periodScope.value,
   period: period.value,
   allocation: allocName.value,
   stage: allocationMode.value,
+  preview: isPreview.value,
 }));
 const emptyText = computed(() => {
   const state = allocationEmptyState({
@@ -90,7 +119,7 @@ const emptyText = computed(() => {
   });
   if (state === "no-detail") return TEXT.noAllocationDetail;
   if (state === "no-detail-for-mode") return TEXT.noDetailForMode;
-  return TEXT.noBusinessData;
+  return isYearScope.value ? TEXT.noYearData : TEXT.noBusinessData;
 });
 const canExport = computed(() => Boolean(summary.value && columns.value.length && result.value.length));
 const totalRows = computed(() => result.value.filter((row) => !isTotalRow(row)).length);
@@ -131,15 +160,14 @@ const reconcileDiff = computed(() => {
 });
 const reconcileBalanced = computed(() => reconcileDiff.value !== null && Math.abs(reconcileDiff.value) < 0.01);
 const reconcileOff = computed(() => reconcileDiff.value !== null && !reconcileBalanced.value);
-// 差额不为 0：只在月度提示（年度是只读汇总，不能在这里重算）
+// 差额不为 0：只在月度提示（年度是只读汇总）
 const showDiffStrip = computed(() => !loading.value && !isYearScope.value && reconcileOff.value);
-// 月度还没有分摊单：提示先重算
-const showNotAllocated = computed(() => !loading.value && !isYearScope.value && !allocName.value);
-const statusTag = computed(() => {
-  if (isYearScope.value) return { text: "年度 · 只读", cls: "" };
-  if (allocName.value) return { text: "已提交", cls: "ok" };
-  return { text: "未分摊", cls: "warn" };
-});
+
+const checkLines = computed(() => buildFinalizeCheckLines(checkData.value));
+const checkIssueCount = computed(() => finalizeCheckIssueCount(checkLines.value));
+const canConfirmFinalize = computed(() => Boolean(
+  checkData.value && checkData.value.can_finalize !== false && !checking.value && !finalizing.value,
+));
 
 const matrixView = computed(() => groupAllocationRows({ columns: columns.value, result: result.value }));
 const labelColumns = computed(() => columns.value.filter((c) => !isCur(c) && !["account_level_3", "account_level_4"].includes(colKey(c))));
@@ -150,10 +178,22 @@ function setMessage(text, bad = false) {
   msgBad.value = bad;
 }
 
+function errorText(res, e, fallback) {
+  return extractFrappeError((res && res.error) || e, fallback);
+}
+
+function resetConfirms() {
+  confirmingCancel.value = false;
+  confirmingFinalize.value = false;
+  checkData.value = null;
+  checkError.value = "";
+  finalizeError.value = "";
+}
+
 async function loadMatrix() {
   columns.value = [];
   result.value = [];
-  if (!summary.value) return;
+  if (!summary.value || isPreviewError.value) return;
   const d = await matrixRes.submit({ report_name: "RD Allocation Matrix", filters: JSON.stringify(matrixFilters.value) });
   columns.value = d.columns || [];
   result.value = d.result || [];
@@ -161,57 +201,79 @@ async function loadMatrix() {
 
 async function load() {
   loading.value = true;
-  confirmingCancel.value = false;
+  resetConfirms();
   setMessage("");
   try {
     const a = await allocRes.submit({ period: period.value, scope: periodScope.value });
+    payload.value = a || null;
     summary.value = hasAllocationData(a) ? a : null;
     allocName.value = a && a.name ? a.name : null;
     await loadMatrix();
+  } catch (e) {
+    payload.value = null;
+    summary.value = null;
+    allocName.value = null;
+    columns.value = [];
+    result.value = [];
+    setMessage(errorText(allocRes, e, "加载失败，请刷新重试"), true);
   } finally {
     loading.value = false;
   }
 }
 
-async function recalc() {
-  if (isYearScope.value) return;
-  recalcing.value = true;
+async function openFinalize() {
+  if (actionState.value.finalizeDisabled) return;
+  confirmingFinalize.value = true;
   confirmingCancel.value = false;
-  setMessage("");
+  checkData.value = null;
+  checkError.value = "";
+  finalizeError.value = "";
+  checking.value = true;
+  const requested = period.value;
   try {
-    const a = await recalcRes.submit({ period: period.value });
-    if (recalcRes.error) {
-      const er = recalcRes.error;
-      setMessage((er.messages && er.messages.join("；")) || er.message || "重算失败", true);
-      return;
-    }
-    summary.value = hasAllocationData(a) ? a : null;
-    allocName.value = a && a.name ? a.name : null;
-    await loadMatrix();
-    setMessage("已重算：" + period.value);
+    const r = await checkRes.submit({ period: requested });
+    if (requested === period.value && confirmingFinalize.value) checkData.value = r || {};
   } catch (e) {
-    setMessage((e && e.message) || "重算失败", true);
+    if (requested === period.value) checkError.value = errorText(checkRes, e, "定版检查失败");
   } finally {
-    recalcing.value = false;
+    checking.value = false;
+  }
+}
+
+function closeFinalize() {
+  confirmingFinalize.value = false;
+  checkData.value = null;
+  checkError.value = "";
+  finalizeError.value = "";
+}
+
+async function finalizeAllocation() {
+  if (isYearScope.value || !canConfirmFinalize.value) return;
+  finalizing.value = true;
+  finalizeError.value = "";
+  try {
+    await finalizeRes.submit({ period: period.value });
+    const done = period.value;
+    await load();
+    setMessage("已定版：" + done);
+  } catch (e) {
+    finalizeError.value = errorText(finalizeRes, e, "定版失败");
+  } finally {
+    finalizing.value = false;
   }
 }
 
 async function cancelAllocation() {
-  if (!allocName.value || isYearScope.value) return;
+  if (!isFinalized.value || isYearScope.value) return;
   canceling.value = true;
   setMessage("");
   try {
     await cancelRes.submit({ period: period.value });
-    if (cancelRes.error) {
-      const er = cancelRes.error;
-      setMessage((er.messages && er.messages.join("；")) || er.message || "撤销失败", true);
-      return;
-    }
     confirmingCancel.value = false;
     await load();
-    setMessage("已撤销本期分摊，可继续调整工时");
+    setMessage("已撤销定版，本月回到预览，可继续调整工时和费用");
   } catch (e) {
-    setMessage((e && e.message) || "撤销失败", true);
+    setMessage(errorText(cancelRes, e, "撤销失败"), true);
   } finally {
     canceling.value = false;
   }
@@ -226,13 +288,14 @@ async function exportCurrentAllocation() {
       scope: periodScope.value,
       period: period.value,
       allocation: allocName.value,
+      preview: isPreview.value,
       load: (filters) => exportMatrixRes.submit({
         report_name: "RD Allocation Matrix",
         filters: JSON.stringify(filters),
       }),
     });
     const filename = await exportAllocationWorkbook({
-      period: `${displayPeriod.value}-${allocationModeLabel.value}`,
+      period: `${displayPeriod.value}${isPreview.value ? "（预览）" : ""}-${allocationModeLabel.value}`,
       summary: summary.value,
       columns: columns.value,
       result: result.value,
@@ -279,10 +342,10 @@ load();
 <template>
   <RdPage :title="TEXT.title" :subtitle="TEXT.subtitle">
     <template #ctl>
-      <span v-if="!loading" class="stat">
+      <span v-if="!loading && statusTag" class="stat" aria-live="polite">
         <span class="tag" :class="statusTag.cls"><RdIcon v-if="statusTag.cls === 'ok'" name="check" />{{ statusTag.text }}</span>
         <span v-if="isYearScope" class="muted">{{ TEXT.yearHint }}</span>
-        <span v-else-if="allocName" class="muted">分摊单 {{ allocName }}</span>
+        <span v-else-if="isFinalized && allocName" class="muted">分摊单 {{ allocName }}</span>
       </span>
       <RdPeriod />
     </template>
@@ -291,15 +354,25 @@ load();
       <RdKpi v-for="card in summaryCards" :key="card.key" :label="card.label" :value="fmt(card.value)" unit="元" :sub="card.sub" :tone="card.tone" />
     </div>
 
+    <div v-if="!loading && isPreview" class="note warn strip" role="status">
+      <RdIcon name="alert" />
+      <span class="grow">{{ TEXT.previewNote }}</span>
+    </div>
+    <div v-if="!loading && isPreviewError" class="note bad strip" role="alert">
+      <RdIcon name="alert" />
+      <span class="grow"><b>预览算不出来：</b>{{ previewError }}</span>
+    </div>
+    <details v-if="!loading && previewWarnings.length" class="pw">
+      <summary class="muted">预览提示 {{ previewWarnings.length }} 条</summary>
+      <ul class="muted">
+        <li v-for="(w, i) in previewWarnings" :key="i">{{ w }}</li>
+      </ul>
+    </details>
+
     <div v-if="showDiffStrip" class="note warn strip" role="alert">
       <RdIcon name="alert" />
-      <span class="grow"><b>分摊合计与费用池差额 {{ fmt(reconcileDiff) }} 元</b>（阶段合计与分摊明细对不上），请核对后重算。</span>
-      <button type="button" class="btn sm pri" :disabled="recalcing || canceling" @click="recalc">{{ recalcing ? TEXT.recalcing : TEXT.recalc }}</button>
-    </div>
-    <div v-if="showNotAllocated" class="note warn strip">
-      <RdIcon name="alert" />
-      <span class="grow">{{ TEXT.notAllocated }}</span>
-      <button type="button" class="btn sm pri" :disabled="recalcing || canceling" @click="recalc">{{ recalcing ? TEXT.recalcing : TEXT.recalc }}</button>
+      <span v-if="isFinalized" class="grow"><b>分摊合计与费用池差额 {{ fmt(reconcileDiff) }} 元</b>（阶段合计与分摊明细对不上），请撤销定版后重新定版。</span>
+      <span v-else class="grow"><b>分摊合计与费用池差额 {{ fmt(reconcileDiff) }} 元</b>（阶段合计与分摊明细对不上），请核对费用和工时后再定版。</span>
     </div>
 
     <div class="bar">
@@ -310,27 +383,52 @@ load();
       </div>
       <div class="row">
         <span class="muted">{{ TEXT.actions }}</span>
-        <button type="button" class="btn pri" :disabled="isYearScope || recalcing || canceling" :title="isYearScope ? '年度为只读汇总，请切换到月度重算' : undefined" @click="recalc"><RdIcon name="refresh" />{{ recalcing ? TEXT.recalcing : TEXT.recalc }}</button>
+        <button v-if="actionState.showFinalize" type="button" class="btn pri" :disabled="actionState.finalizeDisabled || finalizing || confirmingFinalize" :title="actionState.finalizeDisabled ? actionState.finalizeTitle : undefined" @click="openFinalize"><RdIcon name="check" />{{ finalizing ? TEXT.finalizing : TEXT.finalize }}</button>
         <button v-if="summary" type="button" class="btn" :disabled="!canExport || exporting" @click="exportCurrentAllocation"><RdIcon name="download" />{{ exporting ? TEXT.exporting : TEXT.exportExcel }}</button>
-        <template v-if="allocName && !isYearScope">
+        <template v-if="actionState.showCancel">
           <span v-if="confirmingCancel" class="note bad confirm">
             <span>{{ TEXT.confirmCancel }} {{ period }} {{ TEXT.confirmCancelTail }}</span>
-            <button type="button" class="btn sm bad" :disabled="canceling" @click="cancelAllocation">{{ canceling ? TEXT.recalcing : TEXT.confirmYes }}</button>
+            <button type="button" class="btn sm bad" :disabled="canceling" @click="cancelAllocation">{{ canceling ? TEXT.canceling : TEXT.confirmYes }}</button>
             <button type="button" class="btn sm" :disabled="canceling" @click="confirmingCancel = false">{{ TEXT.confirmNo }}</button>
           </span>
-          <button v-else type="button" class="btn bad" :disabled="recalcing" @click="confirmingCancel = true">{{ TEXT.cancel }}</button>
+          <button v-else type="button" class="btn bad" :disabled="actionState.cancelDisabled || canceling" :title="actionState.cancelDisabled ? actionState.cancelTitle : undefined" @click="confirmingCancel = true">{{ TEXT.cancel }}</button>
         </template>
       </div>
     </div>
 
-    <div v-if="msg" class="note" :class="msgBad ? 'bad' : 'ok'"><RdIcon :name="msgBad ? 'alert' : 'check'" /><span class="grow">{{ msg }}</span></div>
+    <div v-if="confirmingFinalize" class="card fin" role="region" aria-label="确认定版">
+      <div class="hd">
+        <b>定版 {{ period }}</b>
+        <span v-if="checking" class="muted">正在检查…</span>
+        <span v-else-if="checkData" class="muted">{{ checkIssueCount ? `有 ${checkIssueCount} 项需要留意，可以继续定版` : "检查都通过了" }}</span>
+      </div>
+      <div class="bd">
+        <div v-if="checking" class="flex justify-center py-3"><Spinner class="w-5" /></div>
+        <div v-else-if="checkError" class="note bad" role="alert"><RdIcon name="alert" /><span class="grow">{{ checkError }}</span></div>
+        <template v-else>
+          <div v-for="line in checkLines" :key="line.key" :class="['chk', line.tone]">
+            <RdIcon :name="line.tone === 'warn' ? 'alert' : 'check'" />
+            <span>{{ line.text }}<span v-if="line.detail" class="muted">（{{ line.detail }}）</span></span>
+          </div>
+        </template>
+        <p class="fin-lock">{{ TEXT.finalizeLock }}</p>
+        <div v-if="finalizeError" class="note bad" role="alert"><RdIcon name="alert" /><span class="grow">{{ finalizeError }}</span></div>
+        <div class="row fin-act">
+          <button type="button" class="btn pri" :disabled="!canConfirmFinalize" @click="finalizeAllocation">{{ finalizing ? TEXT.finalizing : TEXT.confirmFinalize }}</button>
+          <button type="button" class="btn" :disabled="finalizing" @click="closeFinalize">{{ TEXT.confirmFinalizeNo }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="msg" class="note" :class="msgBad ? 'bad' : 'ok'" :role="msgBad ? 'alert' : 'status'"><RdIcon :name="msgBad ? 'alert' : 'check'" /><span class="grow">{{ msg }}</span></div>
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
     <template v-else>
-      <div v-if="!result.length" class="card"><div class="bd muted">{{ emptyText }}</div></div>
+      <div v-if="!result.length && isPreviewError" />
+      <div v-else-if="!result.length" class="card"><div class="bd muted">{{ emptyText }}</div></div>
       <div v-else class="card">
         <div class="hd">
-          <div class="row hd-l"><b>{{ TEXT.matrixTitle }}</b><span class="muted">{{ displayPeriod }} · {{ allocName || displayPeriod }} · {{ totalRows }} 行明细</span></div>
+          <div class="row hd-l"><b>{{ TEXT.matrixTitle }}</b><span class="muted">{{ displayPeriod }} · {{ matrixTag }} · {{ totalRows }} 行明细</span></div>
           <span v-if="reconcileBalanced" class="tag ok"><RdIcon name="check" />已对账 · 差额 0.00</span>
           <span v-else-if="reconcileOff" class="tag warn">差额 {{ fmt(reconcileDiff) }} 元</span>
         </div>
@@ -383,6 +481,12 @@ load();
 .rd .stat { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rd .strip { align-items: center; }
 .rd .strip svg { margin-top: 0; }
+.rd .pw { margin: -4px 0 12px; font-size: 12.5px; }
+.rd .pw summary { cursor: pointer; width: fit-content; }
+.rd .pw ul { margin: 4px 0 0; padding-left: 20px; }
+.rd .fin { margin-bottom: 12px; border-color: var(--rd-warn); }
+.rd .fin .fin-lock { margin: 10px 0 8px; font-size: 13px; color: var(--rd-ink2); }
+.rd .fin .fin-act { gap: 8px; margin-top: 4px; }
 .rd .hd-l { gap: 10px; align-items: baseline; }
 .rd .alloc-tbl { max-height: 560px; }
 .rd .alloc-tbl table { min-width: 1100px; }
