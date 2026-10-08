@@ -133,7 +133,7 @@ test("monthly work limit shows days hours and calendar fallback", () => {
   assert.match(page, /calendar_source/);
   assert.match(view, /可填/);
   assert.match(view, /已批请假/);
-  assert.ok(sheet.includes("未配置假日表，当前按周一至周五计算"));
+  assert.ok(sheet.includes("未配置假日表，按周一至周五计算"));
   assert.ok(sheet.includes("超出本月上限"));
 });
 

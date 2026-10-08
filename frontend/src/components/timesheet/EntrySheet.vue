@@ -118,7 +118,6 @@ function fillEvenly() {
       <button v-if="canRemindNow" type="button" class="btn sm" :disabled="reminding" @click="emit('remind', person.employee)"><RdIcon name="bell" />催办</button>
     </div>
     <div v-if="legacy" class="note warn"><RdIcon name="alert" /><span class="grow">历史按日记录不能在月度视图中直接修改</span></div>
-    <div v-if="weekdayFallback" class="note warn"><RdIcon name="info" /><span class="grow">未配置假日表，当前按周一至周五计算</span></div>
     <div v-if="over" class="note bad"><RdIcon name="alert" /><span class="grow">超出本月上限 {{ fmtDays(used - dayLimit, 1) }} 天（{{ fmtDays((used - dayLimit) * HOURS_PER_DAY, 0) }} 小时），请调整后再保存。</span></div>
 
     <div class="card ts-sheet">
@@ -131,7 +130,7 @@ function fillEvenly() {
               <span class="muted">{{ person.employee }}<template v-if="person.department"> · {{ person.department }}</template></span>
               <span class="tag" :class="meta.tone">{{ meta.label }}</span>
             </div>
-            <div class="muted">{{ capLine }}</div>
+            <div class="muted">{{ capLine }}<template v-if="weekdayFallback"> · 未配置假日表，按周一至周五计算</template></div>
           </div>
           <div v-if="editable" class="ts-save">
             <span v-if="dirty" class="tag warn">有未保存的修改</span>
@@ -202,6 +201,7 @@ function fillEvenly() {
           <span class="muted">上月用过：</span>
           <button v-for="project in suggestions" :key="project.name" type="button" class="ts-suggest" @click="addProject(project)">＋ {{ projectCode(project) }} {{ projectName(project) }}</button>
         </template>
+        <span v-else-if="!recentIds.length" class="muted ts-norecent">上月没有工时记录，所以没有“上月用过”的快捷项目</span>
         <span class="quiets">
           <button type="button" class="btn quiet sm" @click="emit('copy')"><RdIcon name="copy" />复制上月</button>
           <button type="button" class="btn quiet sm" @click="emit('import')"><RdIcon name="upload" />批量导入…</button>
@@ -246,7 +246,6 @@ function fillEvenly() {
         </div>
         <div v-if="!rows.length" class="muted" style="padding: 30px; text-align: center">{{ editable ? '本月还没有工时记录。从上面搜索项目添加，或点“复制上月”、批量导入。' : '本月暂无工时记录' }}</div>
       </div>
-      <div v-if="editable" class="ts-hint">保存按钮在右上角，随时能点；＋ / − 每次 0.5 天；超过本月上限时保存会置灰。</div>
     </div>
   </section>
 </template>
