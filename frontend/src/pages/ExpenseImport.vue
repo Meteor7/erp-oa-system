@@ -75,13 +75,13 @@ const total = computed(() => totals.value.total);
 const visiblePasteErrors = computed(() => pasteErrors.value.slice(0, 5));
 const remainingPasteErrorCount = computed(() => Math.max(pasteErrors.value.length - visiblePasteErrors.value.length, 0));
 
-// 每一行的问题：校验错误（会挡住保存）+ 重复凭证行（只提醒）。年度视图只读，不做检查。
+// 每一行的问题：校验错误（会挡住保存）+ 完全相同的行（只提醒，不挡保存）。年度视图只读，不做检查。
 const duplicates = computed(() => duplicateVoucherRows(items.value));
 const entries = computed(() => items.value.map((row, index) => {
   const errors = isYearScope.value ? [] : rowValidationErrors(row, index).map(stripLinePrefix);
   const problems = [...errors];
   const same = isYearScope.value ? null : duplicates.value.indexes.get(index);
-  if (same) problems.push('与第 ' + same.map((n) => n + 1).join('、') + ' 行的凭证号和科目重复');
+  if (same) problems.push('与第 ' + same.map((n) => n + 1).join('、') + ' 行完全相同（凭证号、科目、金额、项目），请确认不是重复录入；不影响保存');
   return { row, index, errors, problems };
 }));
 const filterCounts = computed(() => expenseFilterCounts(entries.value));
@@ -94,7 +94,7 @@ const filterChips = computed(() => [
   { value: 'project', label: '项目', count: filterCounts.value.project },
   ...(isYearScope.value ? [] : [{ value: 'bad', label: '有问题', count: filterCounts.value.bad }]),
 ]);
-const checksPassed = computed(() => !errorRowCount.value && !pendingAccountPaths.value.length && !duplicateGroupCount.value);
+const checksPassed = computed(() => !errorRowCount.value && !pendingAccountPaths.value.length);
 const saveBlocked = computed(() => isYearScope.value || !catalogReady.value || saving.value || errorRowCount.value > 0 || (pendingAccountPaths.value.length > 0 && !confirmNewAccounts.value));
 
 function parseFrappeServerMessages(raw) {
@@ -423,7 +423,7 @@ watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|'
           </div>
           <div class="chk" :class="duplicateGroupCount ? 'warn' : 'ok'">
             <RdIcon :name="duplicateGroupCount ? 'alert' : 'check'" />
-            <span>{{ duplicateGroupCount ? `${duplicateGroupCount} 组重复凭证行（同凭证号、同科目）` : '没有重复的凭证行' }}</span>
+            <span>{{ duplicateGroupCount ? `${duplicateGroupCount} 组完全相同的行（凭证号、科目、金额、项目都一样），仅提醒，不影响保存` : '没有完全相同的行' }}</span>
           </div>
         </div>
       </div>

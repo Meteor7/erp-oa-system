@@ -35,14 +35,16 @@ export function accountPathKey(row) {
   return LEVELS.map((field) => text(row?.[field])).join('\u001f');
 }
 
-// 重复凭证行：凭证号相同且一至四级科目也相同。凭证号为空的行不参与（没有可比对的凭证）。
+// 疑似重复的行：凭证号、一至四级科目、金额和所属项目都一样。凭证号为空的行不参与（没有可比对的凭证）。
+// 只用来提醒，不拦保存：同一个项目买同一样东西好几次是正常的。
 // 返回 { groups: [[行下标…]…], indexes: Map<行下标, 同组其他行的下标[]> }
 export function duplicateVoucherRows(rows = []) {
   const buckets = new Map();
   (rows || []).forEach((row, index) => {
     const voucher = text(row?.voucher_no);
     if (!voucher) return;
-    const key = `${voucher}\u0002${accountPathKey(row)}`;
+    const project = isProjectRow(row) ? text(row?.direct_project) : '';
+    const key = `${voucher}\u0002${accountPathKey(row)}\u0002${amountOf(row).toFixed(2)}\u0002${project}`;
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(index);
   });

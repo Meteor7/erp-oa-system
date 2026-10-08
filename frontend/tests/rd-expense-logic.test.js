@@ -27,24 +27,26 @@ test('expenseTotals splits common and project expenses with shares', () => {
   assert.deepEqual(expenseTotals([]), { total: 0, common: 0, project: 0, commonShare: 0, projectShare: 0 });
 });
 
-test('duplicateVoucherRows needs the same voucher and the same account path', () => {
+test('duplicateVoucherRows only flags rows with the same voucher, account path, amount and project', () => {
   const rows = [
-    row('V1', 'x', 'y', 'z', 1),
-    row('V1', 'x', 'y', 'z', 2, 'project', 'RD1'),
-    row('V1', 'x', 'y', '', 3),
-    row('V2', 'x', 'y', 'z', 4),
+    row('V1', 'x', 'y', 'z', 100),
+    row('V1', 'x', 'y', 'z', '100.00'),
+    row('V1', 'x', 'y', 'z', 200),
+    row('V1', 'x', 'y', 'z', 100, 'project', 'RD1'),
+    row('V1', 'x', 'y', '', 100),
+    row('V2', 'x', 'y', 'z', 100),
     row('', 'x', 'y', 'z', 5),
-    row('', 'x', 'y', 'z', 6),
-    row(' V3 ', 'a', 'b', 'c', 7),
-    row('V3', 'a', 'b', 'c', 8),
+    row('', 'x', 'y', 'z', 5),
+    row(' V3 ', 'a', 'b', 'c', 7, 'project', 'RD2'),
+    row('V3', 'a', 'b', 'c', 7, 'project', 'RD2'),
+    row('V3', 'a', 'b', 'c', 7, 'project', 'RD3'),
   ];
   const { groups, indexes } = duplicateVoucherRows(rows);
-  assert.deepEqual(groups, [[0, 1], [6, 7]]);
+  assert.deepEqual(groups, [[0, 1], [8, 9]]);
   assert.deepEqual(indexes.get(0), [1]);
-  assert.deepEqual(indexes.get(7), [6]);
-  assert.equal(indexes.has(2), false);
-  assert.equal(indexes.has(4), false);
-  assert.notEqual(accountPathKey(rows[0]), accountPathKey(rows[2]));
+  assert.deepEqual(indexes.get(9), [8]);
+  [2, 3, 4, 5, 6, 7, 10].forEach((index) => assert.equal(indexes.has(index), false));
+  assert.notEqual(accountPathKey(rows[0]), accountPathKey(rows[4]));
 });
 
 test('stripLinePrefix removes the leading line number from validation messages', () => {
