@@ -256,6 +256,27 @@ def test_save_employee_rejects_unknown_household(monkeypatch):
         raise AssertionError("unknown household value was accepted")
 
 
+def test_list_employees_returns_status_and_last_modified_for_the_detail_drawer(monkeypatch):
+    mod, frappe = _load_personnel_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "is_hr_sensitive_hidden", lambda: True)
+    captured = {}
+
+    def get_all(doctype, fields=None, **kwargs):
+        captured["fields"] = fields
+        return []
+
+    frappe.get_all = get_all
+    mod.list_employees()
+
+    assert {"status", "modified", "modified_by"}.issubset(set(captured["fields"]))
+    # 受限账号仍然拿不到社保、公积金字段
+    assert not {
+        "default_social_insurance_base", "default_housing_fund_base",
+        "social_insurance_number", "housing_fund_number",
+    } & set(captured["fields"])
+
+
 def test_list_employees_adds_household_classification(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)

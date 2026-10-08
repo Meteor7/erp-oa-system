@@ -15,14 +15,17 @@ test("personnel page manages employee expense account category", () => {
   assert.ok(personnel.includes("生产成本"));
   assert.match(personnel, /relieving_date/);
   assert.ok(personnel.includes("离职时间"));
-  assert.match(personnel, /{{\s*e\.relieving_date\s*\|\|\s*["\']-["\']\s*}}/);
   assert.match(personnel, /designation/);
   assert.ok(personnel.includes("部门"));
   assert.ok(personnel.includes("职位"));
-  const tableHead = personnel.match(/<thead[\s\S]*?<\/thead>/)?.[0] || "";
-  assert.doesNotMatch(tableHead, /研发类型/);
-  assert.ok(tableHead.indexOf("部门") < tableHead.indexOf("职位"));
-  assert.ok(tableHead.indexOf("职位") < tableHead.indexOf("费用科目"));
+  // 列表只留 部门 · 岗位 等非敏感列；费用科目、离职时间在员工详情抽屉里维护和查看
+  const tableHead = personnel.match(/<table class="pl-table"[\s\S]*?<\/thead>/)?.[0] || "";
+  assert.ok(tableHead.includes("部门 · 岗位"));
+  assert.ok(!tableHead.includes("费用科目"));
+  assert.match(personnel, /key:"expense_account_category",label:"费用科目"/);
+  assert.match(personnel, /key:"relieving_date",label:"离职时间"/);
+  assert.match(personnel, /key:"designation",label:"职位"/);
+  assert.match(personnel, /key:"department",label:"部门"/);
 });
 
 test("accommodation page captures room, total fees, personal fees, company fees, and category summary", () => {
