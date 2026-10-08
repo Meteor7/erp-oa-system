@@ -1,0 +1,71 @@
+/* 研发费用导入页专用的补充样式（状态条、处理清单、工具栏、明细表的轻量输入框）。全部挂在 .rd 下、以 ei- 开头，
+   基础控件沿用 rdUi.css，不改动它。 */
+
+/* 状态条：一行细条，放在指标卡和明细表之间；处理清单是浮层，不推开版面 */
+.rd .ei-stripwrap { position: relative; margin-bottom: 12px; }
+.rd .ei-strip { display: flex; gap: 6px 12px; align-items: center; flex-wrap: wrap; min-height: 40px; padding: 6px 14px; border-radius: 10px; font-size: 13px; border: 1px solid transparent; }
+.rd .ei-strip.ok { background: var(--rd-ok-soft); border-color: #CBE6D4; color: var(--rd-ok); }
+.rd .ei-strip.warn { background: var(--rd-warn-soft); border-color: #E8C48A; color: var(--rd-warn); }
+.rd .ei-strip.bad { background: var(--rd-bad-soft); border-color: #F3C9C4; color: var(--rd-bad); }
+.rd .ei-strip .ei-strip-sum { color: inherit; opacity: .9; }
+.rd .ei-strip .ei-strip-hint { margin-left: auto; font-size: 12px; opacity: .8; }
+.rd .ei-strip .btn { background: var(--rd-surface); color: var(--rd-ink); }
+.rd .ei-pop { position: absolute; right: 0; top: 46px; width: 640px; max-width: 100%; max-height: 60vh; overflow: auto; z-index: 20; background: var(--rd-surface); border: 1px solid var(--rd-line2); border-radius: 10px; box-shadow: 0 10px 28px rgba(20, 24, 40, .16); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--rd-ink); }
+.rd .ei-pop .ei-it { display: flex; gap: 10px; align-items: flex-start; }
+.rd .ei-pop .ei-it .t { flex: 1; min-width: 0; }
+.rd .ei-pop .ei-it .t ul { margin: 2px 0 0; padding-left: 18px; list-style: disc; }
+.rd .ei-pop .ei-it > .tag { margin-top: 2px; }
+.rd .ei-check { display: inline-flex; gap: 8px; align-items: center; margin-top: 6px; }
+
+/* 工具栏 */
+.rd .ei-tools { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--rd-line); }
+.rd .ei-toolrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rd .ei-search { width: 280px; max-width: 100%; }
+.rd .ei-sel { width: auto; max-width: 220px; padding: 5px 8px; }
+.rd .seg button small { font-size: 11px; opacity: .75; margin-left: 5px; }
+.rd .ei-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.rd .ei-result { margin-left: auto; font-size: 13px; color: var(--rd-ink2); }
+.rd .ei-fchip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 999px; font-size: 12.5px; background: var(--rd-brand-soft); color: var(--rd-brand-d); }
+.rd .ei-fchip button { border: 0; background: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: inherit; }
+.rd .ei-fchip button:hover { background: rgba(0, 0, 0, .08); }
+.rd .ei-fchip svg.ic { width: 12px; height: 12px; }
+.rd .ei-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.rd .ei-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.rd .ei-switch b { width: 30px; height: 18px; border-radius: 99px; background: var(--rd-line2); position: relative; display: inline-block; transition: background .15s; }
+.rd .ei-switch b::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s; }
+.rd .ei-switch input:checked + b { background: var(--rd-brand); }
+.rd .ei-switch input:checked + b::after { left: 14px; }
+.rd .ei-switch input:focus-visible + b { outline: 2px solid var(--rd-brand); outline-offset: 2px; }
+.rd .ei-menuwrap { position: relative; display: inline-flex; }
+.rd .ei-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; width: 300px; background: var(--rd-surface); border: 1px solid var(--rd-line2); border-radius: 10px; box-shadow: 0 10px 28px rgba(20, 24, 40, .16); padding: 6px; display: flex; flex-direction: column; }
+.rd .ei-mi { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 6px; font-size: 13px; white-space: normal; }
+.rd .ei-mi:hover, .rd .ei-mi:focus-visible { background: var(--rd-surface2); }
+.rd .ei-mi span { font-size: 12px; color: var(--rd-ink3); }
+
+/* 明细表：固定表头 + 内部滚动 */
+.rd .ei-scroll { max-height: 60vh; overflow: auto; }
+.rd .ei-thbtn { border: 0; background: none; padding: 0; font: inherit; color: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.rd .ei-thbtn:hover { color: var(--rd-brand-d); }
+.rd .ei-grp td { background: var(--rd-surface2) !important; color: var(--rd-ink2); font-size: 12.5px; padding-top: 6px; padding-bottom: 6px; }
+.rd .ei-grp td span { margin-left: 14px; }
+.rd .ei-grp td b { color: var(--rd-ink); }
+.rd .rownote td { background: #FFFAF0 !important; }
+.rd .rownote td:first-child { box-shadow: inset 3px 0 0 #D69A2D; }
+.rd .ei-hasmsg td { border-bottom: 0; }
+.rd .ei-msg td { padding-top: 0; padding-bottom: 8px; font-size: 12.5px; }
+.rd .ei-msg.rowerr td { color: var(--rd-bad); }
+.rd .ei-msg.rownote td { color: var(--rd-warn); }
+.rd .ei-msg.ei-done td { color: var(--rd-ink3); }
+.rd .ei-msg td .btn { margin-left: 10px; }
+.rd tr.ei-flash { outline: 2px solid #E0A100; outline-offset: -2px; animation: ei-flash 1.8s ease-out forwards; }
+@keyframes ei-flash { 0%, 50% { outline-color: #E0A100; } 100% { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .rd tr.ei-flash { animation: none; } }
+.rd .ei-cellflex { display: flex; align-items: center; gap: 8px; }
+.rd .ei-cellflex .field { flex: 1; }
+
+/* 单元格输入框：平时只有虚线下划线，悬停 / 聚焦才出现完整边框 */
+.rd .ei-tbl .field { background: transparent; border: 1px solid transparent; border-bottom: 1px dashed var(--rd-line2); border-radius: 6px; padding: 4px 8px; }
+.rd .ei-tbl .field:hover { border-color: var(--rd-line2); background: var(--rd-surface); }
+.rd .ei-tbl .field:focus { border-color: var(--rd-brand); background: var(--rd-surface); }
+.rd .ei-tbl .field:disabled { background: transparent; color: var(--rd-ink3); border-bottom-style: dotted; }
+.rd .ei-tbl .field.ei-bad { border-color: var(--rd-bad); background: var(--rd-surface); box-shadow: 0 0 0 2px rgba(180, 35, 24, .12); }

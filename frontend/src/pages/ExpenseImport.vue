@@ -1,16 +1,21 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from '../lib/period';
 import { EXPENSE_ACCOUNT_PATHS, clearInvalidLowerLevels, accountOptions, unknownExpenseAccountPaths, validateExpenseAccount } from '../lib/expenseAccounts';
 import { deriveExpenseCategory, filterNewExpenseRows, importWorkbookFile, parseExpensePaste, resolveProjectValue } from '../lib/expensePaste';
-import { duplicateVoucherRows, expenseFilterCounts, expenseTotals, filterExpenseRows, stripLinePrefix } from '../lib/rdExpense';
+import {
+  SORT_OPTIONS, STATUS_FILTERS, account2Options, accountPathKey, activeFilterChips, ariaSort, buildDisplayRows, computeStripState,
+  duplicateVoucherRows, emptyFilters, errorFields, expenseTotals, filterExpenseEntries, groupTitle, isProjectRow,
+  nextSort, projectFilterOptions, pruneAcks, saveBlockReason, scopeCounts, sortExpenseEntries, sortIndicator, statusCounts, stripLinePrefix, sumAmounts,
+} from '../lib/rdExpense';
 import { exportTableWorkbook } from '../lib/tableExport';
 import RdPage from '../components/rd/RdPage.vue';
 import RdPeriod from '../components/rd/RdPeriod.vue';
 import RdSeg from '../components/rd/RdSeg.vue';
 import RdKpi from '../components/rd/RdKpi.vue';
 import RdIcon from '../components/rd/RdIcon.vue';
+import '../styles/rdExpenseImport.css';
 
 const ALLOCATION_TYPES = [
   { v: 'common', l: '公共费用' },
@@ -39,8 +44,24 @@ const workbookReplace = ref(false);
 const confirmNewAccounts = ref(false);
 const confirmWorkbookOverwrite = ref(false);
 const confirmPasteOverwrite = ref(false);
-const filterKind = ref('all');
-const searchText = ref('');
+
+// 工具栏状态：筛选、排序、按凭证号分组
+const filters = reactive(emptyFilters());
+const sortKey = ref('line');
+const groupOn = ref(false);
+// “确认无误”只对本次编辑有效：用内容键记，换期间 / 重新加载 / 覆盖导入就清空
+const ackedKeys = ref(new Set());
+// 在表格里输入时把当前显示的行序固定下来，免得筛选 / 排序 / 分组让正在编辑的行跳走
+const frozen = ref(null);
+const popOpen = ref(false);
+const importMenuOpen = ref(false);
+const stripRef = ref(null);
+const popBtn = ref(null);
+const importMenuRef = ref(null);
+const importBtn = ref(null);
+const tableScroll = ref(null);
+const flashIndex = ref(-1);
+let flashTimer = null;
 
 const projects = createResource({
   url: 'rayher_hr_payroll.api.project_entry.list_projects',
@@ -54,6 +75,9 @@ const loader = createResource({
   onSuccess: (d) => {
     status.value = d.status;
     items.value = normalizeRows(d.items || []);
+    resetEditingSession();
+    filters.account2 = '';
+    filters.project = '';
   },
   auto: true,
 });
@@ -74,28 +98,94 @@ const totals = computed(() => expenseTotals(items.value));
 const total = computed(() => totals.value.total);
 const visiblePasteErrors = computed(() => pasteErrors.value.slice(0, 5));
 const remainingPasteErrorCount = computed(() => Math.max(pasteErrors.value.length - visiblePasteErrors.value.length, 0));
+const dataLoading = computed(() => loader.loading || accountCatalog.loading);
 
-// 每一行的问题：校验错误（会挡住保存）+ 完全相同的行（只提醒，不挡保存）。年度视图只读，不做检查。
-const duplicates = computed(() => duplicateVoucherRows(items.value));
+// 每一行的问题：校验错误（会挡住保存）+ 完全相同的行（只提醒，不挡保存）+ 目录里没有的新科目。年度视图只读，不做检查。
+const duplicates = computed(() => (isYearScope.value ? { groups: [], keys: [], indexes: new Map() } : duplicateVoucherRows(items.value)));
+const noticeGroups = computed(() => duplicates.value.groups.map((indexes, g) => {
+  const key = duplicates.value.keys[g];
+  return { key, indexes, acked: ackedKeys.value.has(key), lineText: indexes.map((n) => n + 1).join('、') };
+}));
+const noticeByIndex = computed(() => {
+  const map = new Map();
+  noticeGroups.value.forEach((group) => group.indexes.forEach((index) => map.set(index, group)));
+  return map;
+});
+const pendingNoticeGroups = computed(() => noticeGroups.value.filter((group) => !group.acked));
+const ackedNoticeCount = computed(() => noticeGroups.value.filter((group) => group.acked).length);
+const newPathKeys = computed(() => new Set(pendingAccountPaths.value.map(accountPathKey)));
 const entries = computed(() => items.value.map((row, index) => {
   const errors = isYearScope.value ? [] : rowValidationErrors(row, index).map(stripLinePrefix);
-  const problems = [...errors];
-  const same = isYearScope.value ? null : duplicates.value.indexes.get(index);
-  if (same) problems.push('与第 ' + same.map((n) => n + 1).join('、') + ' 行完全相同（凭证号、科目、金额、项目），请确认不是重复录入；不影响保存');
-  return { row, index, errors, problems };
+  const group = noticeByIndex.value.get(index);
+  const others = group ? group.indexes.filter((n) => n !== index) : [];
+  return {
+    row,
+    index,
+    errors,
+    bad: errorFields(errors),
+    notice: group ? {
+      key: group.key,
+      acked: group.acked,
+      text: '与第 ' + others.map((n) => n + 1).join('、') + ' 行完全相同（凭证号、科目、金额、项目），请确认不是重复录入；不影响保存',
+    } : null,
+    isNew: !isYearScope.value && newPathKeys.value.has(accountPathKey(row)),
+    projectText: isProjectRow(row) && row.direct_project ? projectLabelByName(row.direct_project) : '',
+  };
 }));
-const filterCounts = computed(() => expenseFilterCounts(entries.value));
-const visibleEntries = computed(() => filterExpenseRows(entries.value, { kind: filterKind.value, query: searchText.value }));
-const errorRowCount = computed(() => entries.value.filter((entry) => entry.errors.length).length);
-const duplicateGroupCount = computed(() => duplicates.value.groups.length);
-const filterChips = computed(() => [
-  { value: 'all', label: '全部', count: filterCounts.value.all },
-  { value: 'common', label: '公共', count: filterCounts.value.common },
-  { value: 'project', label: '项目', count: filterCounts.value.project },
-  ...(isYearScope.value ? [] : [{ value: 'bad', label: '有问题', count: filterCounts.value.bad }]),
+const errorEntries = computed(() => entries.value.filter((entry) => entry.errors.length));
+const errorRowCount = computed(() => errorEntries.value.length);
+
+// 筛选 / 排序 / 分组
+const scopeCountMap = computed(() => scopeCounts(entries.value));
+const scopeChips = computed(() => [
+  { value: 'all', label: '全部', count: scopeCountMap.value.all },
+  { value: 'common', label: '公共', count: scopeCountMap.value.common },
+  { value: 'project', label: '项目', count: scopeCountMap.value.project },
 ]);
-const checksPassed = computed(() => !errorRowCount.value && !pendingAccountPaths.value.length);
-const saveBlocked = computed(() => isYearScope.value || !catalogReady.value || saving.value || errorRowCount.value > 0 || (pendingAccountPaths.value.length > 0 && !confirmNewAccounts.value));
+const statusCountMap = computed(() => statusCounts(entries.value));
+const statusOptions = computed(() => STATUS_FILTERS
+  .filter((item) => !isYearScope.value || item.value === 'foreign')
+  .map((item) => ({ ...item, count: statusCountMap.value[item.value] })));
+const account2List = computed(() => account2Options(entries.value));
+const projectList = computed(() => projectFilterOptions(entries.value, projectLabelByName));
+const filterChips = computed(() => activeFilterChips(filters, { projectLabel: projectLabelByName }));
+const liveEntries = computed(() => sortExpenseEntries(filterExpenseEntries(entries.value, filters), sortKey.value));
+const shownEntries = computed(() => {
+  const lock = frozen.value;
+  if (!lock) return liveEntries.value;
+  return lock.order.map((index) => entries.value[index]).filter(Boolean);
+});
+const displayRows = computed(() => buildDisplayRows(shownEntries.value, {
+  group: groupOn.value,
+  keyOf: frozen.value ? (entry) => frozen.value.vouchers.get(entry.index) ?? String(entry.row.voucher_no ?? '').trim() : undefined,
+}));
+const shownTotal = computed(() => sumAmounts(shownEntries.value));
+const colCount = computed(() => (isYearScope.value ? 9 : 10));
+
+// 检查状态条与保存
+const stripState = computed(() => (isYearScope.value || !items.value.length ? null : computeStripState({
+  errorRows: errorRowCount.value,
+  newCount: pendingAccountPaths.value.length,
+  newConfirmed: confirmNewAccounts.value,
+  noticePending: pendingNoticeGroups.value.length,
+  noticeAcked: ackedNoticeCount.value,
+})));
+const showPop = computed(() => popOpen.value && Boolean(stripState.value?.hasList));
+const newAccountsPending = computed(() => pendingAccountPaths.value.length > 0 && !confirmNewAccounts.value);
+const saveReason = computed(() => saveBlockReason({
+  isYear: isYearScope.value,
+  loading: dataLoading.value,
+  catalogReady: catalogReady.value,
+  saving: saving.value,
+  errorRows: errorRowCount.value,
+  newPending: newAccountsPending.value,
+}));
+const saveBlocked = computed(() => Boolean(saveReason.value));
+const saveTip = computed(() => saveReason.value || '保存会整月覆盖本月已有费用');
+
+function pathText(path) {
+  return [path.account_level_1, path.account_level_2, path.account_level_3, path.account_level_4].filter(Boolean).join(' → ');
+}
 
 function parseFrappeServerMessages(raw) {
   if (!raw) return [];
@@ -170,13 +260,36 @@ function normalizeRows(rows) {
   return rows.map((row) => normalizeRow(row));
 }
 
+// 表里的行被整体换掉（重新加载、保存后回读、覆盖导入）：确认无误的记录和固定的行序都作废
+function resetEditingSession() {
+  ackedKeys.value = new Set();
+  frozen.value = null;
+}
+
+function resetFilters() {
+  Object.assign(filters, emptyFilters());
+}
+
+function clearFilter(key) {
+  filters[key] = key === 'scope' ? 'all' : '';
+}
+
 function addRow() {
-  filterKind.value = 'all';
-  searchText.value = '';
+  resetFilters();
+  sortKey.value = 'line';
+  groupOn.value = false;
+  frozen.value = null;
   items.value.push(normalizeRow());
+  const index = items.value.length - 1;
+  nextTick(() => {
+    const el = document.getElementById('ei-row-' + index);
+    el?.scrollIntoView({ block: 'nearest' });
+    el?.querySelector('input')?.focus({ preventScroll: true });
+  });
 }
 
 function delRow(i) {
+  frozen.value = null;
   items.value.splice(i, 1);
 }
 
@@ -219,14 +332,15 @@ function applyImportedRows(result, replace = false, source = '导入') {
   let skipped = 0;
   if (replace) {
     items.value = rows;
+    resetEditingSession();
   } else {
     const filtered = filterNewExpenseRows(items.value, rows);
     acceptedRows = filtered.rows;
     skipped = filtered.skipped;
     items.value.push(...acceptedRows);
+    frozen.value = null;
   }
-  filterKind.value = 'all';
-  searchText.value = '';
+  resetFilters();
   pasteMessage.value = source + ' ' + acceptedRows.length + ' 行'
     + (skipped ? '，已跳过 ' + skipped + ' 条页面中已有明细' : '')
     + '，请确认后保存';
@@ -262,6 +376,27 @@ function requestWorkbookReplace() {
 function confirmWorkbookReplace() {
   confirmWorkbookOverwrite.value = false;
   chooseWorkbook(true);
+}
+
+// “导入 Excel”下拉菜单的两项
+function closeImportMenu(refocus = false) {
+  importMenuOpen.value = false;
+  if (refocus) importBtn.value?.focus();
+}
+
+function toggleImportMenu() {
+  importMenuOpen.value = !importMenuOpen.value;
+  if (importMenuOpen.value) nextTick(() => importMenuRef.value?.querySelector('[role="menuitem"]')?.focus());
+}
+
+function importAppend() {
+  closeImportMenu();
+  chooseWorkbook(false);
+}
+
+function importOverwrite() {
+  closeImportMenu();
+  requestWorkbookReplace();
 }
 
 async function importWorkbookRows(event) {
@@ -325,7 +460,7 @@ function payloadRows() {
 }
 
 async function save() {
-  if (isYearScope.value || !catalogReady.value) return;
+  if (isYearScope.value || !catalogReady.value || dataLoading.value) return;
   errMsg.value = '';
   const errors = items.value.flatMap((row, index) => rowValidationErrors(row, index));
   if (errors.length) {
@@ -345,6 +480,7 @@ async function save() {
     });
     status.value = d.status;
     items.value = normalizeRows(d.items || []);
+    resetEditingSession();
     confirmNewAccounts.value = false;
     await accountCatalog.reload();
   } catch (e) {
@@ -381,15 +517,81 @@ async function exportCurrentExpense() {
   }
 }
 
-function onKeydown(event) {
-  if (event.key === 'Escape' && pasteOpen.value) closePaste();
+// 提醒：只对本次编辑有效，不挡保存
+function toggleAck(key) {
+  const next = new Set(ackedKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  ackedKeys.value = next;
 }
-onMounted(() => window.addEventListener('keydown', onKeydown));
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
+
+function clickSort(column) {
+  sortKey.value = nextSort(sortKey.value, column);
+}
+
+// 在表格里输入时固定行序，离开表格再按最新的筛选 / 排序重排
+function freezeOrder(event) {
+  if (frozen.value || !event.target?.closest?.('input, select')) return;
+  frozen.value = {
+    order: liveEntries.value.map((entry) => entry.index),
+    vouchers: new Map(entries.value.map((entry) => [entry.index, String(entry.row.voucher_no ?? '').trim()])),
+  };
+}
+
+function releaseOrder(event) {
+  const next = event.relatedTarget;
+  if (next && event.currentTarget.contains(next)) return;
+  frozen.value = null;
+}
+
+async function jumpToRow(index) {
+  popOpen.value = false;
+  frozen.value = null;
+  if (!liveEntries.value.some((entry) => entry.index === index)) resetFilters();
+  await nextTick();
+  const el = document.getElementById('ei-row-' + index);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center' });
+  el.querySelector('.ei-bad')?.focus({ preventScroll: true });
+  flashIndex.value = index;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flashIndex.value = -1; }, 1900);
+}
+
+function onKeydown(event) {
+  if (event.key !== 'Escape') return;
+  if (pasteOpen.value) closePaste();
+  else if (importMenuOpen.value) closeImportMenu(true);
+  else if (popOpen.value) {
+    popOpen.value = false;
+    popBtn.value?.focus();
+  }
+}
+
+function onPointerDown(event) {
+  if (popOpen.value && stripRef.value && !stripRef.value.contains(event.target)) popOpen.value = false;
+  if (importMenuOpen.value && importMenuRef.value && !importMenuRef.value.contains(event.target)) importMenuOpen.value = false;
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+  document.addEventListener('mousedown', onPointerDown);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
+  document.removeEventListener('mousedown', onPointerDown);
+  clearTimeout(flashTimer);
+});
 
 watch(period, () => loader.reload());
 watch(periodScope, () => { confirmWorkbookOverwrite.value = false; loader.reload(); });
 watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|')).join('||'), () => { confirmNewAccounts.value = false; });
+// 改过内容、不再“完全相同”的组，它的确认无误就作废
+watch(() => noticeGroups.value.map((group) => group.key).join('\u0001'), () => {
+  ackedKeys.value = pruneAcks(ackedKeys.value, noticeGroups.value.map((group) => group.key));
+});
+// 换了筛选 / 排序 / 分组，行序按新条件重排
+watch([filters, sortKey, groupOn], () => { frozen.value = null; }, { deep: true });
 </script>
 
 <template>
@@ -398,6 +600,7 @@ watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|'
       <span v-if="status" class="tag">状态：{{ status }}</span>
       <RdSeg :model-value="periodScope" :options="scopeOptions" label="统计范围" @update:model-value="setPeriodScope" />
       <RdPeriod />
+      <button v-if="!isYearScope" type="button" class="btn pri" :disabled="saveBlocked" :title="saveTip" @click="save">{{ saving ? '保存中…' : '保存本月费用' }}</button>
     </template>
 
     <div v-if="loader.loading || accountCatalog.loading" class="muted" style="padding: 16px 0">加载中…</div>
@@ -410,37 +613,7 @@ watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|'
 
       <div v-if="isYearScope" class="note info"><RdIcon name="info" /><span class="grow">年度视图只读。要录入或修改，请切回月度。</span></div>
 
-      <div v-if="!isYearScope && items.length" class="card">
-        <div class="hd"><b>保存前检查</b><span class="muted">{{ checksPassed ? '全部通过' : '有待处理项' }}</span></div>
-        <div class="bd" style="padding-top: 4px">
-          <div class="chk" :class="errorRowCount ? 'bad' : 'ok'">
-            <RdIcon :name="errorRowCount ? 'alert' : 'check'" />
-            <span>{{ errorRowCount ? `${errorRowCount} 行有问题（金额未填、项目未选或科目不合规），见下方明细` : '金额、归属、项目都已填写' }}</span>
-          </div>
-          <div class="chk" :class="pendingAccountPaths.length && !confirmNewAccounts ? 'warn' : 'ok'">
-            <RdIcon :name="pendingAccountPaths.length && !confirmNewAccounts ? 'alert' : 'check'" />
-            <span>{{ pendingAccountPaths.length ? (confirmNewAccounts ? `${pendingAccountPaths.length} 个新科目已确认，保存时创建` : `${pendingAccountPaths.length} 个科目目录里没有，需确认后创建`) : '科目都在目录里' }}</span>
-          </div>
-          <div class="chk" :class="duplicateGroupCount ? 'warn' : 'ok'">
-            <RdIcon :name="duplicateGroupCount ? 'alert' : 'check'" />
-            <span>{{ duplicateGroupCount ? `${duplicateGroupCount} 组完全相同的行（凭证号、科目、金额、项目都一样），仅提醒，不影响保存` : '没有完全相同的行' }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="!isYearScope && pendingAccountPaths.length" class="note warn">
-        <RdIcon name="alert" />
-        <div class="grow">
-          <div><b>检测到 {{ pendingAccountPaths.length }} 个新三级/四级费用科目</b></div>
-          <ul style="margin: 4px 0 0; padding-left: 18px; list-style: disc">
-            <li v-for="path in pendingAccountPaths" :key="[path.account_level_1, path.account_level_2, path.account_level_3, path.account_level_4].join('|')">{{ [path.account_level_1, path.account_level_2, path.account_level_3, path.account_level_4].filter(Boolean).join(' → ') }}</li>
-          </ul>
-          <label style="display: flex; gap: 8px; align-items: flex-start; margin-top: 8px">
-            <input v-model="confirmNewAccounts" type="checkbox" style="margin-top: 4px" />
-            <span>我已核对，保存时将创建这些科目并导入本月费用。</span>
-          </label>
-        </div>
-      </div>
+      <div v-if="errMsg" class="note bad" role="alert"><RdIcon name="alert" /><span class="grow">{{ errMsg }}</span></div>
 
       <div v-if="confirmWorkbookOverwrite" class="note bad">
         <RdIcon name="alert" />
@@ -464,56 +637,120 @@ watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|'
         </div>
       </template>
 
-      <div class="bar">
-        <div class="row">
-          <div class="chips">
-            <button v-for="chip in filterChips" :key="chip.value" type="button" class="chip" :aria-pressed="filterKind === chip.value" @click="filterKind = chip.value">{{ chip.label }}<small>{{ chip.count }}</small></button>
-          </div>
-          <label class="input" style="width: 210px"><RdIcon name="search" /><input v-model="searchText" placeholder="搜索凭证号、科目" /></label>
+      <div v-if="stripState" ref="stripRef" class="ei-stripwrap">
+        <div class="ei-strip" :class="stripState.tone" role="status">
+          <RdIcon :name="stripState.tone === 'ok' ? 'check' : 'alert'" />
+          <b>{{ stripState.title }}</b>
+          <span class="ei-strip-sum">{{ stripState.summary }}</span>
+          <span class="ei-strip-hint">保存会整月覆盖本月已有费用</span>
+          <button v-if="stripState.hasList" ref="popBtn" type="button" class="btn sm" aria-controls="ei-todo" :aria-expanded="showPop" @click="popOpen = !popOpen">处理清单 {{ showPop ? '▴' : '▾' }}</button>
         </div>
-        <div class="row">
-          <template v-if="!isYearScope">
-            <button type="button" class="btn quiet" @click="openPaste"><RdIcon name="copy" />粘贴导入</button>
-            <button type="button" class="btn quiet" @click="requestWorkbookReplace">覆盖导入…</button>
-            <button type="button" class="btn" @click="addRow"><RdIcon name="plus" />添加一行</button>
-          </template>
-          <button type="button" class="btn" :disabled="exporting || !items.length" @click="exportCurrentExpense"><RdIcon name="download" />{{ exporting ? '导出中…' : '导出 Excel' }}</button>
-          <template v-if="!isYearScope">
-            <button type="button" class="btn pri" @click="chooseWorkbook(false)"><RdIcon name="upload" />导入 Excel</button>
-            <input ref="workbookInput" type="file" accept=".xlsx,.xls" class="hidden" @change="importWorkbookRows" />
-          </template>
+        <div v-if="showPop" id="ei-todo" class="ei-pop" role="dialog" aria-label="处理清单">
+          <div v-for="entry in errorEntries" :key="'e' + entry.index" class="ei-it">
+            <span class="tag bad">问题</span>
+            <span class="t">第 {{ entry.index + 1 }} 行：{{ entry.errors.join('；') }}</span>
+            <button type="button" class="btn sm" :aria-label="'跳到第 ' + (entry.index + 1) + ' 行'" @click="jumpToRow(entry.index)">跳到该行</button>
+          </div>
+          <div v-if="pendingAccountPaths.length" class="ei-it">
+            <span class="tag info">新科目</span>
+            <div class="t">
+              <div>{{ pendingAccountPaths.length }} 个科目目录里还没有：</div>
+              <ul>
+                <li v-for="path in pendingAccountPaths" :key="accountPathKey(path)">{{ pathText(path) }}</li>
+              </ul>
+              <label class="ei-check"><input v-model="confirmNewAccounts" type="checkbox" /><span>我已核对，保存时创建</span></label>
+            </div>
+          </div>
+          <div v-for="group in pendingNoticeGroups" :key="'n' + group.key" class="ei-it">
+            <span class="tag warn">提醒</span>
+            <span class="t">第 {{ group.lineText }} 行完全相同（凭证号、科目、金额、项目），请确认不是重复录入</span>
+            <button type="button" class="btn sm" @click="toggleAck(group.key)">确认无误</button>
+          </div>
+          <div class="muted">红色问题必须处理；黄色提醒点“确认无误”就不再提示，也可以不管，不影响保存。</div>
         </div>
       </div>
 
-      <div v-if="isYearScope" class="card">
-        <div class="tbl overflow-x-auto">
+      <div class="card">
+        <div class="ei-tools">
+          <div class="ei-toolrow">
+            <label class="input ei-search"><RdIcon name="search" /><input v-model="filters.query" aria-label="搜索费用明细" placeholder="搜索凭证号、科目、项目、金额" /></label>
+            <div class="seg" role="group" aria-label="归属">
+              <button v-for="chip in scopeChips" :key="chip.value" type="button" :aria-pressed="filters.scope === chip.value" @click="filters.scope = chip.value">{{ chip.label }}<small>{{ chip.count }}</small></button>
+            </div>
+            <select v-model="filters.account2" class="field ei-sel" aria-label="二级科目">
+              <option value="">二级科目：全部</option>
+              <option v-for="option in account2List" :key="option" :value="option">{{ option }}</option>
+            </select>
+            <select v-model="filters.project" class="field ei-sel" aria-label="项目">
+              <option value="">项目：全部</option>
+              <option v-for="option in projectList" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+            <select v-model="filters.status" class="field ei-sel" aria-label="状态">
+              <option value="">状态：全部</option>
+              <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}（{{ option.count }}）</option>
+            </select>
+            <select v-model="sortKey" class="field ei-sel" aria-label="排序">
+              <option v-for="option in SORT_OPTIONS" :key="option.value" :value="option.value">排序：{{ option.label }}</option>
+            </select>
+            <label class="ei-switch"><input v-model="groupOn" type="checkbox" role="switch" /><b aria-hidden="true"></b>按凭证号分组</label>
+            <div class="ei-actions">
+              <template v-if="!isYearScope">
+                <div ref="importMenuRef" class="ei-menuwrap">
+                  <button ref="importBtn" type="button" class="btn" aria-haspopup="menu" :aria-expanded="importMenuOpen" @click="toggleImportMenu"><RdIcon name="upload" />导入 Excel ▾</button>
+                  <div v-if="importMenuOpen" class="ei-menu" role="menu" aria-label="导入 Excel">
+                    <button type="button" role="menuitem" class="ei-mi" @click="importAppend"><b>追加到现有费用</b><span>Excel 里的行加到下面，原来的保留</span></button>
+                    <button type="button" role="menuitem" class="ei-mi" @click="importOverwrite"><b>覆盖现有费用…</b><span>先清空现有明细，再放入 Excel 的内容（会再确认一次）</span></button>
+                  </div>
+                </div>
+                <input ref="workbookInput" type="file" accept=".xlsx,.xls" class="hidden" @change="importWorkbookRows" />
+                <button type="button" class="btn" @click="openPaste"><RdIcon name="copy" />粘贴导入</button>
+                <button type="button" class="btn" @click="addRow"><RdIcon name="plus" />添加一行</button>
+              </template>
+              <button type="button" class="btn" :disabled="exporting || !items.length" @click="exportCurrentExpense"><RdIcon name="download" />{{ exporting ? '导出中…' : '导出 Excel' }}</button>
+            </div>
+          </div>
+          <div class="ei-toolrow">
+            <template v-if="filterChips.length">
+              <span v-for="chip in filterChips" :key="chip.key" class="ei-fchip">{{ chip.label }}<button type="button" :aria-label="'清除筛选：' + chip.label" @click="clearFilter(chip.key)"><RdIcon name="x" /></button></span>
+              <button type="button" class="btn sm quiet" @click="resetFilters">清除全部</button>
+            </template>
+            <span class="ei-result">显示 <b>{{ shownEntries.length }}</b> / {{ items.length }} 行 · 小计 <b class="num">{{ fmt(shownTotal) }}</b> 元</span>
+          </div>
+        </div>
+
+        <div v-if="isYearScope" ref="tableScroll" class="tbl overflow-x-auto ei-scroll">
           <table class="min-w-[1500px] whitespace-nowrap">
             <thead>
               <tr>
                 <th class="w-28">日期</th>
-                <th class="w-28">凭证号</th>
+                <th class="w-28" :aria-sort="ariaSort(sortKey, 'voucher')"><button type="button" class="ei-thbtn" @click="clickSort('voucher')">凭证号 {{ sortIndicator(sortKey, 'voucher') }}</button></th>
                 <th class="min-w-[180px]">一级科目</th>
                 <th class="min-w-[220px]">二级科目</th>
                 <th class="min-w-[340px]">三级科目</th>
                 <th class="min-w-[220px]">四级科目</th>
-                <th class="r min-w-[140px]">费用金额</th>
+                <th class="r min-w-[140px]" :aria-sort="ariaSort(sortKey, 'amount')"><button type="button" class="ei-thbtn" @click="clickSort('amount')">费用金额 {{ sortIndicator(sortKey, 'amount') }}</button></th>
                 <th class="min-w-[150px]">归属方式</th>
                 <th class="min-w-[260px]">所属项目</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="{ row: it, index: i } in visibleEntries" :key="i">
-                <td class="num muted">{{ it.period }}</td>
-                <td class="num">{{ it.voucher_no }}</td>
-                <td>{{ it.account_level_1 }}</td>
-                <td>{{ it.account_level_2 }}</td>
-                <td>{{ it.account_level_3 }}</td>
-                <td>{{ it.account_level_4 }}</td>
-                <td class="r num">{{ fmt(Number(it.amount || 0)) }}</td>
-                <td>{{ it.allocation_type === 'project' ? '项目费用' : '公共费用' }}</td>
-                <td>{{ it.allocation_type === 'project' ? projectLabelByName(it.direct_project) : '-' }}</td>
-              </tr>
-              <tr v-if="!visibleEntries.length"><td colspan="9" class="muted" style="text-align: center; padding: 30px">{{ items.length ? '没有符合条件的明细' : '本期暂无费用' }}</td></tr>
+              <template v-for="{ type, key, row: it, index: i, group } in displayRows" :key="key">
+                <tr v-if="type === 'group'" class="ei-grp">
+                  <td :colspan="colCount"><b>{{ groupTitle(group) }}</b><span>{{ group.count }} 行</span><span class="num">小计 {{ fmt(group.subtotal) }} 元</span></td>
+                </tr>
+                <tr v-else>
+                  <td class="num muted">{{ it.period }}</td>
+                  <td class="num">{{ it.voucher_no }}</td>
+                  <td>{{ it.account_level_1 }}</td>
+                  <td>{{ it.account_level_2 }}</td>
+                  <td>{{ it.account_level_3 }}</td>
+                  <td>{{ it.account_level_4 }}</td>
+                  <td class="r num">{{ fmt(Number(it.amount || 0)) }}</td>
+                  <td>{{ it.allocation_type === 'project' ? '项目费用' : '公共费用' }}</td>
+                  <td>{{ it.allocation_type === 'project' ? projectLabelByName(it.direct_project) : '-' }}</td>
+                </tr>
+              </template>
+              <tr v-if="!shownEntries.length"><td :colspan="colCount" class="muted" style="text-align: center; padding: 30px">{{ items.length ? '没有符合条件的明细' : '本期暂无费用' }}</td></tr>
             </tbody>
             <tfoot v-if="items.length">
               <tr>
@@ -524,66 +761,79 @@ watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|'
             </tfoot>
           </table>
         </div>
-      </div>
 
-      <div v-else class="card">
-        <div class="tbl overflow-x-auto">
+        <div v-else ref="tableScroll" class="tbl overflow-x-auto ei-scroll ei-tbl" @focusin="freezeOrder" @focusout="releaseOrder">
           <table class="min-w-[1500px] whitespace-nowrap">
             <thead>
               <tr>
                 <th style="width: 34px">#</th>
-                <th class="w-28">凭证号</th>
+                <th class="w-28" :aria-sort="ariaSort(sortKey, 'voucher')"><button type="button" class="ei-thbtn" @click="clickSort('voucher')">凭证号 {{ sortIndicator(sortKey, 'voucher') }}</button></th>
                 <th class="min-w-[180px]">一级科目</th>
                 <th class="min-w-[220px]">二级科目</th>
                 <th class="min-w-[340px]">三级科目</th>
                 <th class="min-w-[220px]">四级科目</th>
-                <th class="r min-w-[140px]">费用金额</th>
+                <th class="r min-w-[140px]" :aria-sort="ariaSort(sortKey, 'amount')"><button type="button" class="ei-thbtn" @click="clickSort('amount')">费用金额 {{ sortIndicator(sortKey, 'amount') }}</button></th>
                 <th class="min-w-[150px]">归属方式</th>
                 <th class="min-w-[260px]">所属项目</th>
                 <th class="w-12">删除</th>
               </tr>
             </thead>
             <tbody>
-              <template v-for="{ row: it, index: i, problems } in visibleEntries" :key="i">
-                <tr :class="{ rowerr: problems.length }">
-                  <td class="num muted">{{ i + 1 }}</td>
-                  <td><input v-model="it.voucher_no" class="field num" placeholder="V001" /></td>
-                  <td>
-                    <input v-model="it.account_level_1" :list="accountDatalistId(i, 1)" class="field" placeholder="研发支出" @change="syncAccountLevels(it, 1)" />
-                    <datalist :id="accountDatalistId(i, 1)"><option v-for="option in accountLevelOptions(it, 1)" :key="option" :value="option"></option></datalist>
-                  </td>
-                  <td>
-                    <input v-model="it.account_level_2" :list="accountDatalistId(i, 2)" class="field" placeholder="直接投入费用" @change="syncAccountLevels(it, 2)" />
-                    <datalist :id="accountDatalistId(i, 2)"><option v-for="option in accountLevelOptions(it, 2)" :key="option" :value="option"></option></datalist>
-                  </td>
-                  <td>
-                    <input v-model="it.account_level_3" :list="accountDatalistId(i, 3)" class="field" placeholder="如 差旅费" @change="syncAccountLevels(it, 3)" />
-                    <datalist :id="accountDatalistId(i, 3)"><option v-for="option in accountLevelOptions(it, 3)" :key="option" :value="option"></option></datalist>
-                  </td>
-                  <td>
-                    <input v-model="it.account_level_4" :list="accountDatalistId(i, 4)" class="field" placeholder="可为空" />
-                    <datalist :id="accountDatalistId(i, 4)"><option v-for="option in accountLevelOptions(it, 4)" :key="option" :value="option"></option></datalist>
-                  </td>
-                  <td><input v-model="it.amount" type="number" step="0.01" class="field num" style="text-align: right" placeholder="0" /></td>
-                  <td>
-                    <select v-model="it.allocation_type" class="field" @change="syncAllocationType(it)">
-                      <option v-for="type in ALLOCATION_TYPES" :key="type.v" :value="type.v">{{ type.l }}</option>
-                    </select>
-                  </td>
-                  <td>
-                    <select v-model="it.direct_project" :disabled="it.allocation_type !== 'project'" class="field">
-                      <option value="">请选择项目</option>
-                      <option v-for="project in projectOptions" :key="project.name" :value="project.name">{{ projectLabel(project) }}</option>
-                    </select>
-                  </td>
-                  <td class="r nw"><button type="button" class="btn quiet sm bad" aria-label="删除这一行" @click="delRow(i)"><RdIcon name="trash" /></button></td>
+              <template v-for="{ type, key, row: it, index: i, entry, group } in displayRows" :key="key">
+                <tr v-if="type === 'group'" class="ei-grp">
+                  <td :colspan="colCount"><b>{{ groupTitle(group) }}</b><span>{{ group.count }} 行</span><span class="num">小计 {{ fmt(group.subtotal) }} 元</span></td>
                 </tr>
-                <tr v-if="problems.length" class="rowerr">
-                  <td></td>
-                  <td colspan="9" style="font-size: 12px; padding-top: 0; color: var(--rd-bad)">{{ problems.join('；') }}</td>
-                </tr>
+                <template v-else>
+                  <tr :id="'ei-row-' + i" :class="{ rowerr: entry.errors.length, rownote: !entry.errors.length && entry.notice && !entry.notice.acked, 'ei-hasmsg': entry.errors.length || entry.notice, 'ei-flash': flashIndex === i }">
+                    <td class="num muted">{{ i + 1 }}</td>
+                    <td><input v-model="it.voucher_no" class="field num" placeholder="V001" :aria-label="'第 ' + (i + 1) + ' 行凭证号'" /></td>
+                    <td>
+                      <input v-model="it.account_level_1" :list="accountDatalistId(i, 1)" class="field" :class="{ 'ei-bad': entry.bad.levels.includes(1) }" placeholder="研发支出" :aria-label="'第 ' + (i + 1) + ' 行一级科目'" @change="syncAccountLevels(it, 1)" />
+                      <datalist :id="accountDatalistId(i, 1)"><option v-for="option in accountLevelOptions(it, 1)" :key="option" :value="option"></option></datalist>
+                    </td>
+                    <td>
+                      <input v-model="it.account_level_2" :list="accountDatalistId(i, 2)" class="field" :class="{ 'ei-bad': entry.bad.levels.includes(2) }" placeholder="直接投入费用" :aria-label="'第 ' + (i + 1) + ' 行二级科目'" @change="syncAccountLevels(it, 2)" />
+                      <datalist :id="accountDatalistId(i, 2)"><option v-for="option in accountLevelOptions(it, 2)" :key="option" :value="option"></option></datalist>
+                    </td>
+                    <td>
+                      <div class="ei-cellflex">
+                        <input v-model="it.account_level_3" :list="accountDatalistId(i, 3)" class="field" :class="{ 'ei-bad': entry.bad.levels.includes(3) }" placeholder="如 差旅费" :aria-label="'第 ' + (i + 1) + ' 行三级科目'" @change="syncAccountLevels(it, 3)" />
+                        <span v-if="entry.isNew" class="tag info" title="科目目录里还没有这个科目，保存时会创建">新科目</span>
+                      </div>
+                      <datalist :id="accountDatalistId(i, 3)"><option v-for="option in accountLevelOptions(it, 3)" :key="option" :value="option"></option></datalist>
+                    </td>
+                    <td>
+                      <input v-model="it.account_level_4" :list="accountDatalistId(i, 4)" class="field" :class="{ 'ei-bad': entry.bad.levels.includes(4) }" placeholder="可为空" :aria-label="'第 ' + (i + 1) + ' 行四级科目'" />
+                      <datalist :id="accountDatalistId(i, 4)"><option v-for="option in accountLevelOptions(it, 4)" :key="option" :value="option"></option></datalist>
+                    </td>
+                    <td><input v-model="it.amount" type="number" step="0.01" class="field num" :class="{ 'ei-bad': entry.bad.amount }" style="text-align: right" placeholder="0" :aria-label="'第 ' + (i + 1) + ' 行费用金额'" /></td>
+                    <td>
+                      <select v-model="it.allocation_type" class="field" :aria-label="'第 ' + (i + 1) + ' 行归属方式'" @change="syncAllocationType(it)">
+                        <option v-for="type in ALLOCATION_TYPES" :key="type.v" :value="type.v">{{ type.l }}</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select v-model="it.direct_project" :disabled="it.allocation_type !== 'project'" class="field" :class="{ 'ei-bad': entry.bad.project }" :aria-label="'第 ' + (i + 1) + ' 行所属项目'">
+                        <option value="">请选择项目</option>
+                        <option v-for="project in projectOptions" :key="project.name" :value="project.name">{{ projectLabel(project) }}</option>
+                      </select>
+                    </td>
+                    <td class="r nw"><button type="button" class="btn quiet sm bad" :aria-label="'删除第 ' + (i + 1) + ' 行'" @click="delRow(i)"><RdIcon name="trash" /></button></td>
+                  </tr>
+                  <tr v-if="entry.errors.length" class="rowerr ei-msg" :class="{ 'ei-hasmsg': entry.notice }">
+                    <td></td>
+                    <td colspan="9">{{ entry.errors.join('；') }}</td>
+                  </tr>
+                  <tr v-if="entry.notice" class="ei-msg" :class="entry.notice.acked ? 'ei-done' : 'rownote'">
+                    <td></td>
+                    <td colspan="9">
+                      <span>{{ entry.notice.acked ? '已确认无误（只对本次编辑有效）' : entry.notice.text }}</span>
+                      <button type="button" class="btn sm" @click="toggleAck(entry.notice.key)">{{ entry.notice.acked ? '撤回' : '确认无误' }}</button>
+                    </td>
+                  </tr>
+                </template>
               </template>
-              <tr v-if="!visibleEntries.length"><td colspan="10" class="muted" style="text-align: center; padding: 30px">{{ items.length ? '没有符合条件的明细' : '本期暂无费用，点“添加一行”录入，或粘贴 / 导入 Excel' }}</td></tr>
+              <tr v-if="!shownEntries.length"><td :colspan="colCount" class="muted" style="text-align: center; padding: 30px">{{ items.length ? '没有符合条件的明细' : '本期暂无费用，点“添加一行”录入，或粘贴 / 导入 Excel' }}</td></tr>
             </tbody>
             <tfoot v-if="items.length">
               <tr>
@@ -595,18 +845,7 @@ watch(() => pendingAccountPaths.value.map((path) => Object.values(path).join('|'
             </tfoot>
           </table>
         </div>
-        <div v-if="errMsg" class="note bad" style="margin: 12px 16px 0"><RdIcon name="alert" /><span class="grow">{{ errMsg }}</span></div>
-        <div class="savebar">
-          <div class="row">
-            <span><b class="num">{{ fmt(total) }}</b> <span class="muted">元 · {{ items.length }} 行</span></span>
-            <span v-if="errorRowCount" class="tag bad">{{ errorRowCount }} 行有问题</span>
-            <span v-if="pendingAccountPaths.length && !confirmNewAccounts" class="tag warn">请先确认新科目</span>
-            <span class="muted">保存会整月覆盖本月已有费用</span>
-          </div>
-          <button type="button" class="btn pri" :disabled="saveBlocked" @click="save">{{ saving ? '保存中…' : '保存本月费用' }}</button>
-        </div>
       </div>
-      <p v-if="errMsg && isYearScope" class="muted" style="color: var(--rd-bad)">{{ errMsg }}</p>
     </template>
 
     <Teleport to="body">
