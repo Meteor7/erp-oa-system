@@ -26,24 +26,18 @@ class RDExpenseImport(Document):
         # Accounts User cannot cancel/delete it -- a permanent period squat.
         if not self.items or not any((it.amount or 0) != 0 for it in self.items):
             frappe.throw(frappe._("费用导入单至少需有一条金额非零的费用明细，不能提交。"))
-        # Reject duplicate GL source rows at submit using the SAME key the
+        # Reject duplicate GL source row KEYS at submit using the SAME key the
         # allocator rejects, so a duplicate-laden import cannot be submitted and
-        # then squat the period while allocation keeps failing.
-        from rayher_hr_payroll.rd_cost.frappe_adapter import (
-            source_row_key_for_row, content_row_key_for_row,
-        )
-        seen, seen_content = set(), set()
+        # then squat the period while allocation keeps failing. Rows that merely look
+        # alike (same voucher / account / amount / project) are allowed: the same item
+        # can be bought several times; the import page only reminds about them.
+        from rayher_hr_payroll.rd_cost.frappe_adapter import source_row_key_for_row
+        seen = set()
         for it in self.items:
             k = source_row_key_for_row(it)
             if k in seen:
                 frappe.throw(frappe._("费用明细存在重复行（{0}），不能提交。").format(k))
             seen.add(k)
-            # also reject identical CONTENT carrying different source_row_keys, so a
-            # Desk/API caller cannot re-key duplicate GL rows past the key-based check
-            ck = content_row_key_for_row(it)
-            if ck in seen_content:
-                frappe.throw(frappe._("费用明细存在内容重复行（凭证号、科目与金额都相同），不能提交。"))
-            seen_content.add(ck)
 
     def on_submit(self):
         self.db_set("status", "Imported")

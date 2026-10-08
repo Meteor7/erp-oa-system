@@ -104,6 +104,24 @@ def test_expense_rows_accept_negative_amounts(monkeypatch):
     assert rows[0]["amount"] == -125.50
 
 
+def test_expense_rows_allow_identical_rows_with_their_own_keys(monkeypatch):
+    # 同一个项目一张凭证里买同一样东西几次：完全相同的行也能保存，各自有不同的行键。
+    mod, _frappe = _load_expense_entry(monkeypatch)
+    row = {
+        "voucher_no": "V-1",
+        "account_level_1": "研发支出",
+        "account_level_2": "直接投入费用",
+        "account_level_3": "研发材料",
+        "amount": 100,
+        "allocation_type": "common",
+    }
+
+    rows = mod._expense_rows([dict(row), dict(row)])
+
+    assert len(rows) == 2
+    assert rows[0]["source_row_key"] != rows[1]["source_row_key"]
+
+
 def test_save_expense_persists_four_level_accounts_and_derives_category(monkeypatch):
     mod, frappe = _load_expense_entry(monkeypatch)
     captured = {}

@@ -63,25 +63,14 @@ def _row_key(index, direct_project):
 
 
 def _expense_rows(items):
-    seen = set()
     rows = []
     for idx, it in enumerate(items):
         amt = float(it.get("amount") or 0)
         direct_project = _direct_project_for_row(it)
         account_level_1, account_level_2, account_level_3, account_level_4 = _account_levels(it)
         voucher_no = _clean(it.get("voucher_no")) or ("V%03d" % (idx + 1))
-        duplicate_key = (
-            voucher_no,
-            account_level_1,
-            account_level_2,
-            account_level_3,
-            account_level_4,
-            round(amt, 2),
-            direct_project or "",
-        )
-        if duplicate_key in seen:
-            frappe.throw(frappe._("存在重复的费用行（凭证号、科目、金额与所属项目都相同），请合并或更正。"))
-        seen.add(duplicate_key)
+        # 同一个项目一张凭证里把同一样东西买几次是正常的，完全相同的行也允许保存；
+        # 费用导入页只提醒（见 lib/rdExpense.js duplicateVoucherRows），不拦截。
         rows.append({
             "source_row_key": _row_key(idx, direct_project),
             "voucher_no": voucher_no,
