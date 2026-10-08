@@ -212,17 +212,19 @@ def _expense_rows(months):
 FOREIGN_RD_LABEL = "境外委托研发"
 
 
-def _foreign_rd_rows(months):
+def _foreign_rd_rows(months, extra_months=()):
     """境外委托研发按项目的分摊额，计入研发（修复 2026-09-29，审查 X2-10，决定 D7）。
 
     原来首页的研发只读国内分摊行，境外委托研发不在任何首页数字里。只对费用导入已提交的月份计算：
     国内只算已提交的分摊，草稿导入的境外费用也不提前出现在首页。
+    extra_months：用预览顶上国内部分的月份（没定版），境外部分同样计入，和预览口径一致。
     """
     wanted = set(months)
     imported = {(int(row.year), int(row.month)) for row in frappe.get_all(
         "RD Expense Import",
         filters={"docstatus": 1, "year": ["in", sorted({year for year, _ in wanted})]},
         fields=["year", "month"], limit_page_length=0) if row.year and row.month} & wanted
+    imported |= set(extra_months) & wanted
     if not imported:
         return []
     from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
@@ -261,9 +263,78 @@ def drop_allocated_rd_duplicates(rows, allocated_months, rd_projects):
                     and (row.get("project") or "") in rd_projects)]
 
 
-def cost_rows(months):
-    rows = _rd_rows(months) + _foreign_rd_rows(months) + _po_rows(months) + _expense_rows(months)
+PREVIEW_LIMIT = 12  # 一次请求最多现算几个月的预览（每个月约 0.4–0.7 秒）
+
+
+class PreviewBook:
+    """没有定版（已提交）分摊单的月份，用「预览」（按当前数据现算，只读）顶上研发成本。
+
+    一次请求共用一个：同一个月只算一次，总共最多算 PREVIEW_LIMIT 个月（先到先算，调用方先传当前
+    期间，所以当前期间优先）。有费用导入但算不出来的月份（比如还没有研发工时）和以前一样不计入。"""
+
+    def __init__(self, limit=PREVIEW_LIMIT):
+        self.limit = limit
+        self.computed = 0
+        self._lines = {}      # (year, month) -> 研发成本行；算不出来是 None
+        self._imports = {}    # year -> 有费用导入的月份集合
+
+    @property
+    def months(self):
+        """已经用预览顶上的月份 {(year, month)}。"""
+        return {key for key, rows in self._lines.items() if rows is not None}
+
+    def _imported(self, year):
+        if year not in self._imports:
+            self._imports[year] = {int(row.month) for row in frappe.get_all(
+                "RD Expense Import", filters={"docstatus": ["<", 2], "year": year},
+                fields=["month"], limit_page_length=0) if row.month}
+        return self._imports[year]
+
+    def _compute(self, year, month):
+        from rayher_hr_payroll.rd_cost.allocation_preview import build_preview
+
+        try:
+            preview = build_preview("%04d-%02d" % (year, month), year, month)
+        except Exception:
+            return None
+        if preview is None or preview.error or preview.doc is None:
+            return None
+        return [{"project": line.project, "kind": "rd", "amount": line.allocated_amount,
+                 "label": line.account_level_3 or line.expense_item_name or "其他费用",
+                 "hours": line.basis_hours, "period": (year, month)}
+                for line in (preview.doc.lines or [])]
+
+    def lines_for(self, months, finalized):
+        """months 里没定版、有费用导入、预览算得出来的月份 -> {(year, month): 成本行}。"""
+        result = {}
+        for year, month in sorted(set(months) - set(finalized), reverse=True):
+            if (year, month) not in self._lines:
+                if month not in self._imported(year) or self.computed >= self.limit:
+                    continue
+                self.computed += 1
+                self._lines[(year, month)] = self._compute(year, month)
+            rows = self._lines[(year, month)]
+            if rows is not None:
+                result[(year, month)] = rows
+        return result
+
+    def preview_months(self, months):
+        """months 里用了预览的月份，形如 ["2026-09"]。"""
+        return sorted("%04d-%02d" % key for key in self.months & set(months))
+
+
+def cost_rows(months, previews=None):
     allocated = _allocated_months(months)
+    preview_lines = previews.lines_for(months, allocated) if previews is not None else {}
+    rows = _rd_rows(months)
+    if preview_lines:
+        rows += [row for lines in preview_lines.values() for row in lines]
+        rows += _foreign_rd_rows(months, extra_months=set(preview_lines))
+    else:
+        rows += _foreign_rd_rows(months)
+    rows += _po_rows(months) + _expense_rows(months)
+    # 预览顶上的月份和已定版的月份一样：研发项目的采购、报销已在总账分摊里，不再重复计入。
+    allocated = set(allocated) | set(preview_lines)
     if not allocated:
         return rows
     return drop_allocated_rd_duplicates(rows, allocated, _rd_project_names())
@@ -283,8 +354,11 @@ def get_cost_overview(scope="month", period=None):
     if not can_view_cost():
         return {"visible": False}
     scope, year, month = parse_scope(scope, period)
-    costs = project_costs(cost_rows(period_months(scope, year, month)))
-    previous = project_costs(cost_rows(previous_months(scope, year, month)))
+    # 没定版的月份用预览顶上研发成本；一次请求共用一个 PreviewBook，同一个月只算一次。
+    book = PreviewBook()
+    current_months = period_months(scope, year, month)
+    costs = project_costs(cost_rows(current_months, book))
+    previous = project_costs(cost_rows(previous_months(scope, year, month), book))
     labels = _project_labels(costs)
     totals, previous_totals = sum_costs(costs), sum_costs(previous)
     projects = sorted(
@@ -293,12 +367,17 @@ def get_cost_overview(scope="month", period=None):
           "delta": delta_percent(values["total"], previous.get(key, _empty()).get("total", 0)),
           **values} for key, values in costs.items()),
         key=lambda row: row["total"], reverse=True)
-    trend = [{"label": bucket["label"], **sum_costs(project_costs(cost_rows(bucket["months"])))}
-             for bucket in trend_periods(scope, year, month)]
+    trend = []
+    for bucket in trend_periods(scope, year, month):
+        bucket_costs = sum_costs(project_costs(cost_rows(bucket["months"], book)))
+        trend.append({"label": bucket["label"], **bucket_costs,
+                      "preview": bool(book.preview_months(bucket["months"]))})
+    preview_months = book.preview_months(current_months)
     return {"visible": True, "scope": scope, "year": year, "month": month, "totals": totals,
             "deltas": {kind: delta_percent(totals[kind], previous_totals[kind])
                        for kind in ("rd", "po", "expense", "total")},
-            "projects": projects, "trend": trend}
+            "projects": projects, "trend": trend,
+            "preview": bool(preview_months), "preview_months": preview_months}
 
 
 @frappe.whitelist()
@@ -310,7 +389,10 @@ def get_project_cost_detail(project="", scope="month", period=None):
     groups = {"rd": defaultdict(float), "po": defaultdict(float), "expense": defaultdict(float)}
     # basis_hours repeats on every allocation line of a month, so keep one value per month.
     hours_by_period = {}
-    for row in cost_rows(period_months(scope, year, month)):
+    book = PreviewBook()
+    current_months = period_months(scope, year, month)
+    all_rows = cost_rows(current_months, book)
+    for row in all_rows:
         if (row.get("project") or NON_PROJECT) != key:
             continue
         groups[row["kind"]][row["label"]] += float(row.get("amount") or 0)
@@ -333,15 +415,17 @@ def get_project_cost_detail(project="", scope="month", period=None):
     if key == NON_PROJECT:
         # unassigned spend is easier to act on grouped by the department that spent it
         by_department = defaultdict(float)
-        for row in cost_rows(period_months(scope, year, month)):
+        for row in all_rows:
             if (row.get("project") or NON_PROJECT) != NON_PROJECT:
                 continue
             by_department[row.get("department") or "未指定部门"] += float(row.get("amount") or 0)
         breakdown["department"] = sorted(({"label": name, "amount": amount}
                                           for name, amount in by_department.items()),
                                          key=lambda row: row["amount"], reverse=True)[:8]
+    preview_months = book.preview_months(current_months)
     return {"project": key, "label": label, "owner": owner, "team": team,
-            "totals": totals, "hours": round(hours, 1), "breakdown": breakdown}
+            "totals": totals, "hours": round(hours, 1), "breakdown": breakdown,
+            "preview": bool(preview_months), "preview_months": preview_months}
 
 
 def _project_team(project, months):

@@ -169,6 +169,12 @@ def get_dashboard(period):
     alloc = (frappe.db.get_value("RD Cost Allocation", {"year": year, "month": month, "docstatus": 1},
                                  ["capitalized_total", "expensed_total", "unknown_total"],
                                  as_dict=True, order_by="creation desc") or {}) if can_see_cost else {}
+    # 本月还没有定版（已提交）的分摊单、但有费用导入：用预览（按当前数据现算，只读）顶上，并标出 preview。
+    preview = False
+    if can_see_cost and imp and not alloc:
+        preview_alloc = _preview_alloc_totals(period_canon, year, month)
+        if preview_alloc is not None:
+            alloc, preview = preview_alloc, True
     if can_see_cost:
         from rayher_hr_payroll.payroll_bridge import period_pay_totals
         pay = period_pay_totals(period_canon)
@@ -190,5 +196,21 @@ def get_dashboard(period):
         "alloc": {"capitalized": alloc.get("capitalized_total") or 0,
                   "expensed": alloc.get("expensed_total") or 0,
                   "unknown": alloc.get("unknown_total") or 0},
+        "preview": preview,
         "salary": {"gross": gross, "deductions": deductions},
     }
+
+
+def _preview_alloc_totals(period, year, month):
+    """没有定版时的三个阶段合计（预览）；算不出来返回 None。看板不能因为预览失败而打不开。"""
+    from rayher_hr_payroll.rd_cost.allocation_preview import build_preview
+
+    try:
+        preview = build_preview(period, year, month)
+    except Exception:
+        return None
+    if preview is None or preview.error or preview.doc is None:
+        return None
+    doc = preview.doc
+    return {"capitalized_total": doc.capitalized_total, "expensed_total": doc.expensed_total,
+            "unknown_total": doc.unknown_total}

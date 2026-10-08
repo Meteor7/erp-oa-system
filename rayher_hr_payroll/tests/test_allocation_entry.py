@@ -1,6 +1,7 @@
 import importlib
 import sys
 import types
+from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -69,17 +70,35 @@ def test_cancel_allocation_allows_finance_to_cancel_submitted_allocations(monkey
         def cancel(self):
             captured["canceled"].append((self.name, getattr(self.flags, "ignore_permissions", False)))
 
-    def get_doc(doctype, name):
+    class CommentDoc:
+        def __init__(self, values):
+            self.values = values
+
+        def insert(self, ignore_permissions=False):
+            captured.setdefault("comments", []).append((self.values, ignore_permissions))
+            captured["order"].append(("comment", self.values["reference_name"]))
+
+    def get_doc(doctype, name=None):
+        if isinstance(doctype, dict):
+            return CommentDoc(doctype)
         assert doctype == "RD Cost Allocation"
         return AllocationDoc(name)
 
+    captured["order"] = []
+    original_cancel = AllocationDoc.cancel
+    AllocationDoc.cancel = lambda self: (original_cancel(self), captured["order"].append(("cancel", self.name)))
     frappe.get_all = get_all
     frappe.get_doc = get_doc
+    frappe.session = SimpleNamespace(user="zhangmeng@example.com")
+    frappe.utils = SimpleNamespace(
+        get_fullname=lambda user: "演示员工16",
+        now_datetime=lambda: datetime(2026, 8, 3, 9, 30, 15),
+    )
     frappe.db.savepoint = lambda name: captured.setdefault("savepoint", name)
     frappe.db.rollback = lambda save_point=None: captured.setdefault("rollback", save_point)
     frappe.db.commit = lambda: captured.setdefault("committed", True)
 
-    result = mod.cancel_allocation("2026-07")
+    result = mod.cancel_allocation("2026-07", "  工时补录了两个人  ")
 
     assert captured["roles"] == mod.RD_FINANCE_ROLES
     assert captured["lock_check"] == ("2026-07", "lock_allocations", "分摊")
@@ -92,7 +111,89 @@ def test_cancel_allocation_allows_finance_to_cancel_submitted_allocations(monkey
     assert captured["savepoint"] == "rd_cancel_allocation"
     assert captured["canceled"] == [("ALLOC-1", True), ("ALLOC-2", True)]
     assert captured["committed"] is True
-    assert result == {"ok": True, "period": "2026-07", "canceled": ["ALLOC-1", "ALLOC-2"]}
+    assert result == {
+        "ok": True, "period": "2026-07", "canceled": ["ALLOC-1", "ALLOC-2"], "reason": "工时补录了两个人",
+    }
+    # 每张被撤销的分摊单都留一条 Info 备注：谁、什么时候、为什么；先撤销再写备注。
+    assert captured["comments"] == [
+        (
+            {
+                "doctype": "Comment", "comment_type": "Info",
+                "reference_doctype": "RD Cost Allocation", "reference_name": name,
+                "content": "撤销定版：工时补录了两个人（演示员工16，2026-08-03 09:30:15）",
+            },
+            True,
+        )
+        for name in ("ALLOC-1", "ALLOC-2")
+    ]
+    assert captured["order"] == [
+        ("cancel", "ALLOC-1"), ("comment", "ALLOC-1"), ("cancel", "ALLOC-2"), ("comment", "ALLOC-2"),
+    ]
+
+
+@pytest.mark.parametrize("reason", [None, "", "   ", "x" * 201, "\n\t "])
+def test_cancel_allocation_requires_a_reason_of_1_to_200_characters(monkeypatch, reason):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "lock_period_import", lambda *args: (_ for _ in ()).throw(AssertionError("no lock")))
+    _forbid_db(frappe)
+
+    with pytest.raises(RuleError, match="请填写撤销原因（200 字以内）。"):
+        mod.cancel_allocation("2026-07", reason)
+    with pytest.raises(RuleError, match="请填写撤销原因（200 字以内）。"):
+        mod.cancel_allocation("2026-07")
+
+
+def test_cancel_allocation_accepts_a_200_character_reason(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "zhangmeng@example.com", ["Accounts User"], ["zhangmeng@example.com"])
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
+    monkeypatch.setattr(mod, "lock_period_import", lambda year, month: "IMP-1")
+    frappe.get_all = lambda *args, **kwargs: []
+
+    assert mod.cancel_allocation("2026-07", "因" * 200)["reason"] == "因" * 200
+
+
+def test_cancel_allocation_checks_permission_before_the_reason(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    _as_user(monkeypatch, mod, frappe, "clerk@example.com", ["Accounts User"])
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    _forbid_db(frappe)
+
+    with pytest.raises(RuleError, match=CANCEL_DENIED):
+        mod.cancel_allocation("2026-07", "")
+
+
+def test_cancel_allocation_rolls_back_when_writing_the_comment_fails(monkeypatch):
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    calls = []
+    monkeypatch.setattr(mod, "_can_finalize", lambda: True)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
+    monkeypatch.setattr(mod, "lock_period_import", lambda year, month: "IMP-1")
+    frappe.get_all = lambda *args, **kwargs: ["ALLOC-1"]
+
+    class AllocationDoc:
+        flags = SimpleNamespace()
+
+        def cancel(self):
+            calls.append("cancel")
+
+    class BrokenComment:
+        def insert(self, ignore_permissions=False):
+            raise RuleError("comment failed")
+
+    frappe.get_doc = lambda doctype, name=None: BrokenComment() if isinstance(doctype, dict) else AllocationDoc()
+    frappe.db.savepoint = lambda name: calls.append(("savepoint", name))
+    frappe.db.rollback = lambda save_point=None: calls.append(("rollback", save_point))
+    frappe.db.commit = lambda: calls.append("commit")
+
+    with pytest.raises(RuleError, match="comment failed"):
+        mod.cancel_allocation("2026-07", "原因")
+
+    assert calls == [("savepoint", "rd_cancel_allocation"), "cancel", ("rollback", "rd_cancel_allocation")]
 
 
 def test_cancel_allocation_returns_empty_when_period_has_no_submitted_allocation(monkeypatch):
@@ -106,11 +207,11 @@ def test_cancel_allocation_returns_empty_when_period_has_no_submitted_allocation
     frappe.get_all = lambda *args, **kwargs: []
     frappe.get_doc = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no allocation should be loaded"))
 
-    result = mod.cancel_allocation("2026-07")
+    result = mod.cancel_allocation("2026-07", "测试")
 
     assert captured["roles"] == mod.RD_FINANCE_ROLES
     assert captured["lock_check"] == ("2026-07", "lock_allocations", "分摊")
-    assert result == {"ok": True, "period": "2026-07", "canceled": []}
+    assert result == {"ok": True, "period": "2026-07", "canceled": [], "reason": "测试"}
 
 
 def test_get_allocation_includes_project_and_stage_summaries(monkeypatch):
@@ -178,7 +279,7 @@ def test_cancel_allocation_respects_period_allocation_lock(monkeypatch):
     frappe.get_all = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("locked period should stop before query"))
 
     with pytest.raises(RuleError, match="locked"):
-        mod.cancel_allocation("2026-07")
+        mod.cancel_allocation("2026-07", "测试")
 
 
 def test_get_allocation_year_aggregates_submitted_months(monkeypatch):
@@ -582,7 +683,7 @@ def test_cancel_allocation_is_refused_for_an_ordinary_finance_user_before_any_da
     _forbid_db(frappe)
 
     with pytest.raises(RuleError, match=CANCEL_DENIED):
-        mod.cancel_allocation("2026-07")
+        mod.cancel_allocation("2026-07", "测试")
 
 
 def test_recalc_allocation_is_a_deprecated_alias_with_the_same_permission(monkeypatch):
@@ -704,13 +805,16 @@ def test_cancel_allocation_runs_for_a_finance_manager_position_holder(monkeypatc
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     monkeypatch.setattr(mod, "ensure_not_locked", lambda *args: None)
     monkeypatch.setattr(mod, "lock_period_import", lambda year, month: "IMP-1")
+    monkeypatch.setattr(mod, "_add_cancel_comment", lambda name, reason: canceled.append(("comment", name, reason)))
     frappe.get_all = lambda *args, **kwargs: ["ALLOC-1"]
     frappe.get_doc = lambda doctype, name: AllocationDoc()
     frappe.db.savepoint = lambda name: None
     frappe.db.commit = lambda: None
 
-    assert mod.cancel_allocation("2026-07") == {"ok": True, "period": "2026-07", "canceled": ["ALLOC-1"]}
-    assert canceled == ["ALLOC-1"]
+    assert mod.cancel_allocation("2026-07", "数据有误") == {
+        "ok": True, "period": "2026-07", "canceled": ["ALLOC-1"], "reason": "数据有误",
+    }
+    assert canceled == ["ALLOC-1", ("comment", "ALLOC-1", "数据有误")]
 
 
 def _never_write():
@@ -1018,3 +1122,186 @@ def test_get_finalize_check_on_a_finalized_month_reads_the_submitted_allocation(
     assert result["unknown_amount"] == 5.0
     assert result["reconcile_diff"] == 0
     assert result["warnings"] == []
+
+
+# ---------------------------------------------------------------------------
+# 研发费用汇总页：没有定版的月份用预览顶上（只读）
+# ---------------------------------------------------------------------------
+def _dashboard_preview_doc(amounts=((60, "capitalized", "RD02"), (40, "expensed", "RD03"))):
+    boom = _never_write()
+    lines = [
+        SimpleNamespace(
+            voucher_no="118", expense_item_name="source-a", account_level_3="", account_level_4="",
+            project=project, project_stage=stage, allocated_amount=Decimal(str(amount)),
+        )
+        for amount, stage, project in amounts
+    ]
+    snapshots = [
+        SimpleNamespace(
+            voucher_no="118", expense_item="source-a", account_level_1="研发费用", account_level_2="其他相关费用",
+            account_level_3="差旅费", account_level_4="住宿费", amount=Decimal("100.00"), direct_project=None,
+        ),
+    ]
+    return SimpleNamespace(
+        name=None, lines=lines, expense_snapshots=snapshots,
+        insert=boom, submit=boom, save=boom, db_set=boom, cancel=boom,
+    )
+
+
+def _prepare_dashboard(monkeypatch, *, finalized=None, previews=None, imports=(), allocations=()):
+    """finalized: 月度 get_value 的返回；previews: {(year, month): preview 对象或异常}；allocations: 年度已提交的分摊单行。"""
+    mod, frappe = _load_allocation_entry(monkeypatch)
+    queried = []
+    built = []
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    monkeypatch.setattr(mod, "_foreign_dashboard_lines", lambda periods: [])
+    frappe.db.get_value = lambda *args, **kwargs: finalized
+
+    def build_preview(period, year, month):
+        built.append(period)
+        result = (previews or {}).get((year, month))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(mod, "_build_preview", build_preview)
+
+    def get_all(doctype, filters=None, **kwargs):
+        queried.append(doctype)
+        if doctype == "RD Cost Allocation":
+            return list(allocations)
+        if doctype == "RD Expense Import":
+            return [SimpleNamespace(year=2026, month=month) for month in imports]
+        if doctype == "RD Cost Allocation Line":
+            return [SimpleNamespace(
+                parent="ALLOC-1", voucher_no="118", expense_item_name="source-a", account_level_3="", account_level_4="",
+                project="RD02", project_stage="capitalized", allocated_amount=10,
+            )] if finalized or allocations else []
+        if doctype == "RD Allocation Source Expense":
+            return []
+        if doctype == "Project":
+            return [SimpleNamespace(name=name, project_name=name + " name", rd_project_code=name) for name in ("RD02", "RD03")]
+        raise AssertionError(doctype)
+
+    frappe.get_all = get_all
+    frappe.get_doc = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("a preview must not load or build documents"))
+    frappe.db.commit = _never_write()
+    return mod, built, queried
+
+
+def test_dashboard_month_without_a_finalized_allocation_is_built_from_the_preview(monkeypatch):
+    preview = SimpleNamespace(import_name="IMP-1", doc=_dashboard_preview_doc(), warnings=[], error=None)
+    mod, built, queried = _prepare_dashboard(monkeypatch, previews={(2026, 6): preview})
+
+    result = mod.get_allocation_dashboard("2026-06", scope="month", mode="all")
+
+    assert built == ["2026-06"]
+    assert result["preview"] is True
+    assert result["finalized"] is False
+    assert result["allocation_names"] == []
+    assert "preview_error" not in result
+    assert result["total_amount"] == 100
+    assert result["project_count"] == 2
+    travel = next(row for row in result["summary_rows"] if row["account_level_3"] == "差旅费" and row["row_type"] == "detail")
+    assert travel["account_level_2"] == "其他相关费用"
+    assert travel["total"] == 100
+    assert travel["projects"] == {"RD02": 60, "RD03": 40}
+    assert result["summary_rows"][-1]["row_type"] == "grand_total"
+    assert [item["total"] for item in result["stage_summaries"]] == [60, 40, 0]
+    # 只读：没有读分摊明细表（数据库里没有这个月的分摊单）。
+    assert "RD Cost Allocation Line" not in queried
+
+    filtered = mod.get_allocation_dashboard("2026-06", scope="month", mode="capitalized")
+    assert filtered["preview"] is True
+    assert filtered["total_amount"] == 60
+
+
+def test_dashboard_month_preview_failure_is_reported_not_raised(monkeypatch):
+    preview = SimpleNamespace(import_name="IMP-1", doc=None, warnings=[], error="本月还没有研发工时，费用没法分摊。请先在「研发工时填报」填工时。")
+    mod, built, _queried = _prepare_dashboard(monkeypatch, previews={(2026, 6): preview})
+
+    result = mod.get_allocation_dashboard("2026-06", scope="month")
+
+    assert result["preview"] is False
+    assert result["finalized"] is False
+    assert result["preview_error"] == preview.error
+    assert result["total_amount"] == 0
+    assert result["summary_rows"] == []
+
+
+def test_dashboard_month_without_an_import_is_neither_preview_nor_finalized(monkeypatch):
+    mod, built, _queried = _prepare_dashboard(monkeypatch, previews={})
+
+    result = mod.get_allocation_dashboard("2026-06")
+
+    assert built == ["2026-06"]
+    assert result["preview"] is False
+    assert result["finalized"] is False
+    assert "preview_error" not in result
+    assert result["total_amount"] == 0
+
+
+def test_dashboard_finalized_month_never_computes_a_preview(monkeypatch):
+    mod, built, queried = _prepare_dashboard(
+        monkeypatch, finalized="ALLOC-1", previews={(2026, 6): AssertionError("must not preview a finalized month")},
+    )
+
+    result = mod.get_allocation_dashboard("2026-06")
+
+    assert built == []
+    assert result["finalized"] is True
+    assert result["preview"] is False
+    assert result["allocation_names"] == ["ALLOC-1"]
+    assert result["total_amount"] == 10
+    assert "RD Expense Import" not in queried
+
+
+def test_dashboard_year_adds_previews_only_for_imported_months_without_a_finalized_allocation(monkeypatch):
+    good = SimpleNamespace(import_name="IMP", doc=_dashboard_preview_doc(), warnings=[], error=None)
+    other = SimpleNamespace(import_name="IMP", doc=_dashboard_preview_doc(amounts=((5, "unknown", "RD02"),)), warnings=[], error=None)
+    broken = SimpleNamespace(import_name="IMP", doc=None, warnings=[], error="本月还没有研发工时，费用没法分摊。请先在「研发工时填报」填工时。")
+    mod, built, _queried = _prepare_dashboard(
+        monkeypatch,
+        allocations=[SimpleNamespace(name="ALLOC-1", year=2026, month=1), SimpleNamespace(name="ALLOC-2", year=2026, month=2)],
+        imports=[1, 2, 3, 5, 7],
+        previews={(2026, 3): good, (2026, 5): other, (2026, 7): broken},
+    )
+
+    result = mod.get_allocation_dashboard("2026-06", scope="year")
+
+    # 1、2 月已定版不再预览；4、6、8–12 月没有费用导入不算；其余按月份顺序现算。
+    assert built == ["2026-03", "2026-05", "2026-07"]
+    assert result["scope"] == "year"
+    assert result["allocation_names"] == ["ALLOC-1", "ALLOC-2"]
+    assert result["finalized_months"] == ["2026-01", "2026-02"]
+    assert result["preview_months"] == ["2026-03", "2026-05"]
+    assert result["has_preview"] is True
+    assert result["preview_errors"] == [{"period": "2026-07", "error": broken.error}]
+    assert result["total_amount"] == 10 + 100 + 5
+    assert "preview" not in result and "finalized" not in result
+
+
+def test_dashboard_year_without_previews_keeps_the_old_shape_plus_month_lists(monkeypatch):
+    mod, built, _queried = _prepare_dashboard(
+        monkeypatch, allocations=[SimpleNamespace(name="ALLOC-1", year=2026, month=4)], imports=[4],
+    )
+
+    result = mod.get_allocation_dashboard("2026-06", scope="year")
+
+    assert built == []
+    assert result["finalized_months"] == ["2026-04"]
+    assert result["preview_months"] == []
+    assert result["has_preview"] is False
+    assert "preview_errors" not in result
+
+
+def test_dashboard_year_with_nothing_imported_is_empty(monkeypatch):
+    mod, built, _queried = _prepare_dashboard(monkeypatch)
+
+    result = mod.get_allocation_dashboard("2026-06", scope="year")
+
+    assert built == []
+    assert result["finalized_months"] == []
+    assert result["preview_months"] == []
+    assert result["has_preview"] is False
+    assert result["total_amount"] == 0

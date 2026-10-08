@@ -382,8 +382,89 @@ def _domestic_dashboard_lines(allocation_names, period_by_parent):
         fields=source_fields,
         limit_page_length=50000,
     )
+    return _shape_dashboard_lines(lines, snapshots, period_by_parent)
+
+
+def _shape_dashboard_lines(lines, snapshots, period_by_parent):
+    """分摊明细 + 费用快照 -> 看板行（已定版的数据库行和预览的内存行共用）。"""
     lookup = _snapshot_lookup(snapshots)
     return [_with_snapshot_accounts(line, lookup, period_by_parent) for line in lines]
+
+
+def _preview_parent(year, month):
+    return "PREVIEW-%04d-%02d" % (int(year), int(month))
+
+
+def _preview_dashboard_lines(doc, year, month):
+    """预览（内存里算出、没入库的分摊单）的明细 -> 看板行，和 _domestic_dashboard_lines 同样的形状。"""
+    parent = _preview_parent(year, month)
+    lines = [
+        {
+            "parent": parent,
+            "voucher_no": _value(line, "voucher_no"),
+            "expense_item_name": _value(line, "expense_item_name"),
+            "account_level_3": _value(line, "account_level_3"),
+            "account_level_4": _value(line, "account_level_4"),
+            "project": _value(line, "project"),
+            "project_stage": _value(line, "project_stage"),
+            "allocated_amount": _value(line, "allocated_amount"),
+        }
+        for line in (_value(doc, "lines", []) or [])
+    ]
+    snapshots = [
+        {
+            "parent": parent,
+            "voucher_no": _value(row, "voucher_no"),
+            "expense_item": _value(row, "expense_item"),
+            "account_level_1": _value(row, "account_level_1"),
+            "account_level_2": _value(row, "account_level_2"),
+            "account_level_3": _value(row, "account_level_3"),
+            "account_level_4": _value(row, "account_level_4"),
+            "amount": _value(row, "amount"),
+            "direct_project": _value(row, "direct_project"),
+        }
+        for row in (_value(doc, "expense_snapshots", []) or [])
+    ]
+    return _shape_dashboard_lines(lines, snapshots, {parent: (int(year), int(month))})
+
+
+def _imported_months(year):
+    """这一年有（未取消）费用导入单的月份。"""
+    rows = frappe.get_all(
+        "RD Expense Import",
+        filters={"year": year, "docstatus": ["<", 2]},
+        fields=["year", "month"],
+        limit_page_length=0,
+    )
+    return {int(_value(row, "month")) for row in rows if _value(row, "month")}
+
+
+def _dashboard_previews(context):
+    """没有定版（已提交）分摊单、但有费用导入的月份：按当前数据现算预览（只读，不写库）。
+
+    返回 {lines, months, errors}：lines 是预览的看板行，months 是预览成功的月份（YYYY-MM），
+    errors 是有导入但算不出来的月份 [{"period", "error"}]。年度范围只算「有导入且没定版」的月份，
+    最多 12 个（一年的月份数）。"""
+    year = context["year"]
+    if context["scope"] == "year":
+        finalized = {m for (_y, m) in context["period_by_parent"].values()}
+        candidates = sorted(_imported_months(year) - finalized)[:12]
+    elif context["allocation_names"]:
+        return {"lines": [], "months": [], "errors": []}
+    else:
+        candidates = [context["month"]]
+    lines, months, errors = [], [], []
+    for month in candidates:
+        period = "%04d-%02d" % (year, month)
+        preview = _build_preview(period, year, month)
+        if preview is None:
+            continue
+        if preview.error is not None or preview.doc is None:
+            errors.append({"period": period, "error": preview.error})
+            continue
+        lines.extend(_preview_dashboard_lines(preview.doc, year, month))
+        months.append(period)
+    return {"lines": lines, "months": months, "errors": errors}
 
 
 def _foreign_dashboard_lines(periods):
@@ -545,7 +626,13 @@ def get_allocation_dashboard(period, scope="month", mode="all"):
     mode = _dashboard_mode(mode)
     context = _allocation_dashboard_context(period, scope)
     lines = _domestic_dashboard_lines(context["allocation_names"], context["period_by_parent"])
+    # 没有定版的月份用预览顶上（只读）；已定版的月份和原来完全一样。
+    previews = _dashboard_previews(context)
+    lines.extend(previews["lines"])
     lines.extend(_foreign_dashboard_lines(context["foreign_periods"]))
+    finalized_months = sorted({
+        "%04d-%02d" % (int(y), int(m)) for (y, m) in context["period_by_parent"].values() if y and m
+    })
 
     stage_filter = None if mode == "all" else mode
     filtered_lines = [
@@ -559,7 +646,7 @@ def get_allocation_dashboard(period, scope="month", mode="all"):
         for row in detail_rows
         if _clean(row.get("account_level_2"))
     }
-    return {
+    result = {
         "period": context["period"],
         "scope": context["scope"],
         "mode": mode,
@@ -574,6 +661,18 @@ def get_allocation_dashboard(period, scope="month", mode="all"):
         "project_columns": project_columns,
         "summary_rows": summary_rows,
     }
+    if context["scope"] == "year":
+        result["finalized_months"] = finalized_months
+        result["preview_months"] = previews["months"]
+        result["has_preview"] = bool(previews["months"])
+        if previews["errors"]:
+            result["preview_errors"] = previews["errors"]
+    else:
+        result["finalized"] = bool(context["allocation_names"])
+        result["preview"] = bool(previews["months"])
+        if previews["errors"]:
+            result["preview_error"] = previews["errors"][0]["error"]
+    return result
 
 
 def _finance_manager_users():
@@ -752,11 +851,50 @@ def _allow_ignore_permissions(doc):
         flags.ignore_permissions = True
 
 
+CANCEL_REASON_REQUIRED = "请填写撤销原因（200 字以内）。"
+CANCEL_REASON_MAX = 200
+
+
+def _clean_cancel_reason(reason):
+    text = str(reason if reason is not None else "").strip()
+    if not text or len(text) > CANCEL_REASON_MAX:
+        frappe.throw(frappe._(CANCEL_REASON_REQUIRED))
+    return text
+
+
+def _cancel_comment_text(reason):
+    """「撤销定版：原因（姓名，时间）」，写进被撤销的分摊单的备注，留痕。"""
+    from datetime import datetime
+
+    user = str(getattr(getattr(frappe, "session", None), "user", "") or "").strip()
+    name = user
+    try:
+        name = frappe.utils.get_fullname(user) or user
+    except Exception:
+        name = user
+    try:
+        now = frappe.utils.now_datetime()
+    except Exception:
+        now = datetime.now()
+    return "撤销定版：%s（%s，%s）" % (reason, name, now.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def _add_cancel_comment(allocation_name, reason):
+    frappe.get_doc(dict(
+        doctype="Comment", comment_type="Info",
+        reference_doctype="RD Cost Allocation", reference_name=allocation_name,
+        content=_cancel_comment_text(reason),
+    )).insert(ignore_permissions=True)
+
+
 @frappe.whitelist(methods=["POST"])
-def cancel_allocation(period):
-    """撤销定版。只有财务主管 / System Manager / Administrator。"""
+def cancel_allocation(period, reason=None):
+    """撤销定版。只有财务主管 / System Manager / Administrator；必须填撤销原因（1–200 字）。
+
+    原因会作为一条备注写在每张被撤销的分摊单上（谁、什么时候、为什么）。"""
     require_rd_access(RD_FINANCE_ROLES)
     _require_can_finalize(CANCEL_DENIED)
+    reason = _clean_cancel_reason(reason)
     year, month = parse_period(period)
     ensure_not_locked(period, "lock_allocations", "分摊")
     lock_period_import(year, month)
@@ -766,18 +904,19 @@ def cancel_allocation(period):
         pluck="name",
     )
     if not submitted:
-        return {"ok": True, "period": period, "canceled": []}
+        return {"ok": True, "period": period, "canceled": [], "reason": reason}
     frappe.db.savepoint("rd_cancel_allocation")
     try:
         for name in submitted:
             allocation = frappe.get_doc("RD Cost Allocation", name)
             _allow_ignore_permissions(allocation)
             allocation.cancel()
+            _add_cancel_comment(name, reason)
     except Exception:
         frappe.db.rollback(save_point="rd_cancel_allocation")
         raise
     frappe.db.commit()
-    return {"ok": True, "period": period, "canceled": submitted}
+    return {"ok": True, "period": period, "canceled": submitted, "reason": reason}
 
 
 @frappe.whitelist(methods=["POST"])

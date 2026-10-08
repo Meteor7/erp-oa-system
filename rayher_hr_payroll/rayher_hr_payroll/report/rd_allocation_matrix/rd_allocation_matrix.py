@@ -427,7 +427,11 @@ def _preview_domestic_lines(frappe: Any, year: int, month: int) -> list[dict[str
     if preview is None:
         return []
     if preview.error:
-        frappe.throw(frappe._("预览计算失败：{0}").format(preview.error))
+        # build_preview 已经把英文错误翻成中文（本月没有研发工时等）；已带「预览计算失败」前缀的不再重复加。
+        error = str(preview.error)
+        if error.startswith("预览计算失败"):
+            frappe.throw(error)
+        frappe.throw(frappe._("预览计算失败：{0}").format(error))
     return preview_report_lines(preview.doc, period)
 
 

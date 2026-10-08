@@ -729,3 +729,36 @@ def test_preview_domestic_lines_builds_rows_from_the_calculated_document_and_ref
     )
     with pytest.raises(Boom, match="duplicated labour"):
         mod._preview_domestic_lines(FakeFrappe(), 2026, 7)
+
+
+def test_preview_domestic_lines_surfaces_the_chinese_no_hours_message(monkeypatch):
+    # 矩阵报表的预览路径用 build_preview 翻好的中文，不再带英文，也不重复加前缀。
+    from rayher_hr_payroll.rd_cost import allocation_preview
+    from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix import rd_allocation_matrix as mod
+
+    class Boom(Exception):
+        pass
+
+    class FakeFrappe:
+        _ = staticmethod(lambda text: text)
+
+        @staticmethod
+        def throw(message):
+            raise Boom(message)
+
+    no_hours = "本月还没有研发工时，费用没法分摊。请先在「研发工时填报」填工时。"
+    monkeypatch.setattr(
+        allocation_preview, "build_preview",
+        lambda period, year, month: SimpleNamespace(doc=None, error=allocation_preview.friendly_error("project_hours total must be greater than zero")),
+    )
+    with pytest.raises(Boom) as excinfo:
+        mod._preview_domestic_lines(FakeFrappe(), 2026, 7)
+    assert str(excinfo.value) == "预览计算失败：" + no_hours
+
+    monkeypatch.setattr(
+        allocation_preview, "build_preview",
+        lambda period, year, month: SimpleNamespace(doc=None, error=allocation_preview.friendly_error("odd failure")),
+    )
+    with pytest.raises(Boom) as excinfo:
+        mod._preview_domestic_lines(FakeFrappe(), 2026, 7)
+    assert str(excinfo.value) == "预览计算失败：odd failure"

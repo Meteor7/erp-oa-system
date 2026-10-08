@@ -13,6 +13,46 @@ from types import SimpleNamespace
 
 PREVIEW_PARENT = "PREVIEW"
 
+NO_HOURS_MESSAGE = "本月还没有研发工时，费用没法分摊。请先在「研发工时填报」填工时。"
+_CJK = re.compile(r"[一-鿿]")
+_DIRECT_PROJECT = re.compile(r"direct_project '(?P<project>.*?)' is not present in project_hours")
+_NOT_RECONCILE = re.compile(r"allocation totals do not reconcile: allocated (?P<allocated>\S+), expected (?P<expected>\S+)")
+_DUPLICATE_ROW = re.compile(r"Duplicate GL source row in import: (?P<key>.+)")
+
+
+def friendly_error(text):
+    """把分摊计算抛出的英文错误翻成用户看得懂的中文；已经是中文的原样返回。
+
+    可能到达用户的英文错误（rd_cost/*.py 里的 ValueError / frappe.throw）：
+    - project_hours total must be greater than zero（本月没有研发工时）
+    - direct_project 'X' is not present in project_hours ...（直接计入的项目本月没有工时记录）
+    - allocation totals do not reconcile ...（明细合计和费用合计对不上）
+    - Duplicate GL source row in import: ...（费用导入单里有重复的总账行）
+    其余没有中文的错误统一加上「预览计算失败：」前缀。"""
+    message = str(text or "").strip()
+    if not message:
+        return "预览计算失败：未知错误"
+    if message.startswith("project_hours total must be greater than zero"):
+        return NO_HOURS_MESSAGE
+    match = _DIRECT_PROJECT.search(message)
+    if match:
+        return (
+            "费用导入里有直接计入项目「%s」的费用，但这个项目本月没有研发工时记录，没法判定它是资本化还是费用化。"
+            "请先在「研发工时填报」登记该项目的工时，或检查费用导入里的项目。" % match.group("project")
+        )
+    match = _NOT_RECONCILE.search(message)
+    if match:
+        return (
+            "分摊结果和费用合计对不上（分摊 %s，费用 %s）。请检查费用导入的金额，仍然不行请联系管理员。"
+            % (match.group("allocated"), match.group("expected"))
+        )
+    match = _DUPLICATE_ROW.search(message)
+    if match:
+        return "费用导入单里有重复的总账行（%s）。请到「研发费用导入」删除重复的行后再试。" % match.group("key").strip()
+    if _CJK.search(message):
+        return message
+    return "预览计算失败：%s" % message
+
 
 def new_allocation_doc(period, year, month, expense_import):
     """一份还没入库的 RD Cost Allocation（预览和定版共用，保证两边参数一致）。"""
@@ -63,7 +103,8 @@ def build_preview(period, year, month):
     - warnings: calculate() reports "labour skipped" notices through frappe.msgprint; they are
       captured here (removed from the request's message log so the page does not pop them up)
       and returned as plain strings.
-    - error: user-facing text when calculate() refused (e.g. duplicated labour sources)."""
+    - error: user-facing Chinese text when calculate() refused (e.g. duplicated labour sources,
+      or the month has no R&D hours); English allocator errors are translated by friendly_error."""
     from rayher_hr_payroll.api._guards import find_period_import
 
     import_name = find_period_import(year, month)
@@ -76,7 +117,7 @@ def build_preview(period, year, month):
     try:
         doc.calculate()
     except _business_errors() as exc:
-        error = str(exc) or exc.__class__.__name__
+        error = friendly_error(str(exc) or exc.__class__.__name__)
     except Exception as exc:  # a preview must never take the whole page down
         error = "预览计算失败：%s: %s" % (exc.__class__.__name__, exc)
     finally:

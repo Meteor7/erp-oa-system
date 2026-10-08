@@ -181,3 +181,67 @@ def test_preview_report_lines_use_the_database_row_shape_and_fill_accounts_from_
             "project": "RD06", "project_stage": "expensed", "allocated_amount": 5, "period": "2026-07",
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# 英文错误翻成中文（2026-10）
+# ---------------------------------------------------------------------------
+NO_HOURS = "本月还没有研发工时，费用没法分摊。请先在「研发工时填报」填工时。"
+
+
+def test_build_preview_translates_the_no_hours_error(monkeypatch):
+    preview, frappe = _load_preview(monkeypatch)
+    created = []
+
+    def behaviour(doc):
+        raise ValueError("project_hours total must be greater than zero")
+
+    _install_get_doc(frappe, behaviour, created)
+
+    result = preview.build_preview("2026-07", 2026, 7)
+
+    assert result.doc is None
+    assert result.error == NO_HOURS
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("project_hours total must be greater than zero", NO_HOURS),
+        (
+            "direct_project 'RD09' is not present in project_hours; its capitalization stage cannot be determined",
+            "费用导入里有直接计入项目「RD09」的费用，但这个项目本月没有研发工时记录，没法判定它是资本化还是费用化。"
+            "请先在「研发工时填报」登记该项目的工时，或检查费用导入里的项目。",
+        ),
+        (
+            "allocation totals do not reconcile: allocated 99.99, expected 100.00",
+            "分摊结果和费用合计对不上（分摊 99.99，费用 100.00）。请检查费用导入的金额，仍然不行请联系管理员。",
+        ),
+        (
+            "Duplicate GL source row in import: V1|差旅费|100",
+            "费用导入单里有重复的总账行（V1|差旅费|100）。请到「研发费用导入」删除重复的行后再试。",
+        ),
+        ("本期同时存在「人工费」类导入费用与工资单", "本期同时存在「人工费」类导入费用与工资单"),
+        ("some other english failure", "预览计算失败：some other english failure"),
+        ("", "预览计算失败：未知错误"),
+        (None, "预览计算失败：未知错误"),
+    ],
+)
+def test_friendly_error_maps_known_allocator_messages(monkeypatch, raw, expected):
+    preview, _frappe = _load_preview(monkeypatch)
+
+    assert preview.friendly_error(raw) == expected
+
+
+def test_build_preview_translates_frappe_validation_errors_from_duplicate_rows(monkeypatch):
+    preview, frappe = _load_preview(monkeypatch)
+    created = []
+
+    def behaviour(doc):
+        raise FakeValidationError("Duplicate GL source row in import: ABC")
+
+    _install_get_doc(frappe, behaviour, created)
+
+    result = preview.build_preview("2026-07", 2026, 7)
+
+    assert result.error == "费用导入单里有重复的总账行（ABC）。请到「研发费用导入」删除重复的行后再试。"
