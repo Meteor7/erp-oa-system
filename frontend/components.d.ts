@@ -10,11 +10,10 @@ declare module 'vue' {
   export interface GlobalComponents {
     AccommodationTabs: typeof import('./src/components/AccommodationTabs.vue')['default']
     AttendanceCalendar: typeof import('./src/components/attendance/AttendanceCalendar.vue')['default']
-    AttendanceCards: typeof import('./src/components/attendance/AttendanceCards.vue')['default']
     AttendanceDetail: typeof import('./src/components/attendance/AttendanceDetail.vue')['default']
     AttendanceForm: typeof import('./src/components/attendance/AttendanceForm.vue')['default']
+    AttendanceHome: typeof import('./src/components/attendance/AttendanceHome.vue')['default']
     AttendanceList: typeof import('./src/components/attendance/AttendanceList.vue')['default']
-    AttendanceReview: typeof import('./src/components/attendance/AttendanceReview.vue')['default']
     ClaimWorkbench: typeof import('./src/components/claim/ClaimWorkbench.vue')['default']
     ColumnChart: typeof import('./src/components/expense-ui/ColumnChart.vue')['default']
     DonutChart: typeof import('./src/components/expense-ui/DonutChart.vue')['default']
