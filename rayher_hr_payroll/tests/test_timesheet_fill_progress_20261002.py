@@ -129,3 +129,68 @@ def test_reminders_are_for_managers_only_and_respect_the_scope(mt):
         mod.remind_timesheet_fill("2026-10", json.dumps(["E3"]))
     with pytest.raises(RuleError, match="1 到 500"):
         mod.remind_timesheet_fill("2026-10", "[]")
+
+
+# ---- 2026-10-08：请假 3 / 5 小时后，上限折成天不是 0.01 的倍数（173 小时 = 21.625 天） ----
+CAP_173 = 173 / 8  # 21.625
+
+
+def test_fill_status_uses_the_hour_rule_for_a_non_half_day_cap(mt):
+    mod, _ = mt
+    assert mod._fill_status(21.62, CAP_173) == "full"
+    assert mod._fill_status(21.5, CAP_173) == "part"
+    assert mod._fill_status(21.61, CAP_173) == "part"
+    assert mod._fill_status(21.63, CAP_173) == "over"
+    assert mod._fill_status(0, CAP_173) == "none"
+    # 剩余 < 0.08 小时（0.01 天）算填满；刚好 0.08 小时还能再填 0.01 天
+    assert mod._fill_status(19.995, 20) == "full"
+    assert mod._fill_status(19.99, 20) == "part"
+    # 进度接口给出的 limit_days 已经是向下取整后的最大值，用它判断结果相同
+    assert mod._fill_status(21.62, 21.62) == "full"
+    assert mod._fill_status(21.63, 21.62) == "over"
+
+
+def test_max_entry_days_floors_to_a_hundredth_and_never_rounds_up(mt):
+    mod, _ = mt
+    from decimal import Decimal
+    assert mod.max_entry_days(CAP_173) == Decimal("21.62")
+    assert mod.max_entry_days(171 / 8) == Decimal("21.37")
+    assert mod.max_entry_days(Decimal("21.625")) == Decimal("21.62")
+    assert mod.max_entry_days(22) == Decimal("22.00")
+    assert mod.max_entry_days(21.624999999999996) == Decimal("21.62")
+    assert mod.max_entry_days(0) == Decimal("0.00") and mod.max_entry_days(None) == Decimal("0.00")
+
+
+def test_fill_progress_reports_the_floored_limit_and_classifies_with_it(mt, monkeypatch):
+    mod, _ = mt
+    setup(mt, ["Accounts User", "System Manager"], None)
+    monkeypatch.setattr(mod, "resolve_monthly_work_limit", lambda year, month, employee=None, **kw: {"day_limit": CAP_173, "hour_limit": 173}, raising=False)
+    mod._query_monthly_entries = lambda period, employee=None: [
+        {"employee": "E1", "occurrence_days": 21.62, "hours": 172.96, "project": "P", "employee_name": ""},
+        {"employee": "E2", "occurrence_days": 21.5, "hours": 172, "project": "P", "employee_name": ""},
+        {"employee": "E4", "occurrence_days": 21.63, "hours": 173.04, "project": "P", "employee_name": ""},
+    ]
+    result = mod.get_fill_progress("2026-10")
+    by_id = {row["employee"]: row for row in result["employees"]}
+    assert {k: v["status"] for k, v in by_id.items()} == {"E1": "full", "E2": "part", "E3": "none", "E4": "over"}
+    assert by_id["E1"]["limit_days"] == 21.62 and by_id["E1"]["limit_hours"] == 173.0
+    assert result["summary"]["full"] == 1 and result["summary"]["over"] == 1
+
+
+def test_prepare_rows_accepts_21_62_and_rejects_21_63_for_a_173_hour_cap(mt):
+    from decimal import Decimal
+    mod, _ = mt
+    resolve = lambda code, name, selected: selected
+    row = lambda project, days: {"project": project, "project_code": "C" + project, "project_name": "N" + project, "occurrence_days": days}
+    limit = Decimal(str(CAP_173))
+    ok = mod.prepare_monthly_rows([row("A", "21"), row("B", "0.62")], 2026, 10, resolve, day_limit=limit)
+    assert sum(r["occurrence_days"] for r in ok) == Decimal("21.62")
+    assert mod.prepare_monthly_rows([row("A", "21.5")], 2026, 10, resolve, day_limit=limit)
+    with pytest.raises(RuleError) as caught:
+        mod.prepare_monthly_rows([row("A", "21"), row("B", "0.63")], 2026, 10, resolve, day_limit=limit)
+    message = str(caught.value)
+    assert "最多 21.62 天" in message and "当前 21.63 天" in message and "173 小时" in message
+    # 5 小时请假：171 小时 = 21.375 天，最多 21.37 天
+    with pytest.raises(RuleError, match="最多 21.37 天"):
+        mod.prepare_monthly_rows([row("A", "21.38")], 2026, 10, resolve, day_limit=Decimal(str(171 / 8)))
+    assert mod.prepare_monthly_rows([row("A", "21.37")], 2026, 10, resolve, day_limit=Decimal(str(171 / 8)))

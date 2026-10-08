@@ -72,15 +72,40 @@ export function previousPeriod(period) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// ---- 状态 ----
-// 超上限 > 未填 > 已填满（差 0.01 天以内）> 未填满
+// ---- 上限、剩余、状态（统一按工时算，1 天 = 8 小时） ----
+// 请假可以是 3 / 5 小时或任意 0.5 小时，可填工时折成天常常不是 0.01 的倍数（173 小时 = 21.625 天）。
+// 天数最多保留两位小数，所以能填的最大值是向下取整的 21.62 天；「还差多少」也一律向下取整到 0.01 天，
+// 绝不进位——照着页面上显示的数字填，一定能保存。后端 _fill_status / prepare_monthly_rows 用同一条规则。
+export const FULL_TOLERANCE_HOURS = 0.08;
+
+function hoursOf(days) {
+  return round2((Number(days) || 0) * HOURS_PER_DAY);
+}
+
+// 当月最多能填的天数：上限向下取整到 0.01 天（21.625 -> 21.62）
+export function maxEntryDays(limit) {
+  const hundredths = Math.floor((Number(limit) || 0) * 100 + 1e-6);
+  return Math.max(0, hundredths) / 100;
+}
+
+// 还能填的天数：向下取整到 0.01 天，超上限 / 已填满为 0
+export function remainingDays(used, limit) {
+  const hundredths = Math.floor(((Number(limit) || 0) - (Number(used) || 0)) * 100 + 1e-6);
+  return Math.max(0, hundredths) / 100;
+}
+
+// 离上限还差多少小时（精确值，可能带填不进去的零头，比如 5 小时 = 0.625 天）
+export function remainingHours(used, limit) {
+  return Math.max(0, round2(hoursOf(limit) - hoursOf(used)));
+}
+
+// 超上限 > 未填 > 已填满（剩余工时 < 0.08 小时）> 未填满；可填 0 小时的人没有什么要填，算已填满
 export function deriveStatus(used, limit) {
-  const u = Number(used) || 0;
-  const l = Number(limit) || 0;
-  if (u > l + EPS) return 'over';
-  if (u <= EPS) return 'none';
-  if (Math.abs(u - l) < 0.01) return 'full';
-  return 'part';
+  const usedHours = hoursOf(used);
+  const limitHours = hoursOf(limit);
+  if (usedHours > limitHours + EPS) return 'over';
+  if (usedHours <= EPS) return limitHours > EPS ? 'none' : 'full';
+  return limitHours - usedHours < FULL_TOLERANCE_HOURS - EPS ? 'full' : 'part';
 }
 
 export function needsRemind(status) {
@@ -150,18 +175,36 @@ export function isValidDaysText(value) {
   return DAY_PATTERN.test(text) && Number(text) > 0;
 }
 
-// 把剩余天数平均分给现有项目：每行加 floor(剩余 / 行数 / 0.5) × 0.5，合计绝不超过上限。
-export function averageFill(rows, limit) {
+// 把某一行补到上限：该行的天数 = 现有 + 剩余（向下取整到 0.01 天），合计正好到「已填满」。
+// index 是想补的那一行（最后编辑的那行），没有或越界就补最后一行。
+export function topUpRow(rows, limit, index) {
   const list = rows || [];
-  const left = round2((Number(limit) || 0) - sumDays(list));
-  if (!list.length || left < DAY_STEP - EPS) return { rows: list, added: 0 };
-  const add = Math.floor(left / list.length / DAY_STEP + 1e-9) * DAY_STEP;
-  if (add <= 0) return { rows: list, added: 0 };
-  const next = list.map((row) => {
+  const target = Number.isInteger(index) && index >= 0 && index < list.length ? index : list.length - 1;
+  const add = remainingDays(sumDays(list), limit);
+  if (target < 0 || add <= 0) return { rows: list, added: 0, index: target };
+  const next = list.map((row, i) => {
+    if (i !== target) return row;
     const days = round2(validDays(row.occurrence_days) + add);
     return { ...row, occurrence_days: trimDays(days), hours: round2(days * HOURS_PER_DAY) };
   });
-  return { rows: next, added: round2(add * list.length) };
+  return { rows: next, added: add, index: target };
+}
+
+// 把剩余天数平均分给现有项目：先每行加 floor(剩余 / 行数 / 0.5) × 0.5，
+// 分不尽的零头（向下取整到 0.01 天）全部加在最后一行，合计正好到上限，绝不超过。
+export function averageFill(rows, limit) {
+  const list = rows || [];
+  const left = remainingDays(sumDays(list), limit);
+  if (!list.length || left <= 0) return { rows: list, added: 0 };
+  const add = Math.floor(left / list.length / DAY_STEP + 1e-9) * DAY_STEP;
+  const rest = round2(left - add * list.length);
+  const next = list.map((row, index) => {
+    const extra = add + (index === list.length - 1 ? rest : 0);
+    if (extra <= 0) return row;
+    const days = round2(validDays(row.occurrence_days) + extra);
+    return { ...row, occurrence_days: trimDays(days), hours: round2(days * HOURS_PER_DAY) };
+  });
+  return { rows: next, added: left };
 }
 
 // 复制上月：只取仍然可选的项目，去重，天数 > 0，备注不带过来。
@@ -211,17 +254,30 @@ export function validateEntryRows(rows, { employee, hasLegacy = false, dayLimit 
     if (!Number.isFinite(days) || days <= 0) return `第 ${index + 1} 行发生天数必须大于 0`;
     sum = round2(sum + days);
   }
-  if (Number.isFinite(Number(dayLimit)) && sum > Number(dayLimit) + EPS) {
-    return `当月累计发生天数不能超过 ${Number(dayLimit).toFixed(2)} 天`;
+  if (Number.isFinite(Number(dayLimit)) && deriveStatus(sum, dayLimit) === 'over') {
+    const max = maxEntryDays(dayLimit).toFixed(2);
+    return `当月累计发生天数不能超过 ${max} 天：当前 ${sum.toFixed(2)} 天，本月最多 ${max} 天`;
   }
   return '';
 }
 
+// 天数显示：至少一位小数，最多两位（20 -> "20.0"，21.62 -> "21.62"），不四舍五入进位。
+export function fmtDaysExact(value) {
+  const text = String(round2(value));
+  return text.includes('.') ? text : `${text}.0`;
+}
+
+// 小时显示：去掉多余的 0（173 -> "173"，172.5 -> "172.5"）
+export function fmtHours(value) {
+  return String(round2(value));
+}
+
 // 「4 月可填 20.0 天（160 小时）= 日历工时 176 小时 − 已批请假 16 小时」等说明文字。
+// 可填天数是最多能填的天数（向下取整到 0.01 天）：173 小时显示「可填 21.62 天（173 小时）」。
 export function capText({ month, dayLimit, hourLimit, baseHourLimit, leaveHours, joinedOn, relievedOn } = {}) {
-  const parts = [`${month ? `${month} 月` : '本月'}可填 ${fmtDays(dayLimit, 1)} 天（${fmtDays(hourLimit, 0)} 小时）`];
+  const parts = [`${month ? `${month} 月` : '本月'}可填 ${fmtDaysExact(maxEntryDays(dayLimit))} 天（${fmtHours(hourLimit)} 小时）`];
   const base = baseHourLimit ?? hourLimit;
-  parts.push(`= 日历工时 ${fmtDays(base, 0)} 小时 − 已批请假 ${fmtDays(leaveHours || 0, 0)} 小时`);
+  parts.push(`= 日历工时 ${fmtHours(base)} 小时 − 已批请假 ${fmtHours(leaveHours || 0)} 小时`);
   let text = parts.join(' ');
   if (joinedOn) text += ` · ${joinedOn} 入职，之前的日子不计`;
   if (relievedOn) text += ` · ${relievedOn} 离职，之后的日子不计`;
@@ -532,13 +588,20 @@ export function stackedSegments(rows, limit) {
   return segments;
 }
 
-// 「还差 2.6 天」（琥珀）/「已分配满 ✓」（绿）/「超出上限 X 天…」（红）
+// 「还差 0.62 天（5 小时）」（琥珀）/「已分配满 ✓」（绿）/「超出上限 X 天…」（红）
+// 还差的天数向下取整到 0.01 天（照着填一定能保存）；不是整天 / 半天时括号里写精确的剩余小时数。
 export function remainingMeta(used, limit) {
   const status = deriveStatus(used, limit);
-  const left = round2((Number(limit) || 0) - (Number(used) || 0));
-  if (status === 'over') return { tone: 'bad', text: `超出上限 ${fmtDays(-left, 1)} 天，请调整后再保存` };
-  if (status === 'full') return { tone: 'ok', text: '已分配满 ✓' };
-  return { tone: 'warn', text: `还差 ${fmtDays(left, 1)} 天` };
+  const max = maxEntryDays(limit);
+  const days = remainingDays(used, limit);
+  const hours = remainingHours(used, limit);
+  if (status === 'over') {
+    return { tone: 'bad', days: 0, hours: 0, text: `超出上限 ${trimDays((Number(used) || 0) - max)} 天，最多 ${max.toFixed(2)} 天，请调整后再保存` };
+  }
+  if (status === 'full') return { tone: 'ok', days: 0, hours: 0, text: '已分配满 ✓' };
+  const wholeOrHalf = Math.abs(days * 2 - Math.round(days * 2)) < EPS;
+  const text = wholeOrHalf ? `还差 ${fmtDaysExact(days)} 天` : `还差 ${fmtDaysExact(days)} 天（${fmtHours(hours)} 小时）`;
+  return { tone: 'warn', days, hours, text };
 }
 
 // ---- 服务器报错 ----

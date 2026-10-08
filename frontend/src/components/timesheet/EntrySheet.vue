@@ -6,9 +6,9 @@ import { Spinner } from 'frappe-ui';
 import RdIcon from '../rd/RdIcon.vue';
 import '../../styles/rdTimesheet.css';
 import {
-  DAY_STEP, HOURS_PER_DAY, averageFill, avatarText, canStepDown, defaultNewDays, deriveStatus, fmtDays, isValidDaysText,
-  findProject, pickerOptions, projectCode, projectColor, projectName, projectOwner, remainingMeta, round2, rowFromProject, rowHours,
-  sharePercent, stackedSegments, statusMeta, stepDays, sumDays, sumHours,
+  DAY_STEP, HOURS_PER_DAY, averageFill, avatarText, canStepDown, defaultNewDays, deriveStatus, fmtDays, fmtDaysExact, fmtHours, isValidDaysText,
+  findProject, maxEntryDays, pickerOptions, projectCode, projectColor, projectName, projectOwner, remainingDays, remainingMeta, round2,
+  rowFromProject, rowHours, sharePercent, stackedSegments, statusMeta, stepDays, sumDays, sumHours, topUpRow,
 } from '../../lib/timesheetEntryView.js';
 
 const props = defineProps({
@@ -35,13 +35,31 @@ const emit = defineEmits(['change', 'remove', 'copy', 'import', 'remind', 'save'
 
 const used = computed(() => sumDays(props.rows));
 const hours = computed(() => sumHours(props.rows));
-const left = computed(() => round2(props.dayLimit - used.value));
-const over = computed(() => used.value > props.dayLimit + 1e-6);
+// 剩余一律先按工时算、再换成天并向下取整到 0.01 天（173 小时 = 21.625 天，最多填 21.62 天），所以照着显示的数字填一定能保存。
+const left = computed(() => remainingDays(used.value, props.dayLimit));
+const maxDays = computed(() => maxEntryDays(props.dayLimit));
 const status = computed(() => deriveStatus(used.value, props.dayLimit));
+const over = computed(() => status.value === 'over');
+const overDays = computed(() => round2(used.value - maxDays.value));
+const overHours = computed(() => round2((used.value - props.dayLimit) * HOURS_PER_DAY));
 const meta = computed(() => statusMeta(status.value));
 const remaining = computed(() => remainingMeta(used.value, props.dayLimit));
 const segments = computed(() => stackedSegments(props.rows, props.dayLimit));
 const average = computed(() => averageFill(props.rows, props.dayLimit));
+// 「补满剩余」补哪一行：最后编辑的那一行，找不到就补最后一行
+const lastEditedKey = ref('');
+function rowKeyOf(row, index) {
+  return row.key || row.monthly_entry_id || String(index);
+}
+const topUpIndex = computed(() => {
+  const found = props.rows.findIndex((row, index) => lastEditedKey.value && rowKeyOf(row, index) === lastEditedKey.value);
+  return found >= 0 ? found : props.rows.length - 1;
+});
+const topUp = computed(() => topUpRow(props.rows, props.dayLimit, topUpIndex.value));
+const topUpTitle = computed(() => {
+  const row = props.rows[topUpIndex.value];
+  return row ? `把还差的 ${fmtDaysExact(topUp.value.added)} 天补到「${row.project_name || row.project}」` : '';
+});
 const canRemindNow = computed(() => props.canRemind && (status.value === 'none' || status.value === 'part') && !props.editable);
 const saveHint = computed(() => {
   if (props.saving) return '正在保存';
@@ -71,17 +89,21 @@ function patchRow(index, patch) {
 }
 
 function setDays(index, text) {
+  lastEditedKey.value = rowKeyOf(props.rows[index], index);
   patchRow(index, { occurrence_days: text, hours: rowHours({ occurrence_days: text }) });
 }
 
 function step(index, delta) {
+  lastEditedKey.value = rowKeyOf(props.rows[index], index);
   const next = stepDays(props.rows[index].occurrence_days, delta);
   patchRow(index, { occurrence_days: next, hours: rowHours({ occurrence_days: next }) });
 }
 
 function addProject(project) {
   const days = defaultNewDays(left.value);
-  emit('change', [...props.rows, rowFromProject(project, props.person.employee, days)]);
+  const row = rowFromProject(project, props.person.employee, days);
+  lastEditedKey.value = row.key;
+  emit('change', [...props.rows, row]);
   addQuery.value = '';
   activeIndex.value = 0;
 }
@@ -109,6 +131,10 @@ function onSearchKey(event) {
 function fillEvenly() {
   if (average.value.added > 0) emit('change', average.value.rows);
 }
+
+function fillRemaining() {
+  if (topUp.value.added > 0) emit('change', topUp.value.rows);
+}
 </script>
 
 <template>
@@ -118,7 +144,7 @@ function fillEvenly() {
       <button v-if="canRemindNow" type="button" class="btn sm" :disabled="reminding" @click="emit('remind', person.employee)"><RdIcon name="bell" />催办</button>
     </div>
     <div v-if="legacy" class="note warn"><RdIcon name="alert" /><span class="grow">历史按日记录不能在月度视图中直接修改</span></div>
-    <div v-if="over" class="note bad"><RdIcon name="alert" /><span class="grow">超出本月上限 {{ fmtDays(used - dayLimit, 1) }} 天（{{ fmtDays((used - dayLimit) * HOURS_PER_DAY, 0) }} 小时），请调整后再保存。</span></div>
+    <div v-if="over" class="note bad"><RdIcon name="alert" /><span class="grow">超出本月上限 {{ fmtDaysExact(overDays) }} 天（{{ fmtHours(overHours) }} 小时），本月最多 {{ maxDays.toFixed(2) }} 天，请调整后再保存。</span></div>
 
     <div class="card ts-sheet">
       <div class="ts-top">
@@ -141,11 +167,12 @@ function fillEvenly() {
 
         <div>
           <div class="ts-total">
-            <span class="big" :class="{ bad: over }">{{ fmtDays(used, 1) }}</span>
-            <span class="muted">/ {{ fmtDays(dayLimit, 1) }} 天</span>
-            <span class="muted" style="margin-left: 6px">{{ fmtDays(hours, 0) }} h</span>
+            <span class="big" :class="{ bad: over }">{{ fmtDaysExact(used) }}</span>
+            <span class="muted">/ {{ fmtDaysExact(maxDays) }} 天</span>
+            <span class="muted" style="margin-left: 6px">{{ fmtHours(hours) }} h</span>
             <span class="left" :class="remaining.tone" style="margin-left: auto">{{ remaining.text }}</span>
-            <button v-if="editable && average.added > 0" type="button" class="ts-link" @click="fillEvenly">把剩余平均分给现有项目</button>
+            <button v-if="editable && rows.length && topUp.added > 0" type="button" class="btn sm" :title="topUpTitle" @click="fillRemaining">补满剩余</button>
+            <button v-if="editable && rows.length > 1 && average.added > 0" type="button" class="ts-link" @click="fillEvenly">把剩余平均分给现有项目</button>
           </div>
           <div class="ts-meter" role="img" aria-label="各项目已分配天数占本月上限的比例">
             <i v-for="seg in segments" :key="seg.key" :style="{ width: seg.width + '%', background: seg.color }" :title="`${seg.code} ${seg.name} ${fmtDays(seg.days, 1)} 天`"></i>

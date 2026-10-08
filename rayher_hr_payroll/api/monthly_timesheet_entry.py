@@ -6,7 +6,7 @@ import re
 import uuid
 from calendar import monthrange
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 
 import frappe
 
@@ -23,6 +23,8 @@ from rayher_hr_payroll.working_calendar import resolve_monthly_work_limit
 DAY_QUANTUM = Decimal("0.01")
 HOUR_QUANTUM = Decimal("0.01")
 HOURS_PER_DAY = Decimal("8.00")
+# 「已填满」的容差：剩余工时小于 0.08 小时（= 0.01 天，天数最多保留两位小数时填不进去的零头）。
+FULL_TOLERANCE_HOURS = Decimal("0.08")
 RD_MONTHLY_ENTRY_ROLES = ("System Manager", "HR User", "HR Manager", "Department Manager", "Employee")
 RD_MONTHLY_VIEW_ROLES = (*RD_MONTHLY_ENTRY_ROLES, "Accounts User", "Employee")
 RD_MONTHLY_ADMIN_ROLES = {"System Manager", "HR User", "HR Manager"}
@@ -175,6 +177,25 @@ def calculated_hours(days: Decimal) -> Decimal:
     return (days * HOURS_PER_DAY).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
 
 
+def _as_decimal(value) -> Decimal:
+    try:
+        number = Decimal(str(value if value is not None else 0))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+    return number if number.is_finite() else Decimal("0")
+
+
+def max_entry_days(day_limit) -> Decimal:
+    """当月最多能填的天数：可填工时折成天后向下取整到 0.01 天，绝不进位。
+
+    请假可以是 3 / 5 小时或任意 0.5 小时，上限折成天常常不是 0.01 的倍数
+    （176 − 3 = 173 小时 = 21.625 天）。天数最多保留两位小数，所以能填的最大值是 21.62 天，
+    填 21.63 天（173.04 小时）会超出上限。页面上显示的「还差 / 最多」都用这个值，照着填一定能保存。
+    """
+    hundredths = (_as_decimal(day_limit) * 100 + Decimal("0.000001")).to_integral_value(rounding=ROUND_FLOOR)
+    return max(Decimal("0"), hundredths / 100).quantize(DAY_QUANTUM)
+
+
 def split_day_hours(days: Decimal) -> list[Decimal]:
     full_days = int(days)
     result = [HOURS_PER_DAY] * full_days
@@ -216,8 +237,14 @@ def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project, day_l
     day_limit = Decimal(
         str(day_limit if day_limit is not None else monthrange(int(year), int(month))[1])
     )
-    if calculated_hours(total_days) > calculated_hours(day_limit):
-        frappe.throw(frappe._("该员工当月累计工时不能超过扣除请假后的可填报上限。"))
+    max_days = max_entry_days(day_limit)
+    if total_days > max_days:
+        limit_hours = f"{calculated_hours(day_limit):f}".rstrip("0").rstrip(".")
+        frappe.throw(
+            frappe._("该员工当月累计工时不能超过扣除请假后的可填报上限：当前 {0} 天，本月最多 {1} 天（可填 {2} 小时）。").format(
+                total_days, max_days, limit_hours
+            )
+        )
     return prepared
 
 
@@ -539,6 +566,7 @@ def list_monthly_entries(period, employee=None):
         "total_hours": total_hours,
         "employee_count": employee_count,
         "day_limit": limit["day_limit"],
+        "max_day_limit": float(max_entry_days(limit["day_limit"])),
         "hour_limit": limit["hour_limit"],
         "base_hour_limit": limit.get("base_hour_limit", limit["hour_limit"]),
         "leave_hours": limit.get("leave_hours", 0),
@@ -747,14 +775,19 @@ def _department_label(value) -> str:
 
 
 def _fill_status(used: float, limit: float) -> str:
-    """none 一天没填；over 超过上限；full 刚好填满；part 还没填满。"""
-    used, limit = round(float(used or 0), 2), round(float(limit or 0), 2)
-    if used <= 0:
-        return "none" if limit > 0 else "full"
-    diff = round(used - limit, 2)
-    if diff > 0:
+    """none 一天没填；over 超过上限；full 已填满；part 还没填满。
+
+    按工时比较（1 天 = 8 小时，保留两位小数）：剩余工时小于 0.08 小时（= 0.01 天，
+    天数最多保留两位小数时填不进去的零头）就算填满。前端 deriveStatus 用同一条规则。
+    例：可填 173 小时（21.625 天）时，填 21.62 天（172.96 小时）= 已填满，21.5 天 = 未填满，21.63 天 = 超上限。
+    """
+    used_hours = (_as_decimal(used) * HOURS_PER_DAY).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
+    limit_hours = (_as_decimal(limit) * HOURS_PER_DAY).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
+    if used_hours <= 0:
+        return "none" if limit_hours > 0 else "full"
+    if used_hours > limit_hours:
         return "over"
-    return "full" if diff == 0 else "part"
+    return "full" if limit_hours - used_hours < FULL_TOLERANCE_HOURS else "part"
 
 
 def _fill_scope_kind(scope) -> str:
@@ -793,7 +826,9 @@ def _fill_rows(year: int, month: int, scope) -> list[dict]:
             "department": _department_label(_value(detail, "department")),
             "user_id": str(_value(detail, "user_id") or ""),
             "used_days": days,
-            "limit_days": round(float(limit or 0), 2),
+            # 上限天数 = 最多能填的天数（向下取整到 0.01 天），和 status 的判定、保存时的校验一致。
+            "limit_days": float(max_entry_days(limit)),
+            "limit_hours": float(calculated_hours(_as_decimal(limit))),
             "status": _fill_status(days, limit),
         })
     return result

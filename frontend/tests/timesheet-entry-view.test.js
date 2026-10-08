@@ -8,11 +8,14 @@ import {
   averageFill, capText, daysLeft, deadlineLabel, deadlineTone, defaultNewDays, deriveStatus, filterRoster, followUpList,
   groupByDepartment, lastRemindedText, namesText, pickerOptions, previousPeriod, remindResultText, rosterCounts,
   rosterItemsFromProgress, rowsFromPrevious, serverMessage, stepDays, summarizeProgress, validateEntryRows,
+  fmtDaysExact, fmtHours, maxEntryDays, remainingDays, remainingHours, topUpRow,
 } from '../src/lib/timesheetEntryView.js';
 
 const row = (project, days, extra = {}) => ({ project, project_code: `C-${project}`, project_name: `N-${project}`, occurrence_days: String(days), ...extra });
 
-test('status: over beats everything, none for zero, full within 0.01 day, otherwise part', () => {
+test('status: over beats everything, none for zero, full when under 0.08 hour (0.01 day) is left, otherwise part', () => {
+  assert.equal(deriveStatus(0, 0), 'full');
+  assert.equal(deriveStatus(19.99, 20), 'part');
   assert.equal(deriveStatus(0, 20), 'none');
   assert.equal(deriveStatus(10, 20), 'part');
   assert.equal(deriveStatus(20, 20), 'full');
@@ -40,30 +43,131 @@ test('new rows default to one day, less when little room is left, never below ha
   assert.equal(defaultNewDays(-3), 0.5);
 });
 
-test('average fill: floors to half days and never exceeds the limit', () => {
+test('average fill: half-day steps first, the leftover goes to the last row so the total reaches the limit', () => {
   const rows = [row('A', 1), row('B', 1), row('C', 1)];
-  // 剩余 17，每行 floor(17/3/0.5)*0.5 = 5.5，合计 3 + 16.5 = 19.5 ≤ 20
+  // 剩余 17，每行 floor(17/3/0.5)*0.5 = 5.5，合计 3 + 16.5 = 19.5；零头 0.5 加在最后一行 -> 正好 20
   const result = averageFill(rows, 20);
-  assert.deepEqual(result.rows.map((r) => r.occurrence_days), ['6.5', '6.5', '6.5']);
-  assert.equal(result.added, 16.5);
-  assert.ok(result.rows.reduce((s, r) => s + Number(r.occurrence_days), 0) <= 20);
-  assert.deepEqual(result.rows.map((r) => r.hours), [52, 52, 52]);
+  assert.deepEqual(result.rows.map((r) => r.occurrence_days), ['6.5', '6.5', '7']);
+  assert.equal(result.added, 17);
+  assert.equal(result.rows.reduce((s, r) => s + Number(r.occurrence_days), 0), 20);
+  assert.deepEqual(result.rows.map((r) => r.hours), [52, 52, 56]);
+  assert.equal(deriveStatus(20, 20), 'full');
 });
 
-test('average fill: nothing to do when full, over, empty or less than half a day per person', () => {
+test('average fill: nothing to do when full, over or empty; a thin leftover goes to the last row', () => {
   const rows = [row('A', 10), row('B', 10)];
   assert.equal(averageFill(rows, 20).added, 0);
   assert.equal(averageFill(rows, 18).added, 0);
   assert.equal(averageFill([], 20).added, 0);
-  // 剩 0.75 天分给 2 行：每行 floor(0.375/0.5)=0
+  // 剩 0.75 天分给 2 行：每行 floor(0.375/0.5)=0，零头 0.75 全给最后一行
   const thin = averageFill([row('A', 9.5), row('B', 9.75)], 20);
-  assert.equal(thin.added, 0);
+  assert.equal(thin.added, 0.75);
   assert.strictEqual(thin.rows[0].occurrence_days, '9.5');
+  assert.strictEqual(thin.rows[1].occurrence_days, '10.5');
   // 不修改入参
   const input = [row('A', 1)];
   averageFill(input, 5);
   assert.equal(input[0].occurrence_days, '1');
 });
+
+// 上限 173 小时 = 21.625 天：天数最多两位小数，最多只能填 21.62 天（172.96 小时）。
+const CAP = 173 / 8;
+
+test('cap 173 h (21.625 days): max is floored to 21.62, remaining is floored to 0.01 day', () => {
+  assert.equal(CAP, 21.625);
+  assert.equal(maxEntryDays(CAP), 21.62);
+  assert.equal(maxEntryDays(22), 22);
+  assert.equal(maxEntryDays(21.624999999999996), 21.62);
+  assert.equal(maxEntryDays(0), 0);
+  assert.equal(remainingDays(21, CAP), 0.62);
+  assert.equal(remainingHours(21, CAP), 5);
+  assert.equal(remainingDays(21.5, CAP), 0.12);
+  assert.equal(remainingDays(21.62, CAP), 0);
+  assert.equal(remainingDays(21.63, CAP), 0);
+  assert.equal(remainingDays(30, 22), 0);
+  assert.equal(remainingDays(19.4, 22), 2.6);
+});
+
+test('cap 173 h: 21.62 is full, 21.5 is part, 21.63 is over', () => {
+  assert.equal(deriveStatus(21.62, CAP), 'full');
+  assert.equal(deriveStatus(21.5, CAP), 'part');
+  assert.equal(deriveStatus(21.61, CAP), 'part');
+  assert.equal(deriveStatus(21.63, CAP), 'over');
+  assert.equal(deriveStatus(0, CAP), 'none');
+  // 进度接口给的 limit_days 已经是向下取整后的最大值
+  assert.equal(deriveStatus(21.62, 21.62), 'full');
+  assert.equal(deriveStatus(21.61, 21.62), 'part');
+  assert.equal(deriveStatus(21.63, 21.62), 'over');
+});
+
+test('cap 173 h: validation accepts 21.62 and rejects 21.63 saying the maximum', () => {
+  const base = { employee: 'E1', dayLimit: CAP };
+  assert.equal(validateEntryRows([row('A', 21), row('B', 0.62)], base), '');
+  assert.equal(validateEntryRows([row('A', '21.62')], base), '');
+  assert.equal(validateEntryRows([row('A', 21.5)], base), '');
+  const message = validateEntryRows([row('A', 21), row('B', 0.63)], base);
+  assert.equal(message, '当月累计发生天数不能超过 21.62 天：当前 21.63 天，本月最多 21.62 天');
+  assert.ok(message.includes('最多 21.62 天'));
+  // 上限显示的是向下取整的最大值，不是进位成 21.63
+  assert.ok(!message.includes('不能超过 21.63'));
+});
+
+test('remaining text: typing exactly the shown number is always accepted', () => {
+  assert.deepEqual(remainingMeta(21, CAP), { tone: 'warn', days: 0.62, hours: 5, text: '还差 0.62 天（5 小时）' });
+  assert.equal(remainingMeta(21.5, CAP).text, '还差 0.12 天（1 小时）');
+  assert.equal(remainingMeta(21.62, CAP).text, '已分配满 ✓');
+  assert.equal(remainingMeta(21.62, CAP).tone, 'ok');
+  // 整天 / 半天不带括号
+  assert.equal(remainingMeta(20, 22).text, '还差 2.0 天');
+  assert.equal(remainingMeta(19.5, 22).text, '还差 2.5 天');
+  // 3 小时请假：176 - 3 = 173；5 小时请假：176 - 5 = 171 = 21.375 天
+  assert.equal(remainingMeta(0, 171 / 8).text, '还差 21.37 天（171 小时）');
+  const over = remainingMeta(21.63, CAP);
+  assert.equal(over.tone, 'bad');
+  assert.equal(over.text, '超出上限 0.01 天，最多 21.62 天，请调整后再保存');
+  for (const used of [0, 5, 13.5, 21, 21.5, 21.61]) {
+    const typed = remainingMeta(used, CAP).days;
+    assert.notEqual(deriveStatus(Number((used + typed).toFixed(2)), CAP), 'over', `used ${used}`);
+  }
+  assert.equal(fmtDaysExact(20), '20.0');
+  assert.equal(fmtDaysExact(21.62), '21.62');
+  assert.equal(fmtHours(173), '173');
+  assert.equal(fmtHours(172.5), '172.5');
+});
+
+test('top up: one click puts the remaining days on the chosen row and reaches full', () => {
+  const rows = [row('A', 10), row('B', 11)];
+  const last = topUpRow(rows, CAP, 1);
+  assert.equal(last.added, 0.62);
+  assert.deepEqual(last.rows.map((r) => r.occurrence_days), ['10', '11.62']);
+  assert.equal(last.rows[1].hours, 92.96);
+  assert.equal(deriveStatus(sumDaysOf(last.rows), CAP), 'full');
+  // 指定第一行
+  const first = topUpRow(rows, CAP, 0);
+  assert.deepEqual(first.rows.map((r) => r.occurrence_days), ['10.62', '11']);
+  assert.equal(first.index, 0);
+  // 没有指定 / 越界：补最后一行
+  assert.equal(topUpRow(rows, CAP).index, 1);
+  assert.equal(topUpRow(rows, CAP, 9).index, 1);
+  // 已填满、超上限、没有行：什么都不做
+  assert.equal(topUpRow([row('A', 21.62)], CAP, 0).added, 0);
+  assert.equal(topUpRow([row('A', 22)], CAP, 0).added, 0);
+  assert.equal(topUpRow([], CAP, 0).added, 0);
+  // 不修改入参
+  assert.equal(rows[1].occurrence_days, '11');
+});
+
+test('average fill with a non-half-day cap still reaches full', () => {
+  const result = averageFill([row('A', 1), row('B', 1)], CAP);
+  // 剩余 19.62，每行 floor(19.62/2/0.5)*0.5 = 9.5，零头 0.62 给最后一行
+  assert.deepEqual(result.rows.map((r) => r.occurrence_days), ['10.5', '11.12']);
+  assert.equal(result.added, 19.62);
+  assert.equal(deriveStatus(sumDaysOf(result.rows), CAP), 'full');
+});
+
+function sumDaysOf(rows) {
+  return Math.round(rows.reduce((s, r) => s + Number(r.occurrence_days), 0) * 100) / 100;
+}
 
 test('average fill treats invalid day text as zero', () => {
   const result = averageFill([row('A', 'x'), row('B', 2)], 6);
@@ -200,7 +304,7 @@ test('validation keeps the original row rules and messages', () => {
   assert.equal(validateEntryRows([row('A', '')], base), '第 1 行发生天数最多保留两位小数');
   assert.equal(validateEntryRows([row('A', '0')], base), '第 1 行发生天数必须大于 0');
   assert.equal(validateEntryRows([row('A', '-1')], base), '第 1 行发生天数最多保留两位小数');
-  assert.equal(validateEntryRows([row('A', 12), row('B', 8.01)], base), '当月累计发生天数不能超过 20.00 天');
+  assert.equal(validateEntryRows([row('A', 12), row('B', 8.01)], base), '当月累计发生天数不能超过 20.00 天：当前 20.01 天，本月最多 20.00 天');
   assert.equal(validateEntryRows([row('A', 12), row('B', 8)], base), '');
 });
 
@@ -210,6 +314,11 @@ test('cap text explains the limit, leave deduction and join / leave dates', () =
   assert.ok(text.includes('日历工时 176 小时'));
   assert.ok(text.includes('已批请假 16 小时'));
   assert.ok(text.includes('2026-04-08 入职，之前的日子不计'));
+  // 请假 3 小时：173 小时 = 21.625 天，写成最多能填的 21.62 天；小时数不被取整
+  const cut = capText({ month: 10, dayLimit: 21.625, hourLimit: 173, baseHourLimit: 176, leaveHours: 3 });
+  assert.ok(cut.includes('10 月可填 21.62 天（173 小时）'));
+  assert.ok(cut.includes('已批请假 3 小时'));
+  assert.ok(capText({ month: 10, dayLimit: 21.5625, hourLimit: 172.5, baseHourLimit: 176, leaveHours: 3.5 }).includes('可填 21.56 天（172.5 小时）'));
   assert.ok(!text.includes('离职'));
   assert.ok(capText({ month: 4, dayLimit: 20, hourLimit: 160, relievedOn: '2026-04-20' }).includes('2026-04-20 离职，之后的日子不计'));
 });
@@ -321,9 +430,9 @@ test('project colours cycle through five muted colours', () => {
 });
 
 test('remaining text: amber when short, green when full, red when over', () => {
-  assert.deepEqual(remainingMeta(19.4, 22), { tone: 'warn', text: '还差 2.6 天' });
-  assert.deepEqual(remainingMeta(22, 22), { tone: 'ok', text: '已分配满 ✓' });
-  assert.deepEqual(remainingMeta(21.995, 22), { tone: 'ok', text: '已分配满 ✓' });
+  assert.deepEqual(remainingMeta(19.4, 22), { tone: 'warn', days: 2.6, hours: 20.8, text: '还差 2.6 天（20.8 小时）' });
+  assert.deepEqual(remainingMeta(22, 22), { tone: 'ok', days: 0, hours: 0, text: '已分配满 ✓' });
+  assert.deepEqual(remainingMeta(21.995, 22), { tone: 'ok', days: 0, hours: 0, text: '已分配满 ✓' });
   assert.equal(remainingMeta(0, 22).text, '还差 22.0 天');
   const over = remainingMeta(23.5, 22);
   assert.equal(over.tone, 'bad');
@@ -333,4 +442,15 @@ test('remaining text: amber when short, green when full, red when over', () => {
 test('the project owner shown in the picker prefers the display name from the server', () => {
   assert.equal(projectOwner({ project_owner: 'zhang@example.com', project_owner_name: '演示员工132' }), '演示员工132');
   assert.equal(projectOwner({ project_owner: '演示员工107' }), '演示员工107');
+});
+
+test('the sheet offers a top-up button next to the remaining text and keeps the even split', async () => {
+  const { readFileSync } = await import('node:fs');
+  const sheet = readFileSync(new URL('../src/components/timesheet/EntrySheet.vue', import.meta.url), 'utf8');
+  assert.ok(sheet.includes('补满剩余'));
+  assert.match(sheet, /topUpRow/);
+  assert.match(sheet, /@click="fillRemaining"/);
+  assert.ok(sheet.includes('把剩余平均分给现有项目'));
+  assert.match(sheet, /remainingDays\(used\.value, props\.dayLimit\)/);
+  assert.match(sheet, /maxEntryDays\(props\.dayLimit\)/);
 });
