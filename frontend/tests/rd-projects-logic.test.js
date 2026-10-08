@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { pendingProjectItems, pendingSummary, projectCode, projectStage, projectStats, stageTone, statusTone } from '../src/lib/rdProjects.js';
+import { attachmentPills, hasMissingAttachment, pendingProjectItems, pendingSummary, projectCode, projectStage, projectStats, requiredAttachments, stageTone, statusTone } from '../src/lib/rdProjects.js';
 
 const rows = [
   { name: 'P1', rd_project_code: 'RD19', project_name: 'A', status: 'Open', rd_stage: '资本化', project_initiation_report: '/f/a.pdf', capitalization_confirmation_file: '' },
@@ -56,6 +56,73 @@ test('project display helpers', () => {
   assert.equal(statusTone('Cancelled'), 'bad');
 });
 
+const states = (row) => attachmentPills(row).map((pill) => pill.state).join(',');
+
+test('attachmentPills always returns the three pills in the fixed order', () => {
+  const pills = attachmentPills({ status: 'Open', rd_stage: '费用化' });
+  assert.deepEqual(pills.map((pill) => pill.label), ['立项报告', '结项报告', '资本化确认书']);
+  assert.deepEqual(pills.map((pill) => pill.key), ['project_initiation_report', 'project_completion_report', 'capitalization_confirmation_file']);
+  assert.equal(attachmentPills().length, 3);
+});
+
+test('attachmentPills applies the required / not-required rules by status and stage', () => {
+  // 进行中 + 费用化：只要立项报告
+  assert.equal(states({ status: 'Open', rd_stage: '费用化' }), 'miss,na,na');
+  // 进行中 + 资本化：立项报告 + 确认书
+  assert.equal(states({ status: 'Open', rd_stage: '资本化' }), 'miss,na,miss');
+  // 已结束 + 资本化：三个都要
+  assert.equal(states({ status: 'Completed', rd_stage: '资本化' }), 'miss,miss,miss');
+  // 已结束 + 费用化：不要确认书
+  assert.equal(states({ status: 'Completed', rd_stage: '费用化' }), 'miss,miss,na');
+  // 阶段未判定：不要确认书
+  assert.equal(states({ status: 'Open', rd_stage: '未判定' }), 'miss,na,na');
+  // 已取消：都不要
+  assert.equal(states({ status: 'Cancelled', rd_stage: '资本化' }), 'na,na,na');
+  // 没有状态按进行中算
+  assert.equal(states({ rd_stage: '费用化' }), 'miss,na,na');
+  assert.deepEqual(requiredAttachments({ status: 'Completed', rd_stage: '资本化' }), {
+    project_initiation_report: true,
+    project_completion_report: true,
+    capitalization_confirmation_file: true,
+  });
+});
+
+test('attachmentPills: uploaded files are green even when not required, missing ones read 缺…', () => {
+  const pills = attachmentPills({ status: 'Open', rd_stage: '费用化', project_initiation_report: '/f/a.pdf', project_completion_report: '/f/b.pdf' });
+  assert.deepEqual(pills.map((pill) => pill.state), ['up', 'up', 'na']);
+  assert.equal(pills[1].required, false);
+  assert.equal(pills[1].file, '/f/b.pdf');
+  const cancelled = attachmentPills({ status: 'Cancelled', project_initiation_report: '/f/a.pdf' });
+  assert.equal(cancelled[0].state, 'up');
+  const missing = attachmentPills({ status: 'Completed', rd_stage: '资本化', project_initiation_report: '/f/a.pdf' });
+  assert.deepEqual(missing.map((pill) => pill.text), ['立项报告', '缺结项报告', '缺资本化确认书']);
+  assert.deepEqual(missing.map((pill) => pill.missing), [false, true, true]);
+});
+
+test('hasMissingAttachment is true only when a required file is missing', () => {
+  assert.equal(hasMissingAttachment({ status: 'Open', rd_stage: '费用化', project_initiation_report: '/f/a.pdf' }), false);
+  assert.equal(hasMissingAttachment({ status: 'Open', rd_stage: '资本化', project_initiation_report: '/f/a.pdf' }), true);
+  assert.equal(hasMissingAttachment({ status: 'Cancelled' }), false);
+});
+
+test('pending attachment items agree one-to-one with the missing pills (KPI count equals amber pills)', () => {
+  const mixed = [
+    ...rows,
+    { name: 'P6', rd_project_code: 'RD14', project_name: 'F', status: 'Completed', rd_stage: '费用化', project_initiation_report: '', project_completion_report: '' },
+    { name: 'P7', rd_project_code: 'RD13', project_name: 'G', status: 'Open', rd_stage: '资本化', project_initiation_report: '/f/g.pdf', capitalization_confirmation_file: '/f/g2.pdf' },
+  ];
+  const missingPills = mixed.reduce((sum, row) => sum + attachmentPills(row).filter((pill) => pill.missing).length, 0);
+  const attachmentItems = pendingProjectItems(mixed).filter((item) => !item.text.includes('阶段未判定'));
+  assert.equal(attachmentItems.length, missingPills);
+  // 已结束但没传立项报告也会被算进来
+  assert.ok(attachmentItems.some((item) => item.code === 'RD14' && item.text === '已结项但缺立项报告'));
+  assert.ok(attachmentItems.some((item) => item.code === 'RD14' && item.text === '已结项但缺结项报告'));
+  // 已取消的项目不产生待处理
+  assert.ok(!pendingProjectItems(mixed).some((item) => item.code === 'RD15'));
+  // 仍保留「阶段未判定」（只针对进行中）
+  assert.ok(pendingProjectItems(mixed).some((item) => item.code === 'RD17' && item.text.startsWith('研发阶段未判定')));
+});
+
 const page = readFileSync(new URL('../src/pages/Projects.vue', import.meta.url), 'utf8');
 
 test('project page is wrapped in the shared R&D page shell with KPI cards and one pending note', () => {
@@ -66,6 +133,7 @@ test('project page is wrapped in the shared R&D page shell with KPI cards and on
   assert.match(page, /class="note warn"/);
   assert.match(page, /pendingSummary\(pending\.value, 3\)/);
   assert.doesNotMatch(page, /本年工时/);
+  assert.ok(page.includes('附件齐全、阶段都已判定'));
 });
 
 test('project editor is a teleported right-side drawer and cancelling asks for confirmation', () => {
@@ -80,10 +148,26 @@ test('project editor is a teleported right-side drawer and cancelling asks for c
   assert.doesNotMatch(page, /@click="cancelProject\(row\.name\)"[^>]*>取消</);
 });
 
-test('three attachments are shown as status icons linking to the scoped download', () => {
-  assert.match(page, /class="ico3"/);
-  assert.match(page, /v-for="field in PROJECT_FILE_FIELDS"/);
-  assert.match(page, /reportDownloadUrl\(row, field\.key\)/);
+test('three attachments are shown as labelled pills; uploaded ones link to the scoped download', () => {
+  assert.doesNotMatch(page, /三类附件/);
+  assert.doesNotMatch(page, /class="ico3"/);
+  assert.match(page, /attachmentPills\(row\)/);
+  assert.match(page, /v-for="pill in pills"/);
+  assert.match(page, /class="pill up"[^>]*:href="reportDownloadUrl\(row, pill\.key\)"/);
+  assert.match(page, /class="pill miss"/);
+  assert.match(page, /class="pill na"/);
+  assert.match(page, /pillTitle\(pill\)/);
+});
+
+test('project page has an attachment filter and a legend under the table', () => {
+  assert.match(page, /v-model="filters\.attachment"/);
+  assert.match(page, /aria-label="附件筛选"/);
+  assert.ok(page.includes('附件：有缺失'));
+  assert.match(page, /hasMissingAttachment/);
+  assert.match(page, /class="att-legend"/);
+  assert.ok(page.includes('已上传'));
+  assert.ok(page.includes('缺附件'));
+  assert.ok(page.includes('不需要'));
 });
 
 test('project page keeps search, status filter, export and upload controls', () => {

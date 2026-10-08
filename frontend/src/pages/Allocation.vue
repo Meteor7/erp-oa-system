@@ -40,7 +40,8 @@ const TEXT = {
   confirmCancelTail: "的分摊吗？撤销后本期工时可以继续调整，调整后需要重新分摊。",
   confirmYes: "确认撤销",
   confirmNo: "返回",
-  statusTitle: "分摊状态与对账",
+  yearHint: "年度汇总各月已提交的分摊，只读",
+  notAllocated: "本期尚未分摊，调整完工时后点「重算分摊」",
   matrixTitle: "分摊明细矩阵",
 };
 
@@ -128,37 +129,16 @@ const reconcileDiff = computed(() => {
   if (!summary.value || !result.value.length) return null;
   return allocationReconcileDifference({ summary: viewSummary.value, columns: columns.value, result: result.value });
 });
+const reconcileBalanced = computed(() => reconcileDiff.value !== null && Math.abs(reconcileDiff.value) < 0.01);
+const reconcileOff = computed(() => reconcileDiff.value !== null && !reconcileBalanced.value);
+// 差额不为 0：只在月度提示（年度是只读汇总，不能在这里重算）
+const showDiffStrip = computed(() => !loading.value && !isYearScope.value && reconcileOff.value);
+// 月度还没有分摊单：提示先重算
+const showNotAllocated = computed(() => !loading.value && !isYearScope.value && !allocName.value);
 const statusTag = computed(() => {
   if (isYearScope.value) return { text: "年度 · 只读", cls: "" };
   if (allocName.value) return { text: "已提交", cls: "ok" };
   return { text: "未分摊", cls: "warn" };
-});
-const checks = computed(() => {
-  const list = [];
-  if (isYearScope.value) {
-    list.push({ key: "state", tone: "ok", icon: "check", text: "年度汇总各月已提交的分摊，只读，不能在这里重算或撤销" });
-  } else if (allocName.value) {
-    list.push({ key: "state", tone: "ok", icon: "check", text: `分摊单 ${allocName.value} 已提交` });
-  } else {
-    list.push({ key: "state", tone: "warn", icon: "alert", text: "本期尚未分摊，调整完工时后点「重算分摊」" });
-  }
-  if (summary.value) {
-    const diff = reconcileDiff.value;
-    if (diff !== null) {
-      if (Math.abs(diff) < 0.01) {
-        list.push({ key: "diff", tone: "ok", icon: "check", text: "分摊合计与费用池差额 0.00" });
-      } else {
-        list.push({ key: "diff", tone: "warn", icon: "alert", text: `分摊合计与费用池差额 ${fmt(diff)} 元（阶段合计与分摊明细对不上，请核对后重算）` });
-      }
-    }
-    const unknown = Number(summary.value.unknown || 0);
-    if (unknown > 0) {
-      list.push({ key: "unknown", tone: "warn", icon: "alert", text: `未判定 ${fmt(unknown)} 元（来自阶段未判定的项目）` });
-    } else {
-      list.push({ key: "unknown", tone: "ok", icon: "check", text: "没有未判定金额" });
-    }
-  }
-  return list;
 });
 
 const matrixView = computed(() => groupAllocationRows({ columns: columns.value, result: result.value }));
@@ -298,10 +278,28 @@ load();
 
 <template>
   <RdPage :title="TEXT.title" :subtitle="TEXT.subtitle">
-    <template #ctl><RdPeriod /></template>
+    <template #ctl>
+      <span v-if="!loading" class="stat">
+        <span class="tag" :class="statusTag.cls"><RdIcon v-if="statusTag.cls === 'ok'" name="check" />{{ statusTag.text }}</span>
+        <span v-if="isYearScope" class="muted">{{ TEXT.yearHint }}</span>
+        <span v-else-if="allocName" class="muted">分摊单 {{ allocName }}</span>
+      </span>
+      <RdPeriod />
+    </template>
 
     <div v-if="summary" class="kpis">
       <RdKpi v-for="card in summaryCards" :key="card.key" :label="card.label" :value="fmt(card.value)" unit="元" :sub="card.sub" :tone="card.tone" />
+    </div>
+
+    <div v-if="showDiffStrip" class="note warn strip" role="alert">
+      <RdIcon name="alert" />
+      <span class="grow"><b>分摊合计与费用池差额 {{ fmt(reconcileDiff) }} 元</b>（阶段合计与分摊明细对不上），请核对后重算。</span>
+      <button type="button" class="btn sm pri" :disabled="recalcing || canceling" @click="recalc">{{ recalcing ? TEXT.recalcing : TEXT.recalc }}</button>
+    </div>
+    <div v-if="showNotAllocated" class="note warn strip">
+      <RdIcon name="alert" />
+      <span class="grow">{{ TEXT.notAllocated }}</span>
+      <button type="button" class="btn sm pri" :disabled="recalcing || canceling" @click="recalc">{{ recalcing ? TEXT.recalcing : TEXT.recalc }}</button>
     </div>
 
     <div class="bar">
@@ -329,16 +327,13 @@ load();
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
     <template v-else>
-      <div class="card">
-        <div class="hd"><b>{{ TEXT.statusTitle }}</b><span class="tag" :class="statusTag.cls">{{ statusTag.text }}</span></div>
-        <div class="bd checks">
-          <div v-for="check in checks" :key="check.key" class="chk" :class="check.tone"><RdIcon :name="check.icon" /><span>{{ check.text }}</span></div>
-        </div>
-      </div>
-
       <div v-if="!result.length" class="card"><div class="bd muted">{{ emptyText }}</div></div>
       <div v-else class="card">
-        <div class="hd"><b>{{ TEXT.matrixTitle }}</b><span class="muted">{{ displayPeriod }} · {{ allocName || displayPeriod }} · {{ totalRows }} 行明细</span></div>
+        <div class="hd">
+          <div class="row hd-l"><b>{{ TEXT.matrixTitle }}</b><span class="muted">{{ displayPeriod }} · {{ allocName || displayPeriod }} · {{ totalRows }} 行明细</span></div>
+          <span v-if="reconcileBalanced" class="tag ok"><RdIcon name="check" />已对账 · 差额 0.00</span>
+          <span v-else-if="reconcileOff" class="tag warn">差额 {{ fmt(reconcileDiff) }} 元</span>
+        </div>
         <div class="tbl alloc-tbl">
           <table class="matrix">
             <thead>
@@ -385,7 +380,10 @@ load();
 <style scoped>
 .rd .confirm { margin: 0; padding: 3px 10px; align-items: center; flex-wrap: wrap; }
 .rd .confirm svg { margin-top: 0; }
-.rd .checks { padding-top: 6px; }
+.rd .stat { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rd .strip { align-items: center; }
+.rd .strip svg { margin-top: 0; }
+.rd .hd-l { gap: 10px; align-items: baseline; }
 .rd .alloc-tbl { max-height: 560px; }
 .rd .alloc-tbl table { min-width: 1100px; }
 .rd .matrix th small { display: block; font-weight: 400; font-size: 11px; color: var(--rd-ink3); }

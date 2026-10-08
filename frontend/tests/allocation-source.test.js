@@ -67,9 +67,33 @@ test("allocation page uses the shared R&D page shell and groups the toolbar into
   assert.match(source, /<RdKpi /);
   assert.ok(source.includes('view: "查看"'));
   assert.ok(source.includes('actions: "操作"'));
-  assert.ok(source.includes("分摊状态与对账"));
   assert.match(source, /allocationReconcileDifference/);
   assert.ok(source.includes("分摊合计与费用池差额"));
+});
+
+test("allocation page has no status-and-reconcile card; status is a tag by the title and reconcile sits in the matrix header", () => {
+  assert.ok(!source.includes("分摊状态与对账"));
+  assert.doesNotMatch(source, /statusTitle/);
+  assert.doesNotMatch(source, /const checks = computed/);
+  assert.doesNotMatch(source, /class="chk"/);
+  // 状态标签放在页头右侧
+  assert.match(source, /<template #ctl>[\s\S]*statusTag\.text[\s\S]*<RdPeriod \/>/);
+  assert.ok(source.includes('"年度 · 只读"'));
+  assert.ok(source.includes('"已提交"'));
+  assert.ok(source.includes('"未分摊"'));
+  assert.ok(source.includes("年度汇总各月已提交的分摊，只读"));
+  // 矩阵卡片头里的对账标签
+  assert.ok(source.includes("已对账 · 差额 0.00"));
+  assert.match(source, /差额 \{\{ fmt\(reconcileDiff\) \}\} 元/);
+  // 差额异常条和未分摊条都带「重算分摊」按钮
+  assert.match(source, /v-if="showDiffStrip" class="note warn strip" role="alert"/);
+  assert.ok(source.includes("请核对后重算"));
+  assert.ok(source.includes("本期尚未分摊，调整完工时后点「重算分摊」"));
+  assert.match(source, /const showDiffStrip = computed\(\(\) => !loading\.value && !isYearScope\.value && reconcileOff\.value\)/);
+  assert.match(source, /const showNotAllocated = computed\(\(\) => !loading\.value && !isYearScope\.value && !allocName\.value\)/);
+  assert.equal((source.match(/@click="recalc"/g) || []).length, 3);
+  // 未判定的重复检查行已去掉
+  assert.ok(!source.includes("来自阶段未判定的项目"));
 });
 
 test("allocation page removes the middle project summary and keeps a bottom total row in the matrix", () => {

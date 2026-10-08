@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { createResource } from "frappe-ui";
 import { canAdministerProjects } from "../lib/access";
 import { exportTableWorkbook } from "../lib/tableExport";
-import { PROJECT_FILE_FIELDS, pendingProjectItems, pendingSummary, projectCode, projectStage, projectStats, stageTone, statusTone } from "../lib/rdProjects";
+import { PROJECT_FILE_FIELDS, attachmentPills, hasMissingAttachment, pendingProjectItems, pendingSummary, projectCode, projectStage, projectStats, stageTone, statusTone } from "../lib/rdProjects";
 import RdPage from "../components/rd/RdPage.vue";
 import RdKpi from "../components/rd/RdKpi.vue";
 import RdIcon from "../components/rd/RdIcon.vue";
@@ -14,6 +14,10 @@ const STATUS_OPTIONS = [
   { value: "Completed", label: "已结束" },
   { value: "Cancelled", label: "已取消" },
 ];
+const ATTACHMENT_OPTIONS = [
+  { value: "", label: "附件：全部" },
+  { value: "missing", label: "附件：有缺失" },
+];
 const STAGE_OPTIONS = [
   { value: "资本化", label: "资本化" },
   { value: "费用化", label: "费用化" },
@@ -21,7 +25,7 @@ const STAGE_OPTIONS = [
 ];
 const FILE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png";
 
-const filters = reactive({ search: "", status: "" });
+const filters = reactive({ search: "", status: "", attachment: "" });
 const rows = createResource({
   url: "rayher_hr_payroll.api.project_entry.list_projects",
   method: "GET",
@@ -69,6 +73,12 @@ const loaded = computed(() => Array.isArray(allRows.data));
 const stats = computed(() => projectStats(allRows.data || []));
 const pending = computed(() => pendingProjectItems(allRows.data || []));
 const pendingText = computed(() => pendingSummary(pending.value, 3));
+// 表格里实际显示的行：搜索、状态由服务端筛，「附件：有缺失」在这里按药丸规则筛
+const visibleRows = computed(() => {
+  const list = rows.data || [];
+  return filters.attachment === "missing" ? list.filter(hasMissingAttachment) : list;
+});
+const pillRows = computed(() => visibleRows.value.map((row) => ({ row, pills: attachmentPills(row) })));
 
 function reloadAll() {
   rows.reload();
@@ -134,6 +144,12 @@ function reportDownloadUrl(row, fieldname) {
     + encodeURIComponent(row.name)
     + "&fieldname="
     + encodeURIComponent(fieldname);
+}
+
+function pillTitle(pill) {
+  if (pill.state === "up") return pill.label + "：" + fileName(pill.file);
+  if (pill.state === "miss") return pill.label + "：需要，还没上传";
+  return pill.label + "：这个项目不需要";
 }
 
 async function uploadProjectFile(fieldName, event) {
@@ -202,7 +218,7 @@ async function exportCurrentProjects() {
     await exportTableWorkbook({
       filename: "研发项目管理",
       sheetName: "研发项目",
-      rows: rows.data || [],
+      rows: visibleRows.value,
       columns: [
         { label: "项目代码", value: (row) => row.rd_project_code || row.name, width: 14 },
         { label: "项目名称", key: "project_name", width: 28 },
@@ -229,7 +245,13 @@ async function exportCurrentProjects() {
     <div class="kpis">
       <RdKpi label="项目总数" :value="loaded ? stats.total : '-'" sub="含已结束、已取消" />
       <RdKpi label="进行中" :value="loaded ? stats.open : '-'" :sub="loaded ? `其中资本化 ${stats.capitalized} 个，费用化 ${stats.expensed} 个` : ''" />
-      <RdKpi label="待处理事项" :value="loaded ? pending.length : '-'" sub="缺报告、阶段未判定" :tone="pending.length ? 'warn' : ''" />
+      <RdKpi
+        label="待处理事项"
+        :value="loaded ? pending.length : '-'"
+        :sub="!loaded ? '' : pending.length ? '缺附件、阶段未判定' : '附件齐全、阶段都已判定'"
+        :tone="pending.length ? 'warn' : ''"
+        :class="{ 'kpi-clear': loaded && !pending.length }"
+      />
     </div>
 
     <div v-if="pending.length" class="note warn">
@@ -244,9 +266,12 @@ async function exportCurrentProjects() {
         <select v-model="filters.status" class="field" style="width: 130px" aria-label="状态筛选" @change="rows.reload">
           <option v-for="item in STATUS_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
+        <select v-model="filters.attachment" class="field" style="width: 140px" aria-label="附件筛选">
+          <option v-for="item in ATTACHMENT_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
       </div>
       <div class="row">
-        <button type="button" class="btn" :disabled="exporting || !(rows.data || []).length" @click="exportCurrentProjects"><RdIcon name="download" />{{ exporting ? "导出中…" : "导出 Excel" }}</button>
+        <button type="button" class="btn" :disabled="exporting || !visibleRows.length" @click="exportCurrentProjects"><RdIcon name="download" />{{ exporting ? "导出中…" : "导出 Excel" }}</button>
         <button v-if="canAdministerProjects()" type="button" class="btn pri" @click="newProject"><RdIcon name="plus" />新增项目</button>
       </div>
     </div>
@@ -264,12 +289,12 @@ async function exportCurrentProjects() {
               <th>结项时间</th>
               <th>研发阶段</th>
               <th>状态</th>
-              <th>三类附件</th>
+              <th>附件</th>
               <th class="r">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in rows.data || []" :key="row.name">
+            <tr v-for="{ row, pills } in pillRows" :key="row.name">
               <td class="num nw"><b>{{ projectCode(row) }}</b></td>
               <td>{{ row.project_name }}</td>
               <td>{{ ownerLabel(row.project_owner, row.project_owner_name) }}</td>
@@ -277,13 +302,14 @@ async function exportCurrentProjects() {
               <td class="num nw">{{ row.end_date || row.capitalization_end_date || '-' }}</td>
               <td><span class="tag" :class="stageTone(projectStage(row))">{{ projectStage(row) }}</span></td>
               <td class="nw"><span class="tag" :class="statusTone(row.status)">{{ row.status_label || row.status }}</span></td>
-              <td>
-                <span class="ico3">
-                  <template v-for="field in PROJECT_FILE_FIELDS" :key="field.key">
-                    <a v-if="row[field.key]" :href="reportDownloadUrl(row, field.key)" target="_blank" rel="noopener" :title="field.label + '：' + fileName(row[field.key])"><span class="on"><RdIcon name="check" /></span></a>
-                    <span v-else :title="field.label + '：未上传'">{{ field.short }}</span>
+              <td class="nw">
+                <div class="pills">
+                  <template v-for="pill in pills" :key="pill.key">
+                    <a v-if="pill.state === 'up'" class="pill up" :href="reportDownloadUrl(row, pill.key)" target="_blank" rel="noopener" :title="pillTitle(pill)"><RdIcon name="check" />{{ pill.text }}</a>
+                    <span v-else-if="pill.state === 'miss'" class="pill miss" :title="pillTitle(pill)"><RdIcon name="alert" />{{ pill.text }}</span>
+                    <span v-else class="pill na" :title="pillTitle(pill)">{{ pill.text }}<span class="sr">（不需要）</span></span>
                   </template>
-                </span>
+                </div>
               </td>
               <td class="r nw">
                 <template v-if="askCancelName === row.name">
@@ -299,9 +325,14 @@ async function exportCurrentProjects() {
                 </template>
               </td>
             </tr>
-            <tr v-if="!(rows.data || []).length"><td colspan="9" class="muted" style="text-align: center; padding: 32px">暂无项目</td></tr>
+            <tr v-if="!visibleRows.length"><td colspan="9" class="muted" style="text-align: center; padding: 32px">{{ filters.attachment === "missing" ? "没有缺附件的项目" : "暂无项目" }}</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="att-legend">
+        <span class="pill up"><RdIcon name="check" />已上传</span><span>点开可下载，悬停看文件名</span>
+        <span class="pill miss"><RdIcon name="alert" />缺附件</span><span>需要但还没传</span>
+        <span class="pill na">不需要</span><span>立项报告：进行中、已结束都要 · 结项报告：已结束才要 · 资本化确认书：资本化项目才要 · 已取消的都不要</span>
       </div>
     </div>
 
@@ -365,3 +396,21 @@ async function exportCurrentProjects() {
     </Teleport>
   </RdPage>
 </template>
+
+<style scoped>
+/* 待处理事项为 0：数字和说明用绿色 */
+.rd .kpi-clear :deep(.v) { color: var(--rd-ok); }
+.rd .kpi-clear :deep(.s) { color: var(--rd-ok); }
+.rd .kpi-clear :deep(.s)::before { content: "✓ "; font-weight: 700; }
+
+/* 附件列：固定三枚药丸，已上传 / 缺 / 不需要 */
+.rd .pills { display: flex; gap: 6px; }
+.rd .pill { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; border-radius: 6px; font-size: 12px; border: 1px solid transparent; white-space: nowrap; text-decoration: none; }
+.rd .pill svg.ic { width: 13px; height: 13px; stroke-width: 2; }
+.rd .pill.up { background: var(--rd-ok-soft); color: var(--rd-ok); }
+.rd a.pill.up:hover { border-color: var(--rd-ok); }
+.rd .pill.miss { background: var(--rd-warn-soft); color: var(--rd-warn); border-color: #E8C48A; font-weight: 600; }
+.rd .pill.na { background: transparent; color: var(--rd-ink3); border: 1px dashed var(--rd-line2); }
+.rd .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rd .att-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 18px; border-top: 1px solid var(--rd-line); font-size: 12px; color: var(--rd-ink3); }
+</style>
