@@ -65,7 +65,8 @@ test("withdraw and reject collect the reason inline; push buttons go to claim an
   assert.match(table, /下推报销/);
   assert.match(table, /下推付款/);
   assert.match(bench, /pushTarget\(kind\)/);
-  assert.match(bench, /query: \{ source: row\.name \}/);
+  // from 让目标页取消时回到这里；目标页（ClaimWorkbench）会先弹出"确定要创建草稿吗"再生成
+  assert.match(bench, /query: \{ source: row\.name, from: hereAsFrom\(route\.path, route\.query\) \}/);
 });
 
 test("detail shows the approval timeline instead of chips", () => {

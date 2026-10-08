@@ -60,7 +60,9 @@ test('every old backend call is still wired and arrival / inspection registratio
   assert.doesNotMatch(all, /v-if="false/);
   assert.match(poDetail, /\/采购付款|采购付款/);
   assert.match(view, /PAYMENT_PAGE = '\/approval\/procurement-payment'/);
-  assert.match(poDetail, /router-link :to="PAYMENT_PAGE"/);
+  // "去登记"要带着这张 PO（采购付款页读 ?po=），不再丢到页面最前面
+  assert.match(poDetail, /router-link :to="paymentPoLink\(po\)"/);
+  assert.doesNotMatch(poDetail, /:to="PAYMENT_PAGE"/);
 });
 
 test('PR source keeps grouping per PR, quantity per line, filters, search and the occupied semantics', () => {

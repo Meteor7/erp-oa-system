@@ -1,6 +1,7 @@
 <script setup>
 import { Button, FeatherIcon, createResource } from 'frappe-ui';
 import { computed, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import {
   fetchInvoiceSupplementalAttachmentPreview, getRequestInvoices, invoicesForLine,
   newLineKey, withdrawInvoicePush,
@@ -44,6 +45,8 @@ const STATUS_COLUMNS = [
   { key: 'paid', label: '已付款', icon: 'credit-card', header: 'border-blue-500 text-blue-700', accent: 'border-l-blue-500', badge: 'bg-blue-50 text-blue-700' },
 ];
 
+const route = useRoute();
+const router = useRouter();
 const activeView = ref('invoices');
 const detailRequestName = ref('');
 const showRequestForm = ref(false);
@@ -679,6 +682,17 @@ async function submitAddSign() {
     saving.value = false;
   }
 }
+// 待办和通知里"费用付款申请"的链接是 /approval/reimbursement?request=单号：旧页面原来不读地址，打开后是空白首页。
+// 现在直接打开这张单据（详情弹层）；关掉弹层时把地址里的 request 去掉，同一个链接可以再次打开。
+watch(() => route.query.request, (name) => {
+  const wanted = String(name || '').trim();
+  if (!wanted || wanted === detailRequestName.value) return;
+  activeView.value = 'board';
+  openRequest(wanted);
+}, { immediate: true });
+watch(detailRequestName, (value) => {
+  if (!value && route.query.request) router.replace({ path: route.path, query: {} });
+});
 watch(() => options.data, applyDefaults, { immediate: true });
 watch(() => requestForm.doc_type, () => { if (!isFixedAsset.value) requestForm.asset_category = ''; }, { flush: 'sync' });
 watch(selectedRequest, hydrateDraftSources, { immediate: true });

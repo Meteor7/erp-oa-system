@@ -3,12 +3,15 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router';
 import { FeatherIcon, createResource } from 'frappe-ui';
 import { canSee, currentUser, inMenu, roleLabel } from './lib/access';
+import { deniedNoticeText, groupOwning, ownerOfPath, splitPath, stripAppPrefix } from './lib/navContext';
+import { clearRouteNotice, routeNotice } from './lib/routeNotice';
 const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo-mark.png';
 
 const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
   { label: '审批中心', items: [
-    { step: '01', label: '请假/加班/调休', children: [
+    // 分组名本身是考勤中心首页的入口（view=home），三个子项照旧。
+    { to: '/approval/leave?view=home', step: '01', label: '请假/加班/调休', children: [
       { to: '/approval/leave', label: '请假审批' },
       { to: '/approval/overtime', label: '加班审批' },
       { to: '/approval/comp-time', label: '调休审批' },
@@ -90,7 +93,6 @@ const WIDE_PAGE_PATHS = new Set([
 ]);
 const route = useRoute();
 const router = useRouter();
-const ACCOMMODATION_PATHS = new Set(['/accommodation', '/accommodation/master', '/accommodation/monthly']);
 const openNavGroups = reactive(new Set());
 const mobileNavOpen = ref(false);
 function isNavGroupOpen(item) { return openNavGroups.has(item.label); }
@@ -98,10 +100,18 @@ function toggleNavGroup(item) {
   if (openNavGroups.has(item.label)) openNavGroups.delete(item.label);
   else openNavGroups.add(item.label);
 }
+// 侧栏的每一项都有"自己的"页面：详情、新建、编辑页（/approval/procurement/:name/pmc-edit 等）属于前缀对应的那一项。
+const groupedItems = groups.flatMap((g) => g.items.filter((n) => n.children));
+const allNavTargets = groups.flatMap((g) => g.items.flatMap((n) => (n.children ? n.children.map((child) => child.to) : [n.to])));
+const navLabels = Object.fromEntries(groups.flatMap((g) => g.items.flatMap((n) => (n.children ? n.children : [n]).map((item) => [splitPath(item.to).path, item.label]))));
+const activeNavPath = computed(() => ownerOfPath(route.path, allNavTargets));
+const NAV_ACTIVE_CLASS = 'bg-[#FFF4E6] font-semibold text-[#E57A00]';
+function isNavActive(to) { return splitPath(to).path === activeNavPath.value; }
 watch(() => route.path, (path) => {
-  if (ACCOMMODATION_PATHS.has(path)) openNavGroups.add('宿舍信息管理');
-  mobileNavOpen.value = false;
+  const owner = groupOwning(path, groupedItems);
+  if (owner) openNavGroups.add(owner.label);
 }, { immediate: true });
+watch(() => route.fullPath, () => { mobileNavOpen.value = false; });
 const visibleGroups = computed(() =>
   groups
     .map((g) => ({ ...g, items: g.items
@@ -109,7 +119,20 @@ const visibleGroups = computed(() =>
       .filter((n) => n.children ? n.children.length : inMenu(n.to)) }))
     .filter((g) => g.items.length)
 );
-const allowed = computed(() => canSee(route.path));
+const allowed = computed(() => route.name === 'not-found' || canSee(route.path));
+
+// 没有权限的深链接被带回别的页面：顶部说一声（可关闭，十秒后自动消失）。
+const noticeLabel = (path) => navLabels[ownerOfPath(path, allNavTargets)] || '';
+const deniedText = computed(() => (routeNotice.denied ? deniedNoticeText(routeNotice.denied, routeNotice.fallback, noticeLabel) : ''));
+let noticeTimer = null;
+watch(() => routeNotice.at, () => {
+  window.clearTimeout(noticeTimer);
+  if (routeNotice.denied) noticeTimer = window.setTimeout(clearRouteNotice, 10000);
+});
+// 之后用户自己点去别的页面，提示就不再留着（刚被带回来的那一次不清）。
+watch(() => route.fullPath, () => {
+  if (routeNotice.denied && Date.now() - routeNotice.at > 1500) clearRouteNotice();
+});
 const isWidePage = computed(() => WIDE_PAGE_PATHS.has(route.path) || route.path.startsWith('/approval/procurement/'));
 
 const showPasswordDialog = ref(false);
@@ -156,9 +179,9 @@ async function openNotification(item) {
     }
   }
   if (item?.link) {
-    const target = String(item.link);
-    if (target.startsWith('/planck-semicon/')) router.push(target.replace('/planck-semicon', '') || '/dashboard');
-    else if (target.startsWith('/')) router.push(target);
+    // /planck-semicon/... 和旧的 /rayher/... 都去掉前缀，查询参数原样保留。
+    const target = stripAppPrefix(item.link, window.location.host);
+    if (target) router.push(target);
   }
 }
 
@@ -237,7 +260,14 @@ function logout() {
           <div class='px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500'>{{ g.label }}</div>
           <template v-for='n in g.items' :key='n.to || n.label'>
             <div v-if='n.children'>
-              <button type='button'
+              <div v-if='n.to' class='flex items-center rounded-lg hover:bg-gray-50'>
+                <router-link :to='n.to' class='flex min-w-0 flex-1 items-center gap-1.5 px-2 py-2 text-sm font-medium text-gray-700' @click='openNavGroups.add(n.label)'>
+                  <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>
+                  <span class='flex-1'>{{ n.label }}</span>
+                </router-link>
+                <button type='button' class='px-2 py-2 text-xs text-gray-400 hover:text-gray-700' :aria-expanded='isNavGroupOpen(n)' :aria-label="'展开或收起' + n.label" @click='toggleNavGroup(n)'>{{ isNavGroupOpen(n) ? '▾' : '▸' }}</button>
+              </div>
+              <button v-else type='button'
                 class='flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left text-sm font-medium text-gray-700 hover:bg-gray-50'
                 :aria-expanded='isNavGroupOpen(n)' @click='toggleNavGroup(n)'>
                 <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>
@@ -247,12 +277,12 @@ function logout() {
               <div v-if='isNavGroupOpen(n)'>
                 <router-link v-for='child in n.children' :key='child.to' :to='child.to'
                   class='ml-6 flex items-center rounded-lg px-2 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                  active-class='bg-[#FFF4E6] font-semibold text-[#E57A00]'>{{ child.label }}</router-link>
+                  :class='isNavActive(child.to) ? NAV_ACTIVE_CLASS : ""' :aria-current='isNavActive(child.to) ? "page" : undefined'>{{ child.label }}</router-link>
               </div>
             </div>
             <router-link v-else :to='n.to'
               class='flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50'
-              active-class='bg-[#FFF4E6] font-semibold text-[#E57A00]'>
+              :class='isNavActive(n.to) ? NAV_ACTIVE_CLASS : ""' :aria-current='isNavActive(n.to) ? "page" : undefined'>
               <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>{{ n.label }}
             </router-link>
           </template>
@@ -294,6 +324,10 @@ function logout() {
         </div>
       </header>
       <div :class="['w-full min-w-0 flex-1 p-3 sm:p-4 md:p-7', isWidePage ? 'max-w-[1900px]' : 'mx-auto max-w-6xl']">
+        <div v-if='deniedText' class='mb-3 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800' role='status' data-testid='route-notice'>
+          <span>{{ deniedText }}</span>
+          <button type='button' class='shrink-0 text-lg leading-none text-amber-700 hover:text-amber-900' aria-label='关闭提示' @click='clearRouteNotice()'>×</button>
+        </div>
         <router-view v-if='allowed' />
         <div v-else class='flex flex-col items-center justify-center py-24 text-center'>
           <div class='text-3xl mb-3'>403</div>

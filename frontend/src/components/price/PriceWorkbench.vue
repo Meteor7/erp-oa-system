@@ -9,7 +9,7 @@ import '../../styles/priceUi.css';
 import { canEditProcurementPrice, canSeeProcurementPO, canSeeProcurementPrice } from '../../lib/access';
 import { extractFrappeError } from '../../lib/frappeError.js';
 import {
-  contextApprovals, contextPos, contextPrs, contextSummary, defaultTab, pendingLineCount, resolveTab, tabQuery, tabsFor,
+  contextApprovals, contextPos, contextPrs, contextSummary, defaultTab, pageTitle, pendingLineCount, resolveTab, tabQuery, tabsFor,
 } from '../../lib/priceView.js';
 import { usePriceApi } from './usePriceApi.js';
 import PriceSourceTab from './PriceSourceTab.vue';
@@ -224,8 +224,9 @@ onMounted(reloadAll);
     <div class="ph">
       <div>
         <div class="crumb">审批中心 · 采购/购买申请</div>
-        <h3>价格审批</h3>
-        <div class="muted">采购从 PR 里挑物料发起比价，录入各家报价；副总经理选一家成交，没报价的物料退回 PR。</div>
+        <h3>{{ pageTitle(tab) }}</h3>
+        <div v-if="tab === 'po'" class="muted">价格审批通过后按成交供应商生成的采购订单（PO）：确认 PO、合同复核、电子用印；到货、验收、付款在“采购付款”里办理。</div>
+        <div v-else class="muted">采购从 PR 里挑物料发起比价，录入各家报价；副总经理选一家成交，没报价的物料退回 PR。</div>
       </div>
       <div class="head-actions">
         <button type="button" class="btn" :disabled="busy || loaders.prs.loading || loaders.approvals.loading || loaders.pos.loading" @click="reloadAll">刷新</button>

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  agingColumns, agingTiles, boardRoute, boardTab, bottomColumns, budgetBars, donutSegments, dueText, flowBars, fulfilTone, hasPoWork,
+  agingColumns, agingTiles, boardAccess, boardRoute, boardTab, bottomColumns, budgetBars, donutSegments, dueText, flowBars, fulfilTone, hasPoWork,
   hbarRows, paymentFulfilment, paymentKpis, poProgressRows, poStatusCount, poStatusRows, poStatusTone, poWorkKpis, procurementKpis,
   requestKpis, scopeText, shortMoney, stackedChart, waitBars,
 } from "../src/lib/expenseBoards.js";
@@ -33,17 +33,59 @@ test("付款看板 KPIs split the month and show what the cashier still owes", (
   assert.deepEqual(procurementKpis({ summary: { application_count: 3, application_pending: 1 } }).map((card) => card.value)[0], "3 张");
 });
 
+const everyone = { travelAll: true, claimAll: true };
+
 test("every KPI card is clickable: a list page or an anchor on the same board (2026-10)", () => {
-  const pay = paymentKpis({});
-  assert.deepEqual(pay[0].to, { path: "/approval/claim", query: { view: "list", scope: "all" } });
-  assert.deepEqual(pay[1].to, { path: "/approval/payment", query: { view: "list", scope: "all" } });
+  const pay = paymentKpis({}, everyone);
+  // 本月已付：只看已付这一类，不是全部单据
+  assert.deepEqual(pay[0].to, { path: "/approval/claim", query: { view: "list", scope: "all", bucket: "paid" } });
+  assert.deepEqual(pay[1].to, { path: "/approval/payment", query: { view: "list", scope: "all", bucket: "paid" } });
   assert.deepEqual(pay[2].to, { anchor: "bd-cashier" });
   assert.deepEqual(pay[3].to, { anchor: "bd-invoices" });
-  const request = requestKpis({});
+  const request = requestKpis({}, everyone);
   assert.ok(request.every((card) => card.to && (card.to.path || card.to.anchor)));
+  assert.deepEqual(request[0].to, { path: "/approval/direct-purchase", query: { view: "list", scope: "all" } });
   assert.deepEqual(request[3].to, { path: "/approval/travel", query: { view: "list", scope: "all" } });
-  assert.ok(procurementKpis({}, "request").every((card) => card.to?.path === "/approval/procurement"));
+  assert.ok(procurementKpis({}, "request").every((card) => card.to?.path === "/approval/procurement" && card.to.query.view === "list"));
   assert.ok(procurementKpis({}, "payment").every((card) => card.to?.path === "/approval/procurement-payment"));
+});
+
+test("KPI cards that open scope=all are not clickable for people who cannot see all (2026-10 audit P2-7)", () => {
+  const nobody = { travelAll: false, claimAll: false };
+  const request = requestKpis({}, nobody);
+  assert.equal(request[3].to, null, "出差的全部只给系统管理员 / Rayher Business Executive");
+  assert.match(request[3].note, /没有查看全部的权限/);
+  assert.ok(request[0].to, "购买申请的列表对非全局角色显示“与我相关”，不泄露，所以仍可点");
+  assert.deepEqual(request[1].to, { anchor: "bd-budget" }, "页面内锚点不受限制");
+  const pay = paymentKpis({}, nobody);
+  assert.equal(pay[0].to, null);
+  assert.equal(pay[1].to, null);
+  assert.deepEqual(pay[2].to, { anchor: "bd-cashier" });
+  // each side is independent
+  assert.ok(paymentKpis({}, { travelAll: false, claimAll: true })[0].to);
+  assert.equal(requestKpis({}, { travelAll: false, claimAll: true })[3].to, null);
+  assert.ok(requestKpis({}, { travelAll: true, claimAll: false })[3].to);
+});
+
+test("board access mirrors the roles the workbenches check", () => {
+  assert.deepEqual(boardAccess(["Accounts User"]), { travelAll: false, claimAll: true });
+  assert.deepEqual(boardAccess(["System Manager"]), { travelAll: true, claimAll: true });
+  assert.deepEqual(boardAccess(["Rayher Business Executive"]), { travelAll: true, claimAll: true });
+  assert.deepEqual(boardAccess(["Department Manager", "Employee"]), { travelAll: false, claimAll: false });
+  assert.deepEqual(boardAccess([]), { travelAll: false, claimAll: false });
+});
+
+test("采购付款 cards each open a different view of the payment page (2026-10 audit P2-8)", () => {
+  const cards = poWorkKpis({});
+  const byKey = Object.fromEntries(cards.map((card) => [card.key, card.to]));
+  assert.deepEqual(byKey.final, { path: "/approval/procurement-payment", query: { tab: "approvals" } });
+  assert.deepEqual(byKey.approval, { path: "/approval/procurement-payment", query: { tab: "approvals" } });
+  assert.deepEqual(byKey.ready, { path: "/approval/procurement-payment", query: { status: "可提交付款审批" } });
+  assert.deepEqual(byKey.paid, { path: "/approval/procurement-payment", query: { status: "已付款" } });
+  assert.notDeepEqual(byKey.ready, byKey.final, "no more four cards on the same page");
+  // the legacy payload (no po_work) filters by status too
+  const legacy = procurementKpis({ summary: {} }, "payment");
+  assert.deepEqual(legacy.map((card) => card.to.query.status), ["已付款", "待到货资料", "待验收"]);
 });
 
 test("采购付款 KPIs come from po_work when the server sends it, and 预付款核销 is gone either way", () => {

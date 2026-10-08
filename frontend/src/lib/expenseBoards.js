@@ -1,29 +1,49 @@
 // 申请看板 / 付款看板的前端口径：指标卡、堆叠柱状图几何、横条图比例、跳转。
 import { money } from './expenseClaims.js';
+import { canSeeAllTravel } from './travelView.js';
+import { resolveKpiTarget } from './navContext.js';
 
 const yuan = (value) => `¥ ${money(value)}`;
 
 // 指标卡可以点：to = { path, query } 跳到对应的列表或页面，to = { anchor } 滚动到本页的某一块。
 const page = (path, query) => ({ path, ...(query ? { query } : {}) });
 
-export function requestKpis(data = {}) {
+// 看的人能打开哪些"全部"：出差申请的全部只给系统管理员 / Rayher Business Executive；
+// 报销单、付款单的全部给财务（系统管理员、会计出纳）和 Rayher Business Executive（与 ClaimWorkbench、服务端一致）。
+const CLAIM_ALL_ROLES = ['System Manager', 'Accounts User', 'Rayher Business Executive'];
+
+export function boardAccess(roles = globalThis.window?.roles || []) {
+  const list = roles || [];
+  return { travelAll: canSeeAllTravel(list), claimAll: list.some((role) => CLAIM_ALL_ROLES.includes(role)) };
+}
+
+// 卡片上的链接按看的人的权限处理：打不开"全部"的人，这张卡不再可点（to 为 null，note 说明原因），
+// 而不是点进去被悄悄换成"我的"。
+function withAccess(cards, access = boardAccess()) {
+  return cards.map((card) => {
+    const to = resolveKpiTarget(card.to, access);
+    return to ? { ...card, to } : { ...card, to: null, note: '你没有查看全部的权限，这张卡只用来看数字' };
+  });
+}
+
+export function requestKpis(data = {}, access = boardAccess()) {
   const s = data.summary || {};
-  return [
-    { key: 'month', label: '本月通过的购买申请', value: yuan(s.month_approved_amount), sub: `${s.month_approved_count || 0} 张`, to: page('/approval/direct-purchase') },
+  return withAccess([
+    { key: 'month', label: '本月通过的购买申请', value: yuan(s.month_approved_amount), sub: `${s.month_approved_count || 0} 张`, to: page('/approval/direct-purchase', { view: 'list', scope: 'all' }) },
     { key: 'unpaid', label: '已批准未付出的额度', value: yuan(s.unpaid_amount), sub: '已通过但还没付出去的钱', tone: '#A35A17', to: { anchor: 'bd-budget' } },
     { key: 'pending', label: '审批中', value: `${s.pending_count || 0} 张`, sub: `最久已等 ${s.longest_wait_days || 0} 天`, tone: (s.longest_wait_days || 0) > 3 ? '#B42318' : '', to: { anchor: 'bd-stuck' } },
     { key: 'trip', label: '出差中 / 本月出差', value: `${s.on_trip_count || 0} 人 / ${s.month_trip_count || 0} 次`, sub: '按出发、返回日期', to: page('/approval/travel', { view: 'list', scope: 'all' }) },
-  ];
+  ], access);
 }
 
-export function paymentKpis(data = {}) {
+export function paymentKpis(data = {}, access = boardAccess()) {
   const s = data.summary || {};
-  return [
-    { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期', to: page('/approval/claim', { view: 'list', scope: 'all' }) },
-    { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付', to: page('/approval/payment', { view: 'list', scope: 'all' }) },
+  return withAccess([
+    { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期', to: page('/approval/claim', { view: 'list', scope: 'all', bucket: 'paid' }) },
+    { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付', to: page('/approval/payment', { view: 'list', scope: 'all', bucket: 'paid' }) },
     { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#A35A17', to: { anchor: 'bd-cashier' } },
     { key: 'inv', label: '待补票', value: yuan(s.invoice_pending_amount), sub: `${s.invoice_pending_count || 0} 张，逾期 ${s.invoice_overdue_count || 0} 张`, tone: (s.invoice_overdue_count || 0) ? '#B42318' : '', to: { anchor: 'bd-invoices' } },
-  ];
+  ], access);
 }
 
 // 采购页签的指标卡。采购付款优先用按 PO 付款期次汇总的 po_work；服务端还没有这一块时退回旧口径
@@ -32,16 +52,16 @@ export function procurementKpis(data = {}, part = 'request') {
   const s = data.summary || {};
   if (part === 'request') {
     return [
-      { key: 'count', label: '采购申请', value: `${s.application_count || 0} 张`, sub: `审批中 ${s.application_pending || 0} 张`, to: page('/approval/procurement') },
-      { key: 'amount', label: '采购申请金额', value: yuan(s.application_amount), sub: '批准金额，未批准的按申请金额', to: page('/approval/procurement') },
+      { key: 'count', label: '采购申请', value: `${s.application_count || 0} 张`, sub: `审批中 ${s.application_pending || 0} 张`, to: page('/approval/procurement', { view: 'list', scope: 'all' }) },
+      { key: 'amount', label: '采购申请金额', value: yuan(s.application_amount), sub: '批准金额，未批准的按申请金额', to: page('/approval/procurement', { view: 'list', scope: 'all' }) },
     ];
   }
   if (hasPoWork(data)) return poWorkKpis(data.po_work);
-  const target = page('/approval/procurement-payment');
+  // 旧口径没有按期次的数据：按页面认得的状态筛选（PayWorkTab 读 ?status=）。
   return [
-    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `采购付款共 ${s.payment_count || 0} 张`, to: target },
-    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#E57A00' : '', to: target },
-    { key: 'inspect', label: '待验收', value: `${s.pending_inspection || 0} 张`, sub: '已付款未验收', to: target },
+    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `采购付款共 ${s.payment_count || 0} 张`, to: page('/approval/procurement-payment', { status: '已付款' }) },
+    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#E57A00' : '', to: page('/approval/procurement-payment', { status: '待到货资料' }) },
+    { key: 'inspect', label: '待验收', value: `${s.pending_inspection || 0} 张`, sub: '已付款未验收', to: page('/approval/procurement-payment', { status: '待验收' }) },
   ];
 }
 
@@ -54,14 +74,17 @@ export function hasPoWork(data = {}) {
   return Boolean(work && typeof work === 'object' && (work.summary || Array.isArray(work.by_status) || Array.isArray(work.pos)));
 }
 
+// 四张卡原来都指向同一个页面。现在各去各的：
+//   已付 -> 付款工作项里"已付款"；等总经理确认 / 付款审批中 -> 付款审批单页签（PaymentWorkbench 读 ?tab=approvals）；
+//   待提交 -> 付款工作项里"可提交付款审批"（PayWorkTab 读 ?status=）。
 export function poWorkKpis(work = {}) {
   const s = work.summary || {};
-  const target = page('/approval/procurement-payment');
+  const path = '/approval/procurement-payment';
   return [
-    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `${s.paid_count || 0} 期`, to: target },
-    { key: 'final', label: '等总经理确认付款', value: yuan(s.waiting_final_amount), sub: `${s.waiting_final_count || 0} 张 · 在总经理付款这一步`, tone: '#A35A17', to: target },
-    { key: 'approval', label: '付款审批中', value: yuan(s.in_approval_amount), sub: `${s.in_approval_count || 0} 张`, to: target },
-    { key: 'ready', label: '待提交付款审批', value: yuan(s.ready_amount), sub: `${s.ready_count || 0} 期 · 采购还没提交`, to: target },
+    { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `${s.paid_count || 0} 期`, to: page(path, { status: '已付款' }) },
+    { key: 'final', label: '等总经理确认付款', value: yuan(s.waiting_final_amount), sub: `${s.waiting_final_count || 0} 张 · 在总经理付款这一步`, tone: '#A35A17', to: page(path, { tab: 'approvals' }) },
+    { key: 'approval', label: '付款审批中', value: yuan(s.in_approval_amount), sub: `${s.in_approval_count || 0} 张`, to: page(path, { tab: 'approvals' }) },
+    { key: 'ready', label: '待提交付款审批', value: yuan(s.ready_amount), sub: `${s.ready_count || 0} 期 · 采购还没提交`, to: page(path, { status: '可提交付款审批' }) },
   ];
 }
 

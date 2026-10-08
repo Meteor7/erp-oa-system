@@ -18,7 +18,8 @@ test("personal approval todos render independently of company dashboard permissi
 test("dashboard presents personal queues as actionable categories", () => {
   assert.match(source, /todoCategories/);
   assert.match(source, /openApprovalTodo\(item\)/);
-  assert.match(source, /item\.requests\?\./);
+  // 一张打开这一张，多张打开该类型"待我处理"的列表（逻辑在 lib/navContext.js 的 approvalTodoTarget，有单测）
+  assert.match(source, /approvalTodoTarget\(item\)/);
   assert.match(source, /我的待办与公司经营数据/);
   assert.match(source, /月度核算流程/);
   assert.match(source, /数据完整度/);
@@ -70,7 +71,18 @@ test('the queue is one list covering approvals and hands-on tasks', () => {
   assert.match(source, /item\.reason/);
   assert.match(source, /'价格审批'/);
   assert.match(source, /'采购订单'/);
-  assert.match(source, /item\.query \|\| \{ request: item\.name \}/);
+  // 后端给的 query（价格审批 approval=、PO po=）优先，没有才是 request=单号（queueTarget）
+  assert.match(source, /queueTarget\(item\)/);
+});
+
+test('every link out of the dashboard carries its context (2026-10 navigation audit)', () => {
+  assert.match(source, /noteTarget\(item\)/);
+  assert.match(source, /myRequestTarget\(item\)/);
+  assert.match(source, /openMyRequest\(item\)/);
+  assert.doesNotMatch(source, /@click="openQueueItem\(item\)">\{\{ item\.returned/, '"修改后重新提交" opens the draft, not the read-only detail');
+  // 研发台账 had route '/ledger' (no page, no role rule): the row was silently hidden for everyone
+  assert.doesNotMatch(source, /route: '\/ledger'/);
+  assert.match(source, /route: '\/entry', n: '02', h: '研发台账'/);
 });
 
 test('notifications read as plain language, grouped per document', () => {

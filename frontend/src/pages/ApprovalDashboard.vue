@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
 import { useRoute, useRouter } from 'vue-router';
+import { boardRoute } from '../lib/expenseBoards.js';
+import { hereAsFrom } from '../lib/navContext.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -62,9 +64,12 @@ const riskCards = computed(() => {
   ];
 });
 
+// 从"关联付款 N 笔 / 来源申请 N 张"点进来时地址里带着 source_request= / request=：表格只显示相关的单据，并在表头上说明、可以一键清除。
+const linkedRequest = computed(() => String(route.query.source_request || route.query.request || ''));
+
 const filteredRows = computed(() => {
-  const linkedRequest = String(route.query.source_request || route.query.request || '');
-  if (linkedRequest) return (data.value.rows || []).filter((row) => row.name === linkedRequest || (row.linked_requests || []).includes(linkedRequest));
+  const linkedName = linkedRequest.value;
+  if (linkedName) return (data.value.rows || []).filter((row) => row.name === linkedName || (row.linked_requests || []).includes(linkedName));
   if (!selectedNames.value.length) return data.value.rows || [];
   const names = new Set(selectedNames.value);
   return (data.value.rows || []).filter((row) => names.has(row.name));
@@ -90,9 +95,11 @@ function openSourceRequest(row) {
   if (name) router.push({ path: '/approval/request-dashboard', query: { request: name } });
 }
 
+// 按单据自己的类型打开（购买申请、出差申请、报销单…各有各的页面），类型不明才按看板种类猜；带上来源，返回时回到这里。
 function openDocument(row) {
-  const path = kind.value === 'payment' ? '/approval/procurement-payment' : '/approval/procurement';
-  router.push({ path, query: { request: row.name } });
+  const mapped = boardRoute(row.request_type);
+  const fallback = kind.value === 'payment' ? '/approval/procurement-payment' : '/approval/procurement';
+  router.push({ path: mapped === '/dashboard' ? fallback : mapped, query: { request: row.name, from: hereAsFrom(route.path, route.query) } });
 }
 
 const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
@@ -163,8 +170,12 @@ const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
 
     <section class="rounded-lg border bg-white p-6 shadow-sm">
       <div class="mb-3 flex items-center justify-between">
-        <h2 class="font-semibold">{{ selectedLabel }}（{{ filteredRows.length }}）</h2>
-        <button v-if="selectedNames.length" type="button" class="text-sm text-gray-600 underline" @click="showAll">显示全部</button>
+        <h2 class="font-semibold">{{ linkedRequest ? '关联单据' : selectedLabel }}（{{ filteredRows.length }}）</h2>
+        <button v-if="selectedNames.length || linkedRequest" type="button" class="text-sm text-gray-600 underline" @click="showAll">显示全部</button>
+      </div>
+      <div v-if="linkedRequest" class="mb-3 flex items-center justify-between gap-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="linked-filter">
+        <span>只显示与 <b>{{ linkedRequest }}</b> 关联的单据（{{ kind === 'payment' ? '来源申请' : '关联付款 / 采购链路' }}）。</span>
+        <button type="button" class="shrink-0 underline" @click="showAll">清除筛选，显示全部</button>
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">

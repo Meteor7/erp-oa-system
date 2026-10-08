@@ -5,11 +5,13 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import '../styles/boardsUi.css';
+import '../styles/navUi.css';
 import DonutChart from '../components/expense-ui/DonutChart.vue';
 import HBars from '../components/expense-ui/HBars.vue';
 import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
-import { boardRoute, boardTab, budgetBars, flowBars, requestKpis, scopeText, waitBars } from '../lib/expenseBoards.js';
+import { boardAccess, boardRoute, boardTab, budgetBars, flowBars, requestKpis, scopeText, waitBars } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
+import { hereAsFrom, withFrom } from '../lib/navContext.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -18,7 +20,9 @@ const data = ref({});
 const loading = ref(true);
 const error = ref('');
 const showAllBudgets = ref(false);
-const kpis = computed(() => requestKpis(data.value));
+// 指标卡的链接按看的人的权限处理：打不开"全部出差申请"的人，那张卡不可点（不会被悄悄换成"我的"）。
+const access = boardAccess();
+const kpis = computed(() => requestKpis(data.value, access));
 const summary = computed(() => data.value.summary || {});
 const flow = computed(() => flowBars(data.value.month_flow || []));
 const budgets = computed(() => budgetBars(data.value.applications || []));
@@ -33,12 +37,13 @@ function setTab(value) {
   router.replace({ path: route.path, query: { ...route.query, tab: value } });
 }
 
+// 带上来源：打开的单据 / 列表上"返回"回到这个看板（含当前页签）。
 function open(row, requestType) {
-  router.push({ path: boardRoute(requestType || row.request_type), query: { request: row.name } });
+  router.push({ path: boardRoute(requestType || row.request_type), query: { request: row.name, from: hereAsFrom(route.path, route.query) } });
 }
 
 function openKpi(kpi) {
-  if (kpi.to?.path) router.push(kpi.to);
+  if (kpi.to?.path) router.push(withFrom(kpi.to, hereAsFrom(route.path, route.query)));
   else if (kpi.to?.anchor) nextTick(() => document.getElementById(kpi.to.anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
 }
 
@@ -74,8 +79,8 @@ onMounted(async () => {
     <div v-else-if="error" class="banner err">{{ error }}</div>
     <template v-else>
       <div class="bd-kpis">
-        <button v-for="kpi in kpis" :key="kpi.key" type="button" class="bd-kpi" @click="openKpi(kpi)">
-          <span class="bd-kpi-top"><span>{{ kpi.label }}</span><em aria-hidden="true">›</em></span>
+        <button v-for="kpi in kpis" :key="kpi.key" type="button" class="bd-kpi" :disabled="!kpi.to" :title="kpi.note || ''" @click="openKpi(kpi)">
+          <span class="bd-kpi-top"><span>{{ kpi.label }}</span><em v-if="kpi.to" aria-hidden="true">›</em></span>
           <b class="bd-kpi-value" :style="kpi.tone ? { color: kpi.tone } : null">{{ kpi.value }}</b>
           <span class="bd-kpi-sub">{{ kpi.sub }}</span>
         </button>

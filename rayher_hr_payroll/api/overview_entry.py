@@ -658,7 +658,7 @@ def _price_approval_tasks():
     return [task_item("价格审批", f"{row.name} 待选择成交供应商并审批",
                       f"采购提交 · {frappe.db.get_value('User', row.owner, 'full_name') or row.owner}",
                       waiting_days(row.modified), PROCUREMENT_ROUTE, "我是价格审批人", row.name,
-                      row.total_amount, {"request": row.name})
+                      row.total_amount, {"approval": row.name})
             for row in rows]
 
 
@@ -788,11 +788,14 @@ def get_my_requests(limit=6):
 ACTION_EVENTS = ("待处理", "待审批", "待办理", "待你处理")
 MINE_EVENTS = ("已通过", "已拒绝", "已退回", "被退回", "已付款", "已完成", "已撤回", "已关闭")
 CC_MARK = "抄送"
+# 修复（2026-10，导航审计 P1）：价格审批页只认 approval= / pr= / po=（request= 是 OA 采购申请单号），
+# 原来价格审批单和 PR 的通知都用 request=，打开后是空页面加"仅查看这张采购申请"。
+# 第三项是固定要带的查询：PR 要 view=source 才落在"PR 待比价物料"页签。
 DOC_ROUTES = {
-    "OA Purchase Order": ("/approval/procurement/price-approvals", "po"),
-    "OA Price Approval": ("/approval/procurement/price-approvals", "request"),
-    "OA Procurement Request": ("/approval/procurement/price-approvals", "request"),
-    "OA Material Progress": ("/approval/material-progress", "request"),
+    "OA Purchase Order": ("/approval/procurement/price-approvals", "po", {"tab": "po"}),
+    "OA Price Approval": ("/approval/procurement/price-approvals", "approval", {"view": "approvals"}),
+    "OA Procurement Request": ("/approval/procurement/price-approvals", "pr", {"view": "source"}),
+    "OA Material Progress": ("/approval/material-progress", "request", {}),
 }
 CATEGORY_LABELS = [("mine", "我的申请"), ("cc", "抄送我的"), ("biz", "业务进展"), ("sys", "系统与指派")]
 
@@ -832,20 +835,34 @@ def _document_summary(doctype, name):
         detail = " · ".join(filter(None, [row.get("supplier"), row.get("status"),
                                           row.get("total_amount") and f"¥ {float(row['total_amount']):,.2f}"]))
         return {"title": _short(item or "采购订单"), "detail": detail,
-                "route": DOC_ROUTES[doctype][0], "query": {"po": name}}
+                "route": DOC_ROUTES[doctype][0], "query": _doc_query(doctype, name)}
     if doctype in ("OA Price Approval", "OA Procurement Request"):
         child = "OA Price Approval Line" if doctype == "OA Price Approval" else "OA Procurement Request Line"
         source = frappe.db.get_value(child, {"parent": name}, ["source_request", "item_name"], as_dict=True) or {}
         subject = frappe.db.get_value("OA Approval Request", source.get("source_request"), "subject") if source.get("source_request") else None
         total = frappe.db.get_value(doctype, name, "total_amount") if doctype == "OA Price Approval" else None
         detail = " · ".join(filter(None, [source.get("item_name"), total and f"¥ {float(total):,.2f}"]))
-        route, key = DOC_ROUTES[doctype]
         return {"title": _short(subject or source.get("item_name") or name), "detail": detail,
-                "route": route, "query": {key: name}}
+                "route": DOC_ROUTES[doctype][0], "query": _doc_query(doctype, name)}
+    if doctype == "OA Material Progress":
+        # 物料进度看板按"来源 OA 申请单号"过滤（request=），不认物料进度行自己的编号。
+        board = frappe.db.get_value("OA Material Progress", name,
+                                    ["source_request", "source_line", "item_name"], as_dict=True) or {}
+        source_request = board.get("source_request")
+        query = {"request": source_request} if source_request else {}
+        if source_request and board.get("source_line"):
+            query["source_line"] = board["source_line"]
+        return {"title": _short(board.get("item_name") or name), "detail": "", "route": DOC_ROUTES[doctype][0],
+                "query": query}
     if doctype in DOC_ROUTES:
-        route, key = DOC_ROUTES[doctype]
-        return {"title": name, "detail": "", "route": route, "query": {key: name}}
+        return {"title": name, "detail": "", "route": DOC_ROUTES[doctype][0], "query": _doc_query(doctype, name)}
     return {"title": name, "detail": "", "route": "", "query": {}}
+
+
+def _doc_query(doctype, name):
+    """通知指向的单据在目标页面上的查询参数：固定的页签参数 + 单据自己的键。"""
+    _route, key, extra = DOC_ROUTES[doctype]
+    return {**extra, key: name}
 
 
 def classify(subject, doctype, name, user, applicants):

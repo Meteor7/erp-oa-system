@@ -3,16 +3,21 @@
 // 采购付款按 PO 付款期次的真实状态统计（po_work：期次状态、各 PO 的到货 / 验收 / 已付进度）；
 // 服务端没有 po_work 时退回旧口径，新的两块面板隐藏。
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import '../../styles/boardsUi.css';
+import '../../styles/navUi.css';
 import HBars from './HBars.vue';
 import {
   boardRoute, hasPoWork, paymentFulfilment, poProgressRows, poStatusCount, poStatusRows, procurementKpis,
 } from '../../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../../lib/expenseClaims.js';
+import { hereAsFrom, withFrom } from '../../lib/navContext.js';
 
 const props = defineProps({ part: { type: String, default: 'request' } });
 const router = useRouter();
+const route = useRoute();
+// 打开的单据 / 列表上"返回"回到这个看板（含采购页签）。
+const here = () => hereAsFrom(route.path, route.query);
 const data = ref({});
 const loading = ref(true);
 const error = ref('');
@@ -27,13 +32,13 @@ const poRows = computed(() => poProgressRows(poWork.value || {}));
 const paymentRows = computed(() => rows.value.map((row) => ({ ...row, fulfil: paymentFulfilment(row, poWork.value || {}) })));
 
 function open(row) {
-  router.push({ path: boardRoute(row.request_type), query: { request: row.name } });
+  router.push({ path: boardRoute(row.request_type), query: { request: row.name, from: here() } });
 }
 function openPo(row) {
-  router.push({ path: '/approval/procurement-payment', query: { po: row.po } });
+  router.push({ path: '/approval/procurement-payment', query: { po: row.po, from: here() } });
 }
 function openKpi(kpi) {
-  if (kpi.to?.path) router.push(kpi.to);
+  if (kpi.to?.path) router.push(withFrom(kpi.to, here()));
 }
 
 async function load() {

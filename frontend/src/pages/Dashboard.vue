@@ -9,6 +9,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { canSee, currentUser } from '../lib/access';
 import { period } from '../lib/period';
 import { costPreviewTag } from '../lib/previewTags';
+import { approvalTodoTarget, myRequestTarget, noteTarget, queueTarget } from '../lib/navContext';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
@@ -57,9 +58,11 @@ const notifications = createResource({
 const noteReader = createResource({ url: 'rayher_hr_payroll.api.overview_entry.mark_notifications_read', method: 'POST' });
 const noteCategories = computed(() => notifications.data?.categories || []);
 const noteItems = computed(() => notifications.data?.items || []);
+// 从首页点出去的链接都带 from=/dashboard，目标页的"返回"回到这里。
 function openNote(item) {
   markNoteRead(item);
-  if (item.route) router.push({ path: item.route, query: item.query || {} });
+  const target = noteTarget(item);
+  if (target) router.push(target);
 }
 function markNoteRead(item) {
   if (!item.unread) return;
@@ -110,7 +113,16 @@ function queueDetail(item) {
   parts.push(item.waited_days > 0 ? `已等待 ${item.waited_days} 天` : '今天提交');
   return parts.filter(Boolean).join(' · ');
 }
-function openQueueItem(item) { router.push({ path: item.route, query: item.query || { request: item.name } }); }
+// 后端给了 query（价格审批 approval=、PO po= …）就用它，否则 request=单号。
+function openQueueItem(item) {
+  const target = queueTarget(item);
+  if (target) router.push(target);
+}
+// 我发起的申请：草稿（含被退回改成草稿的）去编辑页，其余看详情；各页面打开草稿的参数不一样，由 draftTarget 统一处理。
+function openMyRequest(item) {
+  const target = myRequestTarget(item);
+  if (target) router.push(target);
+}
 const todoCategories = computed(() => (oaTodos.data?.categories || []).map((item) => ({ ...item, ...(todoPresentation[item.key] || { icon: 'inbox' }) })));
 const pendingApprovalCategories = computed(() => todoCategories.value.filter((item) => Number(item.count || 0) > 0));
 const costVisible = computed(() => Boolean(cost.data?.visible));
@@ -269,9 +281,10 @@ function reloadScope() {
   if (selectedProject.value) costDetail.submit({ project: selectedProject.value, scope: scope.value, period: currentPeriod.value }).then(redraw);
 }
 
+// "加班 5"：只有一张就打开这一张，有多张打开该类型"待我处理"的列表（原来永远只打开第一张）。
 function openApprovalTodo(item) {
-  if (!item?.route) return;
-  router.push({ path: item.route, query: item.requests?.length ? { request: item.requests[0] } : {} });
+  const target = approvalTodoTarget(item);
+  if (target) router.push(target);
 }
 
 
@@ -289,7 +302,8 @@ onBeforeUnmount(() => {
 
 const stages = [
   { route: '/personnel', n: '01', h: '人事信息', p: '员工档案', k: 'emp', unit: '人', icon: 'users' },
-  { route: '/ledger', n: '02', h: '研发台账', p: '研发人员归集', k: 'ledger', unit: '人', icon: 'book-open' },
+  // /ledger 已经没有页面也没有角色规则（canSee 永远为假，这一行被悄悄藏掉）；研发人员归集在研发工时填报页里看。
+  { route: '/entry', n: '02', h: '研发台账', p: '研发人员归集', k: 'ledger', unit: '人', icon: 'book-open' },
   { route: '/entry', n: '03', h: '工时汇总', p: '项目工时', k: 'hours', unit: 'h', icon: 'clock' },
   { route: '/allocation', n: '04', h: '费用分摊', p: '研发费用', k: 'cost', unit: '元', icon: 'pie-chart' },
 ];
@@ -405,7 +419,7 @@ const stages = [
               <i v-for="step in item.total_steps" :key="step" class="h-1.5 flex-1 rounded-full" :class="step <= item.done_steps ? 'bg-[#FF8F00]' : item.returned && step === item.done_steps + 1 ? 'bg-red-300' : 'bg-gray-200'"></i>
             </span>
           </span>
-          <button type="button" class="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium" :class="item.returned ? 'bg-gray-900 text-white hover:bg-[#FF8F00]' : 'border border-gray-200 text-gray-700 hover:border-[#FF8F00] hover:text-[#E57A00]'" @click="openQueueItem(item)">{{ item.returned ? '修改后重新提交' : '查看' }}</button>
+          <button type="button" class="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium" :class="item.returned ? 'bg-gray-900 text-white hover:bg-[#FF8F00]' : 'border border-gray-200 text-gray-700 hover:border-[#FF8F00] hover:text-[#E57A00]'" @click="openMyRequest(item)">{{ item.returned ? '修改后重新提交' : '查看' }}</button>
         </div>
       </div>
 

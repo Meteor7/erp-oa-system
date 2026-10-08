@@ -3,8 +3,8 @@
 // 到货与验收由生产主管在"采购付款"里登记，这里只看进度；PO 生成后系统不提供取消。
 import { computed, ref, watch } from 'vue';
 import {
-  PAYMENT_PAGE, contractDraftFor, contractFields, contractMode, contractPayload, contractStepper, deliveryPayload,
-  inspectionTone, isPoDraft, maskAccount, missingDelivery, money, paymentLink, pillClass, planStatus, poCloseBlockers,
+  contractDraftFor, contractFields, contractMode, contractPayload, contractStepper, deliveryPayload,
+  inspectionTone, isPoDraft, maskAccount, missingDelivery, money, paymentLink, paymentPoLink, pillClass, planStatus, poCloseBlockers,
   poMainAction, poProgress, poSources, poTone, poTrail, quantity, shortDate, splitList,
 } from '../../lib/priceView.js';
 
@@ -181,7 +181,7 @@ function runConfirmed() {
         </section>
 
         <section v-if="executing || closed" class="panel pa-exec">
-          <div class="pt"><span>到货与验收</span><router-link :to="PAYMENT_PAGE" class="link">去登记 / 看记录 →</router-link></div>
+          <div class="pt"><span>到货与验收</span><router-link :to="paymentPoLink(po)" class="link">去登记 / 看记录 →</router-link></div>
           <div class="pa-exec-stats">
             <div><span class="muted">到货</span><b>{{ progress.received }} / {{ progress.lineCount }} 项到齐</b></div>
             <div><span class="muted">验收通过</span><b>{{ progress.passed }} / {{ progress.lineCount }} 项</b></div>
@@ -213,7 +213,7 @@ function runConfirmed() {
             <div class="split"><b class="num">{{ money(row.amount) }}</b><router-link v-if="row.payment_request" :to="paymentLink(row)" class="link">{{ row.payment_request }} →</router-link></div>
           </div>
           <div v-if="!plan.length" class="empty">暂无付款计划</div>
-          <router-link :to="PAYMENT_PAGE" class="pa-pay-link">付款条件、提交付款审批 → 采购付款</router-link>
+          <router-link :to="paymentPoLink(po)" class="pa-pay-link">付款条件、提交付款审批 → 采购付款（{{ po.name }}）</router-link>
           <p class="muted foot">付款条件与执行在采购付款工作台处理：到货资料、验收资料、付款期次条件、付款审批和实际付款都在那里。</p>
         </section>
 

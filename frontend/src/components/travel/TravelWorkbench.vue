@@ -6,12 +6,18 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../../styles/expenseUi.css';
 import '../../styles/boardsUi.css';
+import '../../styles/navUi.css';
 import TravelTable from './TravelTable.vue';
 import { callApi, displayStatus, pillClass } from '../../lib/expenseClaims.js';
 import {
-  approveArgs, canSeeAllTravel, dateRange, emptyTravelForm, isStaleError, normalizeScope, pushTarget, rejectProblem, showMissing,
-  travelBlockers, travelBuckets, travelFormFrom, travelScopes, travelStats, travelTimeline, travelView, tripDays, waitText, waitedDays,
+  approveArgs, canSeeAllTravel, dateRange, emptyTravelForm, filterTravelByBucket, isStaleError, normalizeTravelBucket, pushTarget,
+  rejectProblem, showMissing, travelBlockers, travelBucketLabel, travelBuckets, travelFormFrom, travelScopeInfo, travelScopes,
+  travelStats, travelTimeline, travelView, tripDays, waitText, waitedDays,
 } from '../../lib/travelView.js';
+import {
+  backLocation, carryQuery, cleanQuery, detailQuery, formQuery, fromValue, hereAsFrom, listWithout, originLabel, originOf,
+} from '../../lib/navContext.js';
+import { useLeaveConfirm } from '../../lib/leaveConfirm.js';
 
 const REQUEST_TYPE = '出差申请';
 const route = useRoute();
@@ -19,7 +25,11 @@ const router = useRouter();
 const canAll = canSeeAllTravel();
 
 const view = computed(() => travelView(route.query));
-const scope = computed(() => normalizeScope(route.query.scope, canAll));
+// 没有权限的范围（普通员工的 scope=all）退回"我的"，并在列表页上说明。
+const scopeInfo = computed(() => travelScopeInfo(route.query.scope, canAll));
+const scope = computed(() => scopeInfo.value.scope);
+// 首页指标卡带状态点进来：?bucket=draft|review|approved|back，列表上显示成可以移除的标签。
+const bucketKey = computed(() => normalizeTravelBucket(route.query.bucket));
 const home = reactive({ todo: [], mine: [], loaded: false });
 const docs = ref([]);
 const focusDoc = ref(null);
@@ -47,15 +57,25 @@ const todoTop = computed(() => [...home.todo].sort((a, b) => (waitedDays(b, now)
 const mineTop = computed(() => home.mine.slice(0, 4));
 const scopes = computed(() => travelScopes({ canAll, todoCount: home.todo.length }));
 const scopeLabel = computed(() => scopes.value.find((item) => item.key === scope.value)?.label || '我的');
+const shownDocs = computed(() => filterTravelByBucket(docs.value, bucketKey.value));
 const timeline = computed(() => travelTimeline(focusDoc.value || {}));
 const lastApplied = computed(() => form.travel_start_date && form.travel_end_date
   ? `${form.travel_start_date.slice(5).replace('-', ' 月 ')} 日 – ${form.travel_end_date.slice(5).replace('-', ' 月 ')} 日${form.travel_destination ? ' · ' + form.travel_destination : ''}`
   : (form.travel_destination || '填写日期后显示'));
 
+// 表单有没有改过：打开 / 保存之后的快照对比现在的内容；改过再离开（取消、面包屑、侧栏、后退、关标签页）要确认。
+const baseline = ref('');
+const fingerprint = () => JSON.stringify({ form, editing: editingName.value });
+function markClean() {
+  baseline.value = fingerprint();
+}
+useLeaveConfirm(() => view.value === 'new' && fingerprint() !== baseline.value);
+
 function resetForm() {
   Object.assign(form, emptyTravelForm());
   editingName.value = '';
   attempted.value = false;
+  markClean();
 }
 resetForm();
 
@@ -67,6 +87,25 @@ function flash(ok = '', err = '') {
 function go(query = {}) {
   flash();
   router.push({ path: route.path, query });
+}
+
+// 列表的当前状态：点进详情 / 表单时带上，回来时原样恢复。
+// origin：这个列表自己是从哪个页面（看板、首页）点进来的，详情 / 表单往回走时一层层带回去。
+const originKeep = computed(() => (originOf(route.query) ? { from: originOf(route.query) } : {}));
+const listFilters = computed(() => cleanQuery({ scope: scope.value, bucket: bucketKey.value, origin: originOf(route.query) }));
+const cameFromList = computed(() => fromValue(route.query) === 'list');
+const originText = computed(() => {
+  const from = fromValue(route.query);
+  return from && from !== 'list' ? (originLabel(route.query) || '上一页') : '';
+});
+function goBack() {
+  flash();
+  router.push(backLocation(route.path, route.query));
+}
+// 详情页的"列表"：从列表来的回到同一个范围和筛选；其他入口（通知、首页）按这张单是不是我的来猜（待办链接进来的多半是审批人）。
+function backToList() {
+  flash();
+  router.push(cameFromList.value ? backLocation(route.path, route.query) : { path: route.path, query: { view: 'list', scope: focusOwn.value ? 'mine' : 'todo' } });
 }
 
 async function run(action, okText) {
@@ -158,6 +197,7 @@ async function enterNewPage() {
       return;
     }
     Object.assign(form, travelFormFrom(doc));
+    markClean();
   } catch (error) {
     flash('', String(error?.message || error));
   }
@@ -173,13 +213,14 @@ async function save({ submit = false } = {}) {
   try {
     const doc = await callApi('travel_entry.save_travel_draft', { payload: JSON.stringify({ ...form }), name: editingName.value || undefined });
     editingName.value = doc.name;
+    markClean();
     if (submit) {
       await callApi('oa_entry.submit_request', { name: doc.name });
       resetForm();
       router.push({ path: route.path, query: { request: doc.name } });
       flash(`出差申请 ${doc.name} 已提交审批`);
     } else {
-      router.replace({ path: route.path, query: { view: 'new', draft: doc.name } });
+      router.replace({ path: route.path, query: { view: 'new', draft: doc.name, ...carryQuery(route.query) } });
       flash(`草稿 ${doc.name} 已保存`);
     }
   } catch (error) {
@@ -215,8 +256,9 @@ async function withdraw(row, note) {
   await run(() => callApi('oa_entry.withdraw_request', { name: row.name, note }), `${row.name} 已撤回为草稿`);
 }
 
+// 下推报销 / 付款：目标页先弹出"确定要创建草稿吗"，确认后才生成；from 让它取消时回到这里。
 function push(row, kind) {
-  router.push({ path: pushTarget(kind), query: { source: row.name } });
+  router.push({ path: pushTarget(kind), query: { source: row.name, from: hereAsFrom(route.path, route.query) } });
 }
 
 watch(() => [view.value, scope.value, route.query.request, route.query.draft], () => {
@@ -281,8 +323,8 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft], (
 
         <section class="panel flush">
           <div class="tv-list-head">
-            <b>全部出差申请</b>
-            <div class="seg"><button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="item.key === 'mine'" @click="go({ view: 'list', scope: item.key })">{{ item.label }}<template v-if="item.key === 'todo'"> {{ item.count }}</template></button></div>
+            <b>我的出差申请 <span class="muted">最近 {{ Math.min(home.mine.length, 8) }} 张<template v-if="home.mine.length > 8">，共 {{ home.mine.length }} 张</template></span></b>
+            <div class="seg"><button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="item.key === 'mine'" :title="item.key === 'mine' ? '' : '打开完整列表'" @click="go({ view: 'list', scope: item.key })">{{ item.label }}<template v-if="item.key === 'todo'"> {{ item.count }}</template></button></div>
           </div>
           <TravelTable :rows="home.mine.slice(0, 8)" :busy="busy" empty="还没有出差申请" @open="(row) => go({ request: row.name })" @edit="(row) => go({ view: 'new', draft: row.name })" @push="push" @withdraw="withdraw" />
         </section>
@@ -293,24 +335,32 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft], (
     <template v-else-if="view === 'list'">
       <div class="ph">
         <div>
+          <div v-if="originText" class="crumb"><button type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button></div>
           <div class="crumb"><button type="button" class="link" @click="go({})">出差申请</button> › {{ scopeLabel }}</div>
-          <h3>{{ scopeLabel }} · {{ docs.length }} 张</h3>
+          <h3>{{ scopeLabel }} · {{ shownDocs.length }} 张<template v-if="bucketKey"><span class="muted">（共 {{ docs.length }} 张，已筛选）</span></template></h3>
         </div>
         <div class="seg">
-          <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="go({ view: 'list', scope: item.key })">{{ item.label }}</button>
+          <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="go({ view: 'list', scope: item.key, ...originKeep })">{{ item.label }}</button>
         </div>
       </div>
       <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
       <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
-      <div class="filter-bar"><span class="grow-col"></span><button type="button" class="btn pri" @click="go({ view: 'new' })">＋ 新建出差申请</button></div>
+      <div v-if="scopeInfo.notice" class="banner warn" role="status" data-testid="scope-notice">{{ scopeInfo.notice }}</div>
+      <div v-if="bucketKey" class="nav-filters" data-testid="bucket-filter">
+        <span class="nav-filter">状态：{{ travelBucketLabel(bucketKey) }}<button type="button" aria-label="清除状态筛选" @click="go(listWithout(route.query, 'bucket'))">×</button></span>
+      </div>
+      <div class="filter-bar"><span class="grow-col"></span><button type="button" class="btn pri" @click="go(formQuery({ view: 'new' }, listFilters))">＋ 新建出差申请</button></div>
       <div class="panel flush">
-        <TravelTable :rows="docs" :own="ownRow" :loading="loading" :busy="busy" :show-applicant="scope !== 'mine'" :approvable="scope === 'todo'" :empty="scope === 'todo' ? '没有需要你审批的出差申请' : '这里没有出差申请'" @approve="approve" @open="(row) => go({ request: row.name })" @edit="(row) => go({ view: 'new', draft: row.name })" @push="push" @withdraw="withdraw" />
+        <TravelTable :rows="shownDocs" :own="ownRow" :loading="loading" :busy="busy" :show-applicant="scope !== 'mine'" :approvable="scope === 'todo'" :empty="scope === 'todo' ? '没有需要你审批的出差申请' : '这里没有出差申请'" @approve="approve" @open="(row) => go(detailQuery(row.name, listFilters))" @edit="(row) => go(formQuery({ view: 'new', draft: row.name }, listFilters))" @push="push" @withdraw="withdraw" />
       </div>
     </template>
 
     <!-- ============================== 详情页 ============================== -->
     <template v-else-if="view === 'detail'">
-      <div class="crumb"><button type="button" class="link" @click="go({})">出差申请</button> › <button type="button" class="link" @click="go({ view: 'list', scope: focusOwn ? 'mine' : 'todo' })">列表</button> › {{ route.query.request }}</div>
+      <div class="crumb">
+        <button v-if="originText" type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button>
+        <button type="button" class="link" @click="go({})">出差申请</button> › <button type="button" class="link" @click="backToList">列表</button> › {{ route.query.request }}
+      </div>
       <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
       <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
       <div v-if="loading && !focusDoc" class="panel empty">正在加载…</div>
@@ -324,7 +374,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft], (
           <div class="head-buttons">
             <button v-if="focusDoc.workflow_status === '已完成' && focusOwn" type="button" class="btn" @click="push(focusDoc, 'claim')">下推报销</button>
             <button v-if="focusDoc.workflow_status === '已完成' && focusOwn" type="button" class="btn" @click="push(focusDoc, 'payment')">下推付款</button>
-            <button v-if="focusDoc.workflow_status === '草稿' && focusOwn" type="button" class="btn" :disabled="busy" @click="go({ view: 'new', draft: focusDoc.name })">继续编辑</button>
+            <button v-if="focusDoc.workflow_status === '草稿' && focusOwn" type="button" class="btn" :disabled="busy" @click="go({ view: 'new', draft: focusDoc.name, ...carryQuery(route.query) })">继续编辑</button>
             <button v-if="focusDoc.can_withdraw" type="button" class="btn" :disabled="busy" @click="openAsk('withdraw')">撤回</button>
             <button v-if="focusDoc.can_reject" type="button" class="btn danger" :disabled="busy" @click="openAsk('reject')">驳回</button>
             <button v-if="focusDoc.can_approve" type="button" class="btn pri lg" :disabled="busy" @click="approve(focusDoc)">同意</button>
@@ -376,7 +426,12 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft], (
     <template v-else>
       <div class="ph">
         <div>
-          <div class="crumb"><button type="button" class="link" @click="go({})">出差申请</button> › {{ editingName ? `编辑草稿 ${editingName}` : '新建' }}</div>
+          <div class="crumb">
+            <button v-if="originText" type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button>
+            <button type="button" class="link" @click="go({})">出差申请</button>
+            <template v-if="cameFromList"> › <button type="button" class="link" @click="goBack">列表</button></template>
+            › {{ editingName ? `编辑草稿 ${editingName}` : '新建' }}
+          </div>
           <h3>{{ editingName ? '编辑出差申请草稿' : '新建出差申请' }}</h3>
         </div>
       </div>
@@ -420,7 +475,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft], (
             <button type="button" class="btn pri lg" :disabled="busy" @click="save({ submit: true })">提交审批</button>
             <div class="tv-buttons-row">
               <button type="button" class="btn" :disabled="busy" @click="save()">保存草稿</button>
-              <button type="button" class="btn" :disabled="busy" @click="resetForm(); go({})">取消</button>
+              <button type="button" class="btn" :disabled="busy" @click="goBack">取消</button>
             </div>
           </div>
         </aside>

@@ -3,10 +3,13 @@
 // 详情页和采购申请详情是同一个样子（ProcDetail），只是没有采购链阶段条和执行明细。
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import '../../styles/navUi.css';
 import {
-  LIST_LIMIT, PAGE_SIZE, canActOn, canWithdrawRow, currentStepKey, draftHint, draftKind, isActive, listScope, longestWait,
-  mergeRows, money, pageCount, pageSlice, projectText, purchaseStatus, shortDate, waitText, waitedDays,
+  LIST_LIMIT, PAGE_SIZE, canActOn, canWithdrawRow, currentStepKey, draftHint, draftKind, filterPurchaseStatus, isActive, listScope,
+  longestWait, mergeRows, money, normalizePurchaseStatus, pageCount, pageSlice, projectText, purchaseStatus, purchaseStatusLabel,
+  shortDate, waitText, waitedDays,
 } from '../../lib/procurementView.js';
+import { cleanQuery, detailQuery, formQuery, hereAsFrom, originOf } from '../../lib/navContext.js';
 import { apiGet, apiPost, errText, settle } from './procData.js';
 import { useProc } from './context.js';
 
@@ -16,11 +19,21 @@ const router = useRouter();
 const home = reactive({ mine: [], pending: [], all: [], quotas: [], loaded: false });
 const loading = ref(false);
 const now = ctx.now;
-const search = ref('');
 const page = ref(0);
 const acted = reactive({});
-const scope = ref(listScope(route.query, 'mine'));
+// 查看范围、状态筛选、搜索词都在地址里（scope、status、q）：点进详情再回来、刷新、分享链接都还是同一份列表。
+const scope = computed(() => listScope(route.query, 'mine'));
+const statusKey = computed(() => normalizePurchaseStatus(route.query.status));
+const search = ref(String(route.query.q || ''));
 const listBox = ref(null);
+
+// 只改列表状态的那几项，其余查询（view=list 用来滚动到列表）原样保留；用 replace，不增加历史记录。
+function setListQuery(patch) {
+  const next = { ...route.query, ...patch };
+  for (const key of Object.keys(next)) if (next[key] === '' || next[key] === undefined || next[key] === null) delete next[key];
+  router.replace({ path: route.path, query: next });
+}
+const listFilters = computed(() => cleanQuery({ scope: scope.value, status: statusKey.value, q: search.value, origin: originOf(route.query) }));
 
 const listFor = (view) => apiGet('oa_entry.list_requests', { view, request_type: ctx.requestType, limit: LIST_LIMIT });
 
@@ -58,11 +71,12 @@ const stats = computed(() => {
   const back = mineBy((row) => draftKind(row));
   const review = mineBy((row) => isActive(row));
   const wait = longestWait(todo.value, now);
+  // 每张卡带着范围和状态：点进去只看这一类（原来只切到"我的"，草稿、审批中、待付款都是同一份列表）。
   return [
-    { key: 'todo', label: '待我审批', count: todo.value.length, amount: sum(todo.value), tone: '#D98C4A', scope: 'todo', hint: todo.value.length ? `最久等了 ${wait} 天` : '没有要你审批的' },
-    { key: 'back', label: '我的草稿 / 退回', count: back.length, amount: sum(back), tone: '#C3CAD6', scope: 'mine', hint: back.length ? '继续编辑后重新提交' : '没有要处理的' },
-    { key: 'review', label: '我的 · 审批中', count: review.length, amount: sum(review), tone: '#5470C6', scope: 'mine', hint: review.length ? '审批中还可以撤回' : '' },
-    { key: 'pay', label: '已批准 · 待付款', count: pendingPay.value.length, amount: sum(pendingPay.value), tone: '#E3B26B', scope: 'mine', hint: pendingPay.value.length ? '可以用它发起报销或付款' : '' },
+    { key: 'todo', label: '待我审批', count: todo.value.length, amount: sum(todo.value), tone: '#D98C4A', scope: 'todo', status: '', hint: todo.value.length ? `最久等了 ${wait} 天` : '没有要你审批的' },
+    { key: 'back', label: '我的草稿 / 退回', count: back.length, amount: sum(back), tone: '#C3CAD6', scope: 'mine', status: 'draft', hint: back.length ? '继续编辑后重新提交' : '没有要处理的' },
+    { key: 'review', label: '我的 · 审批中', count: review.length, amount: sum(review), tone: '#5470C6', scope: 'mine', status: 'review', hint: review.length ? '审批中还可以撤回' : '' },
+    { key: 'pay', label: '已批准 · 待付款', count: pendingPay.value.length, amount: sum(pendingPay.value), tone: '#E3B26B', scope: 'mine', status: 'topay', hint: pendingPay.value.length ? '可以用它发起报销或付款' : '' },
   ];
 });
 
@@ -74,25 +88,36 @@ const scopes = computed(() => [
 const base = computed(() => ({ mine: home.mine, todo: todo.value, all: ctx.globalAccess ? home.all : related.value }[scope.value] || []));
 const rows = computed(() => {
   const text = search.value.trim().toLowerCase();
-  if (!text) return base.value;
-  return base.value.filter((row) => [row.name, row.subject, row.employee_name, ...(row.business_lines || []).map((line) => line.item_name)].join(' ').toLowerCase().includes(text));
+  const byStatus = filterPurchaseStatus(base.value, statusKey.value);
+  if (!text) return byStatus;
+  return byStatus.filter((row) => [row.name, row.subject, row.employee_name, ...(row.business_lines || []).map((line) => line.item_name)].join(' ').toLowerCase().includes(text));
 });
 const pages = computed(() => pageCount(rows.value.length));
 const shown = computed(() => pageSlice(rows.value, Math.min(page.value, pages.value - 1)));
-watch([scope, search], () => { page.value = 0; });
+watch([scope, statusKey, search], () => { page.value = 0; });
+// 搜索词同步进地址；地址变了（后退）再同步回来。
+watch(search, (value) => setListQuery({ q: value }));
+watch(() => route.query.q, (value) => { if (String(value || '') !== search.value) search.value = String(value || ''); });
 
-function pickScope(key) {
-  scope.value = key;
+// 换范围就清掉状态筛选（状态只对"我的"有意义）。
+function pickScope(key, status = '') {
+  setListQuery({ scope: key, status });
   listBox.value?.scrollIntoView?.({ block: 'nearest' });
 }
 
 function openStat(card) {
-  pickScope(card.scope);
+  pickScope(card.scope, card.status);
 }
 
+// 从列表点进详情 / 表单：带上范围、状态、搜索词，返回时原样恢复。
 function open(row) {
-  if (row.workflow_status === '草稿' && scope.value === 'mine') ctx.goNew({ draft: row.name });
-  else ctx.go({ request: row.name });
+  if (row.workflow_status === '草稿' && scope.value === 'mine') ctx.goNew(formQuery({ draft: row.name }, listFilters.value));
+  else ctx.go(detailQuery(row.name, listFilters.value));
+}
+
+// 用它报销 / 用它付款：目标页先弹出"确定要创建草稿吗"；from 让它取消时回到这里。
+function pushTo(path, source) {
+  router.push({ path, query: { view: 'new', source, from: hereAsFrom(route.path, route.query) } });
 }
 
 function nextText(row) {
@@ -142,7 +167,7 @@ const usedPercent = (quota, key) => {
         <h3>购买申请</h3>
         <div class="muted">京东或其他渠道的小额购买。批下来后，凭它报销（自己垫付）或付款（公司付给商家）。</div>
       </div>
-      <div class="head-actions"><button type="button" class="btn pri lg" @click="ctx.goNew()">＋ 新建购买申请</button></div>
+      <div class="head-actions"><button type="button" class="btn pri lg" @click="ctx.goNew(formQuery({}, listFilters))">＋ 新建购买申请</button></div>
     </div>
 
     <div v-if="loading && !home.loaded" class="panel empty" aria-live="polite">正在加载…</div>
@@ -180,8 +205,8 @@ const usedPercent = (quota, key) => {
             <div class="split muted">
               <span>{{ quota.name }} · 已占用 ¥ {{ money(quota.reserved_amount) }} · 已付款 ¥ {{ money(quota.paid_amount) }} · 状态 {{ quota.business_status }}</span>
               <span class="links">
-                <button type="button" class="link" @click="router.push({ path: '/approval/claim', query: { view: 'new', source: quota.name } })">用它报销 →</button>
-                <button type="button" class="link" @click="router.push({ path: '/approval/payment', query: { view: 'new', source: quota.name } })">用它付款 →</button>
+                <button type="button" class="link" @click="pushTo('/approval/claim', quota.name)">用它报销 →</button>
+                <button type="button" class="link" @click="pushTo('/approval/payment', quota.name)">用它付款 →</button>
               </span>
             </div>
           </div>
@@ -196,6 +221,9 @@ const usedPercent = (quota, key) => {
             <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="pickScope(item.key)">{{ item.label }} {{ item.count }}</button>
           </div>
           <input v-model="search" type="search" class="pr-search" placeholder="搜索单号、主题、物品" aria-label="搜索" />
+        </div>
+        <div v-if="statusKey" class="nav-filters pr-pad" data-testid="status-filter">
+          <span class="nav-filter">筛选：{{ purchaseStatusLabel(statusKey) }}<button type="button" aria-label="清除状态筛选" @click="setListQuery({ status: '' })">×</button></span>
         </div>
         <div class="tbl">
           <table class="pr-table">

@@ -5,12 +5,14 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import '../styles/boardsUi.css';
+import '../styles/navUi.css';
 import DonutChart from '../components/expense-ui/DonutChart.vue';
 import HBars from '../components/expense-ui/HBars.vue';
 import StackedBars from '../components/expense-ui/StackedBars.vue';
 import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
-import { agingTiles, boardRoute, boardTab, bottomColumns, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
+import { agingTiles, boardAccess, boardRoute, boardTab, bottomColumns, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
+import { hereAsFrom, withFrom } from '../lib/navContext.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -19,7 +21,11 @@ const data = ref({});
 const loading = ref(true);
 const error = ref('');
 const procurement = ref(null);
-const kpis = computed(() => paymentKpis(data.value));
+// 指标卡的链接按看的人的权限处理：打不开"全部报销 / 付款"的人，那张卡不可点（不会被悄悄换成"我的"）。
+const access = boardAccess();
+const kpis = computed(() => paymentKpis(data.value, access));
+// 打开的单据 / 列表上"返回"回到这个看板（含当前页签）。
+const here = computed(() => hereAsFrom(route.path, route.query));
 const queue = computed(() => data.value.cashier_queue || []);
 const tiles = computed(() => agingTiles(queue.value));
 const summary = computed(() => data.value.summary || {});
@@ -31,11 +37,11 @@ function setTab(value) {
 }
 
 function open(row, requestType) {
-  router.push({ path: boardRoute(requestType || row.request_type), query: { request: row.name } });
+  router.push({ path: boardRoute(requestType || row.request_type), query: { request: row.name, from: here.value } });
 }
 
 function openKpi(kpi) {
-  if (kpi.to?.path) router.push(kpi.to);
+  if (kpi.to?.path) router.push(withFrom(kpi.to, here.value));
   else if (kpi.to?.anchor) nextTick(() => document.getElementById(kpi.to.anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
 }
 
@@ -81,8 +87,8 @@ onMounted(load);
     <div v-else-if="error" class="banner err">{{ error }}</div>
     <template v-else>
       <div class="bd-kpis">
-        <button v-for="kpi in kpis" :key="kpi.key" type="button" class="bd-kpi" @click="openKpi(kpi)">
-          <span class="bd-kpi-top"><span>{{ kpi.label }}</span><em aria-hidden="true">›</em></span>
+        <button v-for="kpi in kpis" :key="kpi.key" type="button" class="bd-kpi" :disabled="!kpi.to" :title="kpi.note || ''" @click="openKpi(kpi)">
+          <span class="bd-kpi-top"><span>{{ kpi.label }}</span><em v-if="kpi.to" aria-hidden="true">›</em></span>
           <b class="bd-kpi-value" :style="kpi.tone ? { color: kpi.tone } : null">{{ kpi.value }}</b>
           <span class="bd-kpi-sub">{{ kpi.sub }}</span>
         </button>
@@ -96,7 +102,7 @@ onMounted(load);
       <div id="bd-cashier" class="panel">
         <div class="pt">
           <span>出纳待付款 <span class="muted">{{ queue.length }} 张 · ¥ {{ money(summary.to_pay_amount) }}<template v-if="urgent"> · 其中加急 {{ urgent }} 张</template> · 加急优先，其次按等待时间</span></span>
-          <span class="links"><router-link class="link" :to="{ path: '/approval/claim', query: { view: 'list', scope: 'todo' } }">报销待办 →</router-link><router-link class="link" :to="{ path: '/approval/payment', query: { view: 'list', scope: 'todo' } }">付款待办 →</router-link></span>
+          <span class="links"><router-link class="link" :to="{ path: '/approval/claim', query: { view: 'list', scope: 'todo', from: here } }">报销待办 →</router-link><router-link class="link" :to="{ path: '/approval/payment', query: { view: 'list', scope: 'todo', from: here } }">付款待办 →</router-link></span>
         </div>
         <div v-if="queue.length" class="bd-tiles">
           <div v-for="tile in tiles" :key="tile.label" class="bd-tile">

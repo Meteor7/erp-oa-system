@@ -53,6 +53,23 @@ export function bucketOf(doc) {
   return (BUCKETS.find((bucket) => bucket.match(status)) || {}).key || '';
 }
 
+// 列表页的 ?bucket=draft|review|topay|paid|back：首页指标卡点进来时只看这一类（2026-10 导航整改）。
+export const BUCKET_KEYS = Object.freeze(BUCKETS.map((bucket) => bucket.key));
+
+export function bucketLabel(key) {
+  return (BUCKETS.find((bucket) => bucket.key === key) || {}).label || '';
+}
+
+// 认不得的值当作没有筛选，不让一个拼错的参数把列表筛空。
+export function normalizeBucket(value) {
+  const key = Array.isArray(value) ? value[0] : value;
+  return BUCKET_KEYS.includes(String(key || '')) ? String(key) : '';
+}
+
+export function filterByBucket(docs = [], key = '') {
+  return key ? docs.filter((doc) => bucketOf(doc) === key) : docs;
+}
+
 export function sumDocs(docs = []) {
   return docs.reduce((sum, doc) => sum + Number(doc.amount || 0), 0);
 }

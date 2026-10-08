@@ -2,17 +2,24 @@
 // 报销单（付给员工）与付款单（付给外部单位）共用。2026-09-30 按确认的 demo 改版：
 // 首页分栏目（待我处理 / 我的 / 发票夹里能用的发票 / 全部），点栏目进列表页，点单据进详情页；
 // 新建单独一页，分三步。页面用查询参数区分，通知和待办里的 ?request= 链接照常打开单据。
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../../styles/expenseUi.css';
+import '../../styles/navUi.css';
 import {
   CLAIM_KINDS, accountBlockers, accountDraftFor, applicationLabel, callApi, claimDraftPayload,
   displayStatus, isFinanceUser, maskAccount, money, pillClass, quotaOf, sourceTypeLabel,
   submitBlockers, sumAmount, withDefaultProjects,
 } from '../../lib/expenseClaims.js';
 import {
-  bucketOf, byWait, canQuickApprove, claimView, statusBuckets, stepTimeline, sumDocs, waitText, waitedDays,
+  bucketLabel, bucketOf, byWait, canQuickApprove, claimView, filterByBucket, normalizeBucket, statusBuckets, stepTimeline, sumDocs,
+  waitText, waitedDays,
 } from '../../lib/claimView.js';
+import {
+  backLocation, carryQuery, cleanQuery, detailQuery, formQuery, fromValue, listWithout, originLabel, originOf, pushConfirmText,
+  resolveScope,
+} from '../../lib/navContext.js';
+import { useLeaveConfirm } from '../../lib/leaveConfirm.js';
 
 const props = defineProps({ kind: { type: String, required: true } });
 const config = computed(() => CLAIM_KINDS[props.kind]);
@@ -24,15 +31,25 @@ const finance = isFinanceUser();
 const seeAll = finance || (globalThis.window?.roles || []).includes('Rayher Business Executive');
 
 const view = computed(() => claimView(route.query));
-const scope = computed(() => String(route.query.scope || (finance ? 'todo' : 'mine')));
+// 查看范围放在地址里（scope=todo|mine|all）。没有权限的范围（例如普通员工的 scope=all）退回默认范围，并在列表页上说明。
+const scopeInfo = computed(() => resolveScope(route.query.scope, {
+  allowed: seeAll ? ['todo', 'mine', 'all'] : ['todo', 'mine'],
+  fallback: finance ? 'todo' : 'mine',
+  subject: `${config.value.label}单`,
+  fallbackLabel: `你的${config.value.label}单`,
+}));
+const scope = computed(() => scopeInfo.value.scope);
+// 列表上的状态筛选（首页指标卡点进来）：?bucket=draft|review|topay|paid|back，列表上显示成可以移除的标签。
+const bucketKey = computed(() => normalizeBucket(route.query.bucket));
 const home = reactive({ todo: [], mine: [], all: [], loaded: false });
 const docs = ref([]);
 const focusDoc = ref(null);
 const loading = ref(false);
 const busy = ref(false);
 const banner = reactive({ ok: '', err: '' });
-const search = ref('');
-const longOnly = ref(false);
+// 搜索词和"等超过 3 天"也在地址里（q=、long=1），点进详情再回来还是同一份筛选。
+const search = ref(String(route.query.q || ''));
+const longOnly = ref(route.query.long === '1');
 const picked = ref([]);
 const defaults = ref({ payee: {}, companies: [], urgencies: ['一般', '加急'], payment_methods: ['银行转账', '现金支付'], asset_categories: [] });
 const applications = ref([]);
@@ -51,6 +68,25 @@ const lineProjects = reactive({});
 const manualLines = ref([]);
 const invoiceMode = ref('pending');
 const step = ref(1);
+// 从申请下推（?source=）要先确认再创建草稿：误点"用它报销 / 用它付款"不会留下一张类型不对的草稿。
+const pendingSource = ref('');
+// 编辑草稿时，草稿自己占用的发票：刷新"可用发票"时不能被丢掉。
+const draftInvoices = ref([]);
+const refreshingInvoices = ref(false);
+
+// 表单有没有改过：打开 / 保存之后的快照对比现在的内容；改过再离开（取消、面包屑、侧栏、后退、关标签页）要确认。
+const baseline = ref('');
+function fingerprint() {
+  return JSON.stringify({
+    form, mode: invoiceMode.value, editing: editingName.value, lines: manualLines.value,
+    invoices: pickedInvoices.value.map((item) => [item.name, lineProjects[item.name] || '']),
+  });
+}
+function markClean() {
+  baseline.value = fingerprint();
+}
+const dirty = computed(() => view.value === 'new' && !pendingSource.value && fingerprint() !== baseline.value);
+useLeaveConfirm(() => dirty.value);
 
 function resetForm() {
   Object.assign(form, {
@@ -65,6 +101,8 @@ function resetForm() {
   lockedSource.value = false;
   invoiceMode.value = 'pending';
   step.value = 1;
+  draftInvoices.value = [];
+  markClean();
 }
 resetForm();
 
@@ -97,9 +135,10 @@ const stats = computed(() => {
   const todoLongest = Math.max(0, ...home.todo.map((doc) => waitedDays(doc, now) || 0));
   return [
     { key: 'todo', label: '待我处理', count: home.todo.length, amount: sumDocs(home.todo), hint: home.todo.length ? `最久的等了 ${todoLongest} 天` : '没有要处理的', tone: '#D98C4A', query: { view: 'list', scope: 'todo' } },
-    { key: 'draft', label: '我的草稿', count: mine('draft').length, amount: sumDocs(mine('draft')), hint: '继续编辑后提交', tone: '#C3CAD6', query: { view: 'list', scope: 'mine' } },
-    { key: 'review', label: '我的 · 审批中', count: mine('review').length, amount: sumDocs(mine('review')), hint: '点进去看卡在谁那里', tone: '#5470C6', query: { view: 'list', scope: 'mine' } },
-    { key: 'topay', label: '我的 · 待付款', count: mine('topay').length, amount: sumDocs(mine('topay')), hint: '出纳付款后会通知你', tone: '#E3B26B', query: { view: 'list', scope: 'mine' } },
+    // 指标卡带着状态（bucket）点进列表，列表只显示这一类；不再是"我的"全部单据。
+    { key: 'draft', label: '我的草稿', count: mine('draft').length, amount: sumDocs(mine('draft')), hint: '继续编辑后提交', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', bucket: 'draft' } },
+    { key: 'review', label: '我的 · 审批中', count: mine('review').length, amount: sumDocs(mine('review')), hint: '点进去看卡在谁那里', tone: '#5470C6', query: { view: 'list', scope: 'mine', bucket: 'review' } },
+    { key: 'topay', label: '我的 · 待付款', count: mine('topay').length, amount: sumDocs(mine('topay')), hint: '出纳付款后会通知你', tone: '#E3B26B', query: { view: 'list', scope: 'mine', bucket: 'topay' } },
   ];
 });
 const scopes = computed(() => [
@@ -107,9 +146,17 @@ const scopes = computed(() => [
   { key: 'mine', label: `我的${config.value.label}` },
   ...(seeAll ? [{ key: 'all', label: `全部${config.value.label}` }] : []),
 ]);
+const scopeTitle = computed(() => scopes.value.find((item) => item.key === scope.value)?.label
+  || { todo: '待我处理', mine: `我的${config.value.label}`, all: `全部${config.value.label}` }[scope.value] || '');
+// 当前列表的筛选状态：点进详情 / 表单时带上，回来时原样恢复。
+// origin：这个列表自己是从哪个页面（看板、首页）点进来的，详情 / 表单往回走时一层层带回去。
+const originKeep = computed(() => (originOf(route.query) ? { from: originOf(route.query) } : {}));
+const listFilters = computed(() => cleanQuery({
+  scope: scope.value, bucket: bucketKey.value, q: search.value, long: longOnly.value ? '1' : '', origin: originOf(route.query),
+}));
 const listRows = computed(() => {
   const query = search.value.trim().toLowerCase();
-  return docs.value.filter((doc) => {
+  return filterByBucket(docs.value, bucketKey.value).filter((doc) => {
     if (longOnly.value && (waitedDays(doc, now) || 0) < 3) return false;
     return !query || [doc.name, doc.subject, doc.employee_name, doc.payee_name].join(' ').toLowerCase().includes(query);
   });
@@ -127,6 +174,69 @@ function go(query = {}) {
   flash();
   router.push({ path: route.path, query });
 }
+
+// 详情页、表单页往回走：从列表来的回到同一个范围和筛选，从首页 / 看板来的回到那个页面。
+const cameFromList = computed(() => fromValue(route.query) === 'list');
+const originText = computed(() => {
+  const from = fromValue(route.query);
+  return from && from !== 'list' ? (originLabel(route.query) || '上一页') : '';
+});
+function goBack() {
+  flash();
+  router.push(backLocation(route.path, route.query));
+}
+function backToList() {
+  flash();
+  router.push(cameFromList.value ? backLocation(route.path, route.query) : { path: route.path, query: { view: 'list', scope: scope.value } });
+}
+
+// 搜索词和"等超过 3 天"同步进地址（replace，不增加历史记录）；地址变了（后退、换范围）再同步回来。
+watch([search, longOnly], () => {
+  if (view.value !== 'list') return;
+  const next = { ...route.query };
+  delete next.q;
+  delete next.long;
+  router.replace({ path: route.path, query: { ...next, ...cleanQuery({ q: search.value, long: longOnly.value ? '1' : '' }) } });
+});
+watch(() => [route.query.q, route.query.long], ([q, long]) => {
+  if (String(q || '') !== search.value) search.value = String(q || '');
+  longOnly.value = long === '1';
+});
+
+// ---------------------------------------------------------------- 发票夹（新标签页打开，表单不丢）
+// 填了一半的表单里点"上传新发票"，原来是在当前页跳去发票夹，选好的发票、步骤、主题、说明全丢。
+// 现在在新标签页打开发票夹；回到这一页时自动刷新可用发票，也可以手动点"刷新可用发票"。
+function openInvoiceFolder() {
+  const href = router.resolve({ path: '/approval/invoice-folder' }).href;
+  window.open(href, '_blank', 'noopener');
+}
+
+async function refreshInvoices({ silent = false } = {}) {
+  if (refreshingInvoices.value) return;
+  refreshingInvoices.value = true;
+  try {
+    const fresh = (await callApi('expense_claim_entry.list_available_invoices', { request_type: config.value.requestType }, { method: 'GET' })) || [];
+    const known = new Set(availableInvoices.value.map((item) => item.name));
+    // 已选的、草稿自己占用的发票不在"可用"列表里也要保留，否则刷新一下选择就没了。
+    const merged = new Map();
+    [...draftInvoices.value, ...pickedInvoices.value, ...fresh].forEach((item) => { if (item?.name && !merged.has(item.name)) merged.set(item.name, item); });
+    availableInvoices.value = [...merged.values()];
+    Object.assign(lineProjects, withDefaultProjects(availableInvoices.value, lineProjects));
+    const added = fresh.filter((item) => !known.has(item.name)).length;
+    if (added) flash(`发票夹里新增了 ${added} 张可用发票，已列在下面`);
+    else if (!silent) flash('已刷新：发票夹里没有新的可用发票');
+  } catch (error) {
+    if (!silent) flash('', `刷新可用发票失败：${String(error?.message || error)}`);
+  } finally {
+    refreshingInvoices.value = false;
+  }
+}
+
+function onWindowFocus() {
+  if ((view.value === 'new' && step.value === 1 && !pendingSource.value) || (view.value === 'detail' && supplement.doc)) refreshInvoices({ silent: true });
+}
+onMounted(() => window.addEventListener('focus', onWindowFocus));
+onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus));
 
 async function run(action, okText) {
   busy.value = true;
@@ -240,6 +350,7 @@ async function openNew() {
   } catch (error) {
     flash('', String(error?.message || error));
   }
+  markClean();
 }
 
 async function openDraft(doc) {
@@ -266,6 +377,7 @@ async function openDraft(doc) {
   }));
   if (isClaim.value) {
     pickedInvoices.value = linked;
+    draftInvoices.value = linked;
     availableInvoices.value = [...linked, ...availableInvoices.value.filter((row) => !linked.some((item) => item.name === row.name))];
     lines.forEach((line) => { if (line.source_invoice) lineProjects[line.source_invoice] = (doc.claim_line_projects || {})[line.line_key] || ''; });
   } else {
@@ -285,27 +397,45 @@ async function openDraft(doc) {
       return;
     }
     pickedInvoices.value = attached.filter((row) => row.recognition_status === '已确认');
+    draftInvoices.value = [...pickedInvoices.value];
     availableInvoices.value = [...pickedInvoices.value, ...availableInvoices.value.filter((row) => !pickedInvoices.value.some((item) => item.name === row.name))];
     invoiceMode.value = pickedInvoices.value.length ? 'has' : 'pending';
   }
+  markClean();
+}
+
+// 下推：?source=申请单号 先停在确认条上，点"确定创建"才真的生成草稿（原来一进页面就创建，点错类型就留下一张错的草稿）。
+async function confirmSource() {
+  const source = pendingSource.value;
+  if (!source || busy.value) return;
+  busy.value = true;
+  try {
+    const draft = await callApi('expense_claim_entry.push_from_application', { source_request: source, request_type: config.value.requestType });
+    pendingSource.value = '';
+    flash(`已从申请 ${source} 生成${config.value.label}单草稿，关联申请已锁定`);
+    router.replace({ path: route.path, query: { view: 'new', draft: draft.name, ...carryQuery(route.query) } });
+  } catch (error) {
+    pendingSource.value = '';
+    flash('', String(error?.message || error));
+    router.replace({ path: route.path, query: carryQuery(route.query) });
+  } finally {
+    busy.value = false;
+  }
+}
+
+function cancelSource() {
+  pendingSource.value = '';
+  flash();
+  router.push(backLocation(route.path, route.query));
 }
 
 async function enterNewPage() {
   if (route.query.source) {
-    const source = String(route.query.source);
-    busy.value = true;
-    try {
-      const draft = await callApi('expense_claim_entry.push_from_application', { source_request: source, request_type: config.value.requestType });
-      flash(`已从申请 ${source} 生成${config.value.label}单草稿，关联申请已锁定`);
-      router.replace({ path: route.path, query: { view: 'new', draft: draft.name } });
-    } catch (error) {
-      flash('', String(error?.message || error));
-      router.replace({ path: route.path, query: {} });
-    } finally {
-      busy.value = false;
-    }
+    resetForm();
+    pendingSource.value = String(route.query.source);
     return;
   }
+  pendingSource.value = '';
   if (route.query.draft) {
     const draftName = String(route.query.draft);
     if (editingName.value === draftName) return;
@@ -343,13 +473,14 @@ async function save({ submit = false } = {}) {
       request_type: config.value.requestType, payload: JSON.stringify(payload), name: editingName.value || undefined,
     });
     editingName.value = doc.name;
+    markClean();
     if (submit) {
       await callApi('oa_entry.submit_request', { name: doc.name });
       resetForm();
       router.push({ path: route.path, query: { request: doc.name } });
       flash(`${config.value.label}单 ${doc.name} 已提交审批`);
     } else {
-      router.replace({ path: route.path, query: { view: 'new', draft: doc.name } });
+      router.replace({ path: route.path, query: { view: 'new', draft: doc.name, ...carryQuery(route.query) } });
       flash(`草稿 ${doc.name} 已保存`);
     }
   } catch (error) {
@@ -523,7 +654,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
         <section v-if="finance" class="panel">
           <div class="pt"><span>全部{{ config.label }} <span class="tag">财务可见</span></span><span class="links"><button type="button" class="link" @click="go({ view: 'list', scope: 'all' })">全部列表 →</button><button type="button" class="link" @click="router.push('/approval/expense-payment-board')">付款看板 →</button></span></div>
           <div class="bucket-cards">
-            <button v-for="bucket in allBuckets" :key="bucket.key" type="button" class="bucket-card" @click="go({ view: 'list', scope: 'all' })">
+            <button v-for="bucket in allBuckets" :key="bucket.key" type="button" class="bucket-card" @click="go({ view: 'list', scope: 'all', bucket: bucket.key })">
               <span class="muted"><i :style="{ background: bucket.color }"></i>{{ bucket.label }}</span>
               <b>{{ bucket.count }} 张</b>
               <span class="muted">¥ {{ money(bucket.amount) }}</span>
@@ -538,19 +669,24 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
     <template v-else-if="view === 'list'">
       <div class="ph">
         <div>
-          <div class="crumb"><button type="button" class="link" @click="go({})">{{ config.label }}</button> › {{ scopes.find((item) => item.key === scope)?.label }}</div>
-          <h3>{{ scopes.find((item) => item.key === scope)?.label }} · {{ docs.length }} 张</h3>
+          <div v-if="originText" class="crumb"><button type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button></div>
+          <div class="crumb"><button type="button" class="link" @click="go({})">{{ config.label }}</button> › {{ scopeTitle }}</div>
+          <h3>{{ scopeTitle }} · {{ listRows.length }} 张<template v-if="bucketKey || search.trim() || longOnly"><span class="muted">（共 {{ docs.length }} 张，已筛选）</span></template></h3>
         </div>
         <div class="seg">
-          <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="go({ view: 'list', scope: item.key })">{{ item.label }}</button>
+          <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="go({ view: 'list', scope: item.key, ...cleanQuery({ q: search }), ...originKeep })">{{ item.label }}</button>
         </div>
       </div>
       <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
       <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
+      <div v-if="scopeInfo.notice" class="banner warn" role="status" data-testid="scope-notice">{{ scopeInfo.notice }}</div>
+      <div v-if="bucketKey" class="nav-filters" data-testid="bucket-filter">
+        <span class="nav-filter">状态：{{ bucketLabel(bucketKey) }}<button type="button" aria-label="清除状态筛选" @click="go(listWithout(route.query, 'bucket'))">×</button></span>
+      </div>
       <div class="filter-bar">
         <input v-model="search" type="search" placeholder="搜单号、申请人、主题、收款单位" aria-label="搜索" />
         <button v-if="scope === 'todo'" type="button" :class="['chip', { on: longOnly }]" @click="longOnly = !longOnly">等超过 3 天</button>
-        <button type="button" class="btn pri" @click="go({ view: 'new' })">＋ 新建{{ config.label }}</button>
+        <button type="button" class="btn pri" @click="go(formQuery({ view: 'new' }, listFilters))">＋ 新建{{ config.label }}</button>
       </div>
       <div class="panel flush">
         <div class="tbl">
@@ -559,7 +695,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
             <tbody>
               <tr v-for="doc in listRows" :key="doc.name" :class="{ on: picked.includes(doc.name) }">
                 <td v-if="scope === 'todo'"><input type="checkbox" :disabled="!canQuickApprove(doc)" :checked="picked.includes(doc.name)" :aria-label="'选择 ' + doc.name" :title="canQuickApprove(doc) ? '' : '这一步要进详情页处理'" @change="togglePick(doc)" /></td>
-                <td class="num"><button type="button" class="link strong" @click="go({ request: doc.name })">{{ doc.name }}</button><span v-if="doc.urgency === '加急'" class="pill p-red" style="margin-left:4px">加急</span></td>
+                <td class="num"><button type="button" class="link strong" @click="go(detailQuery(doc.name, listFilters))">{{ doc.name }}</button><span v-if="doc.urgency === '加急'" class="pill p-red" style="margin-left:4px">加急</span></td>
                 <td>{{ doc.employee_name }}</td>
                 <td class="ellipsis-cell">{{ doc.subject }}</td>
                 <td class="r num">¥ {{ money(doc.amount) }}</td>
@@ -567,8 +703,8 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
                 <td>{{ ['待审批', '待办理'].includes(doc.workflow_status) ? (doc.current_step_label || '—') : '—' }}</td>
                 <td :class="{ warn: (waitedDays(doc, now) || 0) >= 3 && ['待审批', '待办理'].includes(doc.workflow_status) }">{{ ['待审批', '待办理'].includes(doc.workflow_status) ? waitText(waitedDays(doc, now)) : '—' }}</td>
                 <td class="r">
-                  <button v-if="doc.workflow_status === '草稿' && scope === 'mine'" type="button" class="btn sm" @click="go({ view: 'new', draft: doc.name })">继续编辑</button>
-                  <button v-else type="button" class="btn sm" @click="go({ request: doc.name })">详情</button>
+                  <button v-if="doc.workflow_status === '草稿' && scope === 'mine'" type="button" class="btn sm" @click="go(formQuery({ view: 'new', draft: doc.name }, listFilters))">继续编辑</button>
+                  <button v-else type="button" class="btn sm" @click="go(detailQuery(doc.name, listFilters))">详情</button>
                 </td>
               </tr>
               <tr v-if="!listRows.length"><td colspan="9" class="empty">{{ loading ? '正在加载…' : '这里没有单据' }}</td></tr>
@@ -586,7 +722,10 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
 
     <!-- ============================== 详情页 ============================== -->
     <template v-else-if="view === 'detail'">
-      <div class="crumb"><button type="button" class="link" @click="go({})">{{ config.label }}</button> › <button type="button" class="link" @click="go({ view: 'list', scope })">列表</button> › {{ route.query.request }}</div>
+      <div class="crumb">
+        <button v-if="originText" type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button>
+        <button type="button" class="link" @click="go({})">{{ config.label }}</button> › <button type="button" class="link" @click="backToList">列表</button> › {{ route.query.request }}
+      </div>
       <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
       <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
       <div v-if="loading && !focusDoc" class="panel empty">正在加载…</div>
@@ -605,7 +744,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
             <button v-if="focusDoc.can_verify_claim_invoices" type="button" class="btn" :disabled="busy" @click="returnInvoices(focusDoc)">退回补票</button>
             <button v-if="focusDoc.can_verify_claim_invoices" type="button" class="btn pri" :disabled="busy" @click="verify(focusDoc)">核验通过</button>
             <button v-if="focusDoc.can_supplement_claim_invoices && supplement.doc !== focusDoc.name" type="button" class="btn pri" :disabled="busy" @click="openSupplement(focusDoc)">补录发票</button>
-            <button v-if="focusDoc.workflow_status === '草稿'" type="button" class="btn" :disabled="busy" @click="go({ view: 'new', draft: focusDoc.name })">继续编辑</button>
+            <button v-if="focusDoc.workflow_status === '草稿'" type="button" class="btn" :disabled="busy" @click="go({ view: 'new', draft: focusDoc.name, ...carryQuery(route.query) })">继续编辑</button>
             <!-- 出纳审核：科目没填完时后端 can_approve 为 false，但出纳正是要在这里填科目再同意（先保存科目再同意）。 -->
             <button v-if="focusDoc.can_approve || focusDoc.can_edit_expense_items" type="button" class="btn pri lg" :disabled="busy" @click="approve(focusDoc)">{{ focusDoc.current_step_mode === 'handle' ? '确认付款' : '同意' }}</button>
           </div>
@@ -680,7 +819,13 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
             </section>
 
             <section v-if="supplement.doc === focusDoc.name" class="panel accent">
-              <div class="pt"><span>补录发票</span><button type="button" class="btn sm" @click="router.push('/approval/invoice-folder')">＋ 上传新发票</button></div>
+              <div class="pt">
+                <span>补录发票</span>
+                <span class="links">
+                  <button type="button" class="btn sm" :disabled="refreshingInvoices" @click="refreshInvoices()">刷新可用发票</button>
+                  <button type="button" class="btn sm" @click="openInvoiceFolder">＋ 上传新发票（新标签页）</button>
+                </span>
+              </div>
               <div class="tbl">
                 <table>
                   <thead><tr><th style="width:36px"></th><th>发票号码</th><th>项目名称</th><th class="r">合计</th><th>费用说明</th></tr></thead>
@@ -721,7 +866,12 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
     <template v-else>
       <div class="ph">
         <div>
-          <div class="crumb"><button type="button" class="link" @click="go({})">{{ config.label }}</button> › {{ editingName ? `编辑草稿 ${editingName}` : `新建${config.label}` }}</div>
+          <div class="crumb">
+            <button v-if="originText" type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button>
+            <button type="button" class="link" @click="go({})">{{ config.label }}</button>
+            <template v-if="cameFromList"> › <button type="button" class="link" @click="goBack">列表</button></template>
+            › {{ editingName ? `编辑草稿 ${editingName}` : `新建${config.label}` }}
+          </div>
           <h3>{{ editingName ? '编辑草稿' : `新建${config.label}` }}</h3>
         </div>
         <div class="stepper">
@@ -733,13 +883,25 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
       <div v-if="banner.ok" class="banner ok">{{ banner.ok }}</div>
       <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
 
-      <div class="new-grid">
+      <div v-if="pendingSource" class="nav-confirm" role="alertdialog" aria-label="确认创建草稿" data-testid="push-confirm">
+        <span class="grow-col"><b>{{ pushConfirmText(props.kind, pendingSource) }}</b><br /><span class="muted">创建后可以继续编辑再提交；关联申请会锁定，不能更换。</span></span>
+        <button type="button" class="btn pri" :disabled="busy" @click="confirmSource">确定创建</button>
+        <button type="button" class="btn" :disabled="busy" @click="cancelSource">取消</button>
+      </div>
+
+      <div v-if="!pendingSource" class="new-grid">
         <div>
           <!-- 第 1 步 -->
           <template v-if="step === 1">
             <div v-if="isClaim" class="panel">
-              <div class="pt"><span>选这次要报销的发票</span><button type="button" class="btn sm" @click="router.push('/approval/invoice-folder')">＋ 上传新发票</button></div>
-              <div class="muted" style="margin-bottom:10px">只列出发票夹里已确认、还没用过的发票；报销金额 = 所选发票合计，不用再手填。</div>
+              <div class="pt">
+                <span>选这次要报销的发票</span>
+                <span class="links">
+                  <button type="button" class="btn sm" :disabled="refreshingInvoices" @click="refreshInvoices()">刷新可用发票</button>
+                  <button type="button" class="btn sm" @click="openInvoiceFolder">＋ 上传新发票（新标签页）</button>
+                </span>
+              </div>
+              <div class="muted" style="margin-bottom:10px">只列出发票夹里已确认、还没用过的发票；报销金额 = 所选发票合计，不用再手填。在新标签页里上传、确认发票后，回到这里会自动刷新，已选的发票和填好的内容不会丢。</div>
               <div class="pick-grid">
                 <label v-for="invoice in availableInvoices" :key="invoice.name" :class="['pick', { on: pickedInvoices.some((item) => item.name === invoice.name) }]">
                   <input type="checkbox" :checked="pickedInvoices.some((item) => item.name === invoice.name)" :aria-label="'选择发票 ' + invoice.invoice_number" @change="togglePicked(invoice)" />
@@ -782,7 +944,13 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
                 </div>
               </div>
               <div class="panel">
-                <div class="pt">发票</div>
+                <div class="pt">
+                  <span>发票</span>
+                  <span v-if="invoiceMode === 'has'" class="links">
+                    <button type="button" class="btn sm" :disabled="refreshingInvoices" @click="refreshInvoices()">刷新可用发票</button>
+                    <button type="button" class="btn sm" @click="openInvoiceFolder">＋ 上传新发票（新标签页）</button>
+                  </span>
+                </div>
                 <div class="form">
                   <div class="f"><label>发票情况</label><select v-model="invoiceMode"><option value="pending">暂未取得发票，付款后补</option><option value="has">已有发票</option></select></div>
                   <template v-if="invoiceMode === 'pending'">
@@ -891,7 +1059,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
           <div class="actions">
             <button v-if="step > 1" type="button" class="btn" @click="step -= 1">上一步</button>
             <button type="button" class="btn" :disabled="busy" @click="save()">保存草稿</button>
-            <button type="button" class="btn" :disabled="busy" @click="go({})">取消</button>
+            <button type="button" class="btn" :disabled="busy" @click="goBack">取消</button>
             <span class="grow-col"></span>
             <button v-if="step < 3" type="button" class="btn pri lg" @click="nextStep">下一步</button>
             <button v-else type="button" class="btn pri lg" :disabled="busy || blockers.length > 0" @click="save({ submit: true })">提交审批</button>

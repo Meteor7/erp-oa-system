@@ -1,6 +1,7 @@
 // 出差申请页面的前端口径（2026-10 改版）：首页 / 列表 / 详情 / 新建用查询参数区分，和报销、付款页一致。
 //   无参数 = 首页；?view=new（可带 &draft=单号）= 新建/编辑草稿；?request=单号 = 详情；?view=list&scope=todo|mine|all = 列表。
 import { displayStatus } from './expenseClaims.js';
+import { resolveScope } from './navContext.js';
 
 export function travelView(query = {}) {
   if (query.request) return 'detail';
@@ -80,6 +81,22 @@ export function travelBucketOf(doc) {
   return (BUCKETS.find((bucket) => bucket.match(status)) || {}).key || '';
 }
 
+// 列表页的 ?bucket=draft|review|approved|back：首页指标卡点进来只看这一类（2026-10 导航整改）。
+export const TRAVEL_BUCKET_KEYS = Object.freeze(BUCKETS.map((bucket) => bucket.key));
+
+export function travelBucketLabel(key) {
+  return (BUCKETS.find((bucket) => bucket.key === key) || {}).label || '';
+}
+
+export function normalizeTravelBucket(value) {
+  const key = Array.isArray(value) ? value[0] : value;
+  return TRAVEL_BUCKET_KEYS.includes(String(key || '')) ? String(key) : '';
+}
+
+export function filterTravelByBucket(docs = [], key = '') {
+  return key ? docs.filter((doc) => travelBucketOf(doc) === key) : docs;
+}
+
 // "我的出差"的状态条：按张数。
 export function travelBuckets(docs = []) {
   const total = Math.max(1, docs.length);
@@ -97,9 +114,10 @@ export function travelStats(todo = [], mine = [], now = Date.now()) {
   const approved = of('approved');
   return [
     { key: 'todo', label: '待我审批', count: todo.length, hint: todo.length ? `最久等了 ${longest} 天` : '没有要审批的', tone: '#D98C4A', query: { view: 'list', scope: 'todo' } },
-    { key: 'draft', label: '我的 · 草稿', count: of('draft').length, hint: '继续编辑后提交', tone: '#C3CAD6', query: { view: 'list', scope: 'mine' } },
-    { key: 'review', label: '我的 · 审批中', count: review.length, hint: review[0]?.current_step_label ? `在 ${review[0].current_step_label}` : '点进去看卡在谁那里', tone: '#5470C6', query: { view: 'list', scope: 'mine' } },
-    { key: 'approved', label: '我的 · 已通过', count: approved.length, hint: '可下推报销或付款', tone: '#7FA38E', query: { view: 'list', scope: 'mine' } },
+    // 指标卡带着状态（bucket）点进列表，列表只显示这一类。
+    { key: 'draft', label: '我的 · 草稿', count: of('draft').length, hint: '继续编辑后提交', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', bucket: 'draft' } },
+    { key: 'review', label: '我的 · 审批中', count: review.length, hint: review[0]?.current_step_label ? `在 ${review[0].current_step_label}` : '点进去看卡在谁那里', tone: '#5470C6', query: { view: 'list', scope: 'mine', bucket: 'review' } },
+    { key: 'approved', label: '我的 · 已通过', count: approved.length, hint: '可下推报销或付款', tone: '#7FA38E', query: { view: 'list', scope: 'mine', bucket: 'approved' } },
   ];
 }
 
@@ -124,6 +142,14 @@ export function normalizeScope(scope, canAll = false) {
   if (value === 'todo' || value === 'mine') return value;
   if (value === 'all' && canAll) return 'all';
   return 'mine';
+}
+
+// 同上，但没有权限的范围（scope=all）要说明：页面上显示"你没有查看全部出差申请的权限，已显示你的出差申请"。
+export function travelScopeInfo(scope, canAll = false) {
+  return resolveScope(scope, {
+    allowed: canAll ? ['todo', 'mine', 'all'] : ['todo', 'mine'],
+    fallback: 'mine', subject: '出差申请', fallbackLabel: '你的出差申请',
+  });
 }
 
 // 列表每行最右边的操作：草稿继续编辑；审批中且能撤回就撤回；已完成下推；其余看详情。

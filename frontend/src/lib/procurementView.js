@@ -66,6 +66,16 @@ export const STAGE_FILTERS = Object.freeze([
   'demand', 'await_pr', 'quote', 'price', 'po', 'closed', 'withdrawn', 'rejected', 'draft',
 ].map((key) => ({ key, label: STAGES[key].label })));
 
+// 首页指标卡"采购执行中""退回 / 已撤回"合并了好几个阶段；点进列表要按合并后的口径筛，不能再只是"全部"（2026-10 导航整改）。
+export const STAGE_GROUPS = Object.freeze({
+  back: Object.freeze(['draft', 'withdrawn', 'rejected']),
+  exec: Object.freeze(['await_pr', 'quote', 'price', 'po']),
+});
+export const STAGE_GROUP_FILTERS = Object.freeze([
+  { key: 'exec', label: '采购执行中（提 PR / 比价 / 价格审批 / PO）' },
+  { key: 'back', label: '草稿 / 退回 / 已撤回' },
+]);
+
 // 旧版（合同 / 到货 / 验收都在申请单上走）遗留数据的业务状态：这些单据只读展示，归入 PO 执行中。
 const LEGACY_EXEC = new Set([
   '价格已批准/待补充合同信息', '待采购复核', '待电子用印', '合同已生效', '付款计划已生成', '采购执行中',
@@ -228,11 +238,30 @@ export function searchText(row, projectName = (name) => name) {
 }
 
 // 搜索、阶段、项目、加急都在已经取回的单据里筛（后端没有搜索接口）。
+// 阶段筛选：单个阶段，或 STAGE_GROUPS 里的合并口径（exec / back）。
+export function stageMatches(row, stage = '') {
+  if (!stage) return true;
+  const key = stageKey(row);
+  return STAGE_GROUPS[stage] ? STAGE_GROUPS[stage].includes(key) : key === stage;
+}
+
+export function stageFilterLabel(stage = '') {
+  const group = STAGE_GROUP_FILTERS.find((item) => item.key === stage);
+  if (group) return group.label;
+  return (STAGE_FILTERS.find((item) => item.key === stage) || {}).label || '';
+}
+
+// 地址里的 stage= 认不得就当没有筛选。
+export function normalizeStage(value) {
+  const key = String((Array.isArray(value) ? value[0] : value) || '');
+  return stageFilterLabel(key) ? key : '';
+}
+
 export function filterRows(rows = [], filters = {}, projectName = (name) => name) {
   const text = String(filters.text || '').trim().toLowerCase();
   return rows.filter((row) => {
     if (filters.urgent && row.urgency !== '加急') return false;
-    if (filters.stage && stageKey(row) !== filters.stage) return false;
+    if (filters.stage && !stageMatches(row, filters.stage)) return false;
     if (filters.project) {
       if (filters.project === '__none__' ? row.project : row.project !== filters.project) return false;
     }
@@ -278,6 +307,27 @@ export function stageGroups(rows = []) {
     demand: count(['demand']),
     exec: count(['await_pr', 'quote', 'price', 'po']),
   };
+}
+
+// 购买申请首页的指标卡（我的草稿 / 退回、我的审批中、已批准待付款）点进列表时的状态筛选：?status=draft|review|topay。
+export const PURCHASE_STATUS_FILTERS = Object.freeze([
+  { key: 'draft', label: '我的草稿 / 退回', match: (row) => Boolean(draftKind(row)) },
+  { key: 'review', label: '我的 · 审批中', match: (row) => isActive(row) },
+  { key: 'topay', label: '已批准 · 待付款', match: (row) => row?.workflow_status === '已完成' && ['待付款', '部分付款'].includes(row?.business_status) },
+]);
+
+export function normalizePurchaseStatus(value) {
+  const key = String((Array.isArray(value) ? value[0] : value) || '');
+  return PURCHASE_STATUS_FILTERS.some((item) => item.key === key) ? key : '';
+}
+
+export function purchaseStatusLabel(key) {
+  return (PURCHASE_STATUS_FILTERS.find((item) => item.key === key) || {}).label || '';
+}
+
+export function filterPurchaseStatus(rows = [], key = '') {
+  const filter = PURCHASE_STATUS_FILTERS.find((item) => item.key === key);
+  return filter ? rows.filter(filter.match) : rows;
 }
 
 const PO_ORDER = ['草稿', '待采购确认', '待合同复核', '待电子用印', '已生效', '供应商制作中', '到货验收中', '付款中'];

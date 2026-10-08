@@ -1,0 +1,12 @@
+/* 导航整改（2026-10）：提示条、筛选条上的可移除标签、行内确认。全部限定在 .xp 里。 */
+.xp .banner.warn { background: var(--xp-sun-bg, #FFF4E0); color: var(--xp-sun, #A35A17); margin: 0 0 12px; }
+.xp .nav-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 13px; }
+.xp .nav-filter { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 12px; border-radius: 999px; border: 1px solid var(--xp-brand, #FF8F00); background: var(--xp-brand-bg, #FFF4E6); color: var(--xp-brand-d, #A35A17); }
+.xp .nav-filter button { border: 0; background: transparent; color: inherit; cursor: pointer; width: 20px; height: 20px; border-radius: 999px; line-height: 18px; font-size: 14px; }
+.xp .nav-filter button:hover { background: rgba(0, 0, 0, .08); }
+.xp .nav-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; margin: 0 0 12px; border-radius: 10px; border: 1px solid var(--xp-brand, #FF8F00); background: var(--xp-brand-bg, #FFF4E6); }
+.xp .nav-confirm .grow-col { flex: 1; min-width: 200px; }
+.xp .nav-back { font-size: 12px; margin-right: 6px; }
+/* 看板指标卡：看的人打不开它指向的页面时，只当数字看，不再像按钮。 */
+.xp .bd-kpi:disabled { cursor: default; }
+.xp .bd-kpi:disabled:hover { border-color: var(--xp-line); background: #fff; }

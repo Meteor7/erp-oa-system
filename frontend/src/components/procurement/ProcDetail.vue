@@ -2,7 +2,8 @@
 // 采购申请 / 购买申请详情：顶部是状态和按钮（按角色和单据状态变化），左边需求信息、物料明细、执行明细，
 // 右边审批进度、关联单据、需求附件、操作记录。采购申请多一条采购链阶段条和执行明细；购买申请没有这两块。
 import { computed, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import '../../styles/navUi.css';
 import MaterialExecutionProgress from '../MaterialExecutionProgress.vue';
 import ProcDocuments from './ProcDocuments.vue';
 import {
@@ -10,13 +11,30 @@ import {
   currentStepKey, detailBanner, formatDateTime, money, pmcButtonLabel, projectText, quantityText, relatedDocuments,
   requestFacts, stageOf, statusOf, stepTimeline, unboundLines,
 } from '../../lib/procurementView.js';
+import { paymentPoLink } from '../../lib/priceView.js';
+import { backLocation, carryQuery, fromValue, originLabel } from '../../lib/navContext.js';
 import { canCreatePr, canOpenBoard, isInsider } from './access.js';
 import { apiGet, apiPost, errText, loadPurchaseOrders, settle } from './procData.js';
 import { useProc } from './context.js';
 
 const ctx = useProc();
 const route = useRoute();
+const router = useRouter();
 const name = computed(() => String(route.query.request || ''));
+// 往回走：从列表来的回到同一个范围 / 阶段 / 搜索词的列表；从首页、看板来的回到那个页面；其他入口回到默认列表。
+const cameFromList = computed(() => fromValue(route.query) === 'list');
+const originText = computed(() => {
+  const from = fromValue(route.query);
+  return from && from !== 'list' ? (originLabel(route.query) || '上一页') : '';
+});
+function goBack() {
+  ctx.flash();
+  router.push(backLocation(route.path, route.query));
+}
+function backToList() {
+  ctx.flash();
+  router.push(cameFromList.value ? backLocation(route.path, route.query) : { path: ctx.basePath, query: { view: 'list' } });
+}
 const row = ref(null);
 const loading = ref(false);
 const ownDraft = ref(false);
@@ -146,7 +164,7 @@ async function withdraw() {
 }
 
 function resume() {
-  ctx.goNew({ draft: row.value.name });
+  ctx.goNew({ draft: row.value.name, ...carryQuery(route.query) });
 }
 
 function toggleLine(index) {
@@ -157,8 +175,9 @@ function toggleLine(index) {
 <template>
   <div class="pr-detail">
     <div class="crumb">
+      <button v-if="originText" type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button>
       <button type="button" class="link" @click="ctx.go({})">{{ ctx.label }}</button> ›
-      <template v-if="isProcurement"><button type="button" class="link" @click="ctx.go({ view: 'list' })">列表</button> › </template>
+      <button type="button" class="link" @click="backToList">列表</button> ›
       {{ name }}
     </div>
     <div v-if="loading && !row" class="panel empty" aria-live="polite">正在加载…</div>
@@ -310,6 +329,7 @@ function toggleLine(index) {
                 <div><span class="muted">付款方式</span>{{ po.payment_method || '—' }}</div>
                 <div><span class="muted">币种 / 税率</span>{{ po.currency || 'CNY' }} / {{ po.tax_rate || 0 }}%</div>
                 <router-link v-if="row.can_view_procurement_po" :to="{ name: 'procurement-price-approvals', query: { tab: 'po', po: po.name } }" class="btn sm">打开 PO →</router-link>
+                <router-link v-if="row.can_view_procurement_po" :to="paymentPoLink(po)" class="btn sm">去采购付款登记 →</router-link>
               </div>
               <div class="tbl">
                 <table class="pr-table">
@@ -329,7 +349,7 @@ function toggleLine(index) {
                 </table>
               </div>
             </div>
-            <router-link to="/approval/procurement-payment" class="pr-banner info pr-paylink">到货、验收、付款审批都在"采购付款"里按 PO 处理：到货和验收都由生产主管登记，采购负责提交付款审批 →</router-link>
+            <router-link :to="paymentPoLink(poRows.length === 1 ? poRows[0] : null)" class="pr-banner info pr-paylink">到货、验收、付款审批都在"采购付款"里按 PO 处理：到货和验收都由生产主管登记，采购负责提交付款审批 →</router-link>
           </section>
         </div>
 

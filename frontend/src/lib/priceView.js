@@ -632,6 +632,19 @@ export function paymentLink(row) {
   return row?.payment_request ? { path: PAYMENT_PAGE, query: { request: row.payment_request } } : { path: PAYMENT_PAGE };
 }
 
+// "去登记到货 / 验收 / 付款"：带上这张 PO（采购付款页的付款工作项按 po= 预选这张 PO 并显示全部状态），不再丢到页面最前面。
+export function paymentPoLink(po) {
+  const name = typeof po === 'string' ? po : String(po?.name || '');
+  return name ? { path: PAYMENT_PAGE, query: { po: name } } : { path: PAYMENT_PAGE };
+}
+
+// 价格审批工作台的页面标题：三个页签共用一个页面，PO 页签要说清楚是"采购订单与合同"，不是价格审批本身。
+export function pageTitle(tab = '') {
+  if (tab === 'po') return '价格审批 · 采购订单与合同';
+  if (tab === 'source') return '价格审批 · PR 待比价物料';
+  return '价格审批';
+}
+
 export function contractFields(po) {
   return [
     { key: 'supplier_legal_name', label: '供应商全称', value: po?.contract_supplier_legal_name || po?.supplier || '' },

@@ -108,9 +108,11 @@ const current = computed(() => {
 });
 
 // 页面状态变了（换单据、换栏目）就重新挂载，各页面从头取数。
+// 列表范围 / 阶段 / 搜索词在地址里（scope、stage、status、q），首页和列表自己读地址、自己响应，改它们不重新挂载
+// （否则点一下指标卡、打一个字都要重新取数、丢掉输入焦点）；采购申请的列表页换范围才重新挂载。
 const paneKey = computed(() => [
-  props.requestType, view.value, route.query.request || '', route.params.name || '', route.query.draft || '', route.query.scope || '',
-  route.query.stage || '',
+  props.requestType, view.value, route.query.request || '', route.params.name || '', route.query.draft || '',
+  view.value === 'list' && isProcurement.value ? (route.query.scope || '') : '',
 ].join('|'));
 
 async function loadLookups() {

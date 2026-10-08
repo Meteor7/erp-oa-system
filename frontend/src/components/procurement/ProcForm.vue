@@ -9,6 +9,9 @@ import {
   FIXED_ASSET_CATEGORIES, REQUEST_PROCUREMENT, blankForm, blankLine, formBlockers, formFromRow,
   money, pmcLines, routePreviewParams, summarizeLines, validateRequestForm,
 } from '../../lib/procurementView.js';
+import '../../styles/navUi.css';
+import { backLocation, carryQuery, fromValue, originLabel } from '../../lib/navContext.js';
+import { useLeaveConfirm } from '../../lib/leaveConfirm.js';
 import { canMaintainCatalog } from './access.js';
 import { apiGet, apiPost, errText } from './procData.js';
 import { useProc } from './context.js';
@@ -34,6 +37,26 @@ const routeNote = ref('');
 const catalogOpen = ref(false);
 const lineBox = ref(null);
 let previewTimer = null;
+
+// 表单有没有改过：打开 / 保存之后的快照对比现在的内容；改过再离开（取消、面包屑、侧栏、后退、关标签页）要确认。
+const baseline = ref('');
+const fingerprint = () => JSON.stringify({ form, draft: draftName.value });
+const isDirty = () => !loading.value && baseline.value !== '' && fingerprint() !== baseline.value;
+function markClean() {
+  baseline.value = fingerprint();
+}
+useLeaveConfirm(isDirty);
+
+// 往回走：从列表来的回到同一个范围 / 阶段 / 搜索词的列表，从首页 / 别的页面来的回到那里，其他入口回到首页。
+const cameFromList = computed(() => fromValue(route.query) === 'list');
+const originText = computed(() => {
+  const from = fromValue(route.query);
+  return from && from !== 'list' ? (originLabel(route.query) || '上一页') : '';
+});
+function goBack() {
+  ctx.flash();
+  router.push(backLocation(ctx.basePath, route.query));
+}
 
 const orgWarning = computed(() => (isPmc ? '' : organizationPreflightMessage(ctx.requestType, ctx.options?.context || {})));
 const summary = computed(() => summarizeLines(form.business_lines, ctx.requestType));
@@ -113,6 +136,7 @@ async function init() {
     ctx.flash('', errText(error, '页面加载失败'));
   } finally {
     loading.value = false;
+    markClean();
   }
 }
 
@@ -122,8 +146,11 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
 // 申请人 / 采购经办人的默认值：选项接口晚到时再补。
 watch(() => [ctx.applicants, ctx.purchasers, loading.value], () => {
   if (loading.value || isPmc || !isProcurement) return;
+  const wasClean = !isDirty();
   if (!form.applicant_employee && ctx.applicants.length) form.applicant_employee = ctx.applicants.find((item) => item.name === ctx.currentEmployee)?.name || ctx.applicants[0].name;
   if (!form.purchaser_user && ctx.purchasers.length) form.purchaser_user = ctx.purchasers[0].name;
+  // 默认值是系统填的，不算用户改过。
+  if (wasClean) markClean();
 }, { immediate: true, deep: true });
 
 async function loadRoute() {
@@ -157,6 +184,7 @@ async function persist() {
     request_type: ctx.requestType, payload: JSON.stringify(buildApprovalCenterPayload(form, ctx.requestType)), name: draftName.value || undefined,
   });
   draftName.value = result.name;
+  markClean();
   return result.name;
 }
 
@@ -165,7 +193,7 @@ async function saveDraft() {
   ctx.flash();
   try {
     const name = await persist();
-    await router.replace({ name: route.name, query: { draft: name } });
+    await router.replace({ name: route.name, query: { draft: name, ...carryQuery(route.query) } });
     ctx.flash(`草稿 ${name} 已保存`);
   } catch (error) {
     ctx.flash('', errText(error, '保存失败'));
@@ -202,7 +230,8 @@ async function savePmc() {
       name, business_lines: JSON.stringify(pmcLines(form.business_lines)), expected_delivery_date: form.expected_delivery_date,
       reason: form.reason, subject: form.subject,
     });
-    ctx.go({ request: name }, `${name} 已保存 PMC 修改并抄送相关人员`);
+    markClean();
+    ctx.go({ request: name, ...carryQuery(route.query) }, `${name} 已保存 PMC 修改并抄送相关人员`);
   } catch (error) {
     ctx.flash('', errText(error, 'PMC 修改保存失败'));
   } finally {
@@ -210,9 +239,10 @@ async function savePmc() {
   }
 }
 
+// 取消：回到来的地方（列表的同一份筛选 / 首页 / 看板 / 单据详情），不再一律回首页；改过没保存会先问一声。
 function cancel() {
-  if (isPmc) ctx.go({ request: requestRow.value?.name || String(route.params.name || '') });
-  else ctx.go({});
+  if (isPmc) ctx.go({ request: requestRow.value?.name || String(route.params.name || ''), ...carryQuery(route.query) });
+  else goBack();
 }
 
 function lineTotal(line) {
@@ -225,8 +255,10 @@ function lineTotal(line) {
     <div class="ph">
       <div>
         <div class="crumb">
+          <button v-if="originText && !isPmc" type="button" class="link nav-back" @click="goBack">← 返回{{ originText }}</button>
           <button type="button" class="link" @click="ctx.go({})">{{ ctx.label }}</button> ›
-          <template v-if="isPmc"><button type="button" class="link" @click="ctx.go({ request: String(route.params.name) })">{{ route.params.name }}</button> › PMC 补录/修改</template>
+          <template v-if="cameFromList && !isPmc"><button type="button" class="link" @click="goBack">列表</button> › </template>
+          <template v-if="isPmc"><button type="button" class="link" @click="ctx.go({ request: String(route.params.name), ...carryQuery(route.query) })">{{ route.params.name }}</button> › PMC 补录/修改</template>
           <template v-else>{{ draftName ? `编辑草稿 ${draftName}` : '新建' }}</template>
         </div>
         <h3>{{ title }}</h3>

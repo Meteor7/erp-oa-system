@@ -113,11 +113,12 @@ const stats = computed(() => {
   }
   if (ctx.globalAccess) {
     cards.push({ key: 'demand', label: '全部 · 需求审批中', count: allGroups.value.demand, unit: '张', tone: '#5470C6', query: { view: 'list', scope: 'all', stage: 'demand' }, hint: '' });
-    cards.push({ key: 'exec', label: '全部 · 采购执行中', count: allGroups.value.exec, unit: '张', tone: '#7FA38E', query: { view: 'list', scope: 'all' }, hint: '提 PR、比价、PO 都算' });
+    // 指标卡的数字是按阶段合并统计的（执行中 = 提 PR + 比价 + 价格审批 + PO），点进列表按同一口径筛（stage=exec / back），不再是"全部"。
+    cards.push({ key: 'exec', label: '全部 · 采购执行中', count: allGroups.value.exec, unit: '张', tone: '#7FA38E', query: { view: 'list', scope: 'all', stage: 'exec' }, hint: '提 PR、比价、PO 都算' });
   } else {
-    cards.push({ key: 'back', label: '退回 / 已撤回', count: mineGroups.value.back, unit: '张', tone: '#C3CAD6', query: { view: 'list', scope: 'mine' }, hint: mineGroups.value.back ? '修改后重新提交' : '没有要处理的' });
+    cards.push({ key: 'back', label: '退回 / 已撤回', count: mineGroups.value.back, unit: '张', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', stage: 'back' }, hint: mineGroups.value.back ? '修改后重新提交' : '没有要处理的' });
     cards.push({ key: 'demand', label: '我的 · 需求审批中', count: mineGroups.value.demand, unit: '张', tone: '#5470C6', query: { view: 'list', scope: 'mine', stage: 'demand' }, hint: '点进去看卡在谁那里' });
-    cards.push({ key: 'exec', label: '我的 · 采购执行中', count: mineGroups.value.exec, unit: '张', tone: '#E3B26B', query: { view: 'list', scope: 'mine' }, hint: '可以看到数量和进度' });
+    cards.push({ key: 'exec', label: '我的 · 采购执行中', count: mineGroups.value.exec, unit: '张', tone: '#E3B26B', query: { view: 'list', scope: 'mine', stage: 'exec' }, hint: '可以看到数量和进度' });
   }
   return cards;
 });

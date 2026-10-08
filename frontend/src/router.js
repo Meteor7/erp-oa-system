@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { canSee, firstVisiblePath } from './lib/access';
+import { stripAppPrefix } from './lib/navContext';
+import { setDeniedNotice } from './lib/routeNotice';
 
 const approvalPage = () => import('./pages/OAApprovals.vue');
 const attendancePage = () => import('./pages/AttendanceCenter.vue');
@@ -52,6 +54,11 @@ const routes = [
   { path: '/allocation-dashboard', component: () => import('./pages/AllocationDashboard.vue') },
   { path: '/foreign-rd', component: () => import('./pages/ForeignRD.vue') },
   { path: '/foreign-rd-timesheet', component: () => import('./pages/ForeignRDTimesheet.vue') },
+  // 旧通知、旧收藏里的 /rayher/...、/planck-semicon/... 链接：去掉前缀后原样（含查询）打开。
+  { path: '/rayher/:rest(.*)*', redirect: (to) => stripAppPrefix(to.fullPath) || '/dashboard' },
+  { path: '/planck-semicon/:rest(.*)*', redirect: (to) => stripAppPrefix(to.fullPath) || '/dashboard' },
+  // 地址不对：给一个说得清的页面，不再悄悄跳走。
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('./pages/NotFound.vue') },
 ];
 
 const LEGACY_BASE = '/rayher';
@@ -69,10 +76,13 @@ if (typeof window !== 'undefined') {
 }
 const router = createRouter({ history: createWebHistory(CANONICAL_BASE), routes });
 
+// 没有权限的深链接：带回第一个能打开的页面，并留一条一次性的提示（App.vue 显示），不再悄悄换页。
 router.beforeEach((to) => {
-  if (to.path === '/' || canSee(to.path)) return true;
+  if (to.name === 'not-found' || to.path === '/' || canSee(to.path)) return true;
   const fallback = firstVisiblePath();
-  return fallback !== to.path ? fallback : true;
+  if (fallback === to.path) return true;
+  setDeniedNotice(to.path, fallback);
+  return { path: fallback, replace: true };
 });
 
 export default router;

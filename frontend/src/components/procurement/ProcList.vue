@@ -2,21 +2,25 @@
 // 采购申请列表：待我处理 / 我提交的 / 全部（全局角色）或与我相关（其他人）。
 // 搜索、阶段、项目、加急都是在已取回的最近 200 张里筛（后端没有搜索接口）；每页 50 张。
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import '../../styles/navUi.css';
 import {
-  LIST_LIMIT, PAGE_SIZE, STAGE_FILTERS, approvalWait, filterRows, listScope, mergeRows, pageCount, pageSlice,
-  projectOptions, projectText, statusOf, waitText, whereText,
+  LIST_LIMIT, PAGE_SIZE, STAGE_FILTERS, STAGE_GROUP_FILTERS, approvalWait, filterRows, listScope, mergeRows, normalizeStage,
+  pageCount, pageSlice, projectOptions, projectText, stageFilterLabel, statusOf, waitText, whereText,
 } from '../../lib/procurementView.js';
+import { cleanQuery, detailQuery, formQuery, originLabel, originOf, splitPath } from '../../lib/navContext.js';
 import { apiGet, errText } from './procData.js';
 import { useProc } from './context.js';
 
 const ctx = useProc();
 const route = useRoute();
+const router = useRouter();
 const data = reactive({ mine: [], pending: [], all: [], loaded: false });
 const loading = ref(false);
 const loadError = ref('');
 const now = ctx.now;
-const filters = reactive({ text: '', stage: String(route.query.stage || ''), project: '', urgent: false });
+// 阶段、搜索词在地址里（stage、q）：首页指标卡点进来就是筛好的，点进详情再回来也还是同一份筛选。
+const filters = reactive({ text: String(route.query.q || ''), stage: normalizeStage(route.query.stage), project: '', urgent: false });
 const page = ref(0);
 
 const scope = computed(() => listScope(route.query, ctx.globalAccess ? 'todo' : 'mine'));
@@ -66,9 +70,27 @@ const emptyText = computed(() => {
 
 watch(filters, () => { page.value = 0; }, { deep: true });
 
+// 阶段、搜索词同步进地址（replace，不增加历史记录）；地址变了（后退）再同步回来。
+function syncUrl() {
+  const next = { ...route.query };
+  delete next.stage;
+  delete next.q;
+  router.replace({ path: route.path, query: { ...next, ...cleanQuery({ stage: filters.stage, q: filters.text }) } });
+}
+watch(() => [filters.stage, filters.text], syncUrl);
+watch(() => [route.query.stage, route.query.q], ([stage, text]) => {
+  filters.stage = normalizeStage(stage);
+  if (String(text || '') !== filters.text) filters.text = String(text || '');
+});
+
+// origin：这个列表自己是从哪个页面（首页、看板）点进来的，详情 / 表单往回走时一层层带回去。
+const originKeep = computed(() => (originOf(route.query) ? { from: originOf(route.query) } : {}));
+const listFilters = computed(() => cleanQuery({ scope: scope.value, stage: filters.stage, q: filters.text, origin: originOf(route.query) }));
+
+// 从列表点进详情 / 表单：带上范围、阶段、搜索词，返回时原样恢复。
 function open(row) {
-  if (row.workflow_status === '草稿' && scope.value === 'mine') ctx.goNew({ draft: row.name });
-  else ctx.go({ request: row.name });
+  if (row.workflow_status === '草稿' && scope.value === 'mine') ctx.goNew(formQuery({ draft: row.name }, listFilters.value));
+  else ctx.go(detailQuery(row.name, listFilters.value));
 }
 </script>
 
@@ -76,22 +98,31 @@ function open(row) {
   <div class="pr-list">
     <div class="ph">
       <div>
-        <div class="crumb"><button type="button" class="link" @click="ctx.go({})">采购申请</button> › 列表</div>
+        <div class="crumb">
+          <button v-if="originKeep.from" type="button" class="link nav-back" @click="router.push({ path: splitPath(originKeep.from).path, query: splitPath(originKeep.from).query })">← 返回{{ originLabel({ from: originKeep.from }) || '上一页' }}</button>
+          <button type="button" class="link" @click="ctx.go({})">采购申请</button> › 列表
+        </div>
         <h3>{{ scopeLabel }} · {{ rows.length }} 张</h3>
       </div>
       <div class="head-actions">
         <div class="seg">
-          <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="ctx.go({ view: 'list', scope: item.key })">{{ item.label }} {{ item.count }}</button>
+          <button v-for="item in scopes" :key="item.key" type="button" :aria-pressed="scope === item.key" @click="ctx.go({ view: 'list', scope: item.key, ...originKeep })">{{ item.label }} {{ item.count }}</button>
         </div>
-        <button type="button" class="btn pri" @click="ctx.goNew()">＋ 新建采购申请</button>
+        <button type="button" class="btn pri" @click="ctx.goNew(formQuery({}, listFilters))">＋ 新建采购申请</button>
       </div>
     </div>
 
+    <div v-if="filters.stage" class="nav-filters" data-testid="stage-filter">
+      <span class="nav-filter">阶段：{{ stageFilterLabel(filters.stage) }}<button type="button" aria-label="清除阶段筛选" @click="filters.stage = ''">×</button></span>
+    </div>
     <div class="filter-bar">
       <input v-model="filters.text" type="search" placeholder="搜索单号、主题、申请人、项目或物料名称" aria-label="搜索" />
       <select v-model="filters.stage" class="pr-select" aria-label="阶段">
         <option value="">全部阶段</option>
         <option v-for="stage in STAGE_FILTERS" :key="stage.key" :value="stage.key">{{ stage.label }}</option>
+        <optgroup label="合并口径">
+          <option v-for="stage in STAGE_GROUP_FILTERS" :key="stage.key" :value="stage.key">{{ stage.label }}</option>
+        </optgroup>
       </select>
       <select v-model="filters.project" class="pr-select" aria-label="项目">
         <option value="">全部项目</option>
