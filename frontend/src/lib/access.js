@@ -21,7 +21,7 @@ const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-
 
 // Temporary test-account restriction. Remove the account from this set to restore
 // the sensitive HR pages and fields without changing role assignments.
-const HR_SENSITIVE_HIDDEN_USERS = new Set(['person046@staff.example.invalid', 'person030@staff.example.invalid']);
+const HR_SENSITIVE_HIDDEN_USERS = new Set(['person046@staff.example.invalid']);
 
 const PAGE_ROLES = {
   '/dashboard': APPROVAL,
