@@ -103,12 +103,12 @@ export function travelStats(todo = [], mine = [], now = Date.now()) {
   ];
 }
 
-// 列表页的栏目：待我审批对每个人都开放（审批人原来只能从待办链接进来）；全部只给能看到别人单据的角色。
-const ALL_ROLES = ['System Manager', 'Accounts User', 'Rayher Business Executive', 'Department Manager', 'HR Manager'];
-const ALL_POSITIONS = ['vice_manager', 'general_manager', 'finance_manager'];
+// 列表页的栏目：待我审批对每个人都开放（审批人原来只能从待办链接进来）；"全部"只给服务端会返回所有出差申请的角色
+// （oa_access.GLOBAL_READ_ROLES：系统管理员、Rayher Business Executive）。其他角色点了也只会看到自己经手的单据。
+const ALL_ROLES = ['System Manager', 'Rayher Business Executive'];
 
-export function canSeeAllTravel(roles = globalThis.window?.roles || [], positions = globalThis.window?.position_access || {}) {
-  return (roles || []).some((role) => ALL_ROLES.includes(role)) || ALL_POSITIONS.some((key) => positions?.[key] === true);
+export function canSeeAllTravel(roles = globalThis.window?.roles || []) {
+  return (roles || []).some((role) => ALL_ROLES.includes(role));
 }
 
 export function travelScopes({ canAll = false, todoCount = 0 } = {}) {

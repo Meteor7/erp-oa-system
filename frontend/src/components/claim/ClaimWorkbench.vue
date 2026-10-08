@@ -20,6 +20,8 @@ const isClaim = computed(() => props.kind === 'claim');
 const route = useRoute();
 const router = useRouter();
 const finance = isFinanceUser();
+// 服务端只对财务、系统管理员和 Rayher Business Executive 返回全部报销 / 付款单。
+const seeAll = finance || (globalThis.window?.roles || []).includes('Rayher Business Executive');
 
 const view = computed(() => claimView(route.query));
 const scope = computed(() => String(route.query.scope || (finance ? 'todo' : 'mine')));
@@ -103,7 +105,7 @@ const stats = computed(() => {
 const scopes = computed(() => [
   ...(finance || home.todo.length ? [{ key: 'todo', label: '待我处理' }] : []),
   { key: 'mine', label: `我的${config.value.label}` },
-  ...(finance ? [{ key: 'all', label: `全部${config.value.label}` }] : []),
+  ...(seeAll ? [{ key: 'all', label: `全部${config.value.label}` }] : []),
 ]);
 const listRows = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -180,7 +182,7 @@ async function loadHome() {
 async function loadList() {
   picked.value = [];
   if (scope.value === 'todo') docs.value = await loadTodo();
-  else if (scope.value === 'all' && finance) docs.value = (await listFor('all', { limit: 200 })) || [];
+  else if (scope.value === 'all' && seeAll) docs.value = (await listFor('all', { limit: 200 })) || [];
   else docs.value = (await listFor('mine')) || [];
   if (!home.loaded) home.todo = scope.value === 'todo' ? docs.value : await loadTodo();
 }

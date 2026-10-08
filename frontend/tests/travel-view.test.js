@@ -72,8 +72,10 @@ test("approvers get a 待我审批 list; 全部 is only for people who can see o
   assert.equal(normalizeScope("todo"), "todo");
   assert.equal(normalizeScope(undefined), "mine");
   assert.equal(canSeeAllTravel(["Employee"], {}), false);
-  assert.equal(canSeeAllTravel(["Employee", "Department Manager"], {}), true);
-  assert.equal(canSeeAllTravel(["Employee"], { vice_manager: true }), true);
+  assert.equal(canSeeAllTravel(["Employee", "Department Manager"], {}), false);
+  assert.equal(canSeeAllTravel(["Employee"], { vice_manager: true }), false);
+  assert.equal(canSeeAllTravel(["Employee", "Rayher Business Executive"], {}), true);
+  assert.equal(canSeeAllTravel(["System Manager"], {}), true);
 });
 
 test("each list row offers one action: edit a draft, withdraw while approving, push when completed", () => {
