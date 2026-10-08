@@ -10,6 +10,7 @@ import RdPeriod from '../components/rd/RdPeriod.vue';
 import RdSeg from '../components/rd/RdSeg.vue';
 import RdKpi from '../components/rd/RdKpi.vue';
 import RdIcon from '../components/rd/RdIcon.vue';
+import { extractFrappeError } from '../lib/frappeError';
 
 const FOREIGN_RD_URL = 'rayher_hr_payroll.api.foreign_rd_entry.get_foreign_rd';
 const TEXT = {
@@ -141,7 +142,8 @@ async function exportReport() {
           <b>{{ isYearScope ? '各月项目分配率' : '主体 × 项目工时' }}</b>
           <span class="muted">{{ isYearScope ? '境外工时独立计算，不与国内工时混算' : `${viewLabel} · 单位 小时，境外工时独立计算分配率` }}</span>
         </div>
-        <div v-if="!activePivot.data.length" class="bd muted">{{ TEXT.noData }}</div>
+        <div v-if="resource.error" class="bd" role="alert" style="color:#B42318">{{ extractFrappeError(resource.error, '境外工时数据加载失败，请刷新重试') }}</div>
+        <div v-else-if="!activePivot.data.length" class="bd muted">{{ TEXT.noData }}</div>
         <div v-else class="tbl pv" style="max-height:70vh">
           <table>
             <thead>

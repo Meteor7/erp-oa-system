@@ -10,6 +10,7 @@ import RdPeriod from "../components/rd/RdPeriod.vue";
 import RdSeg from "../components/rd/RdSeg.vue";
 import RdKpi from "../components/rd/RdKpi.vue";
 import RdIcon from "../components/rd/RdIcon.vue";
+import { extractFrappeError } from "../lib/frappeError";
 
 const TEXT = {
   title: "研发工时报表",
@@ -159,7 +160,8 @@ async function exportCurrentTimesheetPivot() {
           <b>{{ isYearScope ? "各月项目分配率" : "员工 × 项目工时" }}</b>
           <span class="muted">{{ isYearScope ? "每行合计 100%" : `${viewLabel} · 单位 ${mode === "hours" ? "小时" : "占该员工工时的百分比"}` }}</span>
         </div>
-        <div v-if="!activePivot.data.length" class="bd muted">{{ TEXT.noData }}</div>
+        <div v-if="r.error" class="bd" role="alert" style="color:#B42318">{{ extractFrappeError(r.error, "工时数据加载失败，请刷新重试") }}</div>
+        <div v-else-if="!activePivot.data.length" class="bd muted">{{ TEXT.noData }}</div>
         <div v-else class="tbl pv" style="max-height:70vh">
           <table>
             <thead>
