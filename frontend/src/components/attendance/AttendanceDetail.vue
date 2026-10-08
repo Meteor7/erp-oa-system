@@ -2,7 +2,7 @@
 // 单据详情：审批人先看到操作条；时间、时长、通过后的影响放在最显眼的位置；审批进度是横向的，操作记录默认收起。
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { HOURS_PER_DAY, api, dayLabel, departmentLabel, modeOfHours, numText, rangeText, rejectionOf, statusPill, stepRole, stepStates, typeBadge, weekLabel, workedSpan } from '../../lib/attendanceView.js';
+import { api, dayLabel, dayModeText, departmentLabel, durationText, numText, rangeText, rejectionOf, statusPill, stepRole, stepStates, typeBadge, weekLabel, workedSpan } from '../../lib/attendanceView.js';
 
 const props = defineProps({
   name: { type: String, required: true },
@@ -36,11 +36,6 @@ function who(user) {
 
 function stamp(value) {
   return value ? String(value).replace('T', ' ').slice(0, 16) : '';
-}
-
-function modeText(hours) {
-  const mode = modeOfHours(hours);
-  return mode === 'full' ? '全天 · 8 小时' : mode === 'half' ? '半天 · 4 小时' : `${numText(hours)} 小时`;
 }
 
 async function load() {
@@ -142,13 +137,13 @@ watch(() => props.name, load);
 
         <div class="at-info3">
           <div><div class="k">时间</div><div class="v">{{ rangeText(span.from, span.to) }}</div><div class="n">{{ weekLabel(span.from) }}<template v-if="span.to !== span.from"> 至 {{ weekLabel(span.to) }}</template></div></div>
-          <div><div class="k">时长</div><div class="v">{{ overtime ? `${numText(hoursNumber)} 小时` : `${numText(hoursNumber / HOURS_PER_DAY)} 天 · ${numText(hoursNumber)} 小时` }}</div><div class="n">{{ request.leave_type || request.request_type }}</div></div>
+          <div><div class="k">时长</div><div class="v">{{ overtime ? `${numText(hoursNumber)} 小时` : durationText(hoursNumber) }}</div><div class="n">{{ request.leave_type || request.request_type }}</div></div>
           <div :class="{ warn: personal }"><div class="k">通过后的影响</div><div class="v" style="font-size:18px">{{ data.impact }}</div><div class="n">{{ personal ? '事假通过后才扣当月工时上限' : '' }}</div></div>
         </div>
 
         <div v-if="days.length" class="at-block">
           <div class="at-label">每天明细</div>
-          <div class="at-dchips"><div v-for="day in days" :key="day.work_date"><b>{{ dayLabel(day.work_date) }} {{ weekLabel(day.work_date) }}</b><span>{{ modeText(day.hours) }}</span></div></div>
+          <div class="at-dchips"><div v-for="day in days" :key="day.work_date"><b>{{ dayLabel(day.work_date) }} {{ weekLabel(day.work_date) }}</b><span>{{ dayModeText(day.hours) }}</span></div></div>
         </div>
         <div class="at-block"><div class="at-label">事由</div><div style="font-size:15px;line-height:1.7;white-space:pre-wrap">{{ request.reason || '（没有写事由）' }}</div></div>
         <div v-if="request.attachments?.length" class="at-block">

@@ -3,7 +3,14 @@
 import { callApi } from './expenseClaims.js';
 
 export const HOURS_PER_DAY = 8;
+// 公司规定：请假和调休每天 8 小时，上午 3 小时，下午 5 小时；加班按小时。
+// 以前审批通过的半天按 4 小时存，只在读取时认得（显示为"半天"），新申请不能再填。
+export const MORNING_HOURS = 3;
+export const AFTERNOON_HOURS = 5;
+export const LEGACY_HALF_HOURS = 4;
 export const MAX_OVERTIME_HOURS = 24;
+export const DAY_RULE_TEXT = '全天 8 小时，上午 3 小时，下午 5 小时';
+export const DAY_RULE_MESSAGE = '请假和调休按天填：全天 8 小时、上午 3 小时、下午 5 小时。';
 
 export const TYPES = Object.freeze({
   请假申请: Object.freeze({ key: 'leave', label: '请假', path: '/approval/leave', title: '新建请假申请', submit: '提交请假申请' }),
@@ -20,7 +27,7 @@ export function typeForPath(path) {
 }
 
 export const LEAVE_RULES = Object.freeze({
-  事假: '审批通过后，从当月工时上限里扣：全天 8 小时，半天 4 小时；跨月的分别扣。',
+  事假: `审批通过后，从当月工时上限里扣：${DAY_RULE_TEXT}；跨月的分别扣。`,
   年假: '从年假余额里扣，审批中就先占用，被驳回或撤回后退回。',
   病假: '不扣年假，也不扣当月工时上限。',
 });
@@ -49,17 +56,51 @@ export function numText(value) {
 
 // ---------------------------------------------------------------- 每天的时长
 
+// 一天的填法：全天 8 / 上午 3 / 下午 5 / 不请 0；4 小时是旧的半天（只读，不能再选）；其他是自定义（旧草稿里可能有）。
 export function modeOfHours(hours) {
   const value = Number(hours || 0);
   if (value === HOURS_PER_DAY) return 'full';
-  if (value === HOURS_PER_DAY / 2) return 'half';
+  if (value === MORNING_HOURS) return 'am';
+  if (value === AFTERNOON_HOURS) return 'pm';
   if (value === 0) return 'none';
+  if (value === LEGACY_HALF_HOURS) return 'half-legacy';
   return 'custom';
 }
 
+const MODE_HOURS = { full: HOURS_PER_DAY, am: MORNING_HOURS, pm: AFTERNOON_HOURS, none: 0 };
+
+// 这一档放不进这天剩下的小时数时是 0（不请），不再退而求其次变成别的时长。
 export function hoursOfMode(mode, maxHours = HOURS_PER_DAY) {
-  const wanted = { full: HOURS_PER_DAY, half: HOURS_PER_DAY / 2, none: 0 }[mode] ?? 0;
-  return Math.min(wanted, Number(maxHours ?? HOURS_PER_DAY));
+  const wanted = MODE_HOURS[mode] ?? 0;
+  return wanted <= Number(maxHours ?? HOURS_PER_DAY) ? wanted : 0;
+}
+
+// 表单上这一档的按钮能不能点：全天要整天都空；上午、下午要那一半没被占且剩下的小时放得下。
+export function modeAvailable(day, mode) {
+  const max = Number(day?.max_hours ?? HOURS_PER_DAY);
+  if (mode === 'none') return true;
+  if (mode === 'full') return max >= HOURS_PER_DAY;
+  if (mode === 'am') return !day?.am_taken && max >= MORNING_HOURS;
+  if (mode === 'pm') return !day?.pm_taken && max >= AFTERNOON_HOURS;
+  return false;
+}
+
+// 每天明细里一天的文字：上午 · 3 小时 / 下午 · 5 小时 / 全天 · 8 小时；旧数据的 4 小时显示为"半天 · 4 小时"。
+export function dayModeText(hours) {
+  const mode = modeOfHours(hours);
+  const text = { full: '全天', am: '上午', pm: '下午', 'half-legacy': '半天' }[mode];
+  return text ? `${text} · ${numText(hours)} 小时` : `${numText(hours)} 小时`;
+}
+
+// 请假和调休一张申请的总时长：整天数时"2 天 · 16 小时"，否则直接说小时（3 小时 / 11 小时），不拆成小数天。
+export function durationText(hours) {
+  const total = Number(hours || 0);
+  return total % HOURS_PER_DAY === 0 ? `${numText(total / HOURS_PER_DAY)} 天 · ${numText(total)} 小时` : `${numText(total)} 小时`;
+}
+
+// 请假和调休每天只能是 3 / 5 / 8 小时；旧的 4 小时半天和其他数要重新选。
+export function invalidLeaveDays(days) {
+  return (days || []).filter((day) => Number(day.hours) > 0 && !['full', 'am', 'pm'].includes(modeOfHours(day.hours)));
 }
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -95,15 +136,30 @@ export function rangeText(from, to) {
     : `${dayLabel(from)}–${dayLabel(to)}`;
 }
 
-// 服务端返回的可填日子 [{work_date, hours, max_hours, conflict}] 合并用户已经填过的时长：
-// 日期还在的保留用户填的（不超过当天上限），新出现的日子用服务端的默认值。
-export function mergeDays(serverDays, previous = []) {
+// 服务端返回的可填日子 [{work_date, hours, max_hours, am_taken, pm_taken, conflict}] 合并用户已经填过的时长：
+// 日期还在、选的那一档（全天 / 上午 / 下午 / 不请）现在还能选的，保留用户填的；
+// 选的那一档被占了（比如改日期后这天上午已有申请）就换成服务端给的默认值；
+// 旧草稿里的 4 小时或自定义时长原样保留（不超过当天上限），表单会提示要重新选。
+export function mergeDays(serverDays, previous = [], overtime = false) {
   const kept = new Map((previous || []).map((day) => [day.work_date, day]));
   return (serverDays || []).map((day) => {
     const max = Number(day.max_hours ?? HOURS_PER_DAY);
+    const merged = {
+      work_date: day.work_date, hours: 0, max_hours: max,
+      am_taken: Boolean(day.am_taken), pm_taken: Boolean(day.pm_taken), conflict: day.conflict || null,
+    };
     const before = kept.get(day.work_date);
-    const hours = before ? Math.min(Number(before.hours || 0), max) : Math.min(Number(day.hours ?? HOURS_PER_DAY), max);
-    return { work_date: day.work_date, hours, max_hours: max, conflict: day.conflict || null };
+    const fallback = Math.min(Number(day.hours ?? HOURS_PER_DAY), max);
+    if (!before) {
+      merged.hours = fallback;
+    } else if (overtime) {
+      merged.hours = Math.min(Number(before.hours || 0), max);
+    } else {
+      const mode = modeOfHours(before.hours);
+      if (mode === 'custom' || mode === 'half-legacy') merged.hours = Math.min(Number(before.hours || 0), max);
+      else merged.hours = modeAvailable(merged, mode) ? Number(before.hours || 0) : fallback;
+    }
+    return merged;
   });
 }
 
@@ -149,7 +205,9 @@ function hoursByMonth(days) {
 
 export function subjectFor(requestType, leaveType, hours, reason = '') {
   const label = requestType === '请假申请' ? (leaveType || '请假') : TYPES[requestType]?.label || '';
-  const size = requestType === '加班申请' ? `${numText(hours)} 小时` : `${numText(hours / HOURS_PER_DAY)} 天`;
+  // 加班按小时；请假和调休满整天时说"N 天"，有上午或下午时直接说小时（"请假 3 小时"），不出现 0.38 天。
+  const size = requestType !== '加班申请' && Number(hours) % HOURS_PER_DAY === 0
+    ? `${numText(hours / HOURS_PER_DAY)} 天` : `${numText(hours)} 小时`;
   const why = String(reason || '').trim().replace(/\s+/g, ' ').slice(0, 12);
   return why ? `${label} ${size} · ${why}` : `${label} ${size}`;
 }
@@ -175,10 +233,12 @@ export function formSummary({ requestType, leaveType, days, rows = [], annual = 
   const restDays = rows.filter((row) => row.kind === 'rest').length;
   const takenDays = rows.filter((row) => row.kind === 'conflict').length;
   const overtime = requestType === '加班申请';
+  // 满整天（8 的倍数）时大数字是天数；有上午 3 小时或下午 5 小时时直接用小时，不显示 0.38 天这样的小数。
+  const wholeDays = !overtime && hours % HOURS_PER_DAY === 0;
   const result = {
     hours,
-    big: overtime ? numText(hours) : numText(hours / HOURS_PER_DAY),
-    unit: overtime ? '小时加班' : `天 · ${numText(hours)} 小时`,
+    big: wholeDays ? numText(hours / HOURS_PER_DAY) : numText(hours),
+    unit: overtime ? '小时加班' : (wholeDays ? `天 · ${numText(hours)} 小时` : '小时'),
     detail: '', impact: '', tone: 'ok', blocked: '',
   };
   const notes = [];
@@ -209,6 +269,7 @@ export function formSummary({ requestType, leaveType, days, rows = [], annual = 
   } else {
     result.impact = LEAVE_RULE_DEFAULT.replace('。', '');
   }
+  if (!result.blocked && !overtime && invalidLeaveDays(days).length) result.blocked = DAY_RULE_MESSAGE;
   if (!result.blocked && hours <= 0) result.blocked = '请至少填一天的时长';
   return result;
 }

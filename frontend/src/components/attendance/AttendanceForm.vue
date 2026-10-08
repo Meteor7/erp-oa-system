@@ -1,9 +1,9 @@
 <script setup>
-// 新建申请：先选类型，再选起止日期，每一天选全天 / 半天 / 不请（加班按小时），右边实时汇总本次申请、对额度的影响和审批路线。
+// 新建申请：先选类型，再选起止日期，每一天选全天 8 小时 / 上午 3 小时 / 下午 5 小时 / 不请（加班按小时），右边实时汇总本次申请、对额度的影响和审批路线。
 import { computed, reactive, ref, watch } from 'vue';
 import {
-  LEAVE_RULES, LEAVE_RULE_DEFAULT, TYPES, api, createLatest, dayRows, formSummary, hoursOfMode, mergeDays, modeOfHours,
-  buildFields, numText, stepHours, stepRole, subjectFor, totalHours, MAX_OVERTIME_HOURS,
+  LEAVE_RULES, LEAVE_RULE_DEFAULT, TYPES, api, createLatest, dayRows, formSummary, hoursOfMode, mergeDays, modeAvailable, modeOfHours,
+  buildFields, numText, stepHours, stepRole, subjectFor, totalHours, MAX_OVERTIME_HOURS, DAY_RULE_TEXT,
 } from '../../lib/attendanceView.js';
 
 const props = defineProps({
@@ -32,7 +32,7 @@ const summary = computed(() => formSummary({
 }));
 const rule = computed(() => (props.requestType === '请假申请' ? (LEAVE_RULES[form.leaveType] || LEAVE_RULE_DEFAULT)
   : overtime.value ? '提交申请就按 1:1 增加调休额度，不增加月度工时上限；每天最多 24 小时。' : '提交时先占用额度，审批通过后正式扣减；不减少月度工时上限。'));
-const hint = computed(() => (overtime.value ? '按实际小时数填，可以选休息日' : '休息日和已经申请过的日子自动去掉'));
+const hint = computed(() => (overtime.value ? '按实际小时数填，可以选休息日' : `${DAY_RULE_TEXT}；休息日和已经占用的日子自动去掉`));
 const subjectHint = computed(() => subjectFor(props.requestType, form.leaveType, summary.value.hours, form.reason || '写一句原因'));
 const cannotSubmit = computed(() => busy.value || loadingDays.value || !form.from || !form.to || Boolean(summary.value.blocked));
 const whyNot = computed(() => {
@@ -61,7 +61,7 @@ async function loadDays() {
   try {
     const data = await api.options(props.requestType, form.from, form.to);
     if (!latest.isCurrent(token)) return;
-    form.days = mergeDays(data?.days, form.days);
+    form.days = mergeDays(data?.days, form.days, overtime.value);
   } catch (failure) {
     if (!latest.isCurrent(token)) return;
     form.days = [];
@@ -91,13 +91,20 @@ watch(() => props.draft, (draft) => {
   draftName.value = draft.name;
   Object.assign(form, {
     leaveType: draft.leave_type || '事假', from: draft.from_date || '', to: draft.to_date || '',
-    days: (draft.attendance_days || []).map((day) => ({ work_date: day.work_date, hours: Number(day.hours), max_hours: 8, conflict: null })),
+    days: (draft.attendance_days || []).map((day) => ({ work_date: day.work_date, hours: Number(day.hours), max_hours: 8, am_taken: false, pm_taken: false, conflict: null })),
     subject: draft.subject || '', reason: draft.reason || '',
   });
 }, { immediate: true });
 
 function setMode(day, mode) {
-  day.hours = hoursOfMode(mode, day.max_hours);
+  day.hours = modeAvailable(day, mode) ? hoursOfMode(mode, day.max_hours) : day.hours;
+}
+
+// 旧草稿里 4 小时的"半天"或自定义时长：按钮显示原来的样子（不能点），要改成全天 / 上午 / 下午才能提交。
+const LEGACY_LABEL = { 'half-legacy': '半天 · 4 小时' };
+function legacyLabel(day) {
+  const mode = modeOfHours(day.hours);
+  return mode === 'custom' ? `${numText(day.hours)} 小时` : LEGACY_LABEL[mode] || '';
 }
 
 function bump(day, delta) {
@@ -169,10 +176,11 @@ defineExpose({ dirty });
             <div class="d"><b>{{ row.label }}</b><span>{{ row.week }}</span></div>
             <template v-if="row.kind === 'work'">
               <div class="at-modes" role="group" :aria-label="`${row.label}请假时长`">
-                <button type="button" :aria-pressed="modeOfHours(row.day.hours) === 'full'" :disabled="row.day.max_hours < 8" @click="setMode(row.day, 'full')">全天</button>
-                <button type="button" :aria-pressed="modeOfHours(row.day.hours) === 'half'" :disabled="row.day.max_hours < 4" @click="setMode(row.day, 'half')">半天</button>
+                <button type="button" :aria-pressed="modeOfHours(row.day.hours) === 'full'" :disabled="!modeAvailable(row.day, 'full')" title="全天 8 小时" @click="setMode(row.day, 'full')">全天</button>
+                <button type="button" :aria-pressed="modeOfHours(row.day.hours) === 'am'" :disabled="!modeAvailable(row.day, 'am')" title="上午 3 小时" @click="setMode(row.day, 'am')">上午</button>
+                <button type="button" :aria-pressed="modeOfHours(row.day.hours) === 'pm'" :disabled="!modeAvailable(row.day, 'pm')" title="下午 5 小时" @click="setMode(row.day, 'pm')">下午</button>
                 <button type="button" :aria-pressed="modeOfHours(row.day.hours) === 'none'" @click="setMode(row.day, 'none')">不请</button>
-                <button v-if="modeOfHours(row.day.hours) === 'custom'" type="button" aria-pressed="true" disabled>自定义</button>
+                <button v-if="legacyLabel(row.day)" type="button" aria-pressed="true" disabled>{{ legacyLabel(row.day) }}</button>
               </div>
               <span class="h">{{ numText(row.day.hours) }} 小时<template v-if="row.day.max_hours < 8">（这天还能填 {{ numText(row.day.max_hours) }} 小时）</template></span>
             </template>

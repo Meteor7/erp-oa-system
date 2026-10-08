@@ -1,7 +1,7 @@
 <script setup>
 // 待我审批：三类申请放在一起，批之前就能看到影响（额度、月度上限、同期缺勤）；上面是本部门未来两周谁不在。
 import { reactive, ref } from 'vue';
-import { HOURS_PER_DAY, TYPES, api, dayLabel, departmentLabel, numText, rangeText, teamBars, typeBadge } from '../../lib/attendanceView.js';
+import { TYPES, api, dayLabel, departmentLabel, durationText, numText, rangeText, teamBars, typeBadge } from '../../lib/attendanceView.js';
 
 const props = defineProps({
   data: { type: Object, default: () => ({ items: [], team: [] }) },
@@ -18,7 +18,7 @@ function of(row) {
 
 function daysText(row) {
   const hours = Number(row.duration_hours || 0);
-  return row.request_type === '加班申请' ? `${numText(hours)} 小时` : `${numText(hours / HOURS_PER_DAY)} 天 · ${numText(hours)} 小时`;
+  return row.request_type === '加班申请' ? `${numText(hours)} 小时` : durationText(hours);
 }
 
 async function act(row, action) {

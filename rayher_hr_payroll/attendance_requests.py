@@ -14,6 +14,14 @@ ACTIVE = {"待审批", "待办理", "已完成", "已通过"}
 COMPLETED = {"已完成", "已通过"}
 ZERO = Decimal("0.00")
 
+# 公司规定（2026-10）：请假和调休每天 8 小时，上午 3 小时，下午 5 小时；加班按小时。
+# 历史上审批过的半天按 4 小时存储，读取、余额、月度上限都照存的小时数算，不迁移数据。
+DAY_HOURS = Decimal("8")
+MORNING_HOURS = Decimal("3")
+AFTERNOON_HOURS = Decimal("5")
+LEAVE_DAY_HOURS = (MORNING_HOURS, AFTERNOON_HOURS, DAY_HOURS)
+LEAVE_DAY_MESSAGE = "请假和调休按天填：全天 8 小时、上午 3 小时、下午 5 小时。"
+
 
 def value(row, field, default=None):
     return row.get(field, default) if isinstance(row, dict) else getattr(row, field, default)
@@ -34,6 +42,8 @@ def date_range(start, end):
 
 
 def normalize_days(raw, start, end, *, overtime=False, work_dates=None):
+    """校验并整理每日时长。加班按小时（最多两位小数、每天 ≤ 24）；
+    请假和调休每天只能是 全天 8 / 上午 3 / 下午 5 小时（0 表示这天不请，不进明细）。"""
     dates = set(date_range(start, end))
     eligible = dates if overtime else dates & set(work_dates or [])
     if raw == "":
@@ -61,8 +71,11 @@ def normalize_days(raw, start, end, *, overtime=False, work_dates=None):
             hours = Decimal(str(row.get("hours")))
         except InvalidOperation:
             raise ValueError("小时数格式无效") from None
-        if not hours.is_finite() or hours < 0 or hours > (24 if overtime else 8) or hours != hours.quantize(Decimal("0.01")):
-            raise ValueError("小时数最多两位小数，请假和调休每天最多8小时，加班每天最多24小时")
+        if overtime:
+            if not hours.is_finite() or hours < 0 or hours > 24 or hours != hours.quantize(Decimal("0.01")):
+                raise ValueError("小时数最多两位小数，加班每天最多24小时")
+        elif not hours.is_finite() or (hours != 0 and hours not in LEAVE_DAY_HOURS):
+            raise ValueError(LEAVE_DAY_MESSAGE)
         if hours:
             result.append({"work_date": day.isoformat(), "hours": float(hours)})
     if not result:
@@ -71,7 +84,8 @@ def normalize_days(raw, start, end, *, overtime=False, work_dates=None):
 
 
 def leave_hours_by_date(rows, work_dates):
-    """Only completed personal leave reduces limits; half a day is four hours."""
+    """Only completed personal leave reduces limits. Hours are used as stored: a new leave day is
+    8 hours (上午 3 + 下午 5); approved legacy half days were stored as four hours and still count 4."""
     dates = set(work_dates)
     result = {}
     for row in rows:
@@ -118,13 +132,17 @@ def window_hours(row, start, end):
 
 
 ABSENCE_LABELS = {REQUEST_LEAVE: "请假", REQUEST_COMP_TIME: "调休", REQUEST_OVERTIME: "加班"}
-MAX_ABSENCE_HOURS_PER_DAY = Decimal("8")
+MAX_ABSENCE_HOURS_PER_DAY = DAY_HOURS
 MAX_OVERTIME_HOURS_PER_DAY = Decimal("24")
 _STATUS_TEXT = {"待审批": "审批中", "待办理": "审批中", "已完成": "已通过", "已通过": "已通过"}
 
 
 def _taken_by_day(others, wanted):
-    """这个员工其他有效申请在指定日期上已经占了多少：{日期: {absence, overtime, row}}。"""
+    """这个员工其他有效申请在指定日期上已经占了多少：{日期: {absence, overtime, am, pm, row, am_row, pm_row}}。
+
+    am / pm：这天的上午、下午是否已被一张请假或调休占了（3 小时占上午，5 小时占下午，8 小时两个都占）。
+    历史上按 4 小时存的半天分不出上午下午，不标 am / pm，只按小时数占容量（见 find_day_conflict）。
+    """
     taken = {}
     for row in others:
         if value(row, "workflow_status") not in ACTIVE:
@@ -132,11 +150,24 @@ def _taken_by_day(others, wanted):
         kind = "overtime" if value(row, "request_type") == REQUEST_OVERTIME else "absence"
         for day, hours in expand_days(row):
             if day in wanted:
-                slot = taken.setdefault(day, {"absence": ZERO, "overtime": ZERO, "row": row})
+                slot = taken.setdefault(day, {"absence": ZERO, "overtime": ZERO, "am": False, "pm": False,
+                                              "am_row": None, "pm_row": None, "row": row})
                 slot[kind] += hours
                 if hours:
                     slot["row"] = row
+                if kind == "absence" and hours in (MORNING_HOURS, DAY_HOURS):
+                    slot["am"], slot["am_row"] = True, row
+                if kind == "absence" and hours in (AFTERNOON_HOURS, DAY_HOURS):
+                    slot["pm"], slot["pm_row"] = True, row
     return taken
+
+
+def _slots_taken(slot):
+    """(上午被占, 下午被占)；这天的请假和调休合计已满 8 小时时两个都算被占。"""
+    if not slot:
+        return False, False
+    full = slot["absence"] >= MAX_ABSENCE_HOURS_PER_DAY
+    return slot["am"] or full, slot["pm"] or full
 
 
 def _where(day, row):
@@ -150,8 +181,13 @@ def find_day_conflict(request_type, days, others):
     修复（2026-09-29，审查 #56 P2）：三类申请之间原来没有任何日期冲突检查，
     同一天可以同时请假、调休、加班，加班一天还能报到 24 小时。规则：
     - 请假和调休：同一天合计不超过 8 小时（一天 8 小时）；
+    - 上午（3 小时）和下午（5 小时）各只能被占一次：两张申请不能都请同一天的上午，也不能都请下午，
+      全天（8 小时）和这天任何已有的请假、调休冲突；
     - 加班：同一天已有的加班合计不超过 24 小时；
     - 同一天有请假或调休的，不能再申请加班，反过来也一样。
+
+    历史上按 4 小时存的半天（审批通过的旧数据）不迁移，也不猜它是上午还是下午：
+    它只按 4 小时占这天的容量，新申请的小时数不超过 8 - 已占 即可（4 小时的旧半天之后只能再加上午 3 小时）。
     """
     wanted = {}
     for detail in days:
@@ -169,6 +205,11 @@ def find_day_conflict(request_type, days, others):
         else:
             if slot["overtime"] > 0:
                 return f"{where}，同一天不能再申请{ABSENCE_LABELS[request_type]}。"
+            am_taken, pm_taken = _slots_taken(slot)
+            if wanted[day] == MORNING_HOURS and am_taken:
+                return f"{_where(day, slot['am_row'] or row)}，同一天的上午已被占用，不能重复申请上午。"
+            if wanted[day] == AFTERNOON_HOURS and pm_taken:
+                return f"{_where(day, slot['pm_row'] or row)}，同一天的下午已被占用，不能重复申请下午。"
             if slot["absence"] + wanted[day] > MAX_ABSENCE_HOURS_PER_DAY:
                 return f"{where}，同一天的请假和调休合计不能超过 8 小时。"
     return None
@@ -176,7 +217,10 @@ def find_day_conflict(request_type, days, others):
 
 def day_limits(request_type, dates, others):
     """申请表里每一天还能填多少小时；这天已经被占满时给出是哪张申请占的：
-    {日期: {max_hours, conflict: None | {request, text}}}。"""
+    {日期: {max_hours, am_taken, pm_taken, conflict: None | {request, text}}}。
+
+    max_hours = 8（加班 24）- 已占小时数；am_taken / pm_taken 告诉表单上午、下午两个按钮要不要灰掉
+    （请假和调休才有意义，加班恒为 False）。这天被占满或被加班占着时 max_hours 为 0，上午下午都算被占。"""
     taken = _taken_by_day(others, set(dates))
     limits = {}
     for day in dates:
@@ -189,10 +233,28 @@ def day_limits(request_type, dates, others):
             remaining = MAX_ABSENCE_HOURS_PER_DAY - (slot["absence"] if slot else ZERO)
         if slot and (blocked or remaining <= 0):
             row = slot["row"]
-            limits[day] = {"max_hours": 0, "conflict": {"request": value(row, "name"), "text": _where(day, row)}}
+            everything = request_type != REQUEST_OVERTIME
+            limits[day] = {"max_hours": 0, "am_taken": everything, "pm_taken": everything,
+                           "conflict": {"request": value(row, "name"), "text": _where(day, row)}}
         else:
-            limits[day] = {"max_hours": float(remaining), "conflict": None}
+            am_taken, pm_taken = (False, False) if request_type == REQUEST_OVERTIME else _slots_taken(slot)
+            limits[day] = {"max_hours": float(remaining), "am_taken": am_taken, "pm_taken": pm_taken, "conflict": None}
     return limits
+
+
+def default_day_hours(request_type, limit):
+    """申请表里这一天的默认时长：能全天就全天；这天已被占了一部分时给能填的那一半
+    （下午优先，其次上午）；填不了给 0。加班默认 8 小时，不超过当天上限。"""
+    max_hours = Decimal(str(limit["max_hours"]))
+    if request_type == REQUEST_OVERTIME:
+        return float(min(DAY_HOURS, max_hours))
+    if max_hours >= DAY_HOURS:
+        return float(DAY_HOURS)
+    if not limit.get("pm_taken") and max_hours >= AFTERNOON_HOURS:
+        return float(AFTERNOON_HOURS)
+    if not limit.get("am_taken") and max_hours >= MORNING_HOURS:
+        return float(MORNING_HOURS)
+    return 0.0
 
 
 def active_rows(employee, start, end, *, exclude="", lock=False):

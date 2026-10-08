@@ -5464,7 +5464,7 @@ def list_approval_business_documents(request):
 @frappe.whitelist()
 def get_attendance_options(request_type, from_date=None, to_date=None):
     from rayher_hr_payroll.attendance_requests import (
-        LEAVE_TYPES, active_rows, date_range, day_limits, work_dates_for_range, get_balance,
+        LEAVE_TYPES, active_rows, date_range, day_limits, default_day_hours, work_dates_for_range, get_balance,
     )
     if request_type not in ATTENDANCE_TYPES:
         frappe.throw("不支持的申请类型")
@@ -5481,8 +5481,10 @@ def get_attendance_options(request_type, from_date=None, to_date=None):
             dates = date_range(from_date, to_date) if request_type == REQUEST_OVERTIME else sorted(work_dates_for_range(ctx["employee"], from_date, to_date))
             # 每天还能填多少小时，以及这天已被哪张申请占用（2026-09-29，申请表按这个灰掉冲突的日子）。
             limits = day_limits(request_type, dates, active_rows(ctx["employee"], from_date, to_date))
-            days = [{"work_date": d.isoformat(), "hours": min(8, limits[d]["max_hours"]),
-                     "max_hours": limits[d]["max_hours"], "conflict": limits[d]["conflict"]} for d in dates]
+            # 请假和调休每天 全天 8 / 上午 3 / 下午 5 小时（2026-10）：am_taken / pm_taken 告诉表单哪个按钮要灰掉。
+            days = [{"work_date": d.isoformat(), "hours": default_day_hours(request_type, limits[d]),
+                     "max_hours": limits[d]["max_hours"], "am_taken": limits[d]["am_taken"],
+                     "pm_taken": limits[d]["pm_taken"], "conflict": limits[d]["conflict"]} for d in dates]
         except ValueError as exc:
             frappe.throw(str(exc))
     from rayher_hr_payroll.annual_leave import get_annual_balance

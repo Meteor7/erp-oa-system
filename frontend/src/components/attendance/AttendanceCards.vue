@@ -27,6 +27,16 @@ const overtimePreview = computed(() => (props.requestType === '加班申请' ? p
 
 const annualBar = computed(() => bar(annual.value?.credit_hours, annual.value?.used_hours || 0, annual.value?.reserved_hours || 0, annual.value?.available_hours || 0, annualPreview.value));
 const compBar = computed(() => bar((comp.value?.credit_hours || 0) + overtimePreview.value, comp.value?.used_hours || 0, comp.value?.reserved_hours || 0, (comp.value?.available_hours || 0) + overtimePreview.value, compPreview.value + overtimePreview.value));
+// 请假合计：满整天（8 小时的倍数）说天，有上午 3 小时或下午 5 小时时说小时，不显示 0.38 天这样的小数。
+const leaveSize = computed(() => {
+  const hours = Number(month.value?.leave_hours || 0);
+  return hours % HOURS_PER_DAY === 0
+    ? { value: numText(hours / HOURS_PER_DAY), unit: '天' } : { value: numText(hours), unit: '小时' };
+});
+const pendingCapSize = computed(() => {
+  const hours = Number(month.value?.pending_cap_hours || 0);
+  return hours % HOURS_PER_DAY === 0 ? `${numText(hours / HOURS_PER_DAY)} 天` : `${numText(hours)} 小时`;
+});
 const monthName = computed(() => (props.home?.period ? `${Number(props.home.period.slice(5))} 月` : ''));
 </script>
 
@@ -81,11 +91,11 @@ const monthName = computed(() => (props.home?.period ? `${Number(props.home.peri
       <div class="top"><span>{{ monthName }}我的考勤</span><span class="chip">含审批中</span></div>
       <template v-if="month">
         <div class="at-month">
-          <div><b>{{ numText(month.leave_days) }}<small>天</small></b><span>请假</span></div>
+          <div><b>{{ leaveSize.value }}<small>{{ leaveSize.unit }}</small></b><span>请假</span></div>
           <div><b>{{ numText(month.overtime_hours) }}<small>小时</small></b><span>加班</span></div>
           <div><b>{{ numText(month.comp_hours) }}<small>小时</small></b><span>调休</span></div>
         </div>
-        <div v-if="month.pending_cap_hours > 0" class="at-warn">事假 {{ numText(month.pending_cap_hours / HOURS_PER_DAY) }} 天通过后，{{ monthName }}工时上限少 {{ numText(month.pending_cap_hours) }} 小时</div>
+        <div v-if="month.pending_cap_hours > 0" class="at-warn">事假 {{ pendingCapSize }}通过后，{{ monthName }}工时上限少 {{ numText(month.pending_cap_hours) }} 小时</div>
         <div v-else-if="month.cap_deducted_hours > 0" class="at-warn">事假已扣 {{ numText(month.cap_deducted_hours) }} 小时，{{ periodTitle(home.period) }}工时上限 {{ numText(month.hour_limit) }} 小时</div>
       </template>
       <div v-else class="muted">暂无数据</div>
