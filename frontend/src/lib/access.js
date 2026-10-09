@@ -19,9 +19,9 @@ const BOARD_POSITIONS = ['finance_manager', 'finance_auditor', 'vice_manager', '
 const BOARD_PATHS = new Set(['/approval/expense-request-board', '/approval/expense-payment-board']);
 const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/travel', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment', '/approval/expense-request-board', '/approval/expense-payment-board', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
-// Temporary test-account restriction. Remove the account from this set to restore
-// the sensitive HR pages and fields without changing role assignments.
-const HR_SENSITIVE_HIDDEN_USERS = new Set(['person046@staff.example.invalid']);
+// Temporary test-account restriction: add an account's login here to hide the sensitive HR pages
+// and fields from it without changing role assignments. Nobody is hidden now (2026-10-09).
+const HR_SENSITIVE_HIDDEN_USERS = new Set([]);
 
 const PAGE_ROLES = {
   '/dashboard': APPROVAL,
@@ -132,7 +132,7 @@ function accessPath(path) {
 
 function canSeeMaterialProgress() {
   const user = String((typeof window !== 'undefined' && (window.user || window.full_name)) || '').toLowerCase();
-  return myRoles().includes('System Manager') || holdsPosition('pmc', 'procurement_manager', 'vice_manager');
+  return myRoles().includes('System Manager') || holdsPosition('pmc', 'procurement_manager', 'vice_manager', 'general_manager');
 }
 
 // 物料进度看板只对 PMC、采购经理、副总经理和系统管理员开放（服务端 material_progress._board_user）。

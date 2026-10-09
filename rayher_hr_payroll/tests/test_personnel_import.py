@@ -146,6 +146,8 @@ def _env(monkeypatch, user="Administrator", roles=("System Manager",), allow_cre
     sys.modules.pop("rayher_hr_payroll.api._guards", None)
     sys.modules.pop("rayher_hr_payroll.api.personnel_entry", None)
     mod = importlib.import_module("rayher_hr_payroll.api.personnel_entry")
+    # Nobody is masked in production now; these tests exercise the mechanism with one account switched on.
+    monkeypatch.setattr(sys.modules["rayher_hr_payroll.api._guards"], "HR_SENSITIVE_HIDDEN_USERS", {HIDDEN_USER})
     return mod, env, frappe
 
 

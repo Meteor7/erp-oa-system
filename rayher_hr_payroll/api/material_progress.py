@@ -37,14 +37,14 @@ def _clean(value):
 
 def can_access_board(user=None):
     user = _clean(user or frappe.session.user).lower()
-    return user == "administrator" or "System Manager" in set(frappe.get_roles(user)) or user in position_users("pmc", "procurement_manager", "vice_manager")
+    return user == "administrator" or "System Manager" in set(frappe.get_roles(user)) or user in position_users("pmc", "procurement_manager", "vice_manager", "general_manager")
 
 
 def _board_user(user=None):
     user = _clean(user or frappe.session.user).lower()
     if can_access_board(user):
         return user
-    frappe.throw("只有 PMC、采购和副总经理可以访问物料进度看板。")
+    frappe.throw("只有 PMC、采购、副总经理和总经理可以访问物料进度看板。")
 
 
 def _is_procurement(doc):

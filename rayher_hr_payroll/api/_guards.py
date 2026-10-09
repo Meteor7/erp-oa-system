@@ -8,9 +8,10 @@ RD_FINANCE_ROLES = ("System Manager", "Accounts User")
 # Tighter set for endpoints exposing PII / salary.
 RD_HR_ROLES = ("System Manager", "HR User", "HR Manager", "Accounts User")
 
-# Temporary restriction for a test account. Remove the account from this set
-# when the sensitive HR permissions should be restored.
-HR_SENSITIVE_HIDDEN_USERS = {"person046@staff.example.invalid"}
+# Temporary restriction for a test account: add the account's login to this set to hide the
+# sensitive HR pages and fields from it without changing role assignments. Nobody is hidden now
+# (2026-10-09); the mechanism stays so a masked account can be switched on again with one line.
+HR_SENSITIVE_HIDDEN_USERS = set()
 
 
 def is_hr_sensitive_hidden():
