@@ -16,6 +16,18 @@ test("employee table uses fixed twenty-row pagination", () => {
   assert.doesNotMatch(source, /pageSize/);
 });
 
+test("the R&D type follows the department: group header shows who fills the timesheet, new employees get a default, gaps are flagged", () => {
+  // 分组旁边写「填工时 N」，只在看在职时显示
+  assert.match(template, /group\.total\}\} 人<template v-if="statusFilter==='active'&&group\.fill"> · 填工时 \{\{group\.fill\}\}/);
+  // 列表按部门分组判断「研发部门没设类型」
+  assert.match(script, /decorateEmployees\(rows\.data\|\|\[\],\{today,sensitiveHidden,groupOf:groupOf\.value\}\)/);
+  assert.match(template, /研发部门未设类型 \$\{kpi\.rdGap\}/);
+  // 新增员工选部门后自动带出类型，只覆盖空值和自己带出的值，已有员工不动
+  assert.match(script, /watch\(\(\)=>form\.department,department=>\{\s*if\(!editing\.value\|\|form\.name\)return;/);
+  assert.match(script, /form\.rd_personnel_type!==autoRdType\.value\)return;/);
+  assert.match(script, /defaultRdType\(meta\?\.group_name\)/);
+});
+
 test("every filter resets employee pagination", () => {
   assert.match(source, /watch\(\[companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode\]/);
   assert.match(source, /watch\(pageCount/);
@@ -126,7 +138,7 @@ test("delete keeps the role rule and asks for confirmation", () => {
 test("sensitive tabs are hidden for restricted accounts and masked otherwise", () => {
   assert.match(source, /isHrSensitiveHidden/);
   assert.match(script, /const tabs=visibleTabs\(\{sensitiveHidden\}\)/);
-  assert.match(script, /decorateEmployees\(rows\.data\|\|\[\],\{today,sensitiveHidden\}\)/);
+  assert.match(script, /decorateEmployees\(rows\.data\|\|\[\],\{today,sensitiveHidden,groupOf:groupOf\.value\}\)/);
   assert.match(script, /displayFieldValue\(key,value,\{reveal:!!reveal\[key\]\}\)/);
   assert.match(template, /viewCell\(current,field\)\.shown\?'隐藏':'显示'/);
   assert.match(script, /function setTab\(key\)\{drawerTab\.value=key;resetReveal\(\)\}/);

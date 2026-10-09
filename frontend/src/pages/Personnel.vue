@@ -9,7 +9,7 @@ import { extractFrappeError } from "../lib/frappeError.js";
 import { isHrSensitiveHidden } from "../lib/access.js";
 import {
   ARCHIVE_STATUSES as ARCH, NO_RD_TYPE, RD_TYPES, SORT_OPTIONS,
-  archiveTone, avatarText, decorateEmployees, departmentGroups, displayFieldValue, filterEmployees, genderLabel,
+  archiveTone, avatarText, decorateEmployees, defaultRdType, departmentGroupMap, departmentGroups, displayFieldValue, filterEmployees, genderLabel,
   isMaskedField, kpiCounts, lastModifiedText, missingSummary, pageSlice, rdTone, sortEmployees, supervisorLabel,
   todayIso, visibleTabs,
 } from "../lib/personnelView.js";
@@ -79,7 +79,8 @@ const tabs=visibleTabs({sensitiveHidden});
 const canImport=canImportEmployees(typeof window!=="undefined"?window.roles:[]);
 
 // ---------- 列表数据 ----------
-const items=computed(()=>decorateEmployees(rows.data||[],{today,sensitiveHidden}));
+const groupOf=computed(()=>departmentGroupMap(depts.data||[]));
+const items=computed(()=>decorateEmployees(rows.data||[],{today,sensitiveHidden,groupOf:groupOf.value}));
 const nameById=computed(()=>new Map((rows.data||[]).map(x=>[x.name,x.employee_name])));
 const supervisorName=row=>supervisorLabel(row,nameById.value)||"-";
 const companyItems=computed(()=>companyFilter.value?items.value.filter(x=>x.row.company===companyFilter.value):items.value);
@@ -109,6 +110,16 @@ const formDepartmentOptions=computed(()=>(depts.data||[]).filter(x=>x.company===
 function clearDepartmentIfOutsideCompany(){
   if(form.department&&!formDepartmentOptions.value.some(x=>x.name===form.department))form.department="";
 }
+// 新增员工时，选了部门就按部门带出研发人员类型（研发部门→全时研发，其他→非研发）；
+// 只覆盖空值和上一次自动带出的值，HR 自己选的不动。已有员工不带。服务端保存时也会按同样规则补。
+const autoRdType=ref("");
+watch(()=>form.department,department=>{
+  if(!editing.value||form.name)return;
+  if(form.rd_personnel_type&&form.rd_personnel_type!==autoRdType.value)return;
+  const meta=(depts.data||[]).find(x=>x.name===department);
+  autoRdType.value=defaultRdType(meta?.group_name);
+  form.rd_personnel_type=autoRdType.value;
+});
 
 // ---------- 抽屉里的字段 ----------
 // type 决定编辑控件；查看页的显示规则在 viewCell()。virtual：只在查看里显示的派生项。
@@ -547,7 +558,7 @@ onBeforeUnmount(()=>{
 </template>
 
 <div class="kpis">
-<RdKpi label="在职员工" :value="loaded?kpi.active:'-'" :sub="loaded?`研发 ${kpi.rd} · 其他 ${kpi.other}`:''"/>
+<RdKpi label="在职员工" :value="loaded?kpi.active:'-'" :sub="loaded?`研发 ${kpi.rd} · 其他 ${kpi.other}${kpi.rdGap?` · 研发部门未设类型 ${kpi.rdGap}`:''}`:''" :tone="loaded&&kpi.rdGap?'warn':''"/>
 <RdKpi label="本月入职" :value="loaded?kpi.joinedThisMonth:'-'" :sub="loaded?`试用期中 ${kpi.onProbation} 人`:''"/>
 <RdKpi label="本月离职" :value="loaded?kpi.leftThisMonth:'-'" :sub="loaded?(kpi.leftPending?`已生效 ${kpi.leftEffective} · 待生效 ${kpi.leftPending}`:'按离职时间统计'):''"/>
 <RdKpi label="档案待完善 / 待确认" :value="loaded?kpi.fileOpen:'-'" :sub="loaded?`待完善 ${kpi.filePending} · 待确认 ${kpi.fileConfirm}`:''" :tone="loaded&&kpi.fileOpen?'warn':''"/>
@@ -599,7 +610,7 @@ onBeforeUnmount(()=>{
 <select id="pl-company" v-model="companyFilter" class="field"><option value="">全部公司</option><option v-for="x in companies.data||[]" :key="x.name" :value="x.name">{{x.display_name||displayCompany(x.name)}}</option></select></div>
 <button type="button" class="sd" :class="{on:!departmentFilter}" :aria-pressed="!departmentFilter" @click="departmentFilter=''"><span>全部部门</span><small>{{allDepartmentCount}}</small></button>
 <template v-for="group in groups" :key="group.name">
-<div class="sg"><span>{{group.name}}</span><small>{{group.total}} 人</small></div>
+<div class="sg"><span>{{group.name}}</span><small>{{group.total}} 人<template v-if="statusFilter==='active'&&group.fill"> · 填工时 {{group.fill}}</template></small></div>
 <button v-for="department in group.departments" :key="group.name+department.name" type="button" class="sd" :class="{on:departmentFilter===department.name}" :aria-pressed="departmentFilter===department.name" @click="departmentFilter=department.name"><span>{{department.name}}</span><small>{{department.employee_count}}</small></button>
 </template>
 </aside>
