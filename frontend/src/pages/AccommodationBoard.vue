@@ -8,8 +8,14 @@ import {
   COLORS, STATUS_ORDER, STATUS_STYLE, donutGradient, groupByBuilding, leaseMessage, leaseText,
   money, monthLabel, monthTitle, percent, ratioWidth, roomNote, subjectRows, trendBars, useRows, whole,
 } from '../lib/dormitoryBoard';
+import { boardEditLocation, useRoomNotice } from '../lib/accommodationRooms.js';
+import { FEE_PATH, takeSaved } from '../lib/accommodationFees.js';
 
 const router = useRouter();
+// 在房间内页或费用登记内页保存后回到本页：显示一条"已保存 A-302"，几秒后消失。
+const roomNotice = useRoomNotice();
+const feeNotice = takeSaved();
+const savedNotice = computed(() => roomNotice.value || feeNotice);
 const selectedPeriod = ref('');
 const filter = ref('全部');
 const selectedRoom = ref('');
@@ -84,11 +90,16 @@ async function pickRoom(item) {
 }
 
 function editRoom(item) {
-  router.push({ path: '/accommodation/master', query: { room: item.name } });
+  router.push(boardEditLocation(item.name));
 }
 
+// 去月度登记的内页（登记 / 新增），带上来源：保存或取消后回到本看板；「保存并登记下一间」也照样可用。
 function registerFee(item) {
-  router.push({ path: '/accommodation/monthly', query: { period: data.value.period, ...(item ? { room: item.name } : {}) } });
+  const room = item ? (item.room_no || item.name) : '';
+  router.push({
+    path: FEE_PATH,
+    query: { view: room ? 'edit' : 'new', ...(room ? { room } : {}), period: data.value.period, from: '/accommodation' },
+  });
 }
 </script>
 
@@ -113,6 +124,7 @@ function registerFee(item) {
       </div>
     </div>
 
+    <div v-if="savedNotice" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status" data-saved-notice>{{ savedNotice }}</div>
     <div v-if="errorText" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ errorText }}</div>
     <div v-else-if="!data" class="rounded-xl border border-[#E3E6EC] bg-white px-4 py-10 text-center text-sm text-gray-400">加载中…</div>
 

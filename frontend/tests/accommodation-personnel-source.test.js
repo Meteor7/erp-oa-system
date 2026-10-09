@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const personnel = readFileSync(new URL("../src/pages/Personnel.vue", import.meta.url), "utf8");
-const accommodation = readFileSync(new URL("../src/pages/Accommodation.vue", import.meta.url), "utf8");
+// 月度费用登记拆成列表页（pages/Accommodation.vue）和内页表单（components/accommodation/FeeForm.vue）：字段、接口、校验两处合起来断言
+const accommodation = ["../src/pages/Accommodation.vue", "../src/components/accommodation/FeeForm.vue"]
+  .map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 
 test("personnel page manages employee expense account category", () => {
   assert.match(personnel, /EXPENSE_ACCOUNT_CATEGORIES/);

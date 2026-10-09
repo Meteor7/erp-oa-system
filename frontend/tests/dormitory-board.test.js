@@ -72,10 +72,12 @@ test("the dormitory board is the first dormitory page and links to the other two
   assert.match(router, /path: '\/accommodation', component: \(\) => import\('\.\/pages\/AccommodationBoard\.vue'\)/);
   assert.match(app, /\{ to: '\/accommodation', label: '宿舍看板' \}/);
   assert.match(board, /get_dormitory_board/);
-  assert.match(board, /query: \{ room: item\.name \}/);
+  // 「编辑房间」进房间内页（?view=edit&room=<记录名>&from=/accommodation），地址在 lib/accommodationRooms.js 里拼
+  assert.match(board, /router\.push\(boardEditLocation\(item\.name\)\)/);
   assert.match(board, /lease: 'expiring'/);
   for (const page of [board, master, monthly]) assert.match(page, /<AccommodationTabs \/>/);
-  assert.match(master, /route\.query\.room/);
+  // 房间管理：room= 由 parseRoomsLocation 读（view=edit&room=…，旧的 ?room=… 也打开编辑页）
+  assert.match(master, /parseRoomsLocation\(route\.query\)/);
   // 租约到期清单 / 已离职仍占房、月份：都从地址读（bindRouteFilters），看板链接和数据看板链接共用
   assert.match(master, /queryText\(query, 'lease'\) === 'expiring'/);
   assert.match(monthly, /periodRouteSpec\(\)/);

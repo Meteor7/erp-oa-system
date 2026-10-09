@@ -95,12 +95,15 @@ test("accommodation monthly: ?period and ?status=open are bound; the board API s
   assert.ok(indexOf(source, "bindRouteFilters(") < indexOf(source, "const options = createResource"), "period must be read before the data requests");
   // 房间是否在住 / 是否已登记，用宿舍看板同一个接口（与看板「未登记」提醒同口径）
   assert.match(source, /rayher_hr_payroll\.api\.dormitory_board\.get_dormitory_board/);
-  assert.match(source, /room\.status === "入住" && !room\.registered/);
+  // 口径只有一份，在 lib 里（与后端 alert.dorm_register 同口径）；页面和"保存并登记下一间"都用它
+  assert.match(source, /unregisteredRooms\(board\.data\?\.rooms\)/);
+  assert.match(read("../lib/accommodationFees.js"), /room\?\.status === '入住' && !room\?\.registered/);
   assert.match(source, /watch\(statusFilter, \(value\) => \{ if \(value === "open"\) board\.reload\(\); \}\)/);
   assert.match(source, /data-open-rooms/);
   assert.match(source, /data-open-clear @click="statusFilter = ''"/);
-  // 原来的 room= 仍然有效
-  assert.match(source, /form\.room_no = String\(route\.query\.room\)/);
+  // 原来的 room= 仍然有效：现在由地址解析（旧链接 ?room=A-302 当作 view=edit）进入该房间的内页
+  assert.match(source, /parseFeeLocation\(route\.query\)/);
+  assert.match(source, /route\.query\.room/);
 });
 
 test("accommodation master: ?lease=expiring and ?leaver=1 are bound; the leaver filter uses employee_left", () => {
