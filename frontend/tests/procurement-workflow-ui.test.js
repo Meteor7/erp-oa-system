@@ -132,7 +132,8 @@ test("forms use real project options and conditional business fields", () => {
   assert.match(detail, /view: 'all'/);
   assert.match(form, /<select v-model="form\.project"/);
   assert.match(form, /form\.procurement_scope === '项目采购'/);
-  assert.match(form, /non_project_allocation_type/);
+  assert.match(form, /non_project_department/);
+  assert.match(form, /ctx\.departments/);
   assert.match(form, /purchase_method/);
   assert.match(documents, /remove_approval_business_document/);
   assert.match(documents, /attach_approval_business_document/);

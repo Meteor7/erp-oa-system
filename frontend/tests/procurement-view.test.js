@@ -155,7 +155,7 @@ test('facts: procurement and direct purchase show their own fields', () => {
   const facts = requestFacts(base({ reason: '试制', procurement_scope: '项目采购', project: 'P1', asset_nature: '非固定资产', expected_delivery_date: '2026-10-20', purchaser_user: 'buyer@x' }), {
     projectName: () => '硅光样机', purchasers: [{ name: 'buyer@x', full_name: '采购经办' }],
   });
-  assert.deepEqual(facts.map((fact) => fact.k), ['申请用途', '采购范围', '采购归属', '资产属性', '预计交期', '采购经办人', '申请部门']);
+  assert.deepEqual(facts.map((fact) => fact.k), ['申请用途', '采购范围', '采购归属', '费用类别', '资产属性', '预计交期', '采购经办人', '申请部门']);
   assert.equal(facts.find((fact) => fact.k === '采购归属').v, '项目 · 硅光样机');
   assert.equal(facts.find((fact) => fact.k === '采购经办人').v, '采购经办');
   const direct = requestFacts({ request_type: REQUEST_DIRECT, purchase_method: '京东购买', asset_nature: '固定资产', fixed_asset_category: FIXED_ASSET_CATEGORIES[0], source_purchase_order: 'PO-3', department: '销售部' });

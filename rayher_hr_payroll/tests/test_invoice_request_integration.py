@@ -3405,7 +3405,8 @@ def test_zero_step_procurement_and_direct_purchase_are_rejected(monkeypatch):
             doc.business_lines = [Row(item_name="测试物料", quantity=1, material_serial="MAT-TEST", material_code="01.01.01", specification="TEST", brand="TEST", unit="个")]
             doc.procurement_scope = "非项目采购"
             doc.expected_delivery_date = "2026-09-10"
-            doc.non_project_allocation_type = "非项目采购"
+            doc.non_project_allocation_type = "部门"
+            doc.non_project_department = "财务部 - RAY"
             doc.project = ""
             doc.project_owner = ""
         monkeypatch.setattr(oa_entry, "_route_context", lambda **_kwargs: {
