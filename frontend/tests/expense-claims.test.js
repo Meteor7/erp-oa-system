@@ -299,6 +299,15 @@ test("invoice folder: finance can upload and confirm their own invoices (2026-09
   assert.match(source, /view: ownView\.value \? 'mine' : 'all'/);
 });
 
+test("invoice folder: own unused confirmed invoices can be un-confirmed, and excluding your own invoice needs no reason (2026-10-09)", () => {
+  const folder = read("../src/pages/InvoiceFolder.vue");
+  assert.match(folder, /unconfirmInvoice\(selected\.value\.name/);
+  assert.match(folder, /ownView && selected\.folder_status === '可用'/);
+  assert.match(folder, /ownView && selected\.folder_status === '已使用'/);
+  assert.match(folder, /exclude\('确认是重复发票，请填写排除原因', \{ required: true \}\)/);   // 财务确认重复仍要写原因
+  assert.match(folder, /window\.prompt\(reasonPrompt, required \? '' : '传错了'\)/);
+});
+
 test("supplemental attachment calls send the parameter name the server expects (2026-09-28)", () => {
   // R3-49-X1：前端发 attachment_name，后端参数叫 attachment，删除和预览补充附件一直失败。
   const source = read("../src/lib/invoiceOcr.js");

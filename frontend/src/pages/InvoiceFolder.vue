@@ -11,7 +11,7 @@ import {
   confirmBlockers, duplicateText, editableByOwner, folderStatusBar, folderTabsFromCounts, missingFields, retryState, tabStatuses, usedByText,
 } from '../lib/invoiceFolderView.js';
 import {
-  confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice,
+  confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice, unconfirmInvoice,
   updateInvoice, updateInvoiceExpenseContext, uploadInvoiceFiles, validateInvoiceFiles,
 } from '../lib/invoiceOcr.js';
 import { normalizeFolderTab } from '../lib/dashboardLanding.js';
@@ -228,10 +228,22 @@ async function saveOnly() {
   await run(saveEdits, '已保存修改');
 }
 
-async function exclude(reasonPrompt = '请填写排除原因') {
-  const reason = (window.prompt(reasonPrompt) || '').trim();
-  if (!reason) return;
+// 本人排除自己的发票（多半是传错了）不用写原因，直接确定就记「传错了」；财务确认重复必须写原因。
+async function exclude(reasonPrompt = '排除这张发票。原因可以不改，默认记为「传错了」。', { required = false } = {}) {
+  const typed = window.prompt(reasonPrompt, required ? '' : '传错了');
+  if (typed === null) return;
+  const reason = typed.trim();
+  if (required && !reason) {
+    flash('', '请填写排除原因');
+    return;
+  }
   await run(() => excludeInvoice(selected.value.name, reason), '发票已排除');
+}
+
+// 已确认、还没用到任何单据的发票可以撤回确认，回到「待确认」重新修改。
+async function undoConfirm() {
+  if (!window.confirm('撤回确认后，这张发票回到「待确认」，可以重新修改识别内容。确定吗？')) return;
+  await run(() => unconfirmInvoice(selected.value.name, '用户撤回确认'), '已撤回确认，可以重新修改识别内容');
 }
 
 async function notDuplicate() {
@@ -392,9 +404,16 @@ onBeforeUnmount(() => {
               <button v-if="retryState(selected) !== 'exhausted'" type="button" class="btn pri" :disabled="busy" @click="retry">重新识别</button>
               <button type="button" class="btn danger" :disabled="busy" @click="exclude()">排除</button>
             </template>
+            <template v-else-if="ownView && selected.folder_status === '可用'">
+              <button type="button" class="btn" :disabled="busy" @click="undoConfirm">撤回确认</button>
+              <span class="muted">还没用到任何单据，撤回后可以重新修改。</span>
+            </template>
+            <template v-else-if="ownView && selected.folder_status === '已使用'">
+              <span class="muted">已用于 {{ usedByText(selected) }}；要先从那张单据里移出这张发票，才能撤回确认。</span>
+            </template>
             <template v-else-if="!ownView && selected.folder_status === '疑似重复'">
               <button type="button" class="btn" :disabled="busy" @click="notDuplicate">不是重复，退回员工确认</button>
-              <button type="button" class="btn pri" :disabled="busy" @click="exclude('确认是重复发票，请填写排除原因')">确认重复，排除</button>
+              <button type="button" class="btn pri" :disabled="busy" @click="exclude('确认是重复发票，请填写排除原因', { required: true })">确认重复，排除</button>
             </template>
           </div>
         </div>

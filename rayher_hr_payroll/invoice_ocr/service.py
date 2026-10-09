@@ -58,6 +58,7 @@ INVOICE_MODE_PENDING = "暂未取得发票"
 NEW_CLAIM_REQUEST_TYPES = {"报销单", "付款单"}
 INVOICE_FOLLOWUP_PENDING = "待收票"
 INVOICE_FOLLOWUP_RECEIVED = "已收票"
+DEFAULT_EXCLUDE_REASON = "本人排除（未填原因）"
 WORKBENCH_STATUSES = {"排队中", "识别中", "待确认", "已确认", "疑似重复", "失败", "已排除"}
 WORKBENCH_PRIVILEGED_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager"}
 OPERATION_LOG_LIMIT = 100
@@ -1218,8 +1219,6 @@ def retry_invoice(invoice_name):
 
 def exclude_invoice(invoice_name, reason):
     reason = str(reason or "").strip()
-    if not reason:
-        _throw("排除发票必须填写原因。")
     if len(reason) > 500:
         _throw("排除原因过长。")
     name = str(invoice_name)
@@ -1231,6 +1230,11 @@ def exclude_invoice(invoice_name, reason):
         # 修复（2026-09-28）：卡住（排队或识别超过 15 分钟）的发票也可以排除。
         if _get(record, "recognition_status") not in {"待确认", "疑似重复", "失败"} and not _recognition_stuck(record):
             _throw("当前发票状态不允许排除。")
+        if not reason:
+            # 本人排除自己上传的发票（多半是传错了）不用写原因，记成默认说明；财务或别人替他排除必须写清楚。
+            if str(_get(record, "owner") or "").strip().lower() != str(_user() or "").strip().lower():
+                _throw("排除发票必须填写原因。")
+            reason = DEFAULT_EXCLUDE_REASON
         _set(record, "recognition_status", "已排除")
         _set(record, "duplicate_reason", f"排除：{reason}")
         _set(record, "processing_started_on", None)

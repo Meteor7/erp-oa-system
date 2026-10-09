@@ -566,8 +566,9 @@ def test_retry_and_exclude_have_explicit_state_rules(env):
     assert env.enqueued[-1][1] == {"invoice_name": failed.name, "queue": "long"}
     pending = env.add_record(name="INV-P", recognition_status="待确认")
     pending.processing_claim_id = "stale-claim"
-    with pytest.raises(ValidationError, match="原因"):
-        service.exclude_invoice(pending.name, "")
+    mistaken = env.add_record(name="INV-Q", recognition_status="待确认")
+    service.exclude_invoice(mistaken.name, "")        # 本人排除自己上传的发票（传错了）不用写原因
+    assert mistaken.recognition_status == "已排除" and mistaken.duplicate_reason == "排除：" + service.DEFAULT_EXCLUDE_REASON
     service.exclude_invoice(pending.name, "个人消费")
     assert pending.recognition_status == "已排除" and pending.invoice_file
     assert pending.processing_claim_id == ""
@@ -580,6 +581,8 @@ def test_finance_can_exclude_a_suspected_duplicate_but_not_other_pending_records
     frappe_stub_module.session.user = "finance@example.com"
     with pytest.raises(ValidationError, match="无权"):
         service.exclude_invoice(pending.name, "不是重复票")
+    with pytest.raises(ValidationError, match="原因"):
+        service.exclude_invoice(duplicate.name, "")   # 财务替别人排除必须写原因
     service.exclude_invoice(duplicate.name, "确认是重复票")
     assert duplicate.recognition_status == "已排除"
     frappe_stub_module.session.user = "alice@example.com"
