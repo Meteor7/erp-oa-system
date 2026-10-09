@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router';
 import { buildApprovalCenterPayload, organizationPreflightMessage, validateProcurementRequestForm } from '../../lib/procurementWorkflow.js';
 import {
-  FIXED_ASSET_CATEGORIES, REQUEST_PROCUREMENT, blankForm, blankLine, formBlockers, formFromRow,
+  FIXED_ASSET_CATEGORIES, REQUEST_PROCUREMENT, blankForm, blankLine, expenseCategoryOf, formBlockers, formFromRow,
   money, pmcLines, routePreviewParams, summarizeLines, validateRequestForm,
 } from '../../lib/procurementView.js';
 import '../../styles/navUi.css';
@@ -36,6 +36,7 @@ const routeSteps = ref([]);
 const routeNote = ref('');
 const catalogOpen = ref(false);
 const lineBox = ref(null);
+const expenseCategory = computed(() => expenseCategoryOf(form, ctx.departments));
 let previewTimer = null;
 
 // 表单有没有改过：打开 / 保存之后的快照对比现在的内容；改过再离开（取消、面包屑、侧栏、后退、关标签页）要确认。
@@ -333,16 +334,17 @@ function lineTotal(line) {
                 <div v-if="form.procurement_scope === '项目采购'" class="f s2">
                   <label>所属项目<b>*</b></label>
                   <select v-model="form.project" :disabled="isPmc"><option value="">请选择项目</option><option v-for="project in ctx.projects" :key="project.name" :value="project.name">{{ projectLabel(project) }}</option></select>
-                  <div class="h">选"非项目"时这里换成：成本中心 / 部门 / 非项目采购</div>
+                  <div class="h">项目采购的费用一律记研发费用。</div>
                 </div>
-                <template v-else>
-                  <div class="f">
-                    <label>非项目归属</label>
-                    <select v-model="form.non_project_allocation_type" :disabled="isPmc"><option>成本中心</option><option>部门</option><option>非项目采购</option></select>
-                  </div>
-                  <div v-if="form.non_project_allocation_type === '成本中心'" class="f"><label>成本中心<b>*</b></label><input v-model="form.non_project_cost_center" :disabled="isPmc" /></div>
-                  <div v-if="form.non_project_allocation_type === '部门'" class="f"><label>所属部门<b>*</b></label><input v-model="form.non_project_department" :disabled="isPmc" /></div>
-                </template>
+                <div v-else class="f s2">
+                  <label>所属部门<b>*</b></label>
+                  <select v-model="form.non_project_department" :disabled="isPmc"><option value="">请选择部门</option><option v-for="item in ctx.departments" :key="item.name" :value="item.name">{{ item.label }}</option></select>
+                  <div class="h">费用类别跟着部门的性质走：研发部门记研发费用，制造部记生产成本，销售和客服记销售费用，其余记管理费用。</div>
+                </div>
+                <div class="f">
+                  <label>费用类别</label>
+                  <input :value="expenseCategory" readonly placeholder="选好项目或部门后自动带出" aria-label="费用类别" />
+                </div>
               </template>
               <div v-else class="f s2">
                 <label>所属项目</label>

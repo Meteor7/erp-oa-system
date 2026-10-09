@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from rayher_hr_payroll.department_structure import department_expense_category
+
 
 PROJECT_PROCUREMENT = "项目采购"
 NON_PROJECT_PROCUREMENT = "非项目采购"
 PROCUREMENT_SCOPES = {PROJECT_PROCUREMENT, NON_PROJECT_PROCUREMENT}
-NON_PROJECT_ALLOCATION_TYPES = {"成本中心", "部门", "非项目采购"}
+# 非项目采购只按部门归属（原来的"成本中心""非项目采购"选项已取消，旧单据里的值不再校验）。
+NON_PROJECT_ALLOCATION_TYPES = {"部门"}
 PAYMENT_STAGES = {"预付款", "到货款", "尾款", "到货后全额付款"}
 ARRIVAL_STATUSES = {"未到货", "部分到货", "全部到货", "关闭未交数量", "退货中", "换货中"}
 INSPECTION_STATUSES = {"未验收", "待验收", "验收通过", "验收不合格"}
@@ -98,12 +101,20 @@ def validate_procurement_submission(doc, evidence=None):
             raise ProcurementWorkflowError("项目负责人没有关联有效账号")
         return
     allocation = _text(_get(doc, "non_project_allocation_type"))
-    if allocation not in NON_PROJECT_ALLOCATION_TYPES:
-        raise ProcurementWorkflowError("非项目归属必须选择成本中心、部门或非项目采购")
-    if allocation == "成本中心" and not _text(_get(doc, "non_project_cost_center")):
-        raise ProcurementWorkflowError("非项目采购选择成本中心时必须填写成本中心")
-    if allocation == "部门" and not _text(_get(doc, "non_project_department")):
-        raise ProcurementWorkflowError("非项目采购选择部门时必须填写所属部门")
+    department = _text(_get(doc, "non_project_department"))
+    if allocation not in NON_PROJECT_ALLOCATION_TYPES or not department:
+        raise ProcurementWorkflowError("非项目采购必须选择所属部门")
+    if not department_expense_category(department):
+        raise ProcurementWorkflowError("所选部门没有对应的费用类别，请联系管理员")
+
+
+def procurement_expense_category(scope, department=""):
+    """采购申请的费用类别：项目采购一律是研发费用；非项目采购按所选部门的性质。"""
+    if _text(scope) == PROJECT_PROCUREMENT:
+        return "研发费用"
+    if _text(scope) == NON_PROJECT_PROCUREMENT:
+        return department_expense_category(department)
+    return ""
 
 
 def derive_payment_stage(doc):

@@ -28,6 +28,7 @@ const view = computed(() => procurementView(route));
 const options = shallowRef(null);
 const projects = ref([]);
 const applicants = ref([]);
+const departments = ref([]);
 const purchasers = ref([]);
 const ready = ref(false);
 const loadError = ref('');
@@ -86,6 +87,7 @@ const ctx = reactive({
   currentEmployee: computed(() => options.value?.current_applicant?.employee || ''),
   projects,
   applicants,
+  departments,
   purchasers,
   busy,
   banner,
@@ -126,6 +128,7 @@ async function loadLookups() {
   projects.value = (await settle(() => apiGet('oa_entry.list_approval_center_projects', { limit: 500 }))).filter((item) => item.status !== 'Cancelled');
   if (isProcurement.value) {
     applicants.value = await settle(() => apiGet('oa_entry.list_procurement_applicants'));
+    departments.value = await settle(() => apiGet('oa_entry.list_expense_departments'));
     purchasers.value = await settle(() => apiGet('oa_entry.list_procurement_users'));
   }
 }

@@ -172,8 +172,9 @@ test('form blockers cover header, direct purchase rules and the first line probl
   assert.ok(formBlockers(form, REQUEST_PROCUREMENT).includes('预计交期未填'));
   assert.ok(formBlockers(form, REQUEST_PROCUREMENT).includes('所属项目未选'));
   form.procurement_scope = '非项目采购';
-  form.non_project_allocation_type = '成本中心';
-  assert.ok(formBlockers(form, REQUEST_PROCUREMENT).includes('成本中心未填'));
+  assert.ok(formBlockers(form, REQUEST_PROCUREMENT).includes('所属部门未选'));
+  form.non_project_department = '财务部 - RAY';
+  assert.ok(!formBlockers(form, REQUEST_PROCUREMENT).includes('所属部门未选'));
   const direct = { ...blankForm(), subject: '投屏器', expected_delivery_date: '2026-10-15', asset_nature: '固定资产' };
   direct.business_lines = [{ item_name: '投屏器', unit: '台', quantity: 1 }];
   assert.deepEqual(formBlockers(direct, REQUEST_DIRECT), ['固定资产类别未选']);
@@ -258,4 +259,20 @@ test('stage distribution counts each request once and breaks PO down by PO statu
   assert.match(cells[0].sub, /PMC 1/);
   assert.match(cells[4].sub, /供应商制作中 1/);
   assert.match(cells[4].sub, /付款中 1/);
+});
+
+test('the expense category of a procurement request follows the project or the department (2026-10-09)', async () => {
+  const { expenseCategoryOf, formFromRow, requestFacts } = await import('../src/lib/procurementView.js');
+  const departments = [{ name: '研发软件部 - RAY', category: '研发费用' }, { name: '财务部 - RAY', category: '管理费用' }, { name: '制造部 - RAY', category: '生产成本' }];
+  assert.equal(expenseCategoryOf({ procurement_scope: '项目采购', project: 'RD03' }, departments), '研发费用');
+  assert.equal(expenseCategoryOf({ procurement_scope: '项目采购', non_project_department: '财务部 - RAY' }, departments), '研发费用');
+  assert.equal(expenseCategoryOf({ procurement_scope: '非项目采购', non_project_department: '财务部 - RAY' }, departments), '管理费用');
+  assert.equal(expenseCategoryOf({ procurement_scope: '非项目采购', non_project_department: '制造部 - RAY' }, departments), '生产成本');
+  assert.equal(expenseCategoryOf({ procurement_scope: '非项目采购', non_project_department: '' }, departments), '');
+  assert.equal(expenseCategoryOf({ procurement_scope: '非项目采购', non_project_department: '别的部门' }, departments), '');
+  // 旧草稿里的"成本中心"归属：改回按部门，部门要重新选
+  const old = formFromRow({ procurement_scope: '非项目采购', non_project_allocation_type: '成本中心', non_project_cost_center: 'CC-1', expected_delivery_date: '2026-10-15', business_lines: [] });
+  assert.equal(old.non_project_allocation_type, '部门');
+  assert.equal(old.non_project_department, '');
+  assert.equal(requestFacts({ request_type: '采购申请', procurement_scope: '非项目采购', non_project_department: '财务部 - RAY', expense_account_category: '管理费用' }).find((item) => item.k === '费用类别').v, '管理费用');
 });

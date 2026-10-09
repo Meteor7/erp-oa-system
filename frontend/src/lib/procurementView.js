@@ -210,6 +210,12 @@ export function allocationLabel(row, projectName = (name) => name) {
   return row?.non_project_allocation_type || '非项目';
 }
 
+// 采购申请的费用类别：项目采购一律是研发费用；非项目采购按所选部门的性质（部门列表由后端给出，和后端同一份对应关系）。
+export function expenseCategoryOf(form = {}, departments = []) {
+  if (form.procurement_scope === '项目采购') return '研发费用';
+  return departments.find((item) => item.name === form.non_project_department)?.category || '';
+}
+
 export function projectText(row, projectName = (name) => name) {
   if (row?.project) return projectName(row.project);
   if (row?.non_project_department) return `非项目 · ${row.non_project_department}`;
@@ -560,6 +566,7 @@ export function requestFacts(row, { projectName = (name) => name, nameOf = (user
   } else {
     facts.push({ k: '采购范围', v: row?.procurement_scope || (row?.project ? '项目采购' : '非项目采购') });
     facts.push({ k: '采购归属', v: allocationLabel(row, projectName) });
+    facts.push({ k: '费用类别', v: row?.expense_account_category || '—' });
     facts.push({ k: '资产属性', v: row?.asset_nature || '未标注', hot: row?.asset_nature === '固定资产' });
     facts.push({ k: '预计交期', v: row?.expected_delivery_date || row?.expected_arrival_date || '—' });
     facts.push({ k: '采购经办人', v: purchaser || '—' });
@@ -713,7 +720,7 @@ export function blankForm() {
   return {
     subject: '', reason: '', urgency: '一般', asset_nature: '非固定资产', fixed_asset_category: '',
     procurement_scope: '项目采购', expected_delivery_date: '', project: '', applicant_employee: '',
-    non_project_allocation_type: '非项目采购', non_project_cost_center: '', non_project_department: '',
+    non_project_allocation_type: '部门', non_project_cost_center: '', non_project_department: '',
     purchaser_user: '', purchase_method: '京东购买', business_lines: [blankLine()],
   };
 }
@@ -752,6 +759,11 @@ export function formFromRow(row = {}) {
   for (const field of FORM_FIELDS) {
     if (row[field] !== null && row[field] !== undefined && row[field] !== '') form[field] = row[field];
   }
+  // 非项目采购现在只按部门归属：旧草稿里的"成本中心 / 非项目采购"改回"部门"，部门要重新选。
+  if (form.procurement_scope === '非项目采购' && row.non_project_allocation_type !== '部门') {
+    form.non_project_allocation_type = '部门';
+    form.non_project_department = '';
+  }
   form.applicant_employee = row.request_type === REQUEST_DIRECT ? '' : (row.employee || '');
   form.business_lines = (row.business_lines || []).map(lineFromRow);
   if (!form.business_lines.length) form.business_lines = [blankLine()];
@@ -785,10 +797,8 @@ export function formBlockers(form = {}, requestType = REQUEST_PROCUREMENT) {
   if (requestType === REQUEST_PROCUREMENT) {
     if (form.procurement_scope === '项目采购') {
       if (!form.project) list.push('所属项目未选');
-    } else if (form.non_project_allocation_type === '成本中心' && !String(form.non_project_cost_center || '').trim()) {
-      list.push('成本中心未填');
-    } else if (form.non_project_allocation_type === '部门' && !String(form.non_project_department || '').trim()) {
-      list.push('所属部门未填');
+    } else if (!String(form.non_project_department || '').trim()) {
+      list.push('所属部门未选');
     }
   } else {
     if (!['京东购买', '其他购买'].includes(form.purchase_method)) list.push('购买方式未选');

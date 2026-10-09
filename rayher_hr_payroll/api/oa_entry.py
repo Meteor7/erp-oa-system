@@ -48,6 +48,7 @@ from rayher_hr_payroll.procurement_workflow import (
     ProcurementWorkflowError,
     contract_copy_recipients,
     plan_contract_delivery,
+    procurement_expense_category,
     transition_business_state,
     validate_payment_submission,
     validate_procurement_submission,
@@ -1526,6 +1527,11 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "non_project_allocation_type": getattr(doc, "non_project_allocation_type", None),
         "non_project_cost_center": getattr(doc, "non_project_cost_center", None),
         "non_project_department": getattr(doc, "non_project_department", None),
+        # 旧单据没有存费用类别时，按项目 / 部门现算。
+        "expense_account_category": getattr(doc, "expense_account_category", None) or (
+            procurement_expense_category(getattr(doc, "procurement_scope", None), getattr(doc, "non_project_department", None))
+            if getattr(doc, "request_type", None) == REQUEST_PROCUREMENT else ""
+        ),
         "purchase_method": getattr(doc, "purchase_method", None),
         "supplier": getattr(doc, "supplier", None),
         "payment_source_kind": getattr(doc, "payment_source_kind", None) or "",
@@ -5277,6 +5283,24 @@ def list_approval_center_projects(limit=500):
         return project_options(limit=limit)
     except ApprovalCenterError as exc:
         frappe.throw(str(exc))
+
+
+@frappe.whitelist()
+def list_expense_departments():
+    """采购申请「非项目采购」可选的部门，以及每个部门对应的费用类别（研发 / 管理 / 销售 / 生产成本）。"""
+    from rayher_hr_payroll.department_structure import CANONICAL_DEPARTMENTS, department_base_name, department_expense_category
+
+    require_request_type_access(REQUEST_PROCUREMENT)
+    rows = frappe.get_all("Department", filters={"is_group": 0, "disabled": 0}, fields=["name", "department_name"], limit_page_length=500)
+    order = {name: index for index, name in enumerate(CANONICAL_DEPARTMENTS)}
+    result = []
+    for row in rows:
+        category = department_expense_category(row.get("name"))
+        if not category:
+            continue
+        result.append({"name": row.get("name"), "label": row.get("name"), "category": category})
+    result.sort(key=lambda item: (order.get(department_base_name(item["name"]), 999), item["name"]))
+    return result
 
 
 @frappe.whitelist()

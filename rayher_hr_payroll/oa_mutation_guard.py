@@ -84,7 +84,7 @@ DRAFT_ONLY_BUSINESS_FIELDS = {
     "subject", "reason", "urgency", "asset_nature", "fixed_asset_category",
     "asset_category", "procurement_scope", "expected_delivery_date", "project",
     "non_project_allocation_type", "non_project_cost_center",
-    "non_project_department", "purchaser_user", "purchase_method", "supplier",
+    "non_project_department", "expense_account_category", "purchaser_user", "purchase_method", "supplier",
     "payment_stage", "prepayment_percentage", "has_balance_payment",
     "expected_arrival_date", "prepayment_risk_note", "source_request",
     "business_lines",

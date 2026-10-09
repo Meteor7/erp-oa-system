@@ -105,3 +105,23 @@ def department_for_employee(employee_name, designation="", current_department=""
             return department
 
     return current if current in CANONICAL_DEPARTMENTS else ""
+
+
+# 部门的费用性质（采购申请的非项目采购按所选部门取这个类别）。和人员费用科目现在的做法一致：
+# 研发部门记研发费用，销售、客服记销售费用，制造部记生产成本，其余（职能、仓库、采购、物控）记管理费用。
+EXPENSE_CATEGORY_BY_GROUP = {"研发": "研发费用", "客户运营": "销售费用", "运营": "管理费用", "职能": "管理费用"}
+EXPENSE_CATEGORY_BY_DEPARTMENT = {"制造部": "生产成本"}
+
+
+def department_base_name(department):
+    """"研发软件部 - RAY" → "研发软件部"（Department 的名字后面带公司缩写）。"""
+    text = _clean(department)
+    return text.rsplit(" - ", 1)[0].strip() if " - " in text else text
+
+
+def department_expense_category(department):
+    """部门对应的费用类别；不是正式部门（旧的英文部门等）返回空。"""
+    base = department_base_name(department)
+    if base in EXPENSE_CATEGORY_BY_DEPARTMENT:
+        return EXPENSE_CATEGORY_BY_DEPARTMENT[base]
+    return EXPENSE_CATEGORY_BY_GROUP.get(DEPARTMENT_GROUP_BY_NAME.get(base), "")

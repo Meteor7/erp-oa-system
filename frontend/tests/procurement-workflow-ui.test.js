@@ -55,6 +55,12 @@ test("payload separates procurement, direct purchase, and payment-only fields", 
   assert.equal(payment.source_purchase_order, "PO-1");
   assert.equal(payment.source_po_payment_plan_row, "PLAN-1");
   assert.equal(payment.purchase_method, undefined);
+  // 非项目采购只按部门归属，成本中心不再出现
+  const nonProject = buildApprovalCenterPayload({ ...form, procurement_scope: "非项目采购", project: "" }, "采购申请");
+  assert.equal(nonProject.project, "");
+  assert.equal(nonProject.non_project_allocation_type, "部门");
+  assert.equal(nonProject.non_project_department, "研发部");
+  assert.equal(nonProject.non_project_cost_center, "");
   assert.equal(payment.payment_stage, undefined);
   assert.equal(payment.has_balance_payment, undefined);
 });

@@ -12,6 +12,7 @@ from rayher_hr_payroll.procurement_workflow import (
     ProcurementWorkflowError,
     derive_payment_stage,
     derive_prepayment_overdue,
+    procurement_expense_category,
     validate_procurement_submission,
 )
 from rayher_hr_payroll.oa_role_resolver import ApprovalRoleResolutionError, resolve_role
@@ -669,7 +670,13 @@ def save_draft(request_type, payload, name=None, *, store=None):
         project_owner = _text(_get(project, "project_owner"), "项目负责人", 140)
         project_owner_name = _text(_get(project, "project_owner_name"), "项目负责人姓名", 140) or project_owner
 
+    expense_category = ""
     if request_type == REQUEST_PROCUREMENT:
+        if procurement_scope == "非项目采购":
+            # 非项目采购只按部门归属；费用类别由所选部门的性质决定，不由页面传。
+            allocation_type = "部门"
+            non_project_cost_center = ""
+        expense_category = procurement_expense_category(procurement_scope, non_project_department)
         try:
             validate_procurement_submission({
                 "procurement_scope": procurement_scope,
@@ -819,6 +826,7 @@ def save_draft(request_type, payload, name=None, *, store=None):
         "non_project_allocation_type": allocation_type or None,
         "non_project_cost_center": non_project_cost_center or None,
         "non_project_department": non_project_department or None,
+        "expense_account_category": expense_category or None,
         "purchaser_user": purchaser_user or None,
         "purchase_method": purchase_method or None,
         "supplier": supplier or None,

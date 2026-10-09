@@ -34,6 +34,7 @@
     "non_project_allocation_type",
     "non_project_cost_center",
     "non_project_department",
+    "expense_account_category",
     "purchaser_user",
     "contract_delivery_date",
     "pending_contract_delivery_date",
@@ -297,6 +298,13 @@
       "fieldtype": "Link",
       "label": "Non Project Department",
       "options": "Department"
+    },
+    {
+      "fieldname": "expense_account_category",
+      "fieldtype": "Select",
+      "label": "Expense Account Category",
+      "options": "\n研发费用\n管理费用\n销售费用\n生产成本",
+      "read_only": 1
     },
     {
       "fieldname": "purchaser_user",

@@ -65,11 +65,12 @@ const commonPayload = (form) => ({
   })),
 });
 
+// 非项目采购只按部门归属；费用类别由后端按所选部门的性质算，不由页面传。
 const allocationPayload = (form) => ({
-  project: form.project || "",
-  non_project_allocation_type: form.project ? "" : form.non_project_allocation_type,
-  non_project_cost_center: !form.project && form.non_project_allocation_type === "成本中心" ? form.non_project_cost_center : "",
-  non_project_department: !form.project && form.non_project_allocation_type === "部门" ? form.non_project_department : "",
+  project: "",
+  non_project_allocation_type: "部门",
+  non_project_cost_center: "",
+  non_project_department: form.non_project_department || "",
 });
 
 export function buildApprovalCenterPayload(form, requestType) {

@@ -112,7 +112,7 @@ test('documents: upload, list, void with an inline reason, copy-to recipients', 
 
 test('form: header fields, draft save and submit with preflight and validation', () => {
   for (const api of ['save_approval_center_draft', 'submit_approval_center_draft', 'modify_procurement_request', 'preview_route']) assert.match(form, new RegExp(api));
-  for (const text of ['organizationPreflightMessage', 'validateRequestForm', 'buildApprovalCenterPayload', 'canSubmitForOthers', 'FIXED_ASSET_CATEGORIES', 'purchase_method', 'asset_nature', 'procurement_scope', 'non_project_allocation_type', 'non_project_cost_center', 'non_project_department', 'purchaser_user']) assert.match(form, new RegExp(text));
+  for (const text of ['organizationPreflightMessage', 'validateRequestForm', 'buildApprovalCenterPayload', 'canSubmitForOthers', 'FIXED_ASSET_CATEGORIES', 'purchase_method', 'asset_nature', 'procurement_scope', 'non_project_department', 'expenseCategoryOf', 'ctx.departments', 'purchaser_user']) assert.match(form, new RegExp(text));
   assert.doesNotMatch(form, /fixedCategories/);
   assert.match(form, /采购经办人/);
   assert.match(form, /申请说明/);

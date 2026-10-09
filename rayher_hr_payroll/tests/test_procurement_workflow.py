@@ -5,6 +5,7 @@ import pytest
 from rayher_hr_payroll.procurement_workflow import (
     ProcurementWorkflowError,
     derive_prepayment_overdue,
+    procurement_expense_category,
     transition_business_state,
     validate_payment_submission,
     validate_procurement_submission,
@@ -119,25 +120,28 @@ def test_procurement_submission_accepts_category_depth_at_or_above_three():
         }]))
 
 
-def test_non_project_procurement_requires_explicit_allocation():
-    with pytest.raises(ProcurementWorkflowError, match="非项目归属"):
-        validate_procurement_submission(project_request(
-            procurement_scope="非项目采购", project="", project_owner="",
-        ))
-    validate_procurement_submission(project_request(
-        procurement_scope="非项目采购", project="", project_owner="",
-        non_project_allocation_type="非项目采购",
-    ))
-    with pytest.raises(ProcurementWorkflowError, match="成本中心"):
-        validate_procurement_submission(project_request(
-            procurement_scope="非项目采购", project="", project_owner="",
-            non_project_allocation_type="成本中心", non_project_cost_center="",
-        ))
+def test_non_project_procurement_must_pick_a_department_that_has_an_expense_category():
+    non_project = dict(procurement_scope="非项目采购", project="", project_owner="")
     with pytest.raises(ProcurementWorkflowError, match="所属部门"):
-        validate_procurement_submission(project_request(
-            procurement_scope="非项目采购", project="", project_owner="",
-            non_project_allocation_type="部门", non_project_department="",
-        ))
+        validate_procurement_submission(project_request(**non_project))
+    with pytest.raises(ProcurementWorkflowError, match="所属部门"):      # 原来的"成本中心""非项目采购"选项不再有效
+        validate_procurement_submission(project_request(**non_project, non_project_allocation_type="成本中心", non_project_cost_center="CC-1"))
+    with pytest.raises(ProcurementWorkflowError, match="所属部门"):
+        validate_procurement_submission(project_request(**non_project, non_project_allocation_type="部门", non_project_department=""))
+    with pytest.raises(ProcurementWorkflowError, match="费用类别"):      # 不是正式部门（旧的英文部门）取不到费用类别
+        validate_procurement_submission(project_request(**non_project, non_project_allocation_type="部门", non_project_department="Accounts - RAY"))
+    validate_procurement_submission(project_request(**non_project, non_project_allocation_type="部门", non_project_department="财务部 - RAY"))
+
+
+def test_procurement_expense_category_follows_project_or_department():
+    assert procurement_expense_category("项目采购", "") == "研发费用"
+    assert procurement_expense_category("项目采购", "财务部 - RAY") == "研发费用"      # 项目采购不看部门
+    assert procurement_expense_category("非项目采购", "研发软件部 - RAY") == "研发费用"
+    assert procurement_expense_category("非项目采购", "财务部 - RAY") == "管理费用"
+    assert procurement_expense_category("非项目采购", "制造部 - RAY") == "生产成本"
+    assert procurement_expense_category("非项目采购", "客服部 - SHGL") == "销售费用"
+    assert procurement_expense_category("非项目采购", "") == ""
+    assert procurement_expense_category("", "财务部 - RAY") == ""
 
 
 def test_100_percent_prepayment_requires_arrival_date_risk_note_and_documents():
