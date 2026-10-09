@@ -772,43 +772,10 @@ export function stepTracker(row, names = {}) {
   }));
 }
 
-// ---------------------------------------------------------------- 月历
+// ---------------------------------------------------------------- 取数的月份
 
 export function periodOf(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
-
-export function shiftPeriod(period, delta) {
-  const [year, month] = String(period).split('-').map(Number);
-  const moved = new Date(year, month - 1 + delta, 1);
-  return periodOf(moved);
-}
-
-export function periodTitle(period) {
-  const [year, month] = String(period).split('-').map(Number);
-  return `${year} 年 ${month} 月`;
-}
-
-// 月历格子：前面补空格（周一开头），每天带上申请记录、是不是休息日、今天。
-export function calendarCells({ period, firstWeekday, daysInMonth, workDates = [], entries = [], selected = [], today = isoDate(new Date()) }) {
-  const work = new Set(workDates);
-  const chosen = new Set(selected);
-  const byDate = new Map();
-  entries.forEach((entry) => byDate.set(entry.date, [...(byDate.get(entry.date) || []), entry]));
-  const cells = [];
-  for (let blank = 0; blank < Number(firstWeekday || 0); blank += 1) cells.push({ blank: true, key: `b${blank}` });
-  for (let day = 1; day <= Number(daysInMonth || 0); day += 1) {
-    const date = `${period}-${String(day).padStart(2, '0')}`;
-    const items = byDate.get(date) || [];
-    const first = items[0] || null;
-    cells.push({
-      blank: false, key: date, date, day, off: !work.has(date), today: date === today, chosen: chosen.has(date),
-      kind: first ? first.kind : '', pending: items.length ? items.every((item) => item.pending) : false,
-      tag: first ? (items.length > 1 ? `${items.length} 项` : first.label) : (date === today ? '今天' : ''),
-    });
-  }
-  while (cells.length % 7) cells.push({ blank: true, key: `t${cells.length}` });
-  return cells;
 }
 
 // ---------------------------------------------------------------- 审批进度
@@ -830,30 +797,49 @@ export function stepStates(request, names = {}) {
 
 // ---------------------------------------------------------------- 部门这两周谁不在
 
-// 后端 team 数据（每天已通过 / 审批中的人名）→ 每个人哪几天不在：[{name, text: "10-26 至 10-28、10-30", pending}]。
-// 连续的工作日合成一段（周五到下周一也算连续）；只给日期，不给类型和事由。
-export function teamAbsences(team) {
-  const workdays = (team?.days || []).filter((day) => !day.off_day);
+// 后端 team 数据（每天已通过 / 审批中的人名）→ 两周网格：只列出这两周有人不在的人，每人每天一格；
+// 最后一行是每天不在的人数，工作日里 2 人以上不在标 crowded。只给名字和日期，不给类型和事由。
+// 返回 {days: [{date, label, title, off}], rows: [{name, pending, cells: [{state: '' | approved | pending, title}]}], totals: [{n, crowded}], note, range}。
+export function teamGrid(team) {
+  const source = Array.isArray(team?.days) ? team.days : [];
+  const days = source.map((day) => {
+    const text = day.label || shortDate(day.date).replace('-', '/');
+    return {
+      date: day.date, label: String(Number(String(day.date || '').slice(8, 10)) || text), title: [text, day.weekday].filter(Boolean).join(' '), off: Boolean(day.off_day),
+    };
+  });
   const found = new Map();
-  workdays.forEach((day, index) => {
-    [['approved', day.approved], ['pending', day.pending]].forEach(([kind, names]) => (names || []).forEach((name) => {
-      const entry = found.get(name) || { name, hits: [] };
-      entry.hits.push({ index, date: day.date, pending: kind === 'pending' });
+  source.forEach((day, index) => {
+    const approved = new Set(day.approved || []);
+    [['approved', [...approved]], ['pending', (day.pending || []).filter((name) => !approved.has(name))]].forEach(([state, names]) => names.forEach((name) => {
+      const entry = found.get(name) || { name, states: new Array(days.length).fill('') };
+      entry.states[index] = state;
       found.set(name, entry);
     }));
   });
-  return [...found.values()].map(({ name, hits }) => {
-    const runs = [];
-    hits.sort((left, right) => left.index - right.index).forEach((hit) => {
-      const last = runs[runs.length - 1];
-      if (last && hit.index === last.end.index + 1) last.end = hit;
-      else runs.push({ start: hit, end: hit });
-    });
-    return {
-      name, pending: hits.every((hit) => hit.pending), first: hits[0].index,
-      text: runs.map((run) => (run.start.date === run.end.date ? shortDate(run.start.date) : `${shortDate(run.start.date)} 至 ${shortDate(run.end.date)}`)).join('、'),
-    };
-  }).sort((left, right) => left.first - right.first || left.name.localeCompare(right.name, 'zh'));
+  const rows = [...found.values()].map(({ name, states }) => ({
+    name,
+    first: states.findIndex(Boolean),
+    pending: states.filter(Boolean).every((state) => state === 'pending'),
+    cells: states.map((state, index) => ({ state, title: state ? `${name} · ${days[index].title}${state === 'pending' ? '（审批中）' : ''}` : '' })),
+  })).sort((left, right) => left.first - right.first || left.name.localeCompare(right.name, 'zh'))
+    .map(({ first, ...row }) => row);
+  const totals = days.map((day, index) => {
+    const n = rows.filter((row) => row.cells[index].state).length;
+    return { n, crowded: !day.off && n >= 2 };
+  });
+  const range = days.length ? `${source[0].label || shortDate(source[0].date)} 至 ${source[source.length - 1].label || shortDate(source[source.length - 1].date)}` : '';
+  return { days, rows, totals, note: team?.note || '', range };
+}
+
+// 我审批过的：后端给的是我那一步的状态（已通过 / 已拒绝 …）。
+export function reviewedResult(row) {
+  return /拒绝|驳回/.test(String(row?.my_status || '')) ? { text: '已驳回', tone: 'bad' } : { text: '已同意', tone: 'ok' };
+}
+
+// 我处理的时间：10-09 14:30。
+export function actedText(row) {
+  return String(row?.acted_on || '').replace('T', ' ').slice(5, 16);
 }
 
 // ---------------------------------------------------------------- 额度卡片

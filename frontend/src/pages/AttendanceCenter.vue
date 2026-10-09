@@ -154,11 +154,6 @@ function clearToday() {
   go(listLocation({ scope: 'all', filter: page.value.filter }, homePath), { replace: true });
 }
 
-function onPeriod(next) {
-  period.value = next;
-  loadHome();
-}
-
 // ---------------------------------------------------------------- 审批和撤回
 function summary(row) {
   return `${row.employee_name || ''} 的${rowLabel(row)}申请`;
@@ -200,9 +195,23 @@ async function approveMany(rows) {
   await refreshLists();
 }
 
-// 驳回必须写原因：带着"驳回"进入详情页，在那里填。
-function rejectRow(row) {
-  go(detailLocation({ name: row.name, type: rowLabel(row) }, currentOrigin(), { reject: true }));
+// 首页卡片上直接驳回：原因必填，可以选退回给谁；失败时把原因文字还给卡片（留在卡片上重试），成功返回空字符串。
+async function rejectNow(row, note, target) {
+  if (busy.value) return '请稍等，上一个操作还没完成';
+  busy.value = true;
+  flash();
+  let failure = '';
+  try {
+    await api.act({ name: row.name, action: 'reject', note, expected_step_key: row.current_step_key || '', reject_target: target || 'applicant' });
+    flash(`已驳回 · ${summary(row)}`);
+  } catch (error) {
+    const text = messageOf(error);
+    failure = STALE_STEP.test(text) ? `${text}，已刷新列表` : text;
+  } finally {
+    busy.value = false;
+    await refreshLists();
+  }
+  return failure;
 }
 
 async function withdrawRow(row) {
@@ -330,10 +339,10 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
     <div v-if="notice" class="banner info" role="status">{{ notice }}</div>
 
     <AttendanceHome
-      v-if="view === 'home'" :home="home" :mine="mine" :review="review" :loaded="loaded" :now="now" :busy="busy"
-      :has-employee="hasEmployee" :is-approver="isApprover" :available-types="availableTypes" :period="period" :no-employee-text="noEmployeeText"
-      @new="goNew" @list="goList" @open="openRow" @approve="approveRow" @reject="rejectRow" @withdraw="withdrawRow"
-      @continue="continueDraft" @period="onPeriod" />
+      v-if="view === 'home'" :home="home" :mine="mine" :review="review" :reviewed="reviewed" :loaded="loaded" :now="now" :busy="busy"
+      :has-employee="hasEmployee" :is-approver="isApprover" :available-types="availableTypes" :no-employee-text="noEmployeeText" :reject-row="rejectNow"
+      @new="goNew" @list="goList" @open="openRow" @approve="approveRow" @withdraw="withdrawRow"
+      @continue="continueDraft" />
 
     <AttendanceList
       v-else-if="view === 'list'" :page="page" :sets="listSets" :names="listNames" :loaded="loaded" :now="now" :busy="busy"

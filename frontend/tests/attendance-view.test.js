@@ -3,12 +3,12 @@ import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import {
   ATTENDANCE_HOME_PATH, DAY_RULE_MESSAGE, LEAVE_RULES, backLabel, backLocation, balanceKpis, breakdownText, buildFields, byWait,
-  calendarCells, canQuickApprove, contextFilter, createLatest, customCap, dayChip, dayLabel, dayModeText, dayNote, dayRows, defaultScope,
+  canQuickApprove, contextFilter, createLatest, customCap, dayChip, dayLabel, dayModeText, dayNote, dayRows, defaultScope,
   departmentLabel, detailLocation, durationText, effectLine, effectRows, filterRows, formSummary, homeLocation, hoursOfMode, hoursInText,
   invalidLeaveDays, kindOf, listLocation, listTitle, mergeDays, mineSummary, modeAvailable, modeOfHours, newButtonLabel, newLocation,
-  newTitle, nodeText, numText, originOf, originQuery, parseLocation, pathForFilter, periodTitle, personShort, pickMode, rangeText,
-  rejectionOf, requestTitle, returnedDrafts, rowChips, rowDays, scopeTabs, shiftPeriod, shiftText, slotClash, slotNote, statusTag,
-  stepHours, stepRole, stepStates, stepTracker, subjectFor, submittedText, teamAbsences, totalHours, totalOf, typeChips, typeCounts,
+  newTitle, nodeText, numText, originOf, originQuery, parseLocation, pathForFilter, personShort, pickMode, rangeText,
+  actedText, rejectionOf, requestTitle, returnedDrafts, reviewedResult, rowChips, rowDays, scopeTabs, shiftText, slotClash, slotNote, statusTag,
+  stepHours, stepRole, stepStates, stepTracker, subjectFor, submittedText, teamGrid, totalHours, totalOf, typeChips, typeCounts,
   typeForPath, validLeaveHours, validScope, waitText, workedSpan,
 } from "../src/lib/attendanceView.js";
 
@@ -469,20 +469,35 @@ test("my applications: in-progress count and the step tracker", () => {
   assert.equal(rejectionOf({}), null);
 });
 
-test("who is away in the next two weeks: workdays in a row merge, only dates are shown", () => {
-  const day = (date, off, approved = [], pending = []) => ({ date, off_day: off, approved, pending });
-  const team = { days: [
-    day("2026-10-23", false, ["演示员工186", "演示员工108"]), day("2026-10-24", true), day("2026-10-25", true),
-    day("2026-10-26", false, ["演示员工186"]), day("2026-10-27", false, ["演示员工186"], ["演示员工112"]), day("2026-10-28", false, ["演示员工108"]),
+test("who is away in the next two weeks: one row per person, one cell per day, only names and dates", () => {
+  const day = (date, off, approved = [], pending = [], label = "") => ({ date, label, weekday: "", off_day: off, approved, pending });
+  const team = { note: "10/26–10/27 会有 2 人以上同时不在（演示员工108、演示员工186）。", days: [
+    day("2026-10-23", false, ["演示员工186", "演示员工108"], [], "10/23"), day("2026-10-24", true), day("2026-10-25", true),
+    day("2026-10-26", false, ["演示员工186"], [], "10/26"), day("2026-10-27", false, ["演示员工186"], ["演示员工112", "演示员工186"], "10/27"), day("2026-10-28", false, ["演示员工108"], [], "10/28"),
   ] };
-  const people = teamAbsences(team);
-  const by = Object.fromEntries(people.map((person) => [person.name, person]));
-  assert.equal(by["演示员工186"].text, "10-23 至 10-27");        // 周五到下周二是连续的工作日
-  assert.equal(by["演示员工108"].text, "10-23、10-28");
-  assert.deepEqual([by["演示员工112"].text, by["演示员工112"].pending, by["演示员工186"].pending], ["10-27", true, false]);
-  assert.equal(people.at(-1).name, "演示员工112");                 // 先按最早不在的那天排
-  assert.deepEqual(teamAbsences({ days: [] }), []);
-  assert.deepEqual(teamAbsences(null), []);
+  const grid = teamGrid(team);
+  assert.deepEqual(grid.rows.map((row) => row.name), ["演示员工108", "演示员工186", "演示员工112"]);   // 先按最早不在的那天排，同一天按名字
+  const by = Object.fromEntries(grid.rows.map((row) => [row.name, row]));
+  assert.deepEqual(by["演示员工186"].cells.map((cell) => cell.state), ["approved", "", "", "approved", "approved", ""]);   // 同一天已通过又审批中，只算已通过
+  assert.deepEqual(by["演示员工112"].cells.map((cell) => cell.state), ["", "", "", "", "pending", ""]);
+  assert.equal(by["演示员工112"].pending, true);
+  assert.equal(by["演示员工186"].pending, false);
+  assert.equal(by["演示员工112"].cells[4].title, "演示员工112 · 10/27（审批中）");
+  assert.deepEqual(grid.days.map((item) => [item.label, item.off]), [["23", false], ["24", true], ["25", true], ["26", false], ["27", false], ["28", false]]);
+  assert.deepEqual(grid.totals.map((item) => item.n), [2, 0, 0, 1, 2, 1]);
+  assert.deepEqual(grid.totals.map((item) => item.crowded), [true, false, false, false, true, false]);   // 工作日 2 人以上
+  assert.equal(grid.range, "10/23 至 10/28");
+  assert.equal(grid.note, team.note);
+  assert.ok(!JSON.stringify(grid).includes("事假"));                                                          // 不带类型和事由
+  assert.deepEqual(teamGrid({ days: [] }).rows, []);
+  assert.deepEqual(teamGrid(null), { days: [], rows: [], totals: [], note: "", range: "" });
+});
+
+test("the reviewed list says what I did and when", () => {
+  assert.deepEqual(reviewedResult({ my_status: "已通过" }), { text: "已同意", tone: "ok" });
+  assert.deepEqual(reviewedResult({ my_status: "已拒绝" }), { text: "已驳回", tone: "bad" });
+  assert.equal(actedText({ acted_on: "2026-10-09 14:30:12" }), "10-09 14:30");
+  assert.equal(actedText({}), "");
 });
 
 test("the balance cards", () => {
@@ -494,33 +509,7 @@ test("the balance cards", () => {
 
 // ---------------------------------------------------------------- 月历、日期、请求
 
-test("the calendar starts on Monday, marks rest days, pending days, today and the days being filled in", () => {
-  const cells = calendarCells({
-    period: "2026-10", firstWeekday: 3, daysInMonth: 31, today: "2026-10-14",
-    workDates: ["2026-10-13", "2026-10-14", "2026-10-15"],
-    entries: [
-      { date: "2026-10-13", kind: "leave", label: "事假", hours: 8, pending: true, request: "OA-1" },
-      { date: "2026-10-15", kind: "overtime", label: "加班", hours: 6, pending: false, request: "OA-2" },
-      { date: "2026-10-15", kind: "comp", label: "调休", hours: 2, pending: false, request: "OA-3" },
-    ],
-    selected: ["2026-10-14"],
-  });
-  assert.equal(cells.length % 7, 0);
-  assert.equal(cells.filter((cell) => cell.blank).slice(0, 3).length, 3);
-  const day = (n) => cells.find((cell) => cell.day === n);
-  assert.deepEqual([day(13).kind, day(13).pending, day(13).tag], ["leave", true, "事假"]);
-  assert.equal(day(14).today, true);
-  assert.equal(day(14).chosen, true);
-  assert.equal(day(14).tag, "今天");
-  assert.equal(day(15).tag, "2 项");
-  assert.equal(day(17).off, true);
-  assert.equal(day(13).off, false);
-});
-
-test("periods move by month and are titled in Chinese; dates read naturally", () => {
-  assert.equal(shiftPeriod("2026-12", 1), "2027-01");
-  assert.equal(shiftPeriod("2026-01", -1), "2025-12");
-  assert.equal(periodTitle("2026-10"), "2026 年 10 月");
+test("dates read naturally", () => {
   assert.equal(rangeText("2026-10-13", "2026-10-14"), "10月13日–14日");
   assert.equal(rangeText("2026-09-30", "2026-10-02"), "9月30日–10月2日");
   assert.equal(rangeText("2026-10-13", "2026-10-13"), "10月13日");
@@ -559,9 +548,22 @@ test("the four views are wired: home buttons, list header, detail actions and th
   assert.match(home, /v-for="\(type, index\) in availableTypes"/);
   assert.match(home, /emit\('new', TYPES\[type\]\.label\)/);
   assert.match(home, /＋ 新建\{\{ TYPES\[type\]\.label \}\}/);
-  for (const text of ["年假可用", "调休可用", "我的申请", "待我审批", "部门这两周谁不在", "我的申请 · 进行中", "继续填写", "撤回", "查看"]) assert.ok(home.includes(text), text);
+  for (const text of ["年假可用", "调休可用", "我的申请", "待我审批", "我审批过的 · 最近", "批之前先看影响", "确认驳回", "驳回原因（必填），申请人会看到", "驳回必须写原因", "去详情处理"]) assert.ok(home.includes(text), text);
   assert.match(home, /emit\('list', 'todo', 'all'\)/);
-  assert.match(home, /@click\.stop="emit\('reject', row\)"/);
+  assert.match(home, /emit\('list', 'done', 'all'\)/);
+  // 驳回在卡片上完成：原因必填、可以选退回给谁；点申请人那一块才进详情，按钮不会同时触发进详情
+  assert.match(home, /props\.rejectRow \? await props\.rejectRow\(row, note\.value\.trim\(\), target\.value\)/);
+  assert.match(home, /row\.rejection_targets/);
+  assert.match(home, /class="at-rv-top" role="button"/);
+  assert.match(home, /row\.hints/);
+  assert.doesNotMatch(home, /emit\('reject'/);
+  assert.match(home, /<AttendanceMineCard/);
+  assert.match(home, /<AttendanceTeamGrid :teams="review\.team/);
+  assert.doesNotMatch(home, /AttendanceCalendar/);
+  const mineCard = read("../src/components/attendance/AttendanceMineCard.vue");
+  for (const text of ["我的申请 · 进行中", "继续填写", "撤回", "查看", "没有进行中的申请"]) assert.ok(mineCard.includes(text), text);
+  const grid = read("../src/components/attendance/AttendanceTeamGrid.vue");
+  for (const text of ["部门这两周谁不在", "不在人数", "这两周没有人请假或调休", "请假和调休，不含加班；只显示日期。"]) assert.ok(grid.includes(text), text);
   const list = read("../src/components/attendance/AttendanceList.vue");
   assert.match(list, /newButtonLabel\(filter\)/);
   // 列表的新建按钮把当前类型筛选带出去：加班列表新建加班，全部列表才让用户先选
@@ -608,6 +610,8 @@ test("the page keeps the context: picker only without a type, guard for unsaved 
   assert.match(page, /newLocation\(/);
   assert.match(page, /detailLocation\(/);
   assert.match(page, /expected_step_key: row\.current_step_key/);
+  assert.match(page, /action: 'reject', note, expected_step_key: row\.current_step_key \|\| '', reject_target: target \|\| 'applicant'/);   // 首页卡片上直接驳回
+  assert.match(page, /:reject-row="rejectNow"/);
   assert.match(page, /router\.getRoutes\(\)/);
   assert.match(page, /\{ replace: true \}/);
   const view = read("../src/lib/attendanceView.js");
@@ -626,5 +630,6 @@ test("the routes stay as they were, and the replaced components are gone", () =>
   assert.match(router, /path: '\/approval\/reimbursement', component: approvalPage/);
   assert.equal(exists("../src/components/attendance/AttendanceCards.vue"), false);
   assert.equal(exists("../src/components/attendance/AttendanceReview.vue"), false);
-  for (const name of ["AttendanceHome", "AttendanceList", "AttendanceDetail", "AttendanceForm", "AttendanceCalendar"]) assert.equal(exists(`../src/components/attendance/${name}.vue`), true, name);
+  for (const name of ["AttendanceHome", "AttendanceList", "AttendanceDetail", "AttendanceForm", "AttendanceMineCard", "AttendanceTeamGrid"]) assert.equal(exists(`../src/components/attendance/${name}.vue`), true, name);
+  assert.equal(exists("../src/components/attendance/AttendanceCalendar.vue"), false);   // 首页的月历换成了部门两周网格
 });

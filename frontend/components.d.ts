@@ -9,11 +9,12 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AccommodationTabs: typeof import('./src/components/AccommodationTabs.vue')['default']
-    AttendanceCalendar: typeof import('./src/components/attendance/AttendanceCalendar.vue')['default']
     AttendanceDetail: typeof import('./src/components/attendance/AttendanceDetail.vue')['default']
     AttendanceForm: typeof import('./src/components/attendance/AttendanceForm.vue')['default']
     AttendanceHome: typeof import('./src/components/attendance/AttendanceHome.vue')['default']
     AttendanceList: typeof import('./src/components/attendance/AttendanceList.vue')['default']
+    AttendanceMineCard: typeof import('./src/components/attendance/AttendanceMineCard.vue')['default']
+    AttendanceTeamGrid: typeof import('./src/components/attendance/AttendanceTeamGrid.vue')['default']
     ClaimWorkbench: typeof import('./src/components/claim/ClaimWorkbench.vue')['default']
     ColumnChart: typeof import('./src/components/expense-ui/ColumnChart.vue')['default']
     DashAlerts: typeof import('./src/components/dashboard/DashAlerts.vue')['default']
@@ -29,6 +30,7 @@ declare module 'vue' {
     ExpenseApprovalRecords: typeof import('./src/components/expense/ExpenseApprovalRecords.vue')['default']
     ExpenseStatistics: typeof import('./src/components/expense/ExpenseStatistics.vue')['default']
     ExpenseWorkbench: typeof import('./src/components/ExpenseWorkbench.vue')['default']
+    FeeForm: typeof import('./src/components/accommodation/FeeForm.vue')['default']
     HBars: typeof import('./src/components/expense-ui/HBars.vue')['default']
     InvoicePreviewDrawer: typeof import('./src/components/invoice/InvoicePreviewDrawer.vue')['default']
     InvoiceRecognitionPanel: typeof import('./src/components/invoice/InvoiceRecognitionPanel.vue')['default']

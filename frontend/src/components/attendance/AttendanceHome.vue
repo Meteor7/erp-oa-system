@@ -1,35 +1,40 @@
 <script setup>
-// 考勤中心首页：额度和待办一眼看到（年假 / 调休 / 我的申请 / 待我审批），待我审批的可以直接同意、驳回要进详情写原因，
-// 我的申请看到卡在哪一步；右边是我的月历和本部门这两周谁不在（请假和调休，只显示日期）。
+// 考勤中心首页：额度和待办一眼看到（年假 / 调休 / 我的申请 / 待我审批）。
+// 待我审批是审批卡片：批之前先看影响（扣不扣年假、事假第几次、同期有谁不在），同意和驳回（写原因、选退回给谁）都在卡片上完成，
+// 点申请人那一块才进详情；我审批过的在下面。右栏是我的申请（卡在哪一步）和部门这两周谁不在。
+// 只有申请、不审批的人：我的申请放在主栏，不显示右栏。
 import { computed, ref } from 'vue';
 import {
-  TYPES, balanceKpis, byWait, canQuickApprove, effectLine, filterRows, kindOf, mineSummary, numText, personShort, requestTitle,
-  returnedDrafts, rejectionOf, rowChips, statusTag, stepTracker, submittedText, teamAbsences, totalOf, typeChips, typeCounts, waitText,
+  TYPES, actedText, balanceKpis, byWait, canQuickApprove, effectLine, filterRows, kindOf, mineSummary, numText, personShort,
+  requestTitle, returnedDrafts, rejectionOf, reviewedResult, rowChips, totalOf, typeChips, typeCounts, waitText,
 } from '../../lib/attendanceView.js';
-import AttendanceCalendar from './AttendanceCalendar.vue';
+import AttendanceMineCard from './AttendanceMineCard.vue';
+import AttendanceTeamGrid from './AttendanceTeamGrid.vue';
 
 const props = defineProps({
   home: { type: Object, default: null },
   mine: { type: Object, required: true },
   review: { type: Object, required: true },
+  reviewed: { type: Array, default: () => [] },
   loaded: { type: Object, required: true },
   now: { type: Number, default: () => Date.now() },
   busy: { type: Boolean, default: false },
   hasEmployee: { type: Boolean, default: false },
   isApprover: { type: Boolean, default: false },
   availableTypes: { type: Array, default: () => [] },
-  period: { type: String, required: true },
   noEmployeeText: { type: String, default: '' },
+  // 驳回：(单据, 原因, 退回给谁) → 失败时返回错误文字，成功返回空字符串。
+  rejectRow: { type: Function, default: null },
 });
-const emit = defineEmits(['new', 'list', 'open', 'approve', 'reject', 'withdraw', 'continue', 'period']);
+const emit = defineEmits(['new', 'list', 'open', 'approve', 'withdraw', 'continue']);
 
 const chip = ref('all');
 const kpi = computed(() => balanceKpis(props.home));
 const counts = computed(() => typeCounts(props.review.items));
 const chips = computed(() => typeChips(counts.value, chip.value, true));
 const todoRows = computed(() => byWait(filterRows(props.review.items, chip.value), props.now).slice(0, 3));
+const doneRows = computed(() => (props.reviewed || []).slice(0, 3));
 const mineInfo = computed(() => mineSummary(props.mine.items));
-const mineRows = computed(() => mineInfo.value.activeRows.slice(0, 3));
 const returned = computed(() => returnedDrafts(props.mine.items));
 const longest = computed(() => {
   const days = props.review.items.map((row) => waitText(row, props.now)).filter((text) => text.endsWith('天')).map((text) => parseInt(text, 10));
@@ -39,12 +44,43 @@ const todoHint = computed(() => {
   if (!props.review.items.length) return '全部处理完了';
   return longest.value ? `最久等了 ${longest.value} 天 · 现在处理 →` : '现在处理 →';
 });
-const absences = computed(() => (props.review.team || []).map((team) => ({ department: team.department, headcount: team.headcount, people: teamAbsences(team) })));
 
 function rejectionText(row) {
   const rejection = rejectionOf(row);
   const who = props.mine.names[String(rejection?.actor || '').toLowerCase()] || String(rejection?.actor || '').split('@')[0];
   return `${who ? `${who}：` : ''}${rejection?.note || '请修改后重新提交'}`;
+}
+
+// ---------------------------------------------------------------- 卡片上直接驳回
+const rejectFor = ref('');
+const note = ref('');
+const target = ref('applicant');
+const noteError = ref(false);
+const rejectError = ref('');
+
+function startReject(row) {
+  rejectFor.value = row.name;
+  note.value = '';
+  noteError.value = false;
+  rejectError.value = '';
+  target.value = row.rejection_targets?.[0]?.target || 'applicant';
+}
+
+function cancelReject() {
+  rejectFor.value = '';
+  rejectError.value = '';
+}
+
+async function confirmReject(row) {
+  if (!note.value.trim()) {
+    noteError.value = true;
+    return;
+  }
+  noteError.value = false;
+  rejectError.value = '';
+  const failure = props.rejectRow ? await props.rejectRow(row, note.value.trim(), target.value) : '';
+  if (failure) rejectError.value = failure;
+  else rejectFor.value = '';
 }
 </script>
 
@@ -96,7 +132,7 @@ function rejectionText(row) {
       </button>
     </div>
 
-    <div class="at-grid2">
+    <div :class="['at-grid2', { solo: !isApprover }]">
       <div class="at-col">
         <section v-if="isApprover" class="panel flush" aria-label="待我审批">
           <div class="at-hd">
@@ -108,66 +144,83 @@ function rejectionText(row) {
           </div>
           <div v-if="!loaded.review" class="empty">正在加载…</div>
           <div v-else-if="!todoRows.length" class="empty">没有需要你审批的申请（到“我审批过的”里可以看处理记录）</div>
-          <div v-for="row in todoRows" :key="row.name" class="at-item" role="button" tabindex="0" @click="emit('open', row)" @keydown.enter="emit('open', row)">
+          <article v-for="row in todoRows" :key="row.name" class="at-rv">
+            <div class="at-rv-top" role="button" tabindex="0" :aria-label="'打开 ' + row.employee_name + ' 的申请详情'" @click="emit('open', row)" @keydown.enter="emit('open', row)">
+              <span class="at-av">{{ personShort(row.employee_name) }}</span>
+              <div class="at-main">
+                <div class="at-line">
+                  <b>{{ row.employee_name }}</b><span class="muted">{{ row.department }}</span>
+                  <span :class="['at-tag', kindOf(row).tone]">{{ kindOf(row).text }}</span>
+                  <span v-if="waitText(row, now)" class="at-tag warn">等你 {{ waitText(row, now) }}</span>
+                </div>
+                <div class="at-dchips">
+                  <span v-for="day in rowChips(row, 4).chips" :key="day.date + day.text" :class="['at-dchip', day.mode]">{{ day.text }}</span>
+                  <span v-if="rowChips(row, 4).more" class="at-dchip">… 共 {{ rowChips(row).chips.length }} 天</span>
+                </div>
+                <div class="muted">合计 {{ numText(totalOf(row)) }} 小时<template v-if="row.reason"> · {{ row.reason }}</template></div>
+              </div>
+              <span class="link">详情 →</span>
+            </div>
+            <div class="at-rv-body" aria-label="批之前先看影响">
+              <span class="at-lab">批之前先看影响</span>
+              <template v-if="row.hints && row.hints.length">
+                <span v-for="(hint, index) in row.hints" :key="index" :class="['at-tag', hint.tone]">{{ hint.text }}</span>
+              </template>
+              <span v-else class="muted">{{ effectLine(row) }}</span>
+            </div>
+            <div v-if="rejectFor === row.name" class="at-rj">
+              <textarea v-model="note" :aria-invalid="noteError" aria-label="驳回原因" placeholder="驳回原因（必填），申请人会看到" rows="2"></textarea>
+              <div v-if="noteError" class="at-err" role="alert">驳回必须写原因</div>
+              <div v-if="rejectError" class="at-err" role="alert">{{ rejectError }}</div>
+              <div class="at-rj-bar">
+                <select v-if="row.rejection_targets?.length" v-model="target" aria-label="驳回给谁" class="cell">
+                  <option v-for="item in row.rejection_targets" :key="item.target" :value="item.target">驳回至：{{ item.label }}</option>
+                </select>
+                <span class="at-right at-acts">
+                  <button type="button" class="btn sm" :disabled="busy" @click="cancelReject">取消</button>
+                  <button type="button" class="btn sm danger" :disabled="busy" @click="confirmReject(row)">确认驳回</button>
+                </span>
+              </div>
+            </div>
+            <div v-else class="at-acts at-rv-acts">
+              <button type="button" class="btn sm danger" :disabled="busy" @click="startReject(row)">驳回</button>
+              <button v-if="canQuickApprove(row)" type="button" class="btn sm pri" :disabled="busy" @click="emit('approve', row)">同意</button>
+              <button v-else type="button" class="btn sm" @click="emit('open', row)">去详情处理</button>
+            </div>
+          </article>
+        </section>
+
+        <AttendanceMineCard
+          v-if="!isApprover" :mine="mine" :loaded="loaded.mine" :now="now" :busy="busy"
+          @list="(scope, filter) => emit('list', scope, filter)" @open="(row) => emit('open', row)" @withdraw="(row) => emit('withdraw', row)" @continue="(row) => emit('continue', row)" />
+
+        <section v-if="isApprover" class="panel flush" aria-label="我审批过的">
+          <div class="at-hd">
+            <b>我审批过的 · 最近</b><span class="at-cnt green">{{ reviewed.length }}</span>
+            <button type="button" class="link at-right" @click="emit('list', 'done', 'all')">全部 →</button>
+          </div>
+          <div v-if="!loaded.reviewed" class="empty">正在加载…</div>
+          <div v-else-if="!doneRows.length" class="empty">还没有处理过的申请</div>
+          <div v-for="row in doneRows" :key="row.name + String(row.acted_on || '')" class="at-item" role="button" tabindex="0" @click="emit('open', row)" @keydown.enter="emit('open', row)">
             <span class="at-av">{{ personShort(row.employee_name) }}</span>
             <div class="at-main">
               <div class="at-line">
-                <b>{{ row.employee_name }}</b><span class="muted">{{ row.department }}</span>
+                <b>{{ row.employee_name }}</b>
                 <span :class="['at-tag', kindOf(row).tone]">{{ kindOf(row).text }}</span>
-                <span v-if="waitText(row, now)" class="at-tag warn">等你 {{ waitText(row, now) }}</span>
+                <span :class="['at-tag', reviewedResult(row).tone]">{{ reviewedResult(row).text }}</span>
               </div>
-              <div class="at-dchips">
-                <span v-for="day in rowChips(row, 4).chips" :key="day.date + day.text" :class="['at-dchip', day.mode]">{{ day.text }}</span>
-                <span v-if="rowChips(row, 4).more" class="at-dchip">… 共 {{ rowChips(row).chips.length }} 天</span>
-              </div>
-              <div class="muted">合计 {{ numText(totalOf(row)) }} 小时 · {{ effectLine(row) }}</div>
+              <div class="muted">{{ actedText(row) }}<template v-if="row.note"> · {{ row.note }}</template></div>
             </div>
-            <div class="at-acts">
-              <button type="button" class="btn sm danger" :disabled="busy" @click.stop="emit('reject', row)">驳回</button>
-              <button v-if="canQuickApprove(row)" type="button" class="btn sm pri" :disabled="busy" @click.stop="emit('approve', row)">同意</button>
-              <button v-else type="button" class="btn sm" @click.stop="emit('open', row)">去详情处理</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel flush" aria-label="我的申请">
-          <div class="at-hd">
-            <b>我的申请 · 进行中</b><span class="at-cnt cobalt">{{ mineInfo.active }}</span>
-            <button type="button" class="link at-right" @click="emit('list', 'mine', 'all')">全部 {{ mineInfo.total }} 张 →</button>
-          </div>
-          <div v-if="!loaded.mine" class="empty">正在加载…</div>
-          <div v-else-if="!mineRows.length" class="empty">没有进行中的申请</div>
-          <div v-for="row in mineRows" :key="row.name" class="at-item" role="button" tabindex="0" @click="emit('open', row)" @keydown.enter="emit('open', row)">
-            <span :class="['at-av', 'kind', kindOf(row).tone]">{{ kindOf(row).label }}</span>
-            <div class="at-main">
-              <div class="at-line"><b>{{ requestTitle(row) }}</b><span :class="['at-tag', statusTag(row).tone]">{{ statusTag(row).text }}</span></div>
-              <div v-if="row.workflow_status !== '草稿'" class="at-steps">
-                <span v-for="(step, index) in stepTracker(row, mine.names)" :key="index" :class="['at-st', step.cls]"><i>{{ step.mark }}</i>{{ step.text }}</span>
-              </div>
-              <div class="muted">{{ numText(totalOf(row)) }} 小时 · {{ submittedText(row) }}<template v-if="waitText(row, now) && row.workflow_status !== '草稿'"> · 已等 {{ waitText(row, now) }}</template></div>
-            </div>
-            <div class="at-acts">
-              <button v-if="row.workflow_status === '草稿'" type="button" class="btn sm pri" @click.stop="emit('continue', row)">继续填写</button>
-              <template v-else>
-                <button type="button" class="btn sm" @click.stop="emit('open', row)">查看</button>
-                <button v-if="row.can_withdraw" type="button" class="btn sm" :disabled="busy" @click.stop="emit('withdraw', row)">撤回</button>
-              </template>
-            </div>
+            <button type="button" class="btn sm" @click.stop="emit('open', row)">查看</button>
           </div>
         </section>
       </div>
 
-      <div class="at-col">
-        <AttendanceCalendar v-if="hasEmployee" :home="home" :period="period" @period="(value) => emit('period', value)" />
-        <section v-if="absences.length" class="panel flush" aria-label="部门这两周谁不在">
-          <div class="at-hd"><b>部门这两周谁不在</b></div>
-          <template v-for="team in absences" :key="team.department">
-            <div v-if="absences.length > 1" class="at-dept">{{ team.department }} · {{ team.headcount }} 人</div>
-            <div v-for="person in team.people" :key="person.name" class="at-out"><span>{{ person.name }}</span><span class="muted">{{ person.text }}<template v-if="person.pending">（审批中）</template></span></div>
-            <div v-if="!team.people.length" class="at-out"><span class="muted">这两周没有人请假或调休</span></div>
-          </template>
-          <div class="muted at-foot">请假和调休，不含加班；只显示日期。</div>
-        </section>
+      <div v-if="isApprover" class="at-col">
+        <AttendanceMineCard
+          :mine="mine" :loaded="loaded.mine" :now="now" :busy="busy"
+          @list="(scope, filter) => emit('list', scope, filter)" @open="(row) => emit('open', row)" @withdraw="(row) => emit('withdraw', row)" @continue="(row) => emit('continue', row)" />
+        <AttendanceTeamGrid :teams="review.team || []" />
       </div>
     </div>
   </div>
