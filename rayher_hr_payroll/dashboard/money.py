@@ -793,8 +793,9 @@ def block_pay_steps(ctx):
             continue
         tone = "bad" if _waiting(part) else ("warn" if len(part) == top and top > 1 else "")
         rows.append(bar_row(name, len(part), _pct(len(part), top), tone))
+    to = _review_target(items)
     return bars("block.pay_steps", "付款审批卡在哪一步", rows, sub=f"付款审批中 {len(items)} 张" if items else "没有在审批的付款",
-                more="付款看板", to=_review_target(items),
+                more="付款看板" if to and to["key"] == "board.payment" else "查看审批", to=to,
                 hint="按当前审批节点的岗位拆（审批人账号反查岗位，对不上的归「其他」）；标红 = 这一步有等待超过 3 天的。"
                      "报销/付款路线：出纳审核 → 直属主管 → 财务主管 → 副总/总经理；采购付款路线：副总 → 总账 → 财务主管 → 出纳 → 总经理。")
 

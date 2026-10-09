@@ -19,12 +19,13 @@ const emit = defineEmits(['go']);
     </div>
     <p v-if="!todos.length" class="db-empty">{{ EMPTY_TODO_TEXT }}</p>
     <ul v-else class="db-rows">
-      <li v-for="(item, index) in todos" :key="index" class="db-row">
+      <li v-for="(item, index) in todos" :key="index" class="db-row" :class="{ 'is-link': resolve(item.target).state === 'link' }"
+          @click="resolve(item.target).state === 'link' && emit('go', resolve(item.target).to)">
         <div class="db-row-main">
           <div class="db-row-t"><span class="db-tag" :class="item.toneClass">{{ item.kind }}</span> {{ item.title }}</div>
           <div v-if="item.sub" class="db-mut">{{ item.sub }}</div>
         </div>
-        <button v-if="resolve(item.target).state === 'link'" type="button" class="db-btn is-pri" @click="emit('go', resolve(item.target).to)">{{ item.btn }}</button>
+        <button v-if="resolve(item.target).state === 'link'" type="button" class="db-btn is-pri" @click.stop="emit('go', resolve(item.target).to)">{{ item.btn }}</button>
         <button v-else-if="resolve(item.target).state !== 'none'" type="button" class="db-btn" disabled :title="targetHint(resolve(item.target).state)">{{ item.btn }}</button>
       </li>
     </ul>

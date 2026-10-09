@@ -95,6 +95,7 @@
 .db-row-t { font-size: 13.5px; }
 .db-go { flex: none; font-size: 12px; color: var(--db-brand-d); white-space: nowrap; }
 .db-todos .db-row { cursor: default; }
+.db-todos .db-row.is-link { cursor: pointer; }
 .db-todos .db-row:hover { background: #FCFCFD; }
 
 /* ------------------------------------------------------------ 图表块 */
