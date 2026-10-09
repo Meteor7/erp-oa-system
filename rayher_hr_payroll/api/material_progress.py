@@ -35,6 +35,18 @@ def _clean(value):
     return str(value or "").strip()
 
 
+# 合同已生效、货还在路上或还没结清的 PO 状态；看板首页的「交期逾期」和这里的 contract_overdue 用同一口径
+# （dashboard/procurement.py 的 EFFECTIVE_PO 必须与它相等，有测试盯着）。
+LIVE_PO_STATUSES = ("已生效", "供应商制作中", "到货验收中", "付款中")
+
+
+def contract_line_overdue(line, po_status, today):
+    """某个 PO 行：PO 合同已生效、填了合同交期且已过今天、还没收齐。没填合同交期的不算逾期。"""
+    due = str(getattr(line, "contract_delivery_date", None) or "")
+    return (po_status in LIVE_PO_STATUSES and bool(due) and due < str(today)
+            and float(getattr(line, "received_quantity", 0) or 0) < float(getattr(line, "quantity", 0) or 0))
+
+
 def can_access_board(user=None):
     user = _clean(user or frappe.session.user).lower()
     return user == "administrator" or "System Manager" in set(frappe.get_roles(user)) or user in position_users("pmc", "procurement_manager", "vice_manager", "general_manager")
@@ -352,6 +364,7 @@ def _serialize(board, source=None, metrics=None, approval_steps=None, po_statuse
         "po_quantity": metrics["po_quantity"],
         "received_quantity": metrics["received_quantity"],
         "contract_delivery_date": metrics["contract_delivery_date"],
+        "contract_overdue": bool(metrics.get("contract_overdue")),
         "inspection_status": metrics["inspection_status"],
         "paid_amount": metrics["paid_amount"],
         "po_total_amount": metrics["po_total_amount"],
@@ -383,7 +396,7 @@ def _batch_chain_context(boards):
             "pr_quantity": 0.0, "pr_remaining_quantity": 0.0,
             "price_approval_quantity": 0.0, "po_quantity": 0.0,
             "received_quantity": 0.0, "contract_dates": set(),
-            "inspection_values": set(), "po_names": set(),
+            "inspection_values": set(), "po_names": set(), "contract_overdue": False,
         }
 
     metrics = {key: empty_metrics() for key in keys}
@@ -426,6 +439,11 @@ def _batch_chain_context(boards):
     )
     po_by_name = {row.name: row for row in po_rows}
     po_statuses = {row.name: row.status for row in po_rows}
+    today = str(frappe.utils.today())
+    for row in po_lines:
+        item = metrics.get((row.source_request, row.source_line))
+        if item is not None and not item["contract_overdue"] and contract_line_overdue(row, po_statuses.get(row.parent), today):
+            item["contract_overdue"] = True
     for item in metrics.values():
         values = item.pop("inspection_values")
         if "不合格" in values:

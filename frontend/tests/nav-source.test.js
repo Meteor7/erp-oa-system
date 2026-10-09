@@ -58,7 +58,7 @@ test("app shell: notice banner, 404 is not a 403, notification links go through 
 });
 
 test("sidebar: group header links to the attendance home, children highlight by path prefix, any group auto-expands (P3-13)", () => {
-  assert.match(app, /\{ to: '\/approval\/leave\?view=home', step: '01', label: '请假\/加班\/调休', children: \[/);
+  assert.match(app, /\{ to: '\/approval\/attendance\?view=home', step: '01', label: '请假\/加班\/调休', children: \[/);
   assert.ok(app.includes("{ to: '/approval/leave', label: '请假审批' }"));
   assert.ok(app.includes("{ to: '/approval/overtime', label: '加班审批' }"));
   assert.ok(app.includes("{ to: '/approval/comp-time', label: '调休审批' }"));

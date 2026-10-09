@@ -205,11 +205,13 @@ export function ownerOfPath(path, candidates = []) {
 }
 
 // 带子项的分组里，哪一组含当前路径（用来自动展开）。items 形如 [{ label, children: [{ to }] }]。
+// 分组标题自己也可以是一个页面（考勤中心首页 /approval/attendance），它和子项一样让这一组展开。
 export function groupOwning(path, items = []) {
-  const all = items.flatMap((item) => (item.children || []).map((child) => child.to));
+  const all = items.flatMap((item) => [...(item.children || []).map((child) => child.to), ...(item.to ? [item.to] : [])]);
   const owner = ownerOfPath(path, all);
   if (!owner) return null;
-  return items.find((item) => (item.children || []).some((child) => splitPath(child.to).path === owner)) || null;
+  return items.find((item) => (item.children || []).some((child) => splitPath(child.to).path === owner)
+    || (item.to && splitPath(item.to).path === owner)) || null;
 }
 
 // ---------------------------------------------------------------- 站内链接

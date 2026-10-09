@@ -251,12 +251,13 @@ test("sidebar: detail / new / edit routes belong to the item with the longest ma
 
 test("sidebar: the group owning the current path is the one that auto-expands", () => {
   const items = [
-    { label: "请假/加班/调休", to: "/approval/leave?view=home", children: [{ to: "/approval/leave" }, { to: "/approval/overtime" }, { to: "/approval/comp-time" }] },
+    { label: "请假/加班/调休", to: "/approval/attendance?view=home", children: [{ to: "/approval/leave" }, { to: "/approval/overtime" }, { to: "/approval/comp-time" }] },
     { label: "采购/购买申请", children: [{ to: "/approval/procurement" }, { to: "/approval/procurement/price-approvals" }, { to: "/approval/direct-purchase" }, { to: "/approval/travel" }] },
     { label: "宿舍信息管理", children: [{ to: "/accommodation" }, { to: "/accommodation/master" }, { to: "/accommodation/monthly" }] },
   ];
   assert.equal(groupOwning("/approval/procurement/OA-1/pmc-edit", items).label, "采购/购买申请");
   assert.equal(groupOwning("/approval/comp-time/OA-2", items).label, "请假/加班/调休");
+  assert.equal(groupOwning("/approval/attendance", items).label, "请假/加班/调休", "the attendance home belongs to the group header");
   assert.equal(groupOwning("/accommodation/monthly", items).label, "宿舍信息管理");
   assert.equal(groupOwning("/approval/travel", items).label, "采购/购买申请");
   assert.equal(groupOwning("/dashboard", items), null);

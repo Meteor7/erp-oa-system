@@ -11,7 +11,7 @@ const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
   { label: '审批中心', items: [
     // 分组名本身是考勤中心首页的入口（view=home），三个子项照旧。
-    { to: '/approval/leave?view=home', step: '01', label: '请假/加班/调休', children: [
+    { to: '/approval/attendance?view=home', step: '01', label: '请假/加班/调休', children: [
       { to: '/approval/leave', label: '请假审批' },
       { to: '/approval/overtime', label: '加班审批' },
       { to: '/approval/comp-time', label: '调休审批' },
@@ -102,8 +102,8 @@ function toggleNavGroup(item) {
 }
 // 侧栏的每一项都有"自己的"页面：详情、新建、编辑页（/approval/procurement/:name/pmc-edit 等）属于前缀对应的那一项。
 const groupedItems = groups.flatMap((g) => g.items.filter((n) => n.children));
-const allNavTargets = groups.flatMap((g) => g.items.flatMap((n) => (n.children ? n.children.map((child) => child.to) : [n.to])));
-const navLabels = Object.fromEntries(groups.flatMap((g) => g.items.flatMap((n) => (n.children ? n.children : [n]).map((item) => [splitPath(item.to).path, item.label]))));
+const allNavTargets = groups.flatMap((g) => g.items.flatMap((n) => (n.children ? [...n.children.map((child) => child.to), ...(n.to ? [n.to] : [])] : [n.to])));
+const navLabels = Object.fromEntries(groups.flatMap((g) => g.items.flatMap((n) => [...(n.children || []), ...(!n.children || n.to ? [n] : [])].map((item) => [splitPath(item.to).path, item.label]))));
 const activeNavPath = computed(() => ownerOfPath(route.path, allNavTargets));
 const NAV_ACTIVE_CLASS = 'bg-[#FFF4E6] font-semibold text-[#E57A00]';
 function isNavActive(to) { return splitPath(to).path === activeNavPath.value; }
