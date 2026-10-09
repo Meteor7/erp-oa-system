@@ -131,6 +131,28 @@ def test_reminders_are_for_managers_only_and_respect_the_scope(mt):
         mod.remind_timesheet_fill("2026-10", "[]")
 
 
+# ---- 2026-10-09：演示员工21（研发辅助）暂时不用填研发工时，按特例处理，类型不变 ----
+def test_the_exempt_account_is_left_out_of_the_timesheet_list_and_cannot_be_filled_for(mt, monkeypatch):
+    mod, frappe = mt
+    monkeypatch.setattr(mod, "_daily_module", lambda: types.SimpleNamespace(RD_TYPES=("全时研发", "非全时研发", "研发辅助")))
+    assert mod.TIMESHEET_EXEMPT_USERS == frozenset({"person046@staff.example.invalid"})
+    staff = [
+        {"name": "E1", "employee_name": "演示员工181", "user_id": "e1@example.com", "status": "Active"},
+        {"name": "E9", "employee_name": "演示员工21", "user_id": "person046@staff.example.invalid", "status": "Active"},
+        {"name": "E8", "employee_name": "没有账号", "user_id": None, "status": "Active"},
+    ]
+    frappe.get_all = lambda doctype, filters=None, fields=None, order_by=None, **kw: [
+        dict(row) for row in staff if not isinstance((filters or {}).get("name"), str) or row["name"] == filters["name"]
+    ]
+    assert [row["name"] for row in mod._eligible_employee_rows()] == ["E1", "E8"]
+    assert [row["name"] for row in mod._eligible_employee_rows(datetime(2026, 10, 1).date())] == ["E1", "E8"]
+    # 登记工时时也一样：不在名单里就不能为他登记
+    monkeypatch.setattr(mod, "_monthly_employee_scope", lambda mode, start=None: None)
+    mod._require_monthly_employee("E1", "edit")
+    with pytest.raises(RuleError, match="只能为在职研发员工"):
+        mod._require_monthly_employee("E9", "edit")
+
+
 # ---- 2026-10-08：请假 3 / 5 小时后，上限折成天不是 0.01 的倍数（173 小时 = 21.625 天） ----
 CAP_173 = 173 / 8  # 21.625
 

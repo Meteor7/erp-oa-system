@@ -17,8 +17,8 @@ test("employee table uses fixed twenty-row pagination", () => {
 });
 
 test("the R&D type follows the department: group header shows who fills the timesheet, new employees get a default, gaps are flagged", () => {
-  // 分组旁边写「填工时 N」，只在看在职时显示
-  assert.match(template, /group\.total\}\} 人<template v-if="statusFilter==='active'&&group\.fill"> · 填工时 \{\{group\.fill\}\}/);
+  // 研发分组旁边写「填工时 N」，只在看在职时显示（其他分组里有不用填工时的特例，不写）
+  assert.match(template, /group\.total\}\} 人<template v-if="statusFilter==='active'&&group\.name==='研发'&&group\.fill"> · 填工时 \{\{group\.fill\}\}/);
   // 列表按部门分组判断「研发部门没设类型」
   assert.match(script, /decorateEmployees\(rows\.data\|\|\[\],\{today,sensitiveHidden,groupOf:groupOf\.value\}\)/);
   assert.match(template, /研发部门未设类型 \$\{kpi\.rdGap\}/);
