@@ -1,12 +1,13 @@
 <script setup>
 import { ref, computed, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Spinner, createResource } from "frappe-ui";
 import RdPage from "../components/rd/RdPage.vue";
 import RdPeriod from "../components/rd/RdPeriod.vue";
 import RdSeg from "../components/rd/RdSeg.vue";
 import RdKpi from "../components/rd/RdKpi.vue";
 import RdIcon from "../components/rd/RdIcon.vue";
-import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
+import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel, usePeriodFromRoute } from "../lib/period";
 import {
   allocationExportLabel,
   allocationReconcileDifference,
@@ -73,6 +74,9 @@ const modeOptions = [
   { value: "capitalized", label: "资本化" },
   { value: "expensed", label: "费用化" },
 ];
+
+// 看板链接带 ?period=YYYY-MM：在文件末尾第一次 load() 之前读好期间。
+usePeriodFromRoute(useRoute(), useRouter());
 
 // 撤销定版必须写原因（服务端要求 1-200 字，并记录在分摊单上）。
 const CANCEL_REASON_MAX = 200;

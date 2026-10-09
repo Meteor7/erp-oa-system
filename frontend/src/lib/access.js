@@ -41,6 +41,7 @@ const PAGE_ROLES = {
   '/ledger': [],
   '/entry': TIME_VIEW,
   '/oa': APPROVAL,
+  '/approval/attendance': APPROVAL,
   '/approval/leave': APPROVAL,
   '/approval/overtime': APPROVAL,
   '/approval/comp-time': APPROVAL,

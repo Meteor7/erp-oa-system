@@ -1,10 +1,13 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Card, Button, Badge, createResource } from "frappe-ui";
-import { period } from "../lib/period";
+import { period, usePeriodFromRoute } from "../lib/period";
 import { displayCompany } from "../lib/displayBrand.js";
 import { extractFrappeError } from "../lib/frappeError";
 
+// 看板链接带 ?period=YYYY-MM：先读好期间，再建下面的数据请求。
+usePeriodFromRoute(useRoute(), useRouter());
 const api = "rayher_hr_payroll.api.social_insurance_import_entry.";
 const company = ref("all");
 const selectedFile = ref(null);

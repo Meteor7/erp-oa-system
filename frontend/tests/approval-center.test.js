@@ -8,6 +8,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 test("approval center defines every business flow and the two dashboards", () => {
   assert.deepEqual(Object.keys(APPROVAL_CENTER_ROUTES), [
+    "/approval/attendance",
     "/approval/leave",
     "/approval/overtime",
     "/approval/comp-time",

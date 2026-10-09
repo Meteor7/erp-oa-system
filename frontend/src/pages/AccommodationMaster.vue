@@ -1,8 +1,9 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { Badge, Button, Card, createResource } from 'frappe-ui';
 import AccommodationTabs from '../components/AccommodationTabs.vue';
+import { bindRouteFilters, queryText } from '../lib/urlFilterState.js';
 
 const FILE_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png';
 const PURPOSES = ['', '空', '客房', '午休室'];
@@ -41,8 +42,21 @@ const saving = ref(false);
 const uploadingField = ref('');
 const errMsg = ref('');
 const route = useRoute();
-// 从宿舍看板"查看续租清单"进来时只看 60 天内到期或已过期的租约。
-const filters = reactive({ keyword: '', status: '', lease: route.query.lease === 'expiring' });
+// 地址里的筛选：?lease=expiring 只看 60 天内到期或已过期的租约（宿舍看板"查看续租清单"、数据看板），
+// ?leaver=1 只看已离职员工仍占房的房间（数据看板）。改了筛选地址跟着变，刷新还在。
+const filters = reactive({ keyword: '', status: '', lease: false, leaver: false });
+bindRouteFilters({
+  route,
+  router: useRouter(),
+  specs: [{
+    keys: ['lease', 'leaver'],
+    read: (query) => ({ lease: queryText(query, 'lease') === 'expiring', leaver: queryText(query, 'leaver') === '1' }),
+    snapshot: () => ({ lease: filters.lease, leaver: filters.leaver }),
+    apply: (state) => { filters.lease = state.lease; filters.leaver = state.leaver; },
+    toQuery: (state) => ({ ...(state.lease ? { lease: 'expiring' } : {}), ...(state.leaver ? { leaver: '1' } : {}) }),
+    sources: [() => filters.lease, () => filters.leaver],
+  }],
+});
 function leaseSoon(row) {
   if (!row.lease_end_date) return false;
   const days = (new Date(`${row.lease_end_date}T00:00:00`) - new Date(new Date().toDateString())) / 86400000;
@@ -52,7 +66,7 @@ const filteredRows = computed(() => (rows.data || []).filter((row) => {
   const keyword = filters.keyword.trim().toLowerCase();
   const matchesKeyword = !keyword || [row.room_no, row.room_type, row.employee_name, row.room_purpose]
     .some((value) => String(value || '').toLowerCase().includes(keyword));
-  return matchesKeyword && (!filters.status || row.occupancy_status === filters.status) && (!filters.lease || leaseSoon(row));
+  return matchesKeyword && (!filters.status || row.occupancy_status === filters.status) && (!filters.lease || leaseSoon(row)) && (!filters.leaver || row.employee_left);
 }));
 const roomStats = computed(() => {
   const all = rows.data || [];
@@ -181,6 +195,10 @@ async function save() {
       <div v-if="filters.lease" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
         <span>续租清单：只显示 60 天内到期或已过期的租约（{{ filteredRows.length }} 间）。</span>
         <button type="button" class="text-blue-600 hover:underline" @click="filters.lease = false">显示全部房间</button>
+      </div>
+      <div v-if="filters.leaver" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-leaver-filter>
+        <span>已离职仍占房：只显示登记的入住人已离职的房间（{{ filteredRows.length }} 间），请核实后编辑并填写退宿日期。</span>
+        <button type="button" class="text-blue-600 hover:underline" @click="filters.leaver = false">显示全部房间</button>
       </div>
       <div class="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <div v-for="stat in roomStats" :key="stat.label" class="rounded-xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 px-4 py-3">

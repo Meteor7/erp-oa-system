@@ -1,4 +1,6 @@
 export const APPROVAL_CENTER_ROUTES = Object.freeze({
+  // 考勤中心首页（请假/加班/调休合在一起看）：和三个类型页同一个功能开关。
+  '/approval/attendance': { flag: 'leave_approval', label: '考勤中心' },
   '/approval/leave': { flag: 'leave_approval', label: '请假审批' },
   '/approval/overtime': { flag: 'leave_approval', label: '加班审批' },
   '/approval/comp-time': { flag: 'leave_approval', label: '调休审批' },

@@ -76,6 +76,8 @@ test("the dormitory board is the first dormitory page and links to the other two
   assert.match(board, /lease: 'expiring'/);
   for (const page of [board, master, monthly]) assert.match(page, /<AccommodationTabs \/>/);
   assert.match(master, /route\.query\.room/);
-  assert.match(master, /route\.query\.lease === 'expiring'/);
-  assert.match(monthly, /route\.query\.period/);
+  // 租约到期清单 / 已离职仍占房、月份：都从地址读（bindRouteFilters），看板链接和数据看板链接共用
+  assert.match(master, /queryText\(query, 'lease'\) === 'expiring'/);
+  assert.match(monthly, /periodRouteSpec\(\)/);
+  assert.match(monthly, /route\.query\.room/);
 });

@@ -1,8 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { createResource } from "frappe-ui";
+import { useRoute, useRouter } from "vue-router";
 import { period, setPeriodScope } from "../lib/period";
 import { canEditTimesheetEntry } from "../lib/access";
+import { entryQuery, parseEntryQuery } from "../lib/dashboardLanding";
 import { exportTableWorkbook } from "../lib/tableExport";
 import {
   HOURS_PER_DAY, capText, daysInMonth, lastRemindedText, needsRemind, newRowKey,
@@ -21,6 +23,14 @@ import EntryImportDrawer from "../components/timesheet/EntryImportDrawer.vue";
 
 // 月度页：期间选择器固定按月。
 setPeriodScope("month");
+
+// 数据看板点进来的筛选放在地址里：?tab=board|sheet&status=none|part|full|over|open&dept=部门&period=YYYY-MM。
+// 地址是初始状态的来源；之后用户改了页签、筛选、月份，地址用 replace 跟着变（刷新还在，也不占历史记录）。
+const route = useRoute();
+const router = useRouter();
+const ownPath = route.path;
+const landing = parseEntryQuery(route.query);
+if (landing.period) period.value = landing.period;
 
 const options = createResource({
   url: "rayher_hr_payroll.api.monthly_timesheet_entry.get_monthly_options",
@@ -57,7 +67,9 @@ const reminder = createResource({ url: "rayher_hr_payroll.api.monthly_timesheet_
 
 const canEdit = computed(() => canEditTimesheetEntry());
 const selectedEmployee = ref("");
-const tabChoice = ref("");
+const tabChoice = ref(landing.tab);
+const boardStatus = ref(landing.status);
+const boardDept = ref(landing.dept);
 const entries = ref([]);
 const loadedRevision = ref("");
 const dirty = ref(false);
@@ -397,6 +409,22 @@ watch(period, () => {
   options.reload();
   refreshProgress();
 });
+// 状态 → 地址（没变就不写，避免和下面「地址 → 状态」来回触发）。
+// 离开本页时 route 已经是别的页面了：两个监听都只在还停留在本页时才动地址。
+watch([tabChoice, boardStatus, boardDept, period], () => {
+  if (route.path !== ownPath) return;
+  const next = entryQuery({ tab: tabChoice.value, status: boardStatus.value, dept: boardDept.value, period: period.value }, route.query);
+  if (JSON.stringify(next) !== JSON.stringify(route.query)) router.replace({ path: route.path, query: next });
+});
+// 地址 → 状态：在本页再点一次侧栏（地址被清空）或粘贴了新的链接时，筛选跟着地址走。
+watch(() => route.query, (query) => {
+  if (route.path !== ownPath) return;
+  const wanted = parseEntryQuery(query);
+  tabChoice.value = wanted.tab;
+  boardStatus.value = wanted.status;
+  boardDept.value = wanted.dept;
+  if (wanted.period) period.value = wanted.period;
+});
 watch([period, selectedEmployee], loadEntries, { immediate: true });
 onBeforeUnmount(() => clearTimeout(okTimer));
 </script>
@@ -423,6 +451,8 @@ onBeforeUnmount(() => clearTimeout(okTimer));
       :loading="progress.loading"
       :error="progress.error ? serverMessage(progress.error, '填报进度加载失败') : ''"
       :reminding="reminder.loading"
+      v-model:dept="boardDept"
+      v-model:status="boardStatus"
       @open="openEmployee"
       @remind="remind"
       @export-list="exportFollowUp"

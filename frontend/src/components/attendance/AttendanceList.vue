@@ -3,9 +3,10 @@
 // 只有"待我审批"的行可以勾选批量同意。页面标题和主按钮跟着类型走。
 import { computed, ref, watch } from 'vue';
 import {
-  SCOPES, byWait, canQuickApprove, departmentLabel, filterRows, kindOf, listTitle, newButtonLabel, nodeText, numText, personShort,
+  SCOPES, awayToday, byWait, canQuickApprove, departmentLabel, filterRows, kindOf, listTitle, newButtonLabel, nodeText, numText, personShort,
   rowChips, scopeTabs, statusTag, submittedText, totalOf, typeChips, waitText,
 } from '../../lib/attendanceView.js';
+import { todayText } from '../../lib/dashboardLanding.js';
 
 const props = defineProps({
   page: { type: Object, required: true },
@@ -18,17 +19,20 @@ const props = defineProps({
   canViewAll: { type: Boolean, default: false },
   hasEmployee: { type: Boolean, default: false },
 });
-const emit = defineEmits(['home', 'scope', 'filter', 'new', 'open', 'approve-many']);
+const emit = defineEmits(['home', 'scope', 'filter', 'new', 'open', 'approve-many', 'today-off']);
 
 const picked = ref([]);
 const scope = computed(() => props.page.scope);
 const filter = computed(() => props.page.filter);
+// 看板的「今天不在岗」点进来：「全部」里只留今天在休假 / 调休的人（前端按行里的起止日期过滤）。
+const todayOnly = computed(() => Boolean(props.page.today) && scope.value === 'all');
 const title = computed(() => listTitle(filter.value));
 const tabs = computed(() => scopeTabs({ sets: props.sets, filter: filter.value, isApprover: props.isApprover, canViewAll: props.canViewAll, allLoaded: props.loaded.all }));
 const chips = computed(() => typeChips({}, filter.value));
 const ready = computed(() => ({ todo: props.loaded.review, mine: props.loaded.mine, done: props.loaded.reviewed, all: props.loaded.all })[scope.value] ?? false);
 const rows = computed(() => {
-  const list = filterRows(props.sets[scope.value] || [], filter.value);
+  let list = filterRows(props.sets[scope.value] || [], filter.value);
+  if (todayOnly.value) list = awayToday(list, todayText(new Date(props.now)));
   return scope.value === 'todo' ? byWait(list, props.now) : list;
 });
 const selectable = computed(() => (scope.value === 'todo' ? rows.value.filter(canQuickApprove) : []));
@@ -54,7 +58,11 @@ function approveChosen() {
 }
 
 const scopeLabel = computed(() => SCOPES.find((item) => item.key === scope.value)?.label || '');
-const subtitle = computed(() => (scope.value === 'all' ? '只读：所有人已提交的请假、加班、调休（最近 100 张）。' : '按范围、类型筛选；点任意一行看详情。'));
+const subtitle = computed(() => {
+  if (todayOnly.value) return '只读：今天正在休假或调休的人（已批准的申请，从最近 100 张里筛出）。';
+  return scope.value === 'all' ? '只读：所有人已提交的请假、加班、调休（最近 100 张）。' : '按范围、类型筛选；点任意一行看详情。';
+});
+const emptyText = computed(() => (todayOnly.value ? '今天没有人在休假或调休' : '这个范围里没有申请'));
 </script>
 
 <template>
@@ -76,6 +84,7 @@ const subtitle = computed(() => (scope.value === 'all' ? '只读：所有人已�
 
     <section class="panel flush" :aria-label="scopeLabel">
       <div class="at-bar">
+        <button v-if="todayOnly" type="button" class="chip on" aria-label="取消「今天不在岗」筛选" title="点一下取消，回到全部申请" @click="emit('today-off')">今天不在岗 ✕</button>
         <button v-for="item in chips" :key="item.key" type="button" :class="['chip', { on: item.on }]" :aria-pressed="item.on" @click="emit('filter', item.key)">{{ item.label }}</button>
         <span v-if="scope === 'todo'" class="at-right at-batch">
           <span class="muted">已选 {{ chosen.length }} 张</span>
@@ -92,7 +101,7 @@ const subtitle = computed(() => (scope.value === 'all' ? '只读：所有人已�
           </thead>
           <tbody>
             <tr v-if="!scope || !ready"><td :colspan="scope === 'todo' ? 7 : 6" class="empty">正在加载…</td></tr>
-            <tr v-else-if="!rows.length"><td :colspan="scope === 'todo' ? 7 : 6" class="empty">这个范围里没有申请</td></tr>
+            <tr v-else-if="!rows.length"><td :colspan="scope === 'todo' ? 7 : 6" class="empty">{{ emptyText }}</td></tr>
             <tr v-for="row in ready ? rows : []" :key="row.name + String(row.acted_on || '')" class="row-sel" tabindex="0" @click="emit('open', row)" @keydown.enter="emit('open', row)">
               <td v-if="scope === 'todo'" class="at-check" @click.stop>
                 <input type="checkbox" :aria-label="'选择 ' + row.name" :checked="picked.includes(row.name)" :disabled="!canQuickApprove(row)" :title="canQuickApprove(row) ? '' : '这一步要进详情页处理'" @change="toggle(row)" />

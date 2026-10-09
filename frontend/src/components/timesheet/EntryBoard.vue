@@ -8,16 +8,20 @@ import RdIcon from '../rd/RdIcon.vue';
 import '../../styles/rdTimesheet.css';
 import {
   REMIND_CLOSED_TEXT, barColor, boardKindLabel, daysLeft, deadlineLabel, departmentBars, fmtDays, followUpCounts, followUpRows,
-  gapText, gapTone, lastRemindedText, namesText, needsRemind, progressPercent, remindClosed, statusMeta, summarizeProgress,
+  gapText, gapTone, lastRemindedText, matchesDepartment, namesText, needsRemind, progressPercent, remindClosed, statusMeta, summarizeProgress,
 } from '../../lib/timesheetEntryView.js';
+import { entryRowsFor } from '../../lib/dashboardLanding.js';
 
 const props = defineProps({
   progress: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   reminding: { type: Boolean, default: false },
+  // 部门、状态筛选放在页面里（跟着地址走）：v-model:dept / v-model:status。
+  dept: { type: String, default: 'all' },
+  status: { type: String, default: 'all' },
 });
-const emit = defineEmits(['open', 'remind', 'export-list', 'retry']);
+const emit = defineEmits(['open', 'remind', 'export-list', 'retry', 'update:dept', 'update:status']);
 
 const kind = computed(() => props.progress?.kind || 'self');
 const employees = computed(() => props.progress?.employees || []);
@@ -45,17 +49,22 @@ const stats = computed(() => [
 
 // ---- 部门筛选 + 状态筛选 ----
 const departments = computed(() => departmentBars(employees.value));
-const dept = ref('all');
-const statusFilter = ref('all');
-const activeDept = computed(() => (dept.value !== 'all' && departments.value.some((item) => item.department === dept.value) ? dept.value : 'all'));
+const dept = computed({ get: () => props.dept || 'all', set: (value) => emit('update:dept', value) });
+const statusFilter = computed({ get: () => props.status || 'all', set: (value) => emit('update:status', value) });
+// 部门列表只有看全公司的人才有；没有这一栏时地址里的 dept 不生效（否则看不见的筛选会让名单莫名变少）。
+const activeDept = computed(() => (showDepartment.value && dept.value !== 'all' && departments.value.some((item) => item.department === dept.value) ? dept.value : 'all'));
 const counts = computed(() => followUpCounts(employees.value, activeDept.value));
+const fullCount = computed(() => employees.value.filter((item) => item.status === 'full' && matchesDepartment(item, activeDept.value)).length);
+// 「未完成」= 未填 + 未填满（看板上「还有几个人没填满」点进来就是它）；「已填满」把名单反过来看。
 const chips = computed(() => [
   { key: 'all', label: '全部', count: counts.value.all },
+  { key: 'open', label: '未完成', count: counts.value.none + counts.value.part, title: '未填 + 未填满' },
   { key: 'none', label: '未填', count: counts.value.none },
   { key: 'part', label: '未填满', count: counts.value.part },
   { key: 'over', label: '超上限', count: counts.value.over },
+  { key: 'full', label: '已填满', count: fullCount.value },
 ]);
-const rows = computed(() => followUpRows(employees.value, { department: activeDept.value, status: statusFilter.value }));
+const rows = computed(() => entryRowsFor(employees.value, { department: activeDept.value, status: statusFilter.value }));
 const scopeLabel = computed(() => (activeDept.value === 'all' ? '全部人员' : activeDept.value));
 
 // ---- 勾选与催办 ----
@@ -136,9 +145,9 @@ const emptyText = computed(() => {
 
       <div class="card" style="overflow: hidden">
         <div class="ts-follow-hd">
-          <b>需要跟进的人</b>
+          <b>{{ statusFilter === 'full' ? '已填满的人' : '需要跟进的人' }}</b>
           <div class="chips">
-            <button v-for="chip in chips" :key="chip.key" type="button" class="chip" :aria-pressed="statusFilter === chip.key" @click="statusFilter = chip.key">{{ chip.label }}<small>{{ chip.count }}</small></button>
+            <button v-for="chip in chips" :key="chip.key" type="button" class="chip" :title="chip.title" :aria-pressed="statusFilter === chip.key" @click="statusFilter = chip.key">{{ chip.label }}<small>{{ chip.count }}</small></button>
           </div>
           <div class="acts">
             <button type="button" class="btn sm" :disabled="!rows.length" @click="emit('export-list', rows)"><RdIcon name="download" />导出名单</button>

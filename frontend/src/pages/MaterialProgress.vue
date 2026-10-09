@@ -5,11 +5,12 @@
 // 分批生成 PR（只有 PMC）、标记取消、?request= / ?source_line= 深链接。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import '../styles/boardsUi.css';
 import MaterialDrawer from '../components/material/MaterialDrawer.vue';
 import { canCreateProcurementPr } from '../lib/access';
+import { overdueRows, todayText } from '../lib/dashboardLanding.js';
 import {
   CHECK_WIDTH, allStageCount as sumStages, buildPrLines, cellValue as valueOf, columnLabel, displayColumns, drawerKey, errorText,
   filterSortRows, groupDateText, groupRows, isEditableField, normalizedText, otherStatuses, parseClipboardMatrix,
@@ -22,6 +23,8 @@ const wideFields = new Set(['oa_approval_trail', 'remarks']);
 const ACTION_WIDTH = 84;
 
 const route = useRoute();
+const router = useRouter();
+const ownPath = route.path;
 const search = ref('');
 const requester = ref('');
 const status = ref('');
@@ -56,7 +59,59 @@ const updater = createResource({ url: 'rayher_hr_payroll.api.material_progress.u
 const canceller = createResource({ url: 'rayher_hr_payroll.api.material_progress.cancel_material_progress' });
 const prCreator = createResource({ url: 'rayher_hr_payroll.api.procurement_chain.create_pr', method: 'POST' });
 
-const rows = computed(() => loader.data?.items || []);
+// 看板的「物料逾期未到」点进来（?overdue=1）：只看合同交期已过且未收齐的物料。
+// 接口是服务端分页（每页 50），逾期没有服务端筛选，所以这个模式下把各页取全（每次 200 条，最多 10 次）再在前端筛，不分页。
+const SWEEP_SIZE = 200;
+const SWEEP_PAGES = 10;
+const overdueOnly = ref(String(route.query.overdue || '') === '1');
+const overdueFound = ref([]);
+const sweeping = ref(false);
+const sweepCut = ref(false);
+const sweepOffset = ref(0);
+let sweepSeq = 0;
+const sweeper = createResource({
+  url: 'rayher_hr_payroll.api.material_progress.list_material_progress',
+  method: 'GET',
+  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: SWEEP_SIZE, offset: sweepOffset.value, source_request: sourceRequest.value }),
+});
+async function sweepOverdue() {
+  const seq = (sweepSeq += 1);
+  sweeping.value = true;
+  sweepCut.value = false;
+  const found = [];
+  try {
+    let offset = 0;
+    for (let index = 0; index < SWEEP_PAGES; index += 1) {
+      sweepOffset.value = offset;
+      await sweeper.reload();
+      if (seq !== sweepSeq) return;
+      const items = sweeper.data?.items || [];
+      found.push(...overdueRows(items, todayText()));
+      if (!sweeper.data?.has_more || !items.length) break;
+      offset += items.length;
+      if (index === SWEEP_PAGES - 1) sweepCut.value = true;
+    }
+    overdueFound.value = found;
+  } catch (err) {
+    if (seq === sweepSeq) error.value = errorText(err, '逾期物料加载失败');
+  } finally {
+    if (seq === sweepSeq) sweeping.value = false;
+  }
+}
+function setOverdue(on) {
+  overdueOnly.value = on;
+  page.value = 0;
+  executionLine.value = null;
+  selectedOrder.value = '';
+  const next = { ...route.query };
+  if (on) next.overdue = '1';
+  else delete next.overdue;
+  router.replace({ path: route.path, query: next });
+  if (on) sweepOverdue();
+}
+
+const rows = computed(() => (overdueOnly.value ? overdueFound.value : loader.data?.items || []));
+const listLoading = computed(() => loader.loading || sweeping.value);
 const requesters = computed(() => loader.data?.requesters || []);
 const counts = computed(() => loader.data?.stage_counts || {});
 const total = computed(() => Number(loader.data?.total || 0));
@@ -94,7 +149,21 @@ watch(() => [route.query.request, route.query.source_line], () => {
   autoSelected = '';
   loader.reload();
 });
-watch(() => loader.data, () => { epoch.value += 1; });
+// 每次主列表刷新（查询、翻页、保存、生成 PR…）之后，逾期模式要把逾期行重新取一遍。
+watch(() => loader.data, () => {
+  epoch.value += 1;
+  if (overdueOnly.value) sweepOverdue();
+});
+watch(overdueFound, () => { epoch.value += 1; });
+// 在本页再点一次侧栏（地址被清空）：逾期筛选跟着地址走。
+watch(() => route.query.overdue, (value) => {
+  if (route.path !== ownPath) return;
+  const on = String(value || '') === '1';
+  if (on !== overdueOnly.value) {
+    overdueOnly.value = on;
+    if (on) sweepOverdue();
+  }
+});
 watch(rows, () => {
   const line = String(route.query.source_line || '');
   const key = `${sourceRequest.value}:${line}`;
@@ -395,7 +464,7 @@ async function cancelRow(reason) {
         <div class="muted">按物料看它在 OA、PR、价格审批、PO、到货验收、付款走到哪一步了。</div>
       </div>
       <div class="head-actions">
-        <button type="button" class="btn" :disabled="loader.loading" @click="refresh">刷新</button>
+        <button type="button" class="btn" :disabled="listLoading" @click="refresh">刷新</button>
         <button v-if="canCreatePr" type="button" class="btn pri lg" :disabled="!selectedForPr.size || prCreator.loading" @click="createPrFromBoard">生成 PR<template v-if="selectedForPr.size"> · 已选 {{ selectedForPr.size }} 项</template></button>
       </div>
     </div>
@@ -404,6 +473,11 @@ async function cancelRow(reason) {
       <span>来源 OA：<b class="num">{{ sourceRequest }}</b></span>
       <router-link :to="{ path: '/approval/procurement', query: { request: sourceRequest } }" class="link">查看来源 OA →</router-link>
       <router-link to="/approval/material-progress" class="link">查看全部 OA</router-link>
+    </div>
+
+    <div v-if="overdueOnly" class="mp-source">
+      <span>只看 <b>合同交期已过、还没收齐</b> 的物料：{{ sweeping ? '正在统计…' : `${overdueFound.length} 项` }}<template v-if="sweepCut">（物料太多，只检查了最近 {{ SWEEP_SIZE * SWEEP_PAGES }} 项）</template></span>
+      <button type="button" class="link" @click="setOverdue(false)">查看全部物料</button>
     </div>
 
     <div class="mp-stages" role="tablist" aria-label="物料阶段">
@@ -421,6 +495,7 @@ async function cancelRow(reason) {
       <select v-model="requester" aria-label="需求人" @change="query"><option value="">全部需求人</option><option v-for="item in requesters" :key="item" :value="item">{{ item }}</option></select>
       <input v-model="search" type="search" placeholder="物料编号、名称、型号、日期、项目、PR、PO、供应商或单号，回车搜索" aria-label="搜索物料" @keyup.enter="query" />
       <button type="button" class="btn dark" @click="query">查询</button>
+      <button type="button" :class="['btn', { dark: overdueOnly }]" :aria-pressed="overdueOnly" title="合同交期早于今天、累计到货少于 PO 数量" @click="setOverdue(!overdueOnly)">交期已过未收齐</button>
     </div>
 
     <div v-if="message" class="banner ok">{{ message }}</div>
@@ -438,7 +513,7 @@ async function cancelRow(reason) {
             <span class="muted">{{ groupDateText(group) }}</span>
             <span class="mp-order-badges"><span v-for="(count, value) in group.statuses" :key="value" :class="statusPill(value)">{{ value }} {{ count }}</span></span>
           </button>
-          <div v-if="!groups.length" class="empty">{{ loader.loading ? '正在加载…' : '没有订单' }}</div>
+          <div v-if="!groups.length" class="empty">{{ listLoading ? '正在加载…' : '没有订单' }}</div>
         </div>
       </aside>
 
@@ -509,11 +584,12 @@ async function cancelRow(reason) {
                   </td>
                 </tr>
               </template>
-              <tr v-if="!shownGroups.length"><td :colspan="colSpan" class="empty">{{ loader.loading ? '正在加载…' : '暂无符合条件的物料进度' }}</td></tr>
+              <tr v-if="!shownGroups.length"><td :colspan="colSpan" class="empty">{{ listLoading ? '正在加载…' : '暂无符合条件的物料进度' }}</td></tr>
             </tbody>
           </table>
         </div>
-        <div class="mp-pager">
+        <div v-if="overdueOnly" class="mp-pager"><span class="muted">逾期模式不分页 · 共 {{ rows.length }} 项</span></div>
+        <div v-else class="mp-pager">
           <span class="muted">第 {{ page + 1 }} 页 · 共 {{ total }} 项（每页 {{ pageSize }} 项）· 本页 {{ rows.length }} 项</span>
           <div class="head-actions">
             <button type="button" class="btn sm" :disabled="page === 0 || loader.loading" @click="turnPage(-1)">上一页</button>

@@ -1,12 +1,14 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Spinner, createResource } from "frappe-ui";
 import RdPage from "../components/rd/RdPage.vue";
 import RdPeriod from "../components/rd/RdPeriod.vue";
 import RdSeg from "../components/rd/RdSeg.vue";
 import RdKpi from "../components/rd/RdKpi.vue";
 import RdIcon from "../components/rd/RdIcon.vue";
-import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
+import { period, periodRouteSpec, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from "../lib/period";
+import { bindRouteFilters, queryText } from "../lib/urlFilterState";
 import { exportTableWorkbook } from "../lib/tableExport";
 import { rankProjects } from "../lib/allocationGroups";
 import { dashboardStatusTag, yearPreviewNote } from "../lib/previewTags";
@@ -40,6 +42,23 @@ const loading = ref(false);
 const exporting = ref(false);
 const msg = ref("");
 
+// 看板链接 ?period=YYYY-MM&project=<项目编号>：期间要在文件末尾第一次 load() 之前读好。
+// project 不过滤数据（合计、其他项目的列还在，否则合计对不上），只把该项目定位出来：
+// 汇总表里它的那一列和「各项目承担」里它的那一行高亮，页面上方有可清除的提示。
+const projectFocus = ref("");
+bindRouteFilters({
+  route: useRoute(),
+  router: useRouter(),
+  specs: [periodRouteSpec(), {
+    keys: ["project"],
+    read: (query) => ({ project: queryText(query, "project") }),
+    snapshot: () => ({ project: projectFocus.value }),
+    apply: (state) => { projectFocus.value = state.project; },
+    toQuery: (state) => (state.project ? { project: state.project } : {}),
+    sources: [projectFocus],
+  }],
+});
+
 const dashboardRes = createResource({
   url: "rayher_hr_payroll.api.allocation_entry.get_allocation_dashboard",
   method: "GET",
@@ -64,6 +83,21 @@ const cards = computed(() => {
   ];
 });
 const ranking = computed(() => rankProjects({ rows: summaryRows.value, projectColumns: projectColumns.value, topN: 8, otherLabel: "其他" }));
+
+// 项目编号（project_code）或项目记录名都认；「其他」合并行不会被定位
+function isFocusedProject(project) {
+  const wanted = projectFocus.value;
+  return Boolean(wanted) && (project?.project_code === wanted || project?.project === wanted);
+}
+function isFocusedRank(item) {
+  const wanted = projectFocus.value;
+  return Boolean(wanted) && !item.isOther && (item.code === wanted || item.key === wanted);
+}
+const focusedProject = computed(() => projectColumns.value.find(isFocusedProject) || null);
+function revealFocus() {
+  if (!projectFocus.value) return;
+  nextTick(() => document.querySelector(".rd .matrix th.focus")?.scrollIntoView?.({ inline: "center", block: "nearest" }));
+}
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -149,6 +183,7 @@ async function load() {
     msg.value = (error && error.message) || "看板加载失败";
   } finally {
     loading.value = false;
+    revealFocus();
   }
 }
 
@@ -185,6 +220,13 @@ load();
       <button type="button" class="btn" :disabled="exporting || !summaryRows.length" @click="exportCurrentAllocationDashboard"><RdIcon name="download" />{{ exporting ? "导出中…" : TEXT.exportExcel }}</button>
     </div>
 
+    <div v-if="projectFocus && !loading && dashboard" class="note strip" :class="focusedProject ? 'info' : 'warn'" role="status" data-project-focus>
+      <RdIcon :name="focusedProject ? 'check' : 'alert'" />
+      <span v-if="focusedProject" class="grow">已定位到项目 <b>{{ focusedProject.project_code || focusedProject.project }}</b><span v-if="focusedProject.project_name"> {{ focusedProject.project_name }}</span>：汇总表和「各项目承担」里已高亮，合计仍是全部项目。</span>
+      <span v-else class="grow">当前范围里没有项目 {{ projectFocus }} 的分摊数据。</span>
+      <button type="button" class="btn sm" data-project-clear @click="projectFocus = ''">取消定位</button>
+    </div>
+
     <div v-if="msg" class="note bad"><RdIcon name="alert" /><span class="grow">{{ msg }}</span></div>
 
     <div v-if="loading" class="flex justify-center py-10"><Spinner class="w-6" /></div>
@@ -193,7 +235,7 @@ load();
       <div v-if="ranking.items.length" class="card">
         <div class="hd"><b>{{ TEXT.rankTitle }}</b><span class="muted">{{ TEXT.rankHint }}</span></div>
         <div class="bd">
-          <div v-for="item in ranking.items" :key="item.key" class="rank wide" :title="`${item.code}${item.name ? ' ' + item.name : ''} · ${formatMoney(item.value)} 元 · ${percent(item.share)}`">
+          <div v-for="item in ranking.items" :key="item.key" class="rank wide" :class="{ focus: isFocusedRank(item) }" :title="`${item.code}${item.name ? ' ' + item.name : ''} · ${formatMoney(item.value)} 元 · ${percent(item.share)}`">
             <span class="lbl"><b>{{ item.code }}</b> <span v-if="item.name" class="muted">{{ item.name }}</span></span>
             <span class="t"><i :style="{ width: item.width + '%' }"></i></span>
             <span class="val num"><b>{{ formatMoney(item.value) }}</b> <span class="muted">{{ percent(item.share) }}</span></span>
@@ -209,7 +251,7 @@ load();
               <tr>
                 <th class="c1">{{ TEXT.level2 }}</th>
                 <th class="c2">{{ TEXT.level3 }}</th>
-                <th v-for="project in projectColumns" :key="project.project" :title="project.project_name" class="r">{{ project.project_code || project.project }}</th>
+                <th v-for="project in projectColumns" :key="project.project" :title="project.project_name" class="r" :class="{ focus: isFocusedProject(project) }">{{ project.project_code || project.project }}</th>
                 <th class="ct r">{{ TEXT.total }}</th>
               </tr>
             </thead>
@@ -217,7 +259,7 @@ load();
               <tr v-for="(row, index) in summaryRows" :key="index" :class="rowClass(row)">
                 <td class="c1">{{ secondLevelText(row, index) }}</td>
                 <td class="c2" :class="{ detail: !isSubtotal(row) && !isGrandTotal(row) }">{{ cellText(row.account_level_3) }}</td>
-                <td v-for="project in projectColumns" :key="project.project" class="r num nw" :class="{ zero: !projectValue(row, project) }">{{ projectAmount(row, project) }}</td>
+                <td v-for="project in projectColumns" :key="project.project" class="r num nw" :class="{ zero: !projectValue(row, project), focus: isFocusedProject(project) }">{{ projectAmount(row, project) }}</td>
                 <td class="ct r num nw">{{ formatMoney(row.total) }}</td>
               </tr>
             </tbody>
@@ -246,4 +288,7 @@ load();
 .rd .rank.wide .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd .rank.wide .val { text-align: right; white-space: nowrap; }
 .rd .rank.wide .val b { font-weight: 600; }
+.rd .rank.focus { background: var(--rd-info-soft); border-radius: 8px; }
+.rd .matrix th.focus, .rd .matrix td.focus { background: var(--rd-info-soft); }
+.rd .matrix th.focus { color: var(--rd-info); }
 </style>

@@ -454,3 +454,61 @@ export function supervisorLabel(row, nameById) {
   if (!row?.reports_to) return "";
   return nameById.get(row.reports_to) || row.reports_to;
 }
+
+// ---------- 从地址读筛选 ----------
+// 看板链接 /personnel?status=active&reminder=expiring 这类地址与页面筛选之间的转换（纯函数，页面负责绑定）。
+//   status=active|left      在职 / 已离职（缺省 active）
+//   reminder=expiring       60 天内到期的试用期 / 合同（= reminders 里的 probation / contract，不是宽泛的「有提醒」）
+//   rd=none|<研发类型>      none 表示没设研发类型
+//   group=<分组名>          部门分组，如 研发（见 departmentGroupMap）
+//   archive=待完善|待确认|已归档
+//   joined=month            本月入职
+//   dept=<部门>             部门展示名
+export const PERSONNEL_QUERY_KEYS = ["status", "reminder", "rd", "group", "archive", "joined", "dept"];
+
+function queryValue(query, key) {
+  const value = query?.[key];
+  const first = Array.isArray(value) ? value[0] : value;
+  return first === undefined || first === null ? "" : String(first).trim();
+}
+
+// 地址 -> 规范化的筛选状态：不认识的值当没写，缺省值补齐。
+export function parsePersonnelQuery(query) {
+  const rd = queryValue(query, "rd");
+  const archive = queryValue(query, "archive");
+  return {
+    status: queryValue(query, "status") === "left" ? "left" : "active",
+    reminder: queryValue(query, "reminder") === "expiring" ? "expiring" : "",
+    rd: rd === "none" ? NO_RD_TYPE : RD_TYPES.includes(rd) ? rd : "",
+    group: queryValue(query, "group"),
+    archive: ARCHIVE_STATUSES.includes(archive) ? archive : "",
+    joined: queryValue(query, "joined") === "month" ? "month" : "",
+    dept: displayDepartment(queryValue(query, "dept")),
+  };
+}
+
+// 筛选状态 -> 地址参数：只写非缺省值（在职是缺省，所以只有看「已离职」才写 status），清空筛选就回到无参数。
+export function personnelQueryOf(filters = {}) {
+  const query = {};
+  if (filters.status === "left") query.status = "left";
+  if (filters.reminder === "expiring") query.reminder = "expiring";
+  if (filters.rd) query.rd = filters.rd === NO_RD_TYPE ? "none" : filters.rd;
+  if (filters.group) query.group = filters.group;
+  if (filters.archive) query.archive = filters.archive;
+  if (filters.joined === "month") query.joined = "month";
+  if (filters.dept) query.dept = filters.dept;
+  return query;
+}
+
+// filterEmployees 不认识的三个筛选：部门分组、本月入职、60 天内到期。
+// 分组口径与 departmentGroups 一致（有部门但不在分组表里的算「其他」）；到期口径与 kpiCounts.expiring 一致。
+export function filterByUrlExtras(items, { group = "", joined = "", reminder = "" } = {}, today) {
+  if (!group && !joined && !reminder) return items || [];
+  const month = String(today || "").slice(0, 7);
+  return (items || []).filter((item) => {
+    if (group && (item.department ? item.group || OTHER_GROUP : "") !== group) return false;
+    if (joined === "month" && !(month && String(item.row?.date_of_joining || "").startsWith(month))) return false;
+    if (reminder === "expiring" && !item.reminders.some((entry) => entry.key === "probation" || entry.key === "contract")) return false;
+    return true;
+  });
+}

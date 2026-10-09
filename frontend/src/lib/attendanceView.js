@@ -131,6 +131,8 @@ export function parseLocation({ path = '', params = {}, query = {} } = {}) {
     request,
     draft,
     scope: SCOPE_KEYS.includes(scope) ? scope : '',
+    // 看板的「今天不在岗」：?today=1，只在「全部」范围里生效（别的范围没有这个筛选）。
+    today: one(query.today) === '1' && scope === 'all',
     // 列表和首页的类型筛选：?type= 优先，没有就跟路径（侧栏进来的 /approval/overtime 就是加班）。
     filter: filterOf(typeQuery, pathLabel || FILTER_ALL),
     // 新建页要新建的类型；没有（也不是在继续某张草稿）就让用户先选。
@@ -154,8 +156,9 @@ export function homeLocation(homePath = FALLBACK_HOME_PATH) {
   return { path: homePath, query: { view: 'home' } };
 }
 
-export function listLocation({ scope = 'mine', filter = FILTER_ALL } = {}, homePath = FALLBACK_HOME_PATH) {
-  return { path: pathForFilter(filter, homePath), query: clean({ view: 'list', scope, type: filter }) };
+// today：只看今天在休假 / 调休的人（看板的「今天不在岗」），只有「全部」范围有这个筛选，别的范围不带。
+export function listLocation({ scope = 'mine', filter = FILTER_ALL, today = false } = {}, homePath = FALLBACK_HOME_PATH) {
+  return { path: pathForFilter(filter, homePath), query: clean({ view: 'list', scope, type: filter, today: today && scope === 'all' ? '1' : '' }) };
 }
 
 // 详情：path 是这张申请所属类型的路径（侧栏跟着走）；不知道类型时不给，由页面用当前路径。
@@ -213,6 +216,16 @@ export function rowLabel(row) {
 
 export function filterRows(rows, filter) {
   return TYPE_LABELS.includes(filter) ? (rows || []).filter((row) => rowLabel(row) === filter) : [...(rows || [])];
+}
+
+// 今天在休假 / 调休的人：已批准的请假、调休单，起止日期包含今天（口径同总览的「今天不在岗」）。
+// 加班不算不在岗。日期是 YYYY-MM-DD 字符串，直接按字典序比较。
+const AWAY_TYPES = ['请假申请', '调休申请'];
+const AWAY_DONE = ['已完成', '已通过'];
+
+export function awayToday(rows, today) {
+  return (rows || []).filter((row) => AWAY_TYPES.includes(row?.request_type) && AWAY_DONE.includes(row?.workflow_status)
+    && String(row.from_date || '').slice(0, 10) <= today && today <= String(row.to_date || row.from_date || '').slice(0, 10));
 }
 
 export function typeCounts(rows) {

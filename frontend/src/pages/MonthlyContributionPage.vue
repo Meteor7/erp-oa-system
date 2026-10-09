@@ -1,8 +1,11 @@
 <script setup>
 import { computed, reactive, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Card, Button, createResource } from "frappe-ui";
-import { period } from "../lib/period";
+import { period, usePeriodFromRoute } from "../lib/period";
 const props = defineProps({ kind: { type: String, required: true } });
+// 看板链接带 ?period=YYYY-MM：先读好期间，再建下面的数据请求。
+usePeriodFromRoute(useRoute(), useRouter());
 const social = computed(() => props.kind === "social");
 const title = computed(() => social.value ? "社保信息管理" : "公积金信息管理");
 const subtitle = computed(() => social.value ? "按月维护员工社保基数与比例，金额由系统自动计算" : "按月维护员工公积金基数与比例，金额由系统自动计算");

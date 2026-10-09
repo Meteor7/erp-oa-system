@@ -1,16 +1,30 @@
 <script setup>
 import { ref, reactive, computed, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { Card, Button, createResource } from "frappe-ui";
 import AccommodationTabs from "../components/AccommodationTabs.vue";
-import { period } from "../lib/period";
+import { period, periodRouteSpec } from "../lib/period";
+import { bindRouteFilters, queryText } from "../lib/urlFilterState";
 import { extractFrappeError } from "../lib/frappeError";
 
 const EXPENSE_ACCOUNT_CATEGORIES = ["研发费用", "管理费用", "销售费用", "生产成本"];
 const SPECIAL_OCCUPANTS = ["空", "客房", "午休室"];
-// 从宿舍看板点"登记费用"进来时带上月份和房间（先设月份，再建数据请求）。
+// 从宿舍看板点"登记费用"、或从数据看板点进来时，地址带 ?period=YYYY-MM（可再带 room=、status=open）：
+// 先读好月份，再建数据请求。status=open：只看在住但本期还没登记费用的房间。
 const route = useRoute();
-if (/^\d{4}-\d{2}$/.test(String(route.query.period || ""))) period.value = String(route.query.period);
+const statusFilter = ref("");
+bindRouteFilters({
+  route,
+  router: useRouter(),
+  specs: [periodRouteSpec(), {
+    keys: ["status"],
+    read: (query) => ({ status: queryText(query, "status") === "open" ? "open" : "" }),
+    snapshot: () => ({ status: statusFilter.value }),
+    apply: (state) => { statusFilter.value = state.status; },
+    toQuery: (state) => (state.status === "open" ? { status: "open" } : {}),
+    sources: [statusFilter],
+  }],
+});
 
 const options = createResource({ url: "rayher_hr_payroll.api.accommodation_entry.get_emp_options", method: "GET", auto: true });
 const roomOptions = createResource({
@@ -25,6 +39,13 @@ const occupantOptions = createResource({
 });
 const rows = createResource({ url: "rayher_hr_payroll.api.accommodation_entry.list_accommodation", method: "GET", makeParams: () => ({ period: period.value }), auto: true });
 const summary = createResource({ url: "rayher_hr_payroll.api.accommodation_entry.get_accommodation_summary", method: "GET", makeParams: () => ({ period: period.value }), auto: true });
+// 房间一览（含「是否在住」「本期是否已登记」）直接用宿舍看板的接口，权限相同（人事）；只在看「未登记」时才取。
+const board = createResource({
+  url: "rayher_hr_payroll.api.dormitory_board.get_dormitory_board",
+  method: "GET",
+  makeParams: () => ({ period: period.value }),
+  auto: statusFilter.value === "open",
+});
 const saver = createResource({ url: "rayher_hr_payroll.api.accommodation_entry.save_accommodation" });
 const remover = createResource({ url: "rayher_hr_payroll.api.accommodation_entry.delete_accommodation" });
 
@@ -100,9 +121,12 @@ function occupantChoiceLabel(choice) {
   if (!choice?.end_date) return choice?.label || "";
   return `${choice.label}（${choice.start_date || "起始日期未填"} 至 ${choice.end_date}）`;
 }
+// 在住（房间状态「入住」）但本期还没有任何费用记录的房间
+const unregisteredRooms = computed(() => (board.data?.rooms || []).filter((room) => room.status === "入住" && !room.registered));
 function reloadPeriodData() {
   rows.reload();
   summary.reload();
+  if (statusFilter.value === "open") board.reload();
 }
 
 async function save() {
@@ -118,6 +142,7 @@ async function save() {
     });
     rows.data = data;
     summary.reload();
+    if (statusFilter.value === "open") board.reload();
     Object.assign(form, blankForm());
     occupantChoices.value = [];
   } catch (error) {
@@ -134,6 +159,7 @@ async function del(name) {
 }
 
 watch(period, reloadPeriodData);
+watch(statusFilter, (value) => { if (value === "open") board.reload(); });
 watch(() => [period.value, form.room_no], reloadOccupants);
 if (route.query.room) {
   form.room_no = String(route.query.room);
@@ -144,6 +170,20 @@ if (route.query.room) {
 <template>
   <div class="space-y-4">
     <AccommodationTabs />
+    <Card v-if="statusFilter === 'open'" :title="`${period} 在住但还没登记费用的房间`" data-open-rooms>
+      <template #actions><Button variant="subtle" data-open-clear @click="statusFilter = ''">显示全部</Button></template>
+      <p v-if="board.loading && !board.data" class="text-sm text-gray-500">加载中...</p>
+      <p v-else-if="board.error" class="text-sm text-red-600">房间状态加载失败，请稍后重试。</p>
+      <p v-else-if="!unregisteredRooms.length" class="text-sm text-gray-500">本期在住的房间都已登记费用。</p>
+      <template v-else>
+        <p class="mb-2 text-xs text-gray-500">共 {{ unregisteredRooms.length }} 间；点房间号会填进下面的登记表。</p>
+        <div class="flex flex-wrap gap-2">
+          <button v-for="room in unregisteredRooms" :key="room.name" type="button" class="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-100" @click="form.room_no = room.name">
+            {{ room.room_no }}<span v-if="room.employee_name" class="ml-1 text-xs text-amber-700">{{ room.employee_name }}</span>
+          </button>
+        </div>
+      </template>
+    </Card>
     <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
       <Card title="当月费用管理" subtitle="按基础信息中的有效入住关系登记费用；个人承担与公司承担相加后自动形成房间总费用">
         <div class="flex items-center gap-2 mb-4">

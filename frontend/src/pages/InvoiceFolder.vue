@@ -14,12 +14,14 @@ import {
   confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice,
   updateInvoice, updateInvoiceExpenseContext, uploadInvoiceFiles, validateInvoiceFiles,
 } from '../lib/invoiceOcr.js';
+import { normalizeFolderTab } from '../lib/dashboardLanding.js';
 
 const finance = isFinanceUser();
 const route = useRoute();
 const router = useRouter();
 const view = computed(() => (route.query.view === 'list' ? 'list' : 'home'));
-const tab = ref(String(route.query.tab || (finance ? 'dup' : 'list')));
+// 页签来自地址（看板点进来 ?view=list&tab=todo|dup|ok|used|allinv|mine）；财务和员工的页签不同，不属于自己这套的会退到最接近的一个。
+const tab = ref(normalizeFolderTab(route.query.tab, finance));
 const invoices = ref([]);
 const selectedName = ref(String(route.query.invoice || ''));
 const ATTENTION = ['待确认', '识别中', '识别失败', '疑似重复'];
@@ -147,7 +149,8 @@ watch(tab, () => {
   if (view.value === 'list') load();
 });
 watch(() => [route.query.tab, route.query.invoice], ([nextTab, invoice]) => {
-  if (nextTab && nextTab !== tab.value) tab.value = String(nextTab);
+  const wanted = nextTab ? normalizeFolderTab(nextTab, finance) : '';
+  if (wanted && wanted !== tab.value) tab.value = wanted;
   else if (invoice) selectedName.value = String(invoice);
 });
 watch(view, () => refresh());

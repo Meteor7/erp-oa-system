@@ -36,6 +36,8 @@ const everyone = reactive({ items: [], names: {} });
 const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false });
 const approval = ref(null);
 const banner = reactive({ ok: '', err: '' });
+// 地址要求看「全部」但没有这个权限（比如看板的「今天不在岗」链接发给了普通员工）：退回「我的」，并说一声。
+const notice = ref('');
 const busy = ref(false);
 const formRef = ref(null);
 const now = ref(Date.now());
@@ -139,11 +141,17 @@ const goBack = () => go(backLocation(origin.value, { filter: page.value.newType 
 
 // 列表上切范围 / 类型：留在同一个列表，替换历史记录（返回键不会在筛选之间来回跳）。
 function setScope(scope) {
+  notice.value = '';
   go(listLocation({ scope, filter: page.value.filter }, homePath), { replace: true });
 }
 
+// 换类型时「今天不在岗」的筛选保留（范围没变）；换范围时去掉。
 function setFilter(filter) {
-  go(listLocation({ scope: page.value.scope || 'mine', filter }, homePath), { replace: true });
+  go(listLocation({ scope: page.value.scope || 'mine', filter, today: page.value.today }, homePath), { replace: true });
+}
+
+function clearToday() {
+  go(listLocation({ scope: 'all', filter: page.value.filter }, homePath), { replace: true });
 }
 
 function onPeriod(next) {
@@ -255,7 +263,9 @@ watch(() => [route.path, view.value, page.value.filter, page.value.newType], () 
 watch(() => [view.value, page.value.scope, page.value.filter, loaded.review, loaded.home, canViewAll.value], () => {
   if (view.value !== 'list' || !loaded.review || !loaded.home) return;
   const wanted = page.value.scope ? validScope(page.value.scope, { canViewAll: canViewAll.value }) : defaultScope(review.items.length);
-  if (wanted !== page.value.scope) router.replace(listLocation({ scope: wanted, filter: page.value.filter }, homePath));
+  if (wanted === page.value.scope) return;
+  if (page.value.scope === 'all' && wanted === 'mine') notice.value = '你没有查看全部申请的权限，已显示「我的」。';
+  router.replace(listLocation({ scope: wanted, filter: page.value.filter }, homePath));
 }, { immediate: true });
 
 watch(() => [view.value, page.value.scope, canViewAll.value], () => {
@@ -266,6 +276,7 @@ watch(() => [view.value, page.value.scope, canViewAll.value], () => {
 watch(() => `${view.value}|${page.value.request}|${page.value.newType}`, () => {
   if (keepBanner) keepBanner = false;
   else flash();
+  notice.value = '';
 });
 
 // 进入首页 / 列表时刷新一次（别的页面里批过、提交过，这里不能还是旧的）；切类型不重新取数，类型筛选在本地做。
@@ -316,6 +327,7 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
   <div class="xp at">
     <div v-if="banner.ok" class="banner ok" role="status">{{ banner.ok }}</div>
     <div v-if="banner.err" class="banner err" role="alert">{{ banner.err }}</div>
+    <div v-if="notice" class="banner info" role="status">{{ notice }}</div>
 
     <AttendanceHome
       v-if="view === 'home'" :home="home" :mine="mine" :review="review" :loaded="loaded" :now="now" :busy="busy"
@@ -326,7 +338,7 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
     <AttendanceList
       v-else-if="view === 'list'" :page="page" :sets="listSets" :names="listNames" :loaded="loaded" :now="now" :busy="busy"
       :is-approver="isApprover" :can-view-all="canViewAll" :has-employee="hasEmployee"
-      @home="goHome" @scope="setScope" @filter="setFilter" @new="goNew" @open="openRow" @approve-many="approveMany" />
+      @home="goHome" @scope="setScope" @filter="setFilter" @today-off="clearToday" @new="goNew" @open="openRow" @approve-many="approveMany" />
 
     <AttendanceDetail
       v-else-if="view === 'detail'" :key="page.request" :name="page.request" :origin="origin" :reject-mode="page.reject"

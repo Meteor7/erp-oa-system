@@ -20,6 +20,8 @@ const routes = [
   { path: '/ledger', redirect: '/entry' },
   { path: '/entry', component: () => import('./pages/TimesheetEntry.vue') },
   { path: '/oa', redirect: '/approval/leave' },
+  // 考勤中心首页和「全部类型」的列表（看板的「今天不在岗」也落在这里）；类型各自的路径照旧。
+  { path: '/approval/attendance', component: attendancePage },
   { path: '/approval/leave', component: attendancePage },
   { path: '/approval/overtime', component: attendancePage },
   { path: '/approval/overtime/:name', component: attendancePage },

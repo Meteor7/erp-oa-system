@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { createResource } from "frappe-ui";
 import RdPage from "../components/rd/RdPage.vue";
 import RdKpi from "../components/rd/RdKpi.vue";
@@ -8,11 +9,12 @@ import { displayCompany, displayDepartment } from "../lib/displayBrand.js";
 import { extractFrappeError } from "../lib/frappeError.js";
 import { isHrSensitiveHidden } from "../lib/access.js";
 import {
-  ARCHIVE_STATUSES as ARCH, NO_RD_TYPE, RD_TYPES, SORT_OPTIONS,
-  archiveTone, avatarText, decorateEmployees, defaultRdType, departmentGroupMap, departmentGroups, displayFieldValue, filterEmployees, genderLabel,
-  isMaskedField, kpiCounts, lastModifiedText, missingSummary, pageSlice, rdTone, sortEmployees, supervisorLabel,
+  ARCHIVE_STATUSES as ARCH, NO_RD_TYPE, PERSONNEL_QUERY_KEYS, RD_TYPES, SORT_OPTIONS,
+  archiveTone, avatarText, decorateEmployees, defaultRdType, departmentGroupMap, departmentGroups, displayFieldValue, filterByUrlExtras, filterEmployees, genderLabel,
+  isMaskedField, kpiCounts, lastModifiedText, missingSummary, pageSlice, parsePersonnelQuery, personnelQueryOf, rdTone, sortEmployees, supervisorLabel,
   todayIso, visibleTabs,
 } from "../lib/personnelView.js";
+import { bindRouteFilters } from "../lib/urlFilterState.js";
 import { exportSheetsWorkbook } from "../lib/tableExport.js";
 import {
   IMPORT_MAX_ROWS, SENSITIVE_EXPORT_LABEL, buildEmployeeExportSheet, buildEmployeeTemplateSheets, buildImportPreview,
@@ -67,6 +69,10 @@ const statusFilter=ref("active");
 const rdFilter=ref("");
 const archiveFilter=ref("");
 const alertOnly=ref(false);
+// 下面三个只从地址 / 标签进来：60 天内到期、本月入职、部门分组（看板链接用，见 bindRouteFilters）
+const expiringOnly=ref(false);
+const joinedMonth=ref(false);
+const groupFilter=ref("");
 const sortMode=ref("default");
 const currentPage=ref(1);
 const PAGE_SIZE=20;
@@ -93,18 +99,37 @@ const loaded=computed(()=>Array.isArray(rows.data));
 const groups=computed(()=>departmentGroups(items.value,depts.data||[],{company:companyFilter.value,status:statusFilter.value}));
 const departmentOptions=computed(()=>groups.value.flatMap(group=>group.departments.map(item=>item.name)));
 const allDepartmentCount=computed(()=>statusFilter.value==="left"?statusCounts.value.left:statusCounts.value.active);
-const filteredItems=computed(()=>sortEmployees(filterEmployees(items.value,{
+const filteredItems=computed(()=>sortEmployees(filterByUrlExtras(filterEmployees(items.value,{
   company:companyFilter.value,department:departmentFilter.value,status:statusFilter.value,
   rdType:rdFilter.value,archive:archiveFilter.value,alertOnly:alertOnly.value,keyword:keyword.value,
-}),sortMode.value));
+}),{group:groupFilter.value,joined:joinedMonth.value?"month":"",reminder:expiringOnly.value?"expiring":""},today),sortMode.value));
 const pageData=computed(()=>pageSlice(filteredItems.value,currentPage.value,PAGE_SIZE));
 const pageCount=computed(()=>pageData.value.pageCount);
 const pagedItems=computed(()=>pageData.value.items);
-watch([companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode],()=>{currentPage.value=1});
+watch([companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode,expiringOnly,joinedMonth,groupFilter],()=>{currentPage.value=1});
 watch([companyFilter,statusFilter],()=>{
   if(departmentFilter.value&&!departmentOptions.value.includes(departmentFilter.value))departmentFilter.value="";
 });
 watch(pageCount,count=>{if(currentPage.value>count)currentPage.value=count});
+
+// 筛选放在地址里：进来时按 ?status=&reminder=&rd=&group=&archive=&joined=&dept= 初始化，改筛选后地址跟着变（replace，不进历史）。
+// 放在上面「部门不可用就清掉」的 watch 之后，先让页面理顺关联筛选再写地址。
+const route=useRoute();
+const router=useRouter();
+bindRouteFilters({route,router,specs:[{
+  keys:PERSONNEL_QUERY_KEYS,
+  read:parsePersonnelQuery,
+  snapshot:()=>({
+    status:statusFilter.value,reminder:expiringOnly.value?"expiring":"",rd:rdFilter.value,group:groupFilter.value,
+    archive:archiveFilter.value,joined:joinedMonth.value?"month":"",dept:departmentFilter.value,
+  }),
+  apply:state=>{
+    statusFilter.value=state.status;expiringOnly.value=state.reminder==="expiring";rdFilter.value=state.rd;groupFilter.value=state.group;
+    archiveFilter.value=state.archive;joinedMonth.value=state.joined==="month";departmentFilter.value=state.dept;
+  },
+  toQuery:personnelQueryOf,
+  sources:[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,departmentFilter],
+}]});
 
 const formDepartmentOptions=computed(()=>(depts.data||[]).filter(x=>x.company===form.company));
 function clearDepartmentIfOutsideCompany(){
@@ -632,6 +657,9 @@ onBeforeUnmount(()=>{
 <button v-for="x in ARCH" :key="x" type="button" class="chip" :aria-pressed="archiveFilter===x" @click="archiveFilter=x">{{x}}</button>
 </div>
 <button type="button" class="chip" :aria-pressed="alertOnly" @click="alertOnly=!alertOnly"><RdIcon name="bell"/> 只看有提醒</button>
+<button type="button" class="chip" data-chip-expiring :aria-pressed="expiringOnly" title="试用期或合同在 60 天内到期" @click="expiringOnly=!expiringOnly">60 天内到期</button>
+<button type="button" class="chip" data-chip-joined :aria-pressed="joinedMonth" @click="joinedMonth=!joinedMonth">本月入职</button>
+<button v-if="groupFilter" type="button" class="chip" data-chip-group aria-pressed="true" :aria-label="`清除部门分组筛选：${groupFilter}`" @click="groupFilter=''">分组：{{groupFilter}} ✕</button>
 </div>
 
 <div v-if="rows.loading&&!loaded" class="bd muted">加载中…</div>
