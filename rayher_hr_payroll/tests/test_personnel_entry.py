@@ -115,6 +115,58 @@ def test_save_employee_sets_left_status_when_relieving_date_is_saved(monkeypatch
     assert captured["saved"] is True
 
 
+def _save_new_employee(monkeypatch, department, **extra):
+    mod, frappe = _load_personnel_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    frappe.db.exists = lambda doctype, name: True
+    names = {"研发软件部 - RAY": "研发软件部", "财务部 - RAY": "财务部", "旧部门 - RAY": "旧部门"}
+    frappe.db.get_value = lambda doctype, filters, field=None, *a, **k: names.get(filters) if doctype == "Department" else None
+    created = {}
+
+    class FakeDoc:
+        name = "EMP-NEW"
+
+        def insert(self, ignore_permissions=False):
+            pass
+
+    def get_doc(first, name=None):
+        created.update(first)
+        return FakeDoc()
+
+    frappe.get_doc = get_doc
+    mod.save_employee(employee_name="新人", company="Rayher", department=department, **extra)
+    return created
+
+
+def test_new_employee_gets_the_rd_type_of_the_department_when_none_is_chosen(monkeypatch):
+    assert _save_new_employee(monkeypatch, "研发软件部 - RAY")["rd_personnel_type"] == "全时研发"
+    assert _save_new_employee(monkeypatch, "研发软件部 - RAY", rd_personnel_type="")["rd_personnel_type"] == "全时研发"
+    assert _save_new_employee(monkeypatch, "财务部 - RAY")["rd_personnel_type"] == "非研发"
+    # 自己选了就按自己选的；没选部门或不是标准部门就留空
+    assert _save_new_employee(monkeypatch, "研发软件部 - RAY", rd_personnel_type="研发辅助")["rd_personnel_type"] == "研发辅助"
+    assert "rd_personnel_type" not in _save_new_employee(monkeypatch, None)
+    assert "rd_personnel_type" not in _save_new_employee(monkeypatch, "旧部门 - RAY")
+
+
+def test_editing_an_existing_employee_does_not_fill_in_the_rd_type(monkeypatch):
+    mod, frappe = _load_personnel_entry(monkeypatch)
+    monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
+    captured = {}
+
+    class FakeDoc:
+        name = "EMP-OLD"
+
+        def update(self, values):
+            captured.update(values)
+
+        def save(self, ignore_permissions=False):
+            pass
+
+    frappe.get_doc = lambda doctype, name=None: FakeDoc()
+    mod.save_employee(name="EMP-OLD", employee_name="老员工", department="研发软件部 - RAY")
+    assert "rd_personnel_type" not in captured
+
+
 def test_list_employees_includes_reference_template_and_default_base_fields(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     captured = {}

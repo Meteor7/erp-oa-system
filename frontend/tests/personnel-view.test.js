@@ -8,6 +8,8 @@ import {
   daysBetween,
   decorateEmployee,
   decorateEmployees,
+  defaultRdType,
+  departmentGroupMap,
   departmentGroups,
   displayFieldValue,
   filterEmployees,
@@ -242,6 +244,70 @@ test("departmentGroups counts from the roster, by status and company, with an �
   assert.deepEqual(left.map((group) => [group.name, group.total]), [["研发", 1]]);
   const shanghai = departmentGroups(items, meta, { status: "active", company: "示例研发中心" });
   assert.deepEqual(shanghai.map((group) => [group.name, group.total]), [["研发", 1]]);
+});
+
+const RD_META = [
+  { name: "研发软件部 - RAY", department_name: "研发软件部", company: "Rayher", group_name: "研发" },
+  { name: "研发AI部 - RAY", department_name: "研发AI部", company: "Rayher", group_name: "研发" },
+  { name: "财务部 - RAY", department_name: "财务部", company: "Rayher", group_name: "职能" },
+  { name: "总经办 - RAY", department_name: "总经办", company: "Rayher", group_name: "职能" },
+];
+
+test("defaultRdType: the R&D group is 全时研发, other known groups 非研发, unknown stays empty", () => {
+  assert.equal(defaultRdType("研发"), "全时研发");
+  assert.equal(defaultRdType("职能"), "非研发");
+  assert.equal(defaultRdType("客户运营"), "非研发");
+  assert.equal(defaultRdType("其他"), "");
+  assert.equal(defaultRdType(""), "");
+  assert.equal(defaultRdType(undefined), "");
+});
+
+test("an active person in an R&D department without an R&D type is flagged, others are not", () => {
+  const groupOf = departmentGroupMap(RD_META);
+  const ctx = { today: TODAY, groupOf };
+  const flagged = decorateEmployee(full({ department: "研发AI部 - RAY", rd_personnel_type: "" }), ctx);
+  assert.equal(flagged.rdGap, true);
+  assert.equal(flagged.group, "研发");
+  assert.ok(flagged.reminders.some((r) => r.key === "rdtype" && r.tone === "warn"));
+  // 填了类型、非研发部门、已离职、没有分组信息：都不提醒
+  assert.equal(decorateEmployee(full({ rd_personnel_type: "全时研发" }), ctx).rdGap, false);
+  assert.equal(decorateEmployee(full({ department: "财务部 - RAY", rd_personnel_type: "" }), ctx).rdGap, false);
+  assert.equal(decorateEmployee(full({ department: "研发AI部 - RAY", rd_personnel_type: "", relieving_date: "2026-09-01" }), ctx).rdGap, false);
+  assert.equal(decorateEmployee(full({ department: "研发AI部 - RAY", rd_personnel_type: "" }), { today: TODAY }).rdGap, false);
+  // 明确选了「非研发」是 HR 的决定，不当作缺口
+  assert.equal(decorateEmployee(full({ department: "研发AI部 - RAY", rd_personnel_type: "非研发" }), ctx).rdGap, false);
+});
+
+test("the R&D type reminder sits between contract dates and missing data, and counts in the KPI", () => {
+  const groupOf = departmentGroupMap(RD_META);
+  const list = reminders(full(), TODAY, { rdGap: true, missingCount: 2 });
+  assert.deepEqual(list.map((r) => r.key), ["rdtype", "missing"]);
+  const items = decorateEmployees([
+    full({ name: "a", department: "研发AI部 - RAY", rd_personnel_type: "" }),
+    full({ name: "b", department: "研发AI部 - RAY", rd_personnel_type: "全时研发" }),
+    full({ name: "c", department: "财务部 - RAY", rd_personnel_type: "" }),
+  ], { today: TODAY, groupOf });
+  const kpi = kpiCounts(items, TODAY);
+  assert.equal(kpi.rdGap, 1);
+  assert.equal(kpi.rd, 1);
+  assert.equal(kpi.other, 2);
+  assert.equal(filterEmployees(items, { alertOnly: true, status: "active" }).some((item) => item.key === "a"), true);
+});
+
+test("departmentGroups also reports how many people of each group fill in the R&D timesheet", () => {
+  const items = decorateEmployees([
+    full({ name: "1", department: "研发软件部 - RAY", rd_personnel_type: "全时研发" }),
+    full({ name: "2", department: "研发软件部 - RAY", rd_personnel_type: "非研发" }),
+    full({ name: "3", department: "研发AI部 - RAY", rd_personnel_type: "" }),
+    full({ name: "4", department: "总经办 - RAY", rd_personnel_type: "研发辅助" }),
+    full({ name: "5", department: "财务部 - RAY", rd_personnel_type: "非研发" }),
+  ], { today: TODAY });
+  const groups = departmentGroups(items, RD_META, { status: "active" });
+  const byName = Object.fromEntries(groups.map((group) => [group.name, group]));
+  assert.deepEqual([byName["研发"].total, byName["研发"].fill], [3, 1]);
+  // 研发辅助的人在职能部门，也要填工时，所以算在职能这一组的 fill 里
+  assert.deepEqual([byName["职能"].total, byName["职能"].fill], [2, 1]);
+  assert.deepEqual(byName["研发"].departments.map((d) => [d.name, d.employee_count, d.fill_count]), [["研发软件部", 2, 1], ["研发AI部", 1, 0]]);
 });
 
 test("maskValue hides sensitive values and leaves blanks alone", () => {

@@ -84,6 +84,8 @@ def _env(monkeypatch, user="Administrator", roles=("System Manager",), allow_cre
         return []
 
     def get_value(doctype, filters, field=None, *args, **kwargs):
+        if doctype == "Department":
+            return next((row.get(field) for row in env.departments if row["name"] == filters), None)
         if doctype == "OA Approval Role Assignment":
             return env.approvers.get(filters["employee"])
         if doctype == "Employee":
@@ -155,6 +157,40 @@ def _new_row(**fields):
     base = {"_row": 2, "company": "示例总部", "employee_number": "N100", "employee_name": "新员工", "date_of_joining": "2026-10-01"}
     base.update(fields)
     return base
+
+
+def test_new_rows_get_the_rd_type_of_their_department_unless_given(monkeypatch):
+    mod, env, _ = _env(monkeypatch)
+    rows = [
+        _new_row(_row=2, department="研发软件部"),
+        _new_row(_row=3, employee_number="N101", employee_name="财务新人", department="财务部"),
+        _new_row(_row=4, employee_number="N102", employee_name="没填部门"),
+        _new_row(_row=5, employee_number="N103", employee_name="自己选了", department="研发软件部", rd_personnel_type="研发辅助"),
+    ]
+    by = _by_row(mod.preview_employee_import(rows))
+    assert {row["status"] for row in by.values()} == {"create"}
+    assert any("全时研发" in text for text in by[2]["warnings"])
+    assert any("非研发" in text for text in by[3]["warnings"])
+    assert not any("研发人员类型" in text for text in by[4]["warnings"] + by[5]["warnings"])
+    assert "研发人员类型" in by[2]["labels"]
+    assert env.inserted == []   # 预览不写库
+
+    mod.import_employees(rows)
+    types = {row["employee_name"]: row.get("rd_personnel_type") for row in env.store}
+    assert types["新员工"] == "全时研发"
+    assert types["财务新人"] == "非研发"
+    assert types["没填部门"] is None
+    assert types["自己选了"] == "研发辅助"
+
+
+def test_updating_an_existing_employee_never_fills_in_the_rd_type(monkeypatch):
+    mod, env, _ = _env(monkeypatch)
+    rows = [{"_row": 2, "employee_number": "A001", "designation": "财务主管"}]
+    by = _by_row(mod.preview_employee_import(rows))
+    assert by[2]["status"] == "update"
+    assert not any("研发人员类型" in text for text in by[2]["warnings"])
+    mod.import_employees(rows)
+    assert env.store[0].get("rd_personnel_type") is None
 
 
 def test_import_columns_have_unique_keys_and_labels(monkeypatch):

@@ -94,6 +94,15 @@ export function isRdType(type) {
   return RD_TYPES.includes(type) && type !== "非研发";
 }
 
+export const RD_GROUP = "研发";
+
+// 新增员工没选研发人员类型时，按部门分组给默认值（与服务端 personnel_entry._default_rd_type 一致）：
+// 研发组 → 全时研发，其他已知分组 → 非研发，不知道分组 → 不填。已有员工不会被改。
+export function defaultRdType(group) {
+  if (!group || group === OTHER_GROUP) return "";
+  return group === RD_GROUP ? "全时研发" : "非研发";
+}
+
 // 司龄：入职日到今天（已离职算到离职日），"3 年 7 个月" / "7 个月" / "12 天" / "今天入职"
 export function seniority(row, today) {
   const start = dayNumber(row?.date_of_joining);
@@ -140,11 +149,12 @@ export function missingSummary(missing, limit = 3) {
 }
 
 // ---------- 提醒 ----------
-const REMINDER_RANK = { left: 0, leaving: 1, probation: 2, contract: 3, missing: 4 };
+const REMINDER_RANK = { left: 0, leaving: 1, probation: 2, contract: 3, rdtype: 4, missing: 5 };
 
 // 返回按优先级排好的提醒：已离职 > 即将离职 > 试用期到期 > 合同到期 > 缺资料。
 // days：距今天数（到期类提醒用，越小越紧急）。
-export function reminders(row, today, { sensitiveHidden = false, missingCount } = {}) {
+// rdGap：在职、属于研发部门、但研发人员类型没设置——他不会出现在研发工时填报里。
+export function reminders(row, today, { sensitiveHidden = false, missingCount, rdGap = false } = {}) {
   const list = [];
   if (isLeft(row, today)) {
     const day = monthDay(row?.relieving_date);
@@ -170,6 +180,7 @@ export function reminders(row, today, { sensitiveHidden = false, missingCount } 
   if (ends.length) {
     list.push({ key: "contract", text: `合同 ${monthDay(ends[0].date)} 到期`, tone: ends[0].gap <= 7 ? "bad" : "warn", days: ends[0].gap });
   }
+  if (rdGap) list.push({ key: "rdtype", text: "研发类型未设置，不在工时填报里", tone: "warn", days: null });
   const missing = missingCount ?? completeness(row, { sensitiveHidden }).missing.length;
   if (missing > 0) list.push({ key: "missing", text: `缺 ${missing} 项资料`, tone: "info", days: null });
   return list.sort((a, b) => REMINDER_RANK[a.key] - REMINDER_RANK[b.key]);
@@ -197,15 +208,20 @@ export function avatarText(name) {
 }
 
 // 把一行员工数据加上列表和筛选要用的派生信息
-export function decorateEmployee(row, { today, sensitiveHidden = false } = {}) {
+// groupOf：部门展示名 → 分组名（departmentGroupMap(get_dept_options 的结果)）；没传就不判断研发类型缺口。
+export function decorateEmployee(row, { today, sensitiveHidden = false, groupOf = null } = {}) {
   const progress = completeness(row, { sensitiveHidden });
   const left = isLeft(row, today);
-  const list = reminders(row, today, { sensitiveHidden, missingCount: progress.missing.length });
+  const department = displayDepartment(row.department);
+  const rdGap = !left && !isBlank(department) && groupOf?.get(department) === RD_GROUP && isBlank(row?.rd_personnel_type);
+  const list = reminders(row, today, { sensitiveHidden, missingCount: progress.missing.length, rdGap });
   return {
     row,
     key: row.name,
     left,
-    department: displayDepartment(row.department),
+    department,
+    group: groupOf?.get(department) || "",
+    rdGap,
     archive: archiveStatusOf(row),
     rdType: row.rd_personnel_type || "",
     progress,
@@ -224,7 +240,7 @@ export function decorateEmployees(rows, ctx) {
 export function kpiCounts(items, today) {
   const month = String(today || "").slice(0, 7);
   const result = {
-    active: 0, rd: 0, other: 0,
+    active: 0, rd: 0, other: 0, rdGap: 0,
     joinedThisMonth: 0, onProbation: 0,
     leftThisMonth: 0, leftEffective: 0, leftPending: 0,
     fileOpen: 0, filePending: 0, fileConfirm: 0,
@@ -240,6 +256,7 @@ export function kpiCounts(items, today) {
     if (item.left) continue;
     result.active += 1;
     if (isRdType(item.rdType)) result.rd += 1; else result.other += 1;
+    if (item.rdGap) result.rdGap += 1;
     const probationGap = row.probation_end_date ? daysBetween(today, row.probation_end_date) : null;
     if (probationGap !== null && probationGap >= 0) result.onProbation += 1;
     if (item.archive === "待完善") result.filePending += 1;
@@ -287,7 +304,7 @@ export function filterEmployees(items, filters = {}) {
 function alertScore(item) {
   const first = item.reminders.find((reminder) => reminder.key !== "left");
   if (!first) return Number.POSITIVE_INFINITY;
-  const base = { leaving: 1000, probation: 2000, contract: 3000, missing: 5000 }[first.key] ?? 6000;
+  const base = { leaving: 1000, probation: 2000, contract: 3000, rdtype: 4000, missing: 5000 }[first.key] ?? 6000;
   const urgency = item.urgent ? -2000 : 0;
   return base + urgency + (first.days ?? 0);
 }
@@ -326,6 +343,16 @@ export function pageSlice(list, page, size) {
 }
 
 // ---------- 部门分组 ----------
+// 部门展示名 → 分组名，decorateEmployees 用它判断「研发部门的人没设研发类型」。
+export function departmentGroupMap(deptMeta) {
+  const map = new Map();
+  for (const meta of deptMeta || []) {
+    const name = displayDepartment(meta.department_name || meta.name);
+    if (name && meta.group_name && !map.has(name)) map.set(name, meta.group_name);
+  }
+  return map;
+}
+
 // deptMeta：get_dept_options 的结果，用来知道部门属于哪个分组；人数按当前列表数据现算，
 // 这样「在职 / 已离职」切换、公司切换后数字都对得上。
 export function departmentGroups(items, deptMeta, { company = "", status = "active", order = DEPARTMENT_GROUP_ORDER } = {}) {
@@ -338,23 +365,30 @@ export function departmentGroups(items, deptMeta, { company = "", status = "acti
     if (!position.has(name)) position.set(name, position.size);
   }
   const counts = new Map();
+  const fills = new Map();
   for (const item of items || []) {
     if (company && item.row.company !== company) continue;
     if (status === "active" && item.left) continue;
     if (status === "left" && !item.left) continue;
     if (!item.department) continue;
     counts.set(item.department, (counts.get(item.department) || 0) + 1);
+    if (isRdType(item.rdType)) fills.set(item.department, (fills.get(item.department) || 0) + 1);
   }
   const byGroup = new Map();
   for (const [name, count] of counts) {
     const group = groupOf.get(name) || OTHER_GROUP;
     if (!byGroup.has(group)) byGroup.set(group, []);
-    byGroup.get(group).push({ name, group_name: group, employee_count: count });
+    byGroup.get(group).push({ name, group_name: group, employee_count: count, fill_count: fills.get(name) || 0 });
   }
   const rank = (name) => (position.has(name) ? position.get(name) : Number.MAX_SAFE_INTEGER);
+  // fill：这个分组里研发人员类型是全时 / 非全时 / 辅助的人数，也就是会出现在研发工时填报里的人
   return [...order, OTHER_GROUP].map((groupName) => {
     const departments = (byGroup.get(groupName) || []).sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, "zh-CN"));
-    return { name: groupName, departments, total: departments.reduce((sum, department) => sum + department.employee_count, 0) };
+    return {
+      name: groupName, departments,
+      total: departments.reduce((sum, department) => sum + department.employee_count, 0),
+      fill: departments.reduce((sum, department) => sum + department.fill_count, 0),
+    };
   }).filter((group) => group.departments.length);
 }
 

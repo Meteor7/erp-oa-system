@@ -252,6 +252,17 @@ def _employee_values(name, raw):
     return {key: value for key, value in provided.items() if value is not None}
 
 
+def _default_rd_type(department):
+    """新增员工没选研发人员类型时，按部门给一个默认值：研发类部门记“全时研发”，其他部门记“非研发”。
+    部门没填，或不是标准部门时不补，留空。已有员工不会被改。"""
+    if not department:
+        return None
+    group = DEPARTMENT_GROUP_BY_NAME.get(frappe.db.get_value("Department", department, "department_name"))
+    if not group:
+        return None
+    return "全时研发" if group == "研发" else "非研发"
+
+
 def _refuse_hidden_sensitive(vals):
     """受限的测试账号不能维护社保和公积金信息：有值就拒绝，空值直接丢掉。"""
     if is_hr_sensitive_hidden():
@@ -294,6 +305,10 @@ def _write_employee(name, vals, raw):
         if _employment_status(relieving_date) == "Active" and employee_name:
             _require_unique_active_name(employee_name)
         company_value = vals.pop("company")
+        if not vals.get("rd_personnel_type"):
+            default_type = _default_rd_type(vals.get("department"))
+            if default_type:
+                vals["rd_personnel_type"] = default_type
         doc = frappe.get_doc({
             "doctype": "Employee", "company": company_value,
             "status": _employment_status(relieving_date), "relieving_date": relieving_date or None,
@@ -775,6 +790,11 @@ def _plan_employee_import(rows):
                 warnings.append("性别没填，系统会按默认记为“男”。")
             if "date_of_birth" not in vals and not _birth(vals.get("id_card_number_cn")):
                 warnings.append("出生日期没填，系统会按默认记为 1990-01-01。")
+            if not vals.get("rd_personnel_type"):
+                default_type = _default_rd_type(vals.get("department"))
+                if default_type:
+                    vals["rd_personnel_type"] = default_type
+                    warnings.append("研发人员类型没填，会按部门记为“%s”。" % default_type)
             final = {**vals}
             final.setdefault("date_of_birth", _birth(vals.get("id_card_number_cn")) or "1990-01-01")
             touched = set(final)
