@@ -1,0 +1,734 @@
+"""采购 / PMC / 生产主管的看板块（rayher_hr_payroll/dashboard/procurement.py）。
+
+数据读取函数整体替换成假数据，验证口径、权限、空数据显示；SQL / 查询条件的 Python 侧逻辑用假 frappe 单独测。
+今天固定为 2026-10-09（周五），本周 = 10-05 到 10-11。
+"""
+import json
+import re
+from types import SimpleNamespace as NS
+
+import pytest
+
+from rayher_hr_payroll.dashboard import core, layout
+from rayher_hr_payroll.dashboard import procurement as proc
+
+TODAY = "2026-10-09"
+
+KPIS = ["proc.to_compare", "proc.price_pending", "proc.po_transit", "proc.po_overdue", "proc.ready_to_pay",
+        "proc.pay_planned_passed", "proc.month_amount", "proc.suppliers_count", "proc.uncoded", "proc.await_pr",
+        "proc.material_overdue", "proc.week_arrive", "proc.to_arrive", "proc.to_inspect", "proc.exchange",
+        "proc.return", "proc.month_inspected", "proc.month_arrived", "proc.risk_projects"]
+ALERTS = ["alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_quote", "alert.uncoded",
+          "alert.inspect_stale", "alert.material_overdue", "alert.risk_projects"]
+BLOCKS = ["block.proc_chain", "block.arrival_inspect", "block.proc_suppliers", "block.proc_projects",
+          "block.material_stage", "block.risk_projects", "block.week_schedule"]
+MINE = KPIS + ALERTS + BLOCKS
+MONEY = {"proc.month_amount", "block.proc_suppliers", "block.proc_projects", "proc.ready_to_pay",
+         "proc.pay_planned_passed", "alert.pay_planned_passed"}
+CHAIN = {"proc.to_compare", "proc.price_pending", "proc.await_pr", "alert.price_missing_quote"}
+BOARD = {"proc.uncoded", "proc.material_overdue", "proc.risk_projects", "alert.uncoded", "alert.material_overdue",
+         "alert.risk_projects", "block.material_stage", "block.risk_projects"}
+
+
+def make_ctx(positions=(), roles=("Employee",), user="u@example.com", period="2026-10", **kw):
+    return core.Ctx(user=user, roles=frozenset(roles), positions=frozenset(positions), period=period, today=TODAY, **kw)
+
+
+def line(po, quantity, got, state="", due="", project="", item="", sr="", sl="", status="供应商制作中", name=None):
+    return {"po": po, "po_status": status, "supplier": "甲", "line": name or f"{po}-{item or quantity}-{got}-{due}",
+            "quantity": quantity, "received": got, "inspection": state, "due": due, "project": project, "item": item,
+            "source_request": sr, "source_line": sl}
+
+
+def rich_lines():
+    return [
+        line("PO-A", 10, 0, due="2026-10-01", project="P1", item="镜片", sr="R1", sl="L1", name="A1"),
+        line("PO-A", 5, 5, state="待验收", due="2026-10-02", name="A2"),
+        line("PO-B", 4, 2, state="待验收", due="2026-10-10", status="到货验收中", name="B1"),
+        line("PO-B", 3, 3, state="换货中", due="2026-09-20", status="到货验收中", name="B2"),
+        line("PO-B", 2, 2, state="退货中", due="2026-09-30", status="到货验收中", name="B3"),
+        line("PO-C", 1, 1, state="已通过", due="2026-09-01", status="付款中", name="C1"),
+        line("PO-D", 9, 0, due="2026-09-01", status="草稿", name="D1"),          # 草稿 PO：合同没生效，不参与任何口径
+        line("PO-E", 6, 0, project="P1", item="导轨", name="E1"),                 # 没填合同交期
+        line("PO-E", 6, 0, due=TODAY, name="E2"),                                 # 交期就是今天：不算逾期，算本周
+    ]
+
+
+@pytest.fixture
+def world(monkeypatch):
+    """所有数据读取函数换成假数据；world["calls"] 记录被调用的读取函数，用来证明没权限的块没碰数据。"""
+    data = {"calls": [], "lines": [], "arrivals": {}, "records": [], "month_pos": [], "month_lines": [], "pay": [],
+            "pr": [], "price": {"pending": 0, "draft": 0, "unquoted": {}}, "await": [], "uncoded": [], "stages": [],
+            "chain": {"request": 0, "pr": 0, "po": 0, "payment": 0}}
+
+    def reader(name, key, fn=None):
+        def read(*args):
+            data["calls"].append(name)
+            return fn(*args) if fn else data[key]
+        monkeypatch.setattr(proc, name, read)
+
+    monkeypatch.setattr(proc, "_gate_open", lambda ctx, kind: data.get("gate", {}).get(kind, True))
+    reader("_load_live_lines", "lines")
+    reader("_load_latest_arrivals", "arrivals", lambda names: {po: day for po, day in data["arrivals"].items() if po in names})
+    reader("_load_month_records", "records")
+    reader("_load_month_pos", "month_pos")
+    reader("_load_po_line_amounts", "month_lines")
+    reader("_load_payment_items", "pay")
+    reader("_load_pr_lines", "pr")
+    reader("_load_price_state", "price")
+    reader("_load_await_pr", "await")
+    reader("_load_uncoded", "uncoded")
+    reader("_load_stage_counts", "stages")
+    reader("_load_chain_counts", "chain")
+    return data
+
+
+def run(key, ctx):
+    """和 core._run 一样：没权限就不调用块函数。"""
+    entry = core.REGISTRY[key]
+    return entry.fn(ctx) if entry.visible is None or entry.visible(ctx) else None
+
+
+def full_ctx():
+    return make_ctx(positions=("procurement_manager",), roles=("Employee", "Purchase Manager"))
+
+
+def fill(world):
+    world["lines"] = rich_lines()
+    world["arrivals"] = {"PO-A": "2026-09-20", "PO-B": "2026-10-05"}
+    world["records"] = [
+        {"purchase_order": "PO-A", "record_type": "到货", "details_json": json.dumps([{"line": "A1x"}, {"line": "A2"}])},
+        {"purchase_order": "PO-A", "record_type": "到货", "details_json": json.dumps([{"line": "A2"}])},      # 同一行分两次到货只算一次
+        {"purchase_order": "PO-B", "record_type": "到货", "details_json": "不是 json"},                        # 明细坏了：这条登记算一项
+        {"purchase_order": "PO-A", "record_type": "验收", "details_json": json.dumps(
+            [{"line": "A2", "status": "已通过"}, {"line": "A3", "status": "换货中"}])},
+        {"purchase_order": "PO-B", "record_type": "验收", "details_json": json.dumps([{"line": "B9", "status": "已通过"}])},
+    ]
+    world["month_pos"] = (
+        [{"po": f"N{i}", "supplier": s, "amount": a, "month": "2026-10"} for i, (s, a) in enumerate(
+            [("甲", 100000), ("甲", 50000), ("乙", 30000), ("丙", 20000), ("丁", 10000), ("戊", 8000), ("己", 2000)], 1)]
+        + [{"po": "P0", "supplier": "甲", "amount": 200000, "month": "2026-09"}])
+    world["month_lines"] = [{"po": "N1", "project": "P1", "amount": 150000}, {"po": "N3", "project": "P2", "amount": 30000},
+                            {"po": "N4", "project": "", "amount": 40000}]
+    world["pay"] = [
+        {"po": "PO-A", "work_status": "可提交付款审批", "amount": 50000, "paid": 0, "planned": "2026-10-20"},
+        {"po": "PO-A", "work_status": "待到货资料", "amount": 30000, "paid": 0, "planned": "2026-10-01"},
+        {"po": "PO-B", "work_status": "待实际付款", "amount": 20000, "paid": 5000, "planned": "2026-09-29"},
+        {"po": "PO-C", "work_status": "已付款", "amount": 10000, "paid": 10000, "planned": "2026-09-01"},
+        {"po": "PO-D", "work_status": "可提交付款审批", "amount": 20000, "paid": 0, "planned": ""},
+    ]
+    world["pr"] = [{"pr": "PR-1", "line": "a"}, {"pr": "PR-1", "line": "b"}, {"pr": "PR-2", "line": "c"}]
+    world["price"] = {"pending": 2, "draft": 1, "unquoted": {"PA-1": 2}}
+    world["await"] = [{"request": "R1", "line": "1"}, {"request": "R1", "line": "2"}, {"request": "R2", "line": "1"}]
+    world["uncoded"] = [{"name": f"M{i}", "request": "R1"} for i in range(4)]
+    world["stages"] = [
+        {"stage": "采购确认中", "no_pr": 1, "total": 3}, {"stage": "采购确认中", "no_pr": 0, "total": 2},
+        {"stage": "PO处理中", "no_pr": 0, "total": 4}, {"stage": "供应商制作中", "no_pr": 0, "total": 5},
+        {"stage": "到货验收中", "no_pr": 0, "total": 2}, {"stage": "付款中", "no_pr": 0, "total": 1},
+        {"stage": "已关闭", "no_pr": 0, "total": 6}, {"stage": "OA审批中", "no_pr": 0, "total": 9},
+    ]
+    world["chain"] = {"request": 40, "pr": 20, "po": 10, "payment": 25}
+    return world
+
+
+def kpi_of(key, ctx=None):
+    return run(key, ctx or full_ctx())
+
+
+# ---------------------------------------------------------------- 注册和布局
+def test_every_provider_in_the_layouts_is_registered_with_the_right_kind():
+    registered = {key: entry.kind for key, entry in core.REGISTRY.items()}
+    assert set(MINE) <= set(registered)
+    assert {key for key in registered if key in MINE} == set(MINE)
+    for key in KPIS:
+        assert registered[key] == "kpi"
+    for key in ALERTS:
+        assert registered[key] == "alert"
+    for key in BLOCKS:
+        assert registered[key] == "block"
+    wanted = layout.all_block_keys()
+    assert {key for key in wanted if key.startswith("proc.")} <= set(KPIS)       # 布局里的采购指标一个不缺
+    for key in ("alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_quote", "alert.uncoded",
+                "alert.inspect_stale", "alert.material_overdue", "alert.risk_projects", "block.proc_chain",
+                "block.arrival_inspect", "block.proc_suppliers", "block.proc_projects", "block.material_stage",
+                "block.risk_projects", "block.week_schedule"):
+        assert key in wanted
+
+
+# ---------------------------------------------------------------- 权限
+SCENARIO_ROLES = [(), ("Employee",), ("Purchase User",), ("Purchase Manager",), ("Accounts User",), ("Finance User",),
+                  ("Rayher Business Executive",), ("System Manager",), ("Purchase User", "Accounts User")]
+SCENARIO_POSITIONS = [(), ("pmc",), ("procurement_manager",), ("vice_manager",), ("general_manager",),
+                      ("production_asset_owner",), ("finance_manager",), ("finance_accountant",), ("finance_auditor",),
+                      ("hr_manager",), ("pmc", "production_asset_owner")]
+
+
+def test_permission_helpers_match_the_existing_endpoint_checks(monkeypatch):
+    """_has_chain_view / _has_po_view / _has_board 是抄 procurement_chain 和 material_progress 的规则；这里逐个组合对照，规则变了会在这里亮。"""
+    from rayher_hr_payroll.api import material_progress as board
+    from rayher_hr_payroll.api import procurement_chain as pc
+
+    def fail(message, *args):
+        raise ValueError(message)
+
+    def passes(check):
+        try:
+            check()
+            return True
+        except ValueError:
+            return False
+
+    for roles in SCENARIO_ROLES:
+        for positions in SCENARIO_POSITIONS:
+            held = {key: ({"u@example.com"} if key in positions else set()) for key in
+                    ("pmc", "procurement_manager", "vice_manager", "general_manager", "production_asset_owner")}
+
+            def users(*keys, held=held):
+                return {user for key in keys for user in held.get(key, set())}
+
+            monkeypatch.setattr(pc, "frappe", NS(throw=fail))
+            monkeypatch.setattr(pc, "position_users", users)
+            monkeypatch.setattr(pc, "_user", lambda: "u@example.com")
+            monkeypatch.setattr(pc, "_roles", lambda roles=roles: set(roles))
+            monkeypatch.setattr(board, "position_users", users)
+            monkeypatch.setattr(board, "frappe", NS(get_roles=lambda user=None, roles=roles: list(roles)))
+            ctx = make_ctx(positions=positions, roles=roles)
+            label = (roles, positions)
+            assert proc._has_chain_view(ctx) == passes(pc._require_view), label
+            assert proc._has_po_view(ctx) == passes(pc._require_po_view), label
+            assert proc._has_board(ctx) == board.can_access_board("u@example.com"), label
+
+
+def test_administrator_may_open_the_board_like_the_endpoint(monkeypatch):
+    assert proc._has_board(make_ctx(user="Administrator"))
+    assert not proc._has_board(make_ctx(user="clerk@example.com"))
+
+
+def visible_keys(ctx):
+    return {key for key in MINE if core.REGISTRY[key].visible(ctx)}
+
+
+def test_visibility_by_identity(world):
+    everything = set(MINE)
+    manager = make_ctx(positions=("procurement_manager",), roles=("Employee", "Purchase Manager"))
+    assert visible_keys(manager) == everything
+
+    pmc = make_ctx(positions=("pmc",), roles=("Employee", "Purchase User", "Accounts User"))   # PMC 带着 Purchase User，也不给金额
+    assert visible_keys(pmc) == everything - MONEY
+
+    production = make_ctx(positions=("production_asset_owner",))
+    assert visible_keys(production) == everything - MONEY - CHAIN - BOARD
+
+    accountant = make_ctx(positions=("finance_accountant",), roles=("Employee", "Accounts User"))
+    assert visible_keys(accountant) == everything - CHAIN - BOARD
+
+    for positions in (("general_manager",), ("vice_manager",)):
+        boss = make_ctx(positions=positions, roles=("Employee", "Accounts User", "Rayher Business Executive"))
+        assert visible_keys(boss) == everything
+
+    assert visible_keys(make_ctx()) == set()
+    assert visible_keys(make_ctx(positions=("hr_manager",), roles=("Employee", "HR Manager"))) == set()
+
+
+def test_pmc_who_also_holds_a_finance_or_purchase_position_keeps_the_union(world):
+    for extra in ("procurement_manager", "vice_manager", "general_manager", "finance_accountant"):
+        both = make_ctx(positions=("pmc", extra), roles=("Employee", "Purchase User", "Accounts User", "Rayher Business Executive"))
+        assert MONEY <= visible_keys(both), extra
+    admin = make_ctx(positions=("pmc",), roles=("Employee", "System Manager"))
+    assert MONEY <= visible_keys(admin)
+
+
+def test_feature_gates_hide_the_blocks_behind_them(world):
+    manager = full_ctx()
+    world["gate"] = {"payment": False}
+    assert visible_keys(manager) == set(MINE) - {"proc.ready_to_pay", "proc.pay_planned_passed", "alert.pay_planned_passed"}
+    world["gate"] = {"chain": False}
+    assert visible_keys(manager) == BOARD | {"proc.ready_to_pay", "proc.pay_planned_passed", "alert.pay_planned_passed"}
+
+
+def test_gate_open_asks_for_the_matching_request_type(monkeypatch):
+    from rayher_hr_payroll import oa_feature_gate
+    from rayher_hr_payroll.oa_document_types import REQUEST_PROCUREMENT, REQUEST_PROCUREMENT_PAYMENT
+
+    asked = []
+    monkeypatch.setattr(oa_feature_gate, "can_access_request_type", lambda request_type, user=None: asked.append((request_type, user)) or False)
+    ctx = make_ctx(user="who@example.com")
+    assert proc._gate_open(ctx, "chain") is False and proc._gate_open(ctx, "payment") is False
+    assert asked == [(REQUEST_PROCUREMENT, "who@example.com"), (REQUEST_PROCUREMENT_PAYMENT, "who@example.com")]
+
+
+def test_hidden_blocks_never_touch_the_data(world):
+    """没权限的人拿到整页：什么都没有，也没有读过任何数据（权限异常不会被当成块失败吞掉）。"""
+    spec = {"note": "", "tabs": [layout.tab("overview", "总览", kpis=KPIS, alerts=ALERTS, blocks=BLOCKS)]}
+    page = core.assemble(make_ctx(profile="employee"), spec)["pages"]["overview"]
+    assert (page["kpis"], page["alerts"], page["blocks"], page["errors"]) == ([], [], [], [])
+    assert world["calls"] == []
+
+
+def test_pmc_page_has_no_money_and_does_not_read_money_data(world):
+    fill(world)
+    world["pay"] = None            # 付款数据 / 金额数据一旦被读，下面直接炸
+    world["month_pos"] = None
+    pmc = make_ctx(positions=("pmc",), roles=("Employee", "Purchase User", "Accounts User"), profile="pmc")
+    out = core.assemble(pmc, layout.LAYOUTS["pmc"], include_todos=False)
+    page = out["pages"]["overview"]
+    assert page["errors"] == []
+    assert page["kpis"] and page["alerts"] and page["blocks"]
+    text = json.dumps(page, ensure_ascii=False)
+    assert not re.search(r"¥|\d\s*(万|元)", text), text
+    assert "_load_payment_items" not in world["calls"] and "_load_month_pos" not in world["calls"]
+    assert {item["key"] for item in page["kpis"]} == {"proc.await_pr", "proc.material_overdue", "proc.week_arrive", "proc.uncoded",
+                                                      "proc.po_transit", "proc.risk_projects", "proc.price_pending"}
+
+
+def test_production_owner_page_only_has_arrival_and_inspection(world):
+    fill(world)
+    owner = make_ctx(positions=("production_asset_owner",), profile="production_asset_owner")
+    page = core.assemble(owner, layout.LAYOUTS["production_asset_owner"], include_todos=False)["pages"]["overview"]
+    assert page["errors"] == []
+    assert [item["key"] for item in page["kpis"]] == ["proc.to_arrive", "proc.to_inspect", "proc.week_arrive", "proc.po_overdue",
+                                                      "proc.exchange", "proc.return", "proc.month_inspected", "proc.month_arrived"]
+    assert [item["key"] for item in page["alerts"]] == ["alert.inspect_stale", "alert.po_overdue"]
+    assert [item["key"] for item in page["blocks"]] == ["block.week_schedule", "block.arrival_inspect"]
+    for item in page["kpis"] + page["alerts"]:      # 生产主管看不了价格审批页，点击去采购付款页
+        assert item["target"]["key"] == "procpay.work"
+    assert not re.search(r"¥|\d\s*(万|元)", json.dumps(page, ensure_ascii=False))
+
+
+def test_every_layout_that_uses_these_blocks_renders_without_errors(world):
+    fill(world)
+    boss_roles = ("Employee", "Accounts User", "Rayher Business Executive")
+    ctxs = {
+        "general_manager": make_ctx(positions=("general_manager",), roles=boss_roles),
+        "vice_manager": make_ctx(positions=("vice_manager",), roles=boss_roles),
+        "procurement_manager": full_ctx(),
+        "pmc": make_ctx(positions=("pmc",), roles=("Employee", "Purchase User")),
+        "production_asset_owner": make_ctx(positions=("production_asset_owner",)),
+    }
+    for profile, ctx in ctxs.items():
+        ctx.profile = profile
+        out = core.assemble(ctx, layout.LAYOUTS[profile], include_todos=False)
+        for page in out["pages"].values():
+            assert [e for e in page["errors"] if e["key"] in MINE] == [], profile
+            for block in page["blocks"]:
+                assert block["error"] is None, (profile, block["key"])
+
+
+# ---------------------------------------------------------------- 物料行分类（纯函数）
+def test_classify_puts_each_line_in_the_right_buckets():
+    from datetime import date
+
+    data = proc.classify(rich_lines(), date(2026, 10, 9))
+    names = lambda key: sorted(row["line"] for row in data[key])
+    assert names("transit") == ["A1", "B1", "B3", "E1", "E2"]
+    assert names("to_arrive") == ["A1", "B1", "E1", "E2"]            # 退货中的 B3 不算待到货
+    assert names("to_inspect") == ["A2", "B1"]                        # B1 部分到货：还差货也有已到的部分待验
+    assert names("exchange") == ["B2"] and names("returning") == ["B3"]
+    assert names("overdue") == ["A1", "B3"]                           # E1 没填交期、E2 交期是今天、草稿 PO 的 D1：都不算逾期
+    assert names("week") == ["B1", "E2"]
+    assert all(row["po"] != "PO-D" for rows in data.values() for row in rows)
+
+
+def test_month_events_dedupes_lines_and_survives_bad_details(world):
+    fill(world)
+    assert proc.month_events(world["records"]) == (3, 2)
+    assert proc.month_events([]) == (0, 0)
+    assert proc.month_events([{"purchase_order": "X", "record_type": "验收", "details_json": None}]) == (0, 0)
+    assert proc.month_events([{"purchase_order": "X", "record_type": "到货", "details_json": "[1, 2]"}]) == (1, 0)
+
+
+# ---------------------------------------------------------------- 指标卡：有数据
+def test_po_and_arrival_kpis_with_data(world):
+    fill(world)
+    ctx = full_ctx()
+    transit = kpi_of("proc.po_transit", ctx)
+    assert (transit["value"], transit["unit"], transit["sub"]) == ("3", "个", "待到货 4 项 · 待验收 2 项")
+    assert transit["target"] == {"key": "price.approvals", "params": {"tab": "po"}}
+    overdue = kpi_of("proc.po_overdue", ctx)
+    assert (overdue["value"], overdue["tone"], overdue["sub"]) == ("2", "bad", "最久逾期 9 天 · 共 2 项物料")
+    arrive = kpi_of("proc.to_arrive", ctx)
+    assert (arrive["value"], arrive["sub"], arrive["target"]["params"]) == ("4", "来自 3 个 PO", {"status": "待到货资料"})
+    inspect = kpi_of("proc.to_inspect", ctx)
+    assert (inspect["value"], inspect["sub"], inspect["tone"]) == ("2", "最久到货 19 天", "bad")      # PO-A 到货 19 天，超过 7 天
+    assert inspect["target"]["params"] == {"status": "待验收"}
+    week = kpi_of("proc.week_arrive", ctx)
+    assert (week["value"], week["sub"]) == ("2", "来自 2 个 PO")
+    assert kpi_of("proc.exchange", ctx)["value"] == "1" and kpi_of("proc.return", ctx)["value"] == "1"
+    assert kpi_of("proc.month_arrived", ctx)["value"] == "3" and kpi_of("proc.month_inspected", ctx)["value"] == "2"
+
+
+def test_to_inspect_is_only_bad_when_something_is_stale(world):
+    fill(world)
+    world["arrivals"] = {"PO-A": "2026-10-05", "PO-B": "2026-10-05"}      # 都只有 4 天
+    inspect = kpi_of("proc.to_inspect")
+    assert (inspect["tone"], inspect["sub"]) == ("hot", "最久到货 4 天")
+    world["arrivals"] = {"PO-A": "2026-10-02"}                              # 恰好 7 天：不含，不算久拖
+    assert kpi_of("proc.to_inspect")["tone"] == "hot"
+    world["arrivals"] = {"PO-A": "2026-10-01"}                              # 8 天
+    assert kpi_of("proc.to_inspect")["tone"] == "bad"
+
+
+def test_chain_and_material_kpis_with_data(world):
+    fill(world)
+    ctx = full_ctx()
+    compare = kpi_of("proc.to_compare", ctx)
+    assert (compare["value"], compare["unit"], compare["sub"], compare["target"]["params"]) == ("3", "项", "来自 2 张 PR", {"view": "source"})
+    pending = kpi_of("proc.price_pending", ctx)
+    assert (pending["value"], pending["sub"], pending["target"]["params"]) == ("2", "另有 1 张还在比价（草稿）", {"view": "approvals"})
+    await_pr = kpi_of("proc.await_pr", ctx)
+    assert (await_pr["value"], await_pr["sub"], await_pr["tone"]) == ("2", "共 3 项物料", "hot")
+    assert await_pr["target"] == {"key": "procurement.list", "params": {"scope": "all", "stage": "await_pr"}}
+    uncoded = kpi_of("proc.uncoded", ctx)
+    assert (uncoded["value"], uncoded["tone"], uncoded["target"]["key"]) == ("4", "hot", "material.progress")
+    material = kpi_of("proc.material_overdue", ctx)
+    assert (material["value"], material["sub"], material["tone"], material["target"]["key"]) == ("2", "最久逾期 9 天", "bad", "material.overdue")
+    risk = kpi_of("proc.risk_projects", ctx)
+    assert (risk["value"], risk["unit"]) == ("1", "个")          # 只有 P1 一个项目（B3 没填项目）
+
+
+def test_payment_kpis_with_data(world):
+    fill(world)
+    ctx = full_ctx()
+    ready = kpi_of("proc.ready_to_pay", ctx)
+    assert (ready["value"], ready["sub"], ready["tone"]) == ("2", "合计 7.0 万", "hot")
+    assert ready["target"] == {"key": "procpay.work", "params": {"status": "可提交付款审批"}}
+    passed = kpi_of("proc.pay_planned_passed", ctx)
+    # 过期未付的两期：3 万（没付）+ 1.5 万（付了 5000 还差 1.5 万）；没填计划日的、已付款的不算
+    assert (passed["value"], passed["sub"], passed["tone"]) == ("2", "未付 4.5 万 · 最久 10 天", "bad")
+
+
+def test_month_amount_and_suppliers(world):
+    fill(world)
+    ctx = full_ctx()
+    amount = kpi_of("proc.month_amount", ctx)
+    assert (amount["value"], amount["unit"], amount["sub"]) == ("22.0", "万", "较上月 +10.0%")
+    suppliers = kpi_of("proc.suppliers_count", ctx)
+    assert (suppliers["value"], suppliers["unit"], suppliers["sub"]) == ("6", "家", "共 7 张 PO")
+    world["month_pos"] = [{"po": "N1", "supplier": "甲", "amount": 5000, "month": "2026-10"}]
+    small = kpi_of("proc.month_amount", full_ctx())            # 同一个 ctx 里读过的数据会被记住，换数据要换 ctx
+    assert (small["value"], small["unit"], small["sub"]) == ("5,000", "元", "上月没有采购")
+
+
+# ---------------------------------------------------------------- 指标卡：没有数据
+def test_kpis_show_zero_when_there_is_nothing(world):
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    for key in KPIS:
+        item = run(key, ctx)
+        assert item is not None, key
+        if key == "proc.month_amount":
+            assert (item["value"], item["unit"], item["sub"]) == ("0", "元", "本月还没有下单")
+        else:
+            assert item["value"] == "0", key
+            assert item["sub"] == "" and item["tone"] == "", key
+
+
+def test_alerts_stay_quiet_when_nothing_triggers(world):
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    for key in ALERTS:
+        assert run(key, ctx) is None, key
+
+
+def test_blocks_are_empty_but_present_without_data(world):
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    for key in ("block.proc_suppliers", "block.proc_projects", "block.risk_projects", "block.week_schedule"):
+        block = run(key, ctx)
+        assert block["rows"] == [] and block["error"] is None, key
+    assert run("block.week_schedule", ctx)["sub"] == "本周没有预计到货的物料"
+    for key in ("block.proc_chain", "block.arrival_inspect", "block.material_stage"):
+        block = run(key, ctx)
+        assert all(row["value"] == "0" and row["pct"] == 0 for row in block["rows"]), key
+
+
+# ---------------------------------------------------------------- 提醒：有数据
+def test_alerts_with_data(world):
+    fill(world)
+    ctx = full_ctx()
+    overdue = run("alert.po_overdue", ctx)
+    assert (overdue["tone"], overdue["title"], overdue["sub"]) == ("bad", "2 个 PO 已过合同交期还没收齐", "最久逾期 9 天（PO-B）")
+    passed = run("alert.pay_planned_passed", ctx)
+    assert (passed["tone"], passed["title"], passed["sub"]) == ("bad", "2 期采购付款已过计划付款日", "未付 4.5 万，最久 10 天，供应商可能催款")
+    missing = run("alert.price_missing_quote", ctx)
+    assert (missing["tone"], missing["title"], missing["sub"]) == ("warn", "1 张待审批的价格审批单有物料没有报价", "共 2 项物料一个报价都没有，副总没法选供应商")
+    assert run("alert.uncoded", ctx)["title"] == "4 项物料还没有物料编码"
+    stale = run("alert.inspect_stale", ctx)
+    assert (stale["tone"], stale["title"], stale["sub"]) == ("bad", "1 个 PO 到货超过 7 天还没验收", "PO-A 已到货 19 天，可能耽误付款")
+    assert stale["target"]["params"] == {"status": "待验收"}
+    material = run("alert.material_overdue", ctx)
+    assert (material["tone"], material["title"]) == ("bad", "2 项物料超过合同交期还没到")
+    risk = run("alert.risk_projects", ctx)
+    assert (risk["title"], risk["sub"]) == ("1 个项目有物料逾期未到", "P1 有 1 项物料逾期")
+
+
+def test_overdue_alert_is_only_a_warning_within_a_week(world):
+    world["lines"] = [line("PO-A", 10, 0, due="2026-10-05", name="A1")]       # 逾期 4 天
+    assert run("alert.po_overdue", full_ctx())["tone"] == "warn"
+    assert run("alert.material_overdue", full_ctx())["tone"] == "warn"
+    world["lines"] = [line("PO-A", 10, 0, due="2026-10-02", name="A1")]       # 逾期 7 天：超过 7 天才标红
+    assert run("alert.po_overdue", full_ctx())["tone"] == "warn"
+    world["lines"] = [line("PO-A", 10, 0, due="2026-10-01", name="A1")]
+    assert run("alert.po_overdue", full_ctx())["tone"] == "bad"
+
+
+def test_overdue_ignores_received_lines_and_dead_pos(world):
+    world["lines"] = [
+        line("PO-A", 10, 10, state="已通过", due="2026-09-01", name="A1"),                 # 收齐了
+        line("PO-B", 10, 0, due="2026-09-01", status="已关闭", name="B1"),                 # 已关闭
+        line("PO-C", 10, 0, due="2026-09-01", status="待电子用印", name="C1"),             # 合同没生效
+        line("PO-D", 10, 0, due="", name="D1"),                                            # 没填合同交期
+    ]
+    assert kpi_of("proc.po_overdue")["value"] == "0"
+    assert run("alert.po_overdue", full_ctx()) is None
+
+
+# ---------------------------------------------------------------- 图表块
+def test_proc_chain_scales_to_the_biggest_stage(world):
+    fill(world)
+    block = run("block.proc_chain", full_ctx())
+    assert block["type"] == "bars" and "累计" in block["hint"] and "累计" in block["sub"]
+    assert [(r["label"], r["value"], r["pct"]) for r in block["rows"]] == [
+        ("OA 申请", "40", 100.0), ("PR", "20", 50.0), ("PO", "10", 25.0), ("付款期次", "25", 62.5)]
+
+
+def test_arrival_inspect_rows(world):
+    fill(world)
+    block = run("block.arrival_inspect", full_ctx())
+    assert [(r["label"], r["value"], r["tone"]) for r in block["rows"]] == [
+        ("本月已到货", "3", "ok"), ("本月已验收通过", "2", "ok"), ("待验收", "2", "warn"), ("待到货", "4", "")]
+    assert [r["pct"] for r in block["rows"]] == [75.0, 50.0, 50.0, 100.0]
+
+
+def test_supplier_and_project_blocks_top5_plus_other(world):
+    fill(world)
+    ctx = full_ctx()
+    suppliers = run("block.proc_suppliers", ctx)
+    assert [(r["label"], r["value"]) for r in suppliers["rows"]] == [
+        ("甲", "15.0 万"), ("乙", "3.0 万"), ("丙", "2.0 万"), ("丁", "1.0 万"), ("戊", "8,000 元"), ("其他（1 项）", "2,000 元")]
+    assert suppliers["rows"][0]["pct"] == 100.0 and suppliers["rows"][1]["pct"] == 20.0
+    projects = run("block.proc_projects", ctx)
+    assert [(r["label"], r["value"]) for r in projects["rows"]] == [("P1", "15.0 万"), ("非项目", "4.0 万"), ("P2", "3.0 万")]
+    world["month_pos"] = [{"po": "N1", "supplier": "", "amount": 100, "month": "2026-10"}]
+    assert run("block.proc_suppliers", full_ctx())["rows"][0]["label"] == "未填供应商"
+
+
+def test_material_stage_mapping(world):
+    fill(world)
+    block = run("block.material_stage", make_ctx(positions=("pmc",)))
+    assert [(r["label"], r["value"]) for r in block["rows"]] == [
+        ("待提 PR", "3"), ("询价比价", "6"), ("PO 已下", "5"), ("到货验收", "3"), ("已关闭", "6")]
+    assert [r["pct"] for r in block["rows"]] == [50.0, 100.0, 83.3, 50.0, 100.0]
+    assert block["rows"][4]["tone"] == "ok" and "到货验收中 + 付款中" in block["hint"]
+
+
+def test_risk_projects_list(world):
+    fill(world)
+    world["lines"] = [
+        line("PO-A", 10, 0, due="2026-09-20", project="ACONCA 7961", item="镜片", sr="R1", sl="1", name="1"),
+        line("PO-A", 10, 0, due="2026-09-25", project="ACONCA 7961", item="导轨", sr="R1", sl="2", name="2"),
+        line("PO-A", 10, 5, due="2026-09-26", project="ACONCA 7961", item="底板", sr="R1", sl="3", name="3"),
+        line("PO-B", 10, 0, due="2026-10-07", project="RD14", item="连接器", sr="R2", sl="1", name="4"),
+        line("PO-B", 10, 0, due="2026-10-07", project="", item="无项目", sr="R2", sl="2", name="5"),
+    ]
+    block = run("block.risk_projects", make_ctx(positions=("pmc",)))
+    assert [(r["label"], r["sub"], r["value"], r["tone"]) for r in block["rows"]] == [
+        ("ACONCA 7961", "镜片、导轨 等", "3 项", "bad"), ("RD14", "连接器", "1 项", "warn")]
+    assert block["more"] == "" and block["target"]["key"] == "material.overdue"
+    assert kpi_of("proc.risk_projects")["value"] == "2" and kpi_of("proc.material_overdue")["value"] == "5"
+
+
+def test_risk_projects_list_is_cut_at_six(world):
+    world["lines"] = [line("PO-A", 1, 0, due="2026-09-01", project=f"P{i}", sr=f"R{i}", sl="1", name=str(i)) for i in range(8)]
+    block = run("block.risk_projects", make_ctx(positions=("pmc",)))
+    assert len(block["rows"]) == 6 and block["more"] == "还有 2 个项目"
+
+
+def test_week_schedule_groups_by_day(world):
+    fill(world)
+    world["lines"] += [line("PO-F", 3, 0, due="2026-10-07", name="F1"), line("PO-G", 3, 1, due="2026-10-07", name="G1"),
+                       line("PO-H", 3, 0, due="2026-10-12", name="H1")]            # 下周一不在本周里
+    block = run("block.week_schedule", make_ctx(positions=("production_asset_owner",)))
+    assert [(r["label"], r["sub"], r["value"], r["tone"]) for r in block["rows"]] == [
+        ("10-07 周三", "2 个 PO：PO-F、PO-G", "2 项", "bad"),
+        ("10-09 周五", "1 个 PO：PO-E", "1 项", "warn"),
+        ("10-10 周六", "1 个 PO：PO-B", "1 项", "")]
+
+
+# ---------------------------------------------------------------- 目标
+def test_all_targets_are_registered_and_params_checked(world):
+    fill(world)
+    ctx = make_ctx(positions=("general_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    production = make_ctx(positions=("production_asset_owner",))
+    seen = set()
+    for who in (ctx, production):
+        for key in MINE:
+            item = run(key, who)
+            if item is None:
+                continue
+            for target in [item.get("target")] + [row.get("target") for row in item.get("rows", []) if isinstance(row, dict)]:
+                if target:
+                    seen.add(target["key"])
+                    assert target["key"] in core.load_targets()
+    assert seen == {"price.approvals", "procpay.work", "procurement.list", "material.progress", "material.overdue"}
+    assert proc._po_target(production) == {"key": "procpay.work", "params": {}}
+    assert proc._po_target(full_ctx()) == {"key": "price.approvals", "params": {"tab": "po"}}
+
+
+# ---------------------------------------------------------------- 读取函数（假 frappe，验证过滤条件和 Python 侧的整理）
+class FakeFrappe:
+    def __init__(self, tables, counts=None, sql_rows=None):
+        self.tables, self.queries, self.counts, self.sql_rows = tables, [], counts or {}, sql_rows or []
+        self.db = NS(count=self._count, sql=self._sql)
+
+    def get_all(self, doctype, filters=None, fields=None, pluck=None, limit_page_length=None, **kwargs):
+        self.queries.append((doctype, filters, fields))
+        rows = [NS_ROW(row) for row in self.tables.get(doctype, [])]
+        return [row.get(pluck) for row in rows] if pluck else rows
+
+    def _count(self, doctype, filters=None):
+        return self.counts[doctype]
+
+    def _sql(self, query, values=(), as_dict=False):
+        self.queries.append(("sql", query, values))
+        return self.sql_rows
+
+
+class NS_ROW(dict):
+    def __getattr__(self, name):
+        return self.get(name)
+
+
+def fake(monkeypatch, tables, **kwargs):
+    frappe = FakeFrappe(tables, **kwargs)
+    monkeypatch.setattr(proc, "frappe", frappe)
+    return frappe
+
+
+def test_load_live_lines_only_asks_for_effective_pos(monkeypatch):
+    frappe = fake(monkeypatch, {
+        "OA Purchase Order": [{"name": "PO-A", "status": "供应商制作中", "supplier": " 甲 "}],
+        "OA Purchase Order Line": [
+            {"name": "l1", "parent": "PO-A", "quantity": 2, "received_quantity": 1, "inspection_status": None,
+             "contract_delivery_date": "2026-10-01", "project": " P1 ", "item_name": "镜片", "source_request": "R1", "source_line": "x"},
+            {"name": "l2", "parent": "PO-OTHER", "quantity": 1, "received_quantity": 0}]})
+    rows = proc._load_live_lines()
+    assert frappe.queries[0][1] == {"status": ["in", ["已生效", "供应商制作中", "到货验收中", "付款中"]]}
+    assert frappe.queries[1][1]["parent"] == ["in", ["PO-A"]]
+    assert rows == [{"po": "PO-A", "po_status": "供应商制作中", "supplier": "甲", "line": "l1", "quantity": 2, "received": 1,
+                     "inspection": "", "due": "2026-10-01", "project": "P1", "item": "镜片", "source_request": "R1", "source_line": "x"}]
+    fake(monkeypatch, {"OA Purchase Order": []})
+    assert proc._load_live_lines() == []
+
+
+def test_load_month_pos_splits_by_creation_month_and_strips_suppliers(monkeypatch):
+    frappe = fake(monkeypatch, {"OA Purchase Order": [
+        {"name": "N1", "supplier": " 甲 ", "total_amount": 100, "creation": "2026-10-03 09:00:00"},
+        {"name": "N0", "supplier": None, "total_amount": None, "creation": "2026-09-30 23:59:59"}]})
+    rows = proc._load_month_pos("2026-09-01", "2026-11-01")
+    assert frappe.queries[0][1] == [["OA Purchase Order", "status", "!=", "已取消"], ["OA Purchase Order", "creation", ">=", "2026-09-01"],
+                                    ["OA Purchase Order", "creation", "<", "2026-11-01"]]
+    assert rows == [{"po": "N1", "supplier": "甲", "amount": 100.0, "month": "2026-10"},
+                    {"po": "N0", "supplier": "", "amount": 0.0, "month": "2026-09"}]
+
+
+def test_month_bounds_handles_year_ends():
+    assert proc._month_bounds("2026-10") == ("2026-09-01", "2026-10-01", "2026-11-01")
+    assert proc._month_bounds("2026-01") == ("2025-12-01", "2026-01-01", "2026-02-01")
+    assert proc._month_bounds("2026-12") == ("2026-11-01", "2026-12-01", "2027-01-01")
+
+
+def test_month_pos_asks_for_last_and_this_month_once(world, monkeypatch):
+    asked = []
+    monkeypatch.setattr(proc, "_load_month_pos", lambda prev, nxt: asked.append((prev, nxt)) or [])
+    ctx = full_ctx()
+    run("proc.month_amount", ctx)
+    run("proc.suppliers_count", ctx)
+    run("block.proc_suppliers", ctx)
+    assert asked == [("2026-09-01", "2026-11-01")]          # 三个块共用一次读取
+
+
+def test_load_latest_arrivals_keeps_the_newest_date(monkeypatch):
+    frappe = fake(monkeypatch, {"OA PO Fulfillment Record": [
+        {"purchase_order": "PO-A", "record_date": "2026-09-01"}, {"purchase_order": "PO-A", "record_date": "2026-09-20"},
+        {"purchase_order": "PO-B", "record_date": None}]})
+    assert proc._load_latest_arrivals({"PO-A", "PO-B"}) == {"PO-A": "2026-09-20"}
+    assert frappe.queries[0][1]["record_type"] == ["in", ["到货", "换货到货"]]
+    assert proc._load_latest_arrivals(set()) == {}
+
+
+def test_load_pr_lines_skips_cancelled_prs(monkeypatch):
+    fake(monkeypatch, {
+        "OA Procurement Request Line": [{"name": "a", "parent": "PR-1", "remaining_quantity": 2}, {"name": "b", "parent": "PR-X", "remaining_quantity": 1}],
+        "OA Procurement Request": [{"name": "PR-1"}]})
+    assert proc._load_pr_lines() == [{"pr": "PR-1", "line": "a"}]
+
+
+def test_load_price_state_counts_lines_without_any_quote(monkeypatch):
+    fake(monkeypatch, {
+        "OA Price Approval": [{"name": "PA-1", "status": "待审批"}, {"name": "PA-2", "status": "待审批"}, {"name": "PA-3", "status": "草稿"}],
+        "OA Price Approval Line": [{"name": "l1", "parent": "PA-1"}, {"name": "l2", "parent": "PA-1"}, {"name": "l3", "parent": "PA-2"}],
+        "OA Price Approval Quote": [{"price_approval": "PA-1", "price_line": "l1"}, {"price_approval": "PA-2", "price_line": "l3"}]})
+    assert proc._load_price_state() == {"pending": 2, "draft": 1, "unquoted": {"PA-1": 1}}
+
+
+def test_load_price_state_without_pending_approvals_skips_the_line_queries(monkeypatch):
+    frappe = fake(monkeypatch, {"OA Price Approval": [{"name": "PA-3", "status": "草稿"}]})
+    assert proc._load_price_state() == {"pending": 0, "draft": 1, "unquoted": {}}
+    assert [query[0] for query in frappe.queries] == ["OA Price Approval"]
+
+
+def test_load_await_pr_follows_list_materials_for_pr(monkeypatch):
+    fake(monkeypatch, {
+        "OA Approval Request": [
+            {"name": "R1", "workflow_status": "已完成", "business_status": ""},
+            {"name": "R2", "workflow_status": "审批中", "business_status": "需求已批准/待提PR"},
+            {"name": "R3", "workflow_status": "审批中", "business_status": ""}],       # 需求还没批准：不算
+        "OA Purchase Request Line": [
+            {"name": "1", "parent": "R1", "quantity": 10}, {"name": "2", "parent": "R1", "quantity": 5},
+            {"name": "3", "parent": "R2", "quantity": 4}, {"name": "4", "parent": "R2", "quantity": 4}],
+        "OA Procurement Request": [{"name": "PR-CANCELLED"}],
+        "OA Procurement Request Line": [
+            {"source_request": "R1", "source_line": "1", "quantity": 10, "parent": "PR-1"},             # 全部提了 PR
+            {"source_request": "R1", "source_line": "2", "quantity": 2, "parent": "PR-1"},              # 只提了一部分
+            {"source_request": "R2", "source_line": "3", "quantity": 4, "parent": "PR-CANCELLED"}],     # PR 取消了，数量回来
+        "OA Material Progress": [{"source_request": "R2", "source_line": "4"}]})                        # 物料已取消
+    assert proc._load_await_pr() == [{"request": "R1", "line": "2"}, {"request": "R2", "line": "3"}]
+    fake(monkeypatch, {"OA Approval Request": [{"name": "R3", "workflow_status": "审批中", "business_status": ""}]})
+    assert proc._load_await_pr() == []
+
+
+def test_load_uncoded_ignores_blank_spaces_and_dead_requests(monkeypatch):
+    frappe = fake(monkeypatch, {
+        "OA Material Progress": [
+            {"name": "M1", "source_request": "R1", "material_code": ""}, {"name": "M2", "source_request": "R1", "material_code": "  "},
+            {"name": "M3", "source_request": "R1", "material_code": None}, {"name": "M4", "source_request": "R1", "material_code": "A-001"},
+            {"name": "M5", "source_request": "R-DEAD", "material_code": ""}],
+        "OA Approval Request": [{"name": "R-DEAD"}]})
+    assert [row["name"] for row in proc._load_uncoded()] == ["M1", "M2", "M3"]
+    assert frappe.queries[0][1] == {"status": "正常"}
+
+
+def test_load_stage_counts_reuses_the_material_board_stage_sql(monkeypatch):
+    from rayher_hr_payroll.material_progress_query import FROM_SQL, stage_sql
+
+    frappe = fake(monkeypatch, {}, sql_rows=[{"stage": "已关闭", "no_pr": 0, "total": 3}])
+    assert proc._load_stage_counts() == [{"stage": "已关闭", "no_pr": 0, "total": 3}]
+    query = frappe.queries[0][1]
+    assert stage_sql() in query and FROM_SQL in query and "GROUP BY stage, no_pr" in query
+
+
+def test_load_chain_counts_leaves_out_cancelled_pos(monkeypatch):
+    fake(monkeypatch, {"OA Purchase Order": [{"name": "PO-X"}],
+                       "OA Procurement Payment Plan Row": [{"parent": "PO-1"}, {"parent": "PO-1"}, {"parent": "PO-X"}]},
+         counts={"OA Approval Request": 7, "OA Procurement Request": 5, "OA Purchase Order": 3})
+    assert proc._load_chain_counts() == {"request": 7, "pr": 5, "po": 3, "payment": 2}
+
+
+def test_payment_items_are_trimmed_to_what_the_board_needs(monkeypatch):
+    from rayher_hr_payroll.api import procurement_chain as pc
+
+    calls = []
+    monkeypatch.setattr(pc, "list_payment_work_items", lambda limit=500: calls.append(limit) or [
+        {"po": "PO-A", "work_status": "待验收", "amount": "100", "paid_amount": None, "planned_date": "2026-10-01",
+         "payment_stage": "预付款", "supplier": "甲", "lines": ["很大的明细"]}])
+    assert proc._load_payment_items() == [{"po": "PO-A", "work_status": "待验收", "amount": 100.0, "paid": 0.0,
+                                           "planned": "2026-10-01"}]
+    assert calls == [1000]
