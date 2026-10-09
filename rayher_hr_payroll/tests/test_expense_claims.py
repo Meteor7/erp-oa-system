@@ -24,6 +24,23 @@ def application(**overrides):
     return values
 
 
+# ---------------------------------------------------------------- asset type carried down from the application
+
+
+def test_claim_asset_category_follows_the_fixed_asset_purchase():
+    fixed = {"asset_nature": "固定资产", "asset_category": "其他"}
+    assert rules.claim_asset_category(application(**fixed, fixed_asset_category="办公家具、工具及器具")) == "非电子类固定资产（人事/行政）"
+    assert rules.claim_asset_category(application(**fixed, fixed_asset_category="电子设备、研发专用设备、仪器仪表")) == "电子类固定资产（IT）"
+    assert rules.claim_asset_category(application(**fixed, fixed_asset_category="生产设备、生产工具及器具")) == "生产设备、生产工具及器具"
+    # 申请上已经有具体资产类型就直接用
+    assert rules.claim_asset_category(application(asset_nature="固定资产", asset_category="电子类固定资产（IT）", fixed_asset_category="")) == "电子类固定资产（IT）"
+    # 非固定资产、类别缺失或对不上：不带，由用户自己选
+    assert rules.claim_asset_category(application(asset_nature="非固定资产", fixed_asset_category="办公家具、工具及器具")) == ""
+    assert rules.claim_asset_category(application(**fixed, fixed_asset_category="")) == ""
+    assert rules.claim_asset_category(application(**fixed, fixed_asset_category="别的类别")) == ""
+    assert rules.claim_asset_category(None) == ""
+
+
 # ---------------------------------------------------------------- linking
 
 

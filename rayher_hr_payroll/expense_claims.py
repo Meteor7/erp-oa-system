@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from rayher_hr_payroll.oa_approval import ADMIN_ASSET, IT_ASSET, OTHER_ASSET, PRODUCTION_ASSET
 from rayher_hr_payroll.oa_document_types import (
     REQUEST_DIRECT_PURCHASE,
     REQUEST_PAYMENT,
@@ -51,10 +52,32 @@ class ClaimRuleError(ValueError):
     pass
 
 
+# 购买申请里的固定资产类别 → 付款单 / 报销单上的资产类型（两边的叫法不同，这里对上）。
+CLAIM_ASSET_BY_FIXED_CATEGORY = {
+    "办公家具、工具及器具": ADMIN_ASSET,
+    "电子设备、研发专用设备、仪器仪表": IT_ASSET,
+    "生产设备、生产工具及器具": PRODUCTION_ASSET,
+}
+
+
 def _get(value, key, default=None):
     if isinstance(value, dict):
         return value.get(key, default)
     return getattr(value, key, default)
+
+
+def claim_asset_category(application):
+    """从申请下推时，单据的资产类型：固定资产的购买申请把类别带过来，用户不用再选一遍。
+
+    申请上写了具体资产类型就直接用；购买申请只填了固定资产类别（办公家具 / 电子设备 / 生产设备）时按对应关系换算；
+    对不上、或者不是固定资产，返回空（单据保持原来的处理：固定资产仍要用户自己选）。
+    """
+    if _text(_get(application, "asset_nature")) != "固定资产":
+        return ""
+    category = _text(_get(application, "asset_category"))
+    if category and category != OTHER_ASSET:
+        return category
+    return CLAIM_ASSET_BY_FIXED_CATEGORY.get(_text(_get(application, "fixed_asset_category")), "")
 
 
 def _text(value):

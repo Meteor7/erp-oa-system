@@ -398,8 +398,9 @@ def _new_claim(request_type, application=None, *, pushed=False):
         _link_application(doc, application)
         doc.subject = _clean(application.subject) or request_type
         doc.reason = _clean(getattr(application, "reason", None))
-        if getattr(application, "asset_nature", None) == "固定资产" and getattr(application, "asset_category", None):
-            classification = oa_entry._expense_classification("固定资产", application.asset_category)
+        if getattr(application, "asset_nature", None) == "固定资产":
+            # 购买申请只填了固定资产类别时，按对应关系带出资产类型；对不上就留空，提交前由用户选。
+            classification = oa_entry._expense_classification("固定资产", rules.claim_asset_category(application))
             for fieldname, value in classification.items():
                 setattr(doc, fieldname, value)
     return doc
