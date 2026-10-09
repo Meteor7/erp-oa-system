@@ -25,6 +25,9 @@ HOUR_QUANTUM = Decimal("0.01")
 HOURS_PER_DAY = Decimal("8.00")
 # 「已填满」的容差：剩余工时小于 0.08 小时（= 0.01 天，天数最多保留两位小数时填不进去的零头）。
 FULL_TOLERANCE_HOURS = Decimal("0.08")
+# 暂时不用填研发工时的人（特例，决定 2026-10-09）：演示员工21的研发人员类型保持“研发辅助”不变，
+# 只是不出现在工时填报名单里，也不能登记工时。要恢复填工时，把这个账号从这里删掉即可。
+TIMESHEET_EXEMPT_USERS = frozenset({"person046@staff.example.invalid"})
 RD_MONTHLY_ENTRY_ROLES = ("System Manager", "HR User", "HR Manager", "Department Manager", "Employee")
 RD_MONTHLY_VIEW_ROLES = (*RD_MONTHLY_ENTRY_ROLES, "Accounts User", "Employee")
 RD_MONTHLY_ADMIN_ROLES = {"System Manager", "HR User", "HR Manager"}
@@ -69,6 +72,7 @@ def _eligible_employee_rows(period_start=None, **extra) -> list:
         fields=["name", "employee_name", "user_id", "reports_to", "status", "relieving_date"],
         order_by="name",
     )
+    rows = [row for row in rows if str(_value(row, "user_id") or "").strip().lower() not in TIMESHEET_EXEMPT_USERS]
     if not period_start:
         return rows
     # 修复（2026-09-29，审查 X3-6）：离职员工在离职当天就被停用，离职当月的工时再也登记不进去，

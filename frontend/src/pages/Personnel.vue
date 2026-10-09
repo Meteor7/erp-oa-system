@@ -610,7 +610,7 @@ onBeforeUnmount(()=>{
 <select id="pl-company" v-model="companyFilter" class="field"><option value="">全部公司</option><option v-for="x in companies.data||[]" :key="x.name" :value="x.name">{{x.display_name||displayCompany(x.name)}}</option></select></div>
 <button type="button" class="sd" :class="{on:!departmentFilter}" :aria-pressed="!departmentFilter" @click="departmentFilter=''"><span>全部部门</span><small>{{allDepartmentCount}}</small></button>
 <template v-for="group in groups" :key="group.name">
-<div class="sg"><span>{{group.name}}</span><small>{{group.total}} 人<template v-if="statusFilter==='active'&&group.fill"> · 填工时 {{group.fill}}</template></small></div>
+<div class="sg"><span>{{group.name}}</span><small>{{group.total}} 人<template v-if="statusFilter==='active'&&group.name==='研发'&&group.fill"> · 填工时 {{group.fill}}</template></small></div>
 <button v-for="department in group.departments" :key="group.name+department.name" type="button" class="sd" :class="{on:departmentFilter===department.name}" :aria-pressed="departmentFilter===department.name" @click="departmentFilter=department.name"><span>{{department.name}}</span><small>{{department.employee_count}}</small></button>
 </template>
 </aside>
