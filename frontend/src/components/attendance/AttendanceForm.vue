@@ -312,7 +312,7 @@ defineExpose({ dirty });
             <template v-if="overtime">
               <div class="ac-note af-lab">加班小时数</div>
               <div v-if="!visibleRows.length" class="ac-note">{{ loadingDays || loadingDraft ? '正在计算每一天…' : '先在月历上选日期' }}</div>
-              <div v-for="row in visibleRows" :key="row.date" :class="['af-day', { conflict: row.kind === 'conflict' }]">
+              <div v-for="row in visibleRows" :key="row.date" :class="['af-day', 'ot', { solo: visibleRows.length === 1, conflict: row.kind === 'conflict' }]">
                 <div v-if="visibleRows.length > 1" class="d"><b>{{ row.date }}</b> <span class="ac-note">{{ row.week }}</span></div>
                 <template v-if="row.kind === 'ot'">
                   <span class="af-step">
