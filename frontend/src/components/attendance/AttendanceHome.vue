@@ -7,7 +7,7 @@
 // 待我审批是一人一行的紧凑列表，同意 / 驳回在行内完成，点一行才进详情。
 import { computed, ref } from 'vue';
 import {
-  TYPES, balanceKpis, departmentLabel, mineSummary, numText, requestTitle, returnedDrafts, rejectionOf, waitText,
+  TYPES, balanceKpis, byWait, departmentLabel, mineSummary, numText, requestTitle, returnedDrafts, rejectionOf, waitText,
 } from '../../lib/attendanceView.js';
 import { awayList, longDate, ratePercent, readChartsOpen, writeChartsOpen } from '../../lib/attendanceCharts.js';
 import AttendanceAway from './AttendanceAway.vue';
@@ -57,7 +57,7 @@ const personal = computed(() => props.board?.personal || null);
 const summary = computed(() => props.board?.summary || null);
 const detail = computed(() => (view.value === 'manager' ? props.board?.detail : view.value === 'dept' ? props.drill : null) || null);
 const stats = computed(() => (view.value === 'company' ? summary.value?.stats : detail.value?.stats) || null);
-const todoRows = computed(() => props.review.items);
+const todoRows = computed(() => byWait(props.review.items, props.now));
 const deptRows = computed(() => (view.value === 'dept' && detail.value
   ? todoRows.value.filter((row) => departmentLabel(row.department) === departmentLabel(detail.value.department)) : todoRows.value));
 const away = computed(() => awayList(detail.value?.members, 0, 5));

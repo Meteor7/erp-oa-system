@@ -101,6 +101,11 @@ export function rankDepartments(departments, key = 'month_hours') {
     || (Number(right.headcount) || 0) - (Number(left.headcount) || 0) || String(left.label).localeCompare(String(right.label), 'zh'));
 }
 
+// 各部门柱状图只列本月请假最多的前 limit 个（部门很多时图不会拉得太长；全部部门在下面的部门概况表里）。
+export function topDepartments(departments, limit = 8) {
+  return rankDepartments(departments).slice(0, limit);
+}
+
 // 环形图：每段的 stroke-dasharray / dashoffset（半径 radius，从 12 点方向顺时针）。
 export function donutArcs(items, radius = 33) {
   const circumference = 2 * Math.PI * radius;

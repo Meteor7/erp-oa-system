@@ -6,7 +6,7 @@
 //   dept    ：人事 / 领导点进某个部门后，同 approver 的三栏，只统计这个部门。
 // 数据都由服务端按身份范围算好，这里只画；员工的 personal 里没有任何同事的数据。
 import { computed } from 'vue';
-import { hoursByKind, monthBars, quotaRows, rankDepartments, totalHours, waitBuckets } from '../../lib/attendanceCharts.js';
+import { hoursByKind, monthBars, quotaRows, topDepartments, totalHours, waitBuckets } from '../../lib/attendanceCharts.js';
 import AttendanceDayStack from './AttendanceDayStack.vue';
 import AttendanceDonut from './AttendanceDonut.vue';
 
@@ -28,7 +28,7 @@ const months = computed(() => monthBars(props.personal?.months));
 const teamItems = computed(() => hoursByKind(props.stats?.month?.by_kind));
 const wait = computed(() => waitBuckets(props.reviewRows, props.now));
 const waitMax = computed(() => Math.max(1, ...wait.value.buckets.map((item) => item.count)));
-const ranked = computed(() => rankDepartments(props.departments));
+const ranked = computed(() => topDepartments(props.departments));
 const deptMax = computed(() => Math.max(1, ...ranked.value.map((item) => item.month_hours)));
 const waitColors = ['k-annual', 'k-ot', 'k-sick'];
 const round = (value) => Math.round(value * 10) / 10;
@@ -70,6 +70,7 @@ const round = (value) => Math.round(value * 10) / 10;
             <span><b>{{ item.month_hours }}</b> <span class="ac-note">{{ item.per_capita }}</span></span>
           </div>
         </div>
+        <div v-if="departments.length > ranked.length" class="ac-note">只列本月请假最多的 {{ ranked.length }} 个部门，全部在下面的部门概况里</div>
       </div>
       <div v-else class="ac-cc">
         <h3>{{ kind === 'dept' ? '这个部门待审批等了多久' : '待我审批等了多久' }}<span>平均 {{ wait.average }} 天</span></h3>

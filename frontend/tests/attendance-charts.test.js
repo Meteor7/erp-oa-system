@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
   CHARTS_KEY, attendanceRate, avatarKind, awayList, cellClass, cellTitle, donutArcs, hoursByKind, longDate, monthBars, offPerDay,
-  quotaRows, rankDepartments, rateTone, ratePercent, readChartsOpen, rowKind, sparklinePoints, stackColumns, stripTitle, todayParts,
+  quotaRows, rankDepartments, topDepartments, rateTone, ratePercent, readChartsOpen, rowKind, sparklinePoints, stackColumns, stripTitle, todayParts,
   totalHours, waitBuckets, writeChartsOpen,
 } from "../src/lib/attendanceCharts.js";
 
@@ -69,6 +69,8 @@ test("departments rank by the month's leave hours, then headcount, then name", (
   assert.deepEqual(rankDepartments(list).map((item) => item.label), ["甲", "丙", "乙"]);
   assert.deepEqual(rankDepartments(list, "headcount").map((item) => item.label), ["丙", "乙", "甲"]);
   assert.deepEqual(list.map((item) => item.label), ["乙", "甲", "丙"]);       // 不改原数组
+  assert.deepEqual(topDepartments(list, 2).map((item) => item.label), ["甲", "丙"]);   // 柱状图只列前几个
+  assert.equal(topDepartments(Array.from({ length: 20 }, (_, index) => ({ label: String(index), month_hours: index })), 8).length, 8);
 });
 
 test("donut arcs fill the circle in order, the sparkline and the month bars scale", () => {
@@ -192,6 +194,7 @@ test("the charts are plain SVG and CSS, remembered open/closed, and each identit
   for (const text of ["我的额度", "我今年的请假构成", "近 6 个月请假", "待我审批等了多久", "各部门本月请假", "本月请假类型", "14 天"]) assert.ok(charts.includes(text), text);
   assert.match(charts, /kind === 'employee'/);
   assert.match(charts, /kind === 'company'/);
+  assert.match(charts, /topDepartments\(props\.departments\)/);
   const home = read("../src/components/attendance/AttendanceHome.vue");
   assert.match(home, /readChartsOpen\(\)/);
   assert.match(home, /writeChartsOpen\(chartsOpen\.value\)/);
