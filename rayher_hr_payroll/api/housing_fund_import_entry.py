@@ -432,6 +432,21 @@ def reconcile_fund_batch(batch):
         for field, value in _calculated_values(result).items():
             row_doc.set(field, value)
         row_doc.save(ignore_permissions=True)
+    _sync_missing_rows(batch_doc, employees)
     _refresh_batch_summary(batch_doc.name)
     frappe.db.commit()
     return get_fund_workbench(batch_doc.period, None, batch_doc.name)
+
+
+def _sync_missing_rows(batch_doc, employees):
+    """基数补齐以后，"申报表里没有"的名单也要跟着变：已经有 Excel 行或不再有基数的撤掉，新有基数又不在表里的补上。已经人工处理过的不动。"""
+    by_id = {employee["name"]: employee for employee in employees}
+    linked = {row["employee"] for row in frappe.get_all(ROW, filters={"batch": batch_doc.name, "row_type": "excel"}, fields=["employee"]) if row.get("employee")}
+    existing = {row["employee"]: row for row in frappe.get_all(ROW, filters={"batch": batch_doc.name, "row_type": "missing"}, fields=["name", "employee", "status"])}
+    for employee_id, stored in existing.items():
+        employee = by_id.get(employee_id)
+        if stored["status"] == "Pending" and (employee_id in linked or not employee or employee["housing_fund_base"] <= 0):
+            frappe.delete_doc(ROW, stored["name"], ignore_permissions=True, force=True)
+    for employee in missing_from_excel(employees, linked):
+        if employee["name"] not in existing:
+            frappe.get_doc(_missing_row_values(batch_doc, employee)).insert(ignore_permissions=True)

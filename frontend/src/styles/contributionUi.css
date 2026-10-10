@@ -11,8 +11,8 @@
 .xp.cw .cw-card .v { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .xp.cw .cw-card .s { font-size: 12px; color: var(--xp-ink3); }
 .xp.cw .cw-card.hot { border-color: #F0D3A6; background: linear-gradient(180deg, #FFF8EB, #fff); }
-.xp.cw .c3 { grid-column: span 3; } .xp.cw .c5 { grid-column: span 5; } .xp.cw .c7 { grid-column: span 7; }
-@media (max-width: 1100px) { .xp.cw .c3 { grid-column: span 6; } .xp.cw .c5, .xp.cw .c7 { grid-column: span 12; } }
+.xp.cw .c3 { grid-column: span 3; } .xp.cw .c5 { grid-column: span 5; } .xp.cw .c7 { grid-column: span 7; } .xp.cw .c12 { grid-column: span 12; }
+@media (max-width: 1100px) { .xp.cw .c3 { grid-column: span 6; } .xp.cw .c5, .xp.cw .c7, .xp.cw .c12 { grid-column: span 12; } }
 @media (max-width: 560px) { .xp.cw .c3 { grid-column: span 12; } }
 .xp.cw .cw-ring { display: flex; align-items: center; gap: 14px; }
 .xp.cw .cw-ring svg { width: 72px; height: 72px; flex: none; }

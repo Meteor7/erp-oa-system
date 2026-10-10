@@ -215,7 +215,7 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
           </div>
         </div>
       </div>
-      <div :class="['cw-card', kind === 'si' ? 'c5' : 'c7']">
+      <div :class="['cw-card', kind === 'si' ? 'c5' : 'c12']">
         <div class="pt"><span>各公司 <span class="muted">应{{ kind === 'si' ? '收' : '缴' }}合计 {{ money(dashboard.receivable_total) }}</span></span></div>
         <div class="tbl narrow"><table>
           <thead><tr><th>公司</th><th class="r">人数</th><th class="r">个人</th><th class="r">单位</th><th class="r">待处理</th></tr></thead>
