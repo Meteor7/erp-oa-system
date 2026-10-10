@@ -75,7 +75,8 @@ test("when and how long: one day shows its slot, several days show the range", (
   assert.equal(whenText(leave([["2026-10-22", 3]])), "10/22 周四 · 上午");
   assert.equal(whenText(leave([["2026-10-22", 5]])), "10/22 周四 · 下午");
   assert.equal(whenText(leave([["2026-10-26", 8], ["2026-10-27", 8]])), "10/26 周一 – 10/27 周二");
-  assert.equal(whenText(leave([["2026-10-17", 6]], { request_type: "加班申请", leave_type: "" })), "10/17 周六 · 6 小时");
+  assert.equal(whenText(leave([["2026-10-17", 6]], { request_type: "加班申请", leave_type: "" })), "10/17 周六");   // 加班的小时数在旁边的时长里，不重复
+  assert.equal(whenText(leave([["2026-10-19", 4]])), "10/19 周一");                                              // 自定义小时同理
   assert.equal(whenText({ from_date: "2026-10-20", to_date: "2026-10-20" }), "10/20 周二 · 全天");   // 只有起止日期的旧申请：按周一到周五 8 小时
   assert.equal(whenText({}), "");
   assert.equal(lengthText(leave([["2026-10-26", 8], ["2026-10-27", 8]])), "2 天 · 16 小时");

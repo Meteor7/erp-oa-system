@@ -58,7 +58,7 @@ export function filtersActive({ type = 'all', time = 'all', slow = false, query 
 // ---------------------------------------------------------------- 一行上的文字
 const dayText = (date) => `${shortDate(date).replace('-', '/')} ${weekLabel(date)}`;
 
-// "10/26 周一 – 10/27 周二"；只有一天时带上时段："10/30 周五 · 全天"（加班说小时）。
+// "10/26 周一 – 10/27 周二"；只有一天时带上时段："10/30 周五 · 全天"（上午、下午同理）。加班和自定义小时不重复写小时数（旁边的时长里有）。
 export function whenText(row) {
   const days = rowDays(row);
   const span = days.length ? workedSpan(days, row?.from_date, row?.to_date) : { from: row?.from_date, to: row?.to_date };
@@ -66,7 +66,8 @@ export function whenText(row) {
   const to = String(span.to || span.from || '').slice(0, 10);
   if (!from) return '';
   if (from !== to) return `${dayText(from)} – ${dayText(to)}`;
-  return days.length === 1 ? `${dayText(from)} · ${dayChip(days[0], row?.request_type === '加班申请').label}` : dayText(from);
+  const chip = days.length === 1 ? dayChip(days[0], row?.request_type === '加班申请') : null;
+  return chip && ['full', 'am', 'pm'].includes(chip.mode) && row?.request_type !== '加班申请' ? `${dayText(from)} · ${chip.label}` : dayText(from);
 }
 
 // "2 天 · 16 小时" / "3 小时"
