@@ -1,0 +1,232 @@
+{
+ "doctype": "DocType",
+ "name": "Housing Fund Import Row",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "HFR-.YYYY.-.#####",
+ "title_field": "excel_name",
+ "fields": [
+  {
+   "fieldname": "batch",
+   "label": "导入批次",
+   "fieldtype": "Link",
+   "options": "Housing Fund Import Batch",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "company",
+   "label": "公司",
+   "fieldtype": "Link",
+   "options": "Company",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "period",
+   "label": "期间",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "row_type",
+   "label": "明细类型",
+   "fieldtype": "Select",
+   "options": "excel\nmissing",
+   "default": "excel",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_row",
+   "label": "Excel行号",
+   "fieldtype": "Int"
+  },
+  {
+   "fieldname": "row_key",
+   "label": "明细键",
+   "fieldtype": "Data",
+   "unique": 1,
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "excel_name",
+   "label": "Excel姓名",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "identity_number",
+   "label": "证件号码",
+   "fieldtype": "Data",
+   "permlevel": 1
+  },
+  {
+   "fieldname": "masked_identity",
+   "label": "脱敏证件号码",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee",
+   "label": "关联员工",
+   "fieldtype": "Link",
+   "options": "Employee",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "label": "员工姓名",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "contribution_base",
+   "label": "Excel缴存基数",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "employee_amount",
+   "label": "Excel个人缴存额",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "company_amount",
+   "label": "Excel单位缴存额",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "receivable_total",
+   "label": "Excel缴存合计",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "calculated_employee_amount",
+   "label": "后台个人缴存额",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "calculated_company_amount",
+   "label": "后台单位缴存额",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "calculated_receivable_total",
+   "label": "后台缴存合计",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "difference_total",
+   "label": "总差额",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "reference_base",
+   "label": "档案公积金基数",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_source",
+   "label": "基数来源",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_employee_rate",
+   "label": "参考个人比例（%）",
+   "fieldtype": "Float",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_company_rate",
+   "label": "参考单位比例（%）",
+   "fieldtype": "Float",
+   "read_only": 1
+  },
+  {
+   "fieldname": "original_match_status",
+   "label": "原始匹配结果",
+   "fieldtype": "Select",
+   "options": "Matched\nPending",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "处理状态",
+   "fieldtype": "Select",
+   "options": "Matched\nPending\nConfirmed Difference\nIgnored",
+   "default": "Pending",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "difference_reasons",
+   "label": "差异原因",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "remark",
+   "label": "备注",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "confirmed_by",
+   "label": "确认人",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "confirmed_at",
+   "label": "确认时间",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ignored_by",
+   "label": "忽略操作人",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ignored_at",
+   "label": "忽略时间",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  }
+ ]
+}
