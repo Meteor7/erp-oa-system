@@ -199,3 +199,50 @@ def test_the_review_endpoint_hides_the_who_is_away_grid_from_plain_employees(mon
         result = raw()
         assert len(result["team"]) == shown, level
         assert ("演示员工120" in json.dumps(result, ensure_ascii=False)) is bool(shown)
+
+def overlap(api, user, request, monkeypatch):
+    entry, _scope, state = api
+    attendance_entry = importlib.import_module("rayher_hr_payroll.api.attendance_entry")
+    monkeypatch.setattr(attendance_entry, "get_attendance_request", lambda name: {"request": request})
+    state.login(user)
+    raw = getattr(entry.get_request_overlap, "__wrapped__", entry.get_request_overlap)
+    return raw(request["name"])
+
+
+def leave_request(employee, name="OA-9"):
+    return {"name": name, "employee": employee, "request_type": att.REQUEST_LEAVE, "leave_type": "事假",
+            "attendance_days": [{"work_date": IN_TWO_DAYS, "hours": 8}]}
+
+
+def test_the_overlap_list_names_colleagues_only_for_those_allowed_to_see_the_team(api, monkeypatch):
+    entry, _scope, state = api
+    monkeypatch.setattr(entry.frappe.db, "get_value", lambda doctype, name, field: next(row["department"] for row in EMPLOYEES if row["name"] == name), raising=False)
+    # 杨员工（E2）的申请：同部门有演示员工120（E3）病假同一天；自己的年假不算
+    for user in ("mgr@tests-x.example.invalid", "hr@tests-x.example.invalid", "person014@tests-x.example.invalid"):
+        result = overlap(api, user, leave_request("E2"), monkeypatch)
+        assert result["visible"] is True and result["count"] == 1
+        assert result["people"] == [{"name": "演示员工120", "kind": "sick", "dates": [IN_TWO_DAYS], "pending": False}]
+    # 没有管理职责的审批人：不给人名
+    assert overlap(api, "emp@tests-x.example.invalid", leave_request("E2"), monkeypatch) == {"visible": False, "count": 0, "people": []}
+    # 部门主管看别的部门的申请：不给人名
+    assert overlap(api, "mgr@tests-x.example.invalid", leave_request("E4"), monkeypatch) == {"visible": False, "count": 0, "people": []}
+    # 加班不查
+    overtime = {**leave_request("E2"), "request_type": att.REQUEST_OVERTIME}
+    assert overlap(api, "hr@tests-x.example.invalid", overtime, monkeypatch)["people"] == []
+    # 同一天有几个人时，按日期再按名字排；申请人自己不在列表里
+    both = overlap(api, "hr@tests-x.example.invalid", leave_request("E1", "OA-8"), monkeypatch)
+    assert [person["name"] for person in both["people"]] == ["演示员工120", "杨员工"] and both["count"] == 2
+
+
+def test_the_overlap_list_checks_the_same_access_as_the_detail_page(api, monkeypatch):
+    entry, _scope, state = api
+    attendance_entry = importlib.import_module("rayher_hr_payroll.api.attendance_entry")
+
+    def refuse(name):
+        raise PermissionError("找不到这张申请，或你没有权限查看。")
+
+    monkeypatch.setattr(attendance_entry, "get_attendance_request", refuse)
+    state.login("hr@tests-x.example.invalid")
+    raw = getattr(entry.get_request_overlap, "__wrapped__", entry.get_request_overlap)
+    with pytest.raises(PermissionError):
+        raw("OA-1")

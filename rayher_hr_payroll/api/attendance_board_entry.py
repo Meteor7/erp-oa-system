@@ -6,6 +6,7 @@
 - 人事经理 / 副总经理 / 总经理：get_attendance_board 只返回各部门的汇总数字，没有人名；
   点进某个部门（get_department_attendance）才返回这个部门的人名和日历。
 员工调用 get_department_attendance 一律拒绝。
+审批时的"同期谁不在"（get_request_overlap）同样按身份：部门主管只有申请人在自己部门时给人名，人事和管理层给人名，其他人只给空列表。
 """
 from __future__ import annotations
 
@@ -154,3 +155,46 @@ def get_department_attendance(department=""):
     if not detail["headcount"]:
         frappe.throw(frappe._("找不到这个部门，或部门里没有在职员工。"), frappe.DoesNotExistError)
     return {"level": scope["level"], "detail": detail}
+
+
+@frappe.whitelist()
+def get_request_overlap(name):
+    """批之前看"同期谁不在"：申请人所在部门里，和这张申请日期重叠的请假、调休、出差的人（审批中的也列，标出来）。
+
+    先走详情页同一套权限（看不到这张申请就报错）；再按身份定能不能给人名：人事和管理层可以，部门主管只有申请人在
+    自己部门时可以，其他人（没有管理职责的审批人）一律只给空列表，不泄露同事的请假。加班申请不查。
+    """
+    scope = resolve_scope()
+    _require_open()
+    from rayher_hr_payroll.api import attendance_entry
+
+    detail = getattr(attendance_entry.get_attendance_request, "__wrapped__", attendance_entry.get_attendance_request)
+    request = (detail(name) or {}).get("request") or {}
+    empty = {"visible": False, "count": 0, "people": []}
+    employee = request.get("employee")
+    if not employee or request.get("request_type") == att.REQUEST_OVERTIME:
+        return empty
+    department = frappe.db.get_value("Employee", employee, "department") or ""
+    if not department or scope["level"] == EMPLOYEE or (scope["level"] == MANAGER and department != scope["department"]):
+        return empty
+    wanted = {day for day, _hours in board.days_of(request)}
+    if not wanted:
+        return {**empty, "visible": True}
+    members = [member for member in _members(department) if member.get("name") != employee]
+    names = {member.get("name"): member.get("employee_name") or member.get("name") for member in members}
+    found = {}
+    for row in _rows(list(names), min(wanted), max(wanted)):
+        kind = board.kind_of(row)
+        if kind not in (*board.ABSENCE_KINDS, "trip"):
+            continue
+        dates = sorted({day for day, _hours in board.days_of(row) if day in wanted})
+        if not dates:
+            continue
+        person = found.setdefault(row.get("employee"), {"name": names.get(row.get("employee")), "kind": kind, "dates": set(), "pending": True})
+        person["dates"].update(dates)
+        person["pending"] = person["pending"] and row.get("workflow_status") not in att.COMPLETED
+        if kind in board.ABSENCE_KINDS:
+            person["kind"] = kind
+    people = sorted(({**person, "dates": [day.isoformat() for day in sorted(person["dates"])]} for person in found.values()),
+                    key=lambda item: (item["dates"][0], item["name"] or ""))
+    return {"visible": True, "count": len(people), "people": people[:12]}

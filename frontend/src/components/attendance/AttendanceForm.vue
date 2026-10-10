@@ -1,14 +1,16 @@
 <script setup>
-// 新建请假 / 加班 / 调休（也用来继续填写草稿、修改被退回的申请）：单独一页。
-// 请假和调休：先选起止日期，每一天选 全天 8 小时 / 上午 3 小时 / 下午 5 小时 / 自定义小时（每次 0.5）/ 不请；
-// 加班：选日期和小时数（每次 0.5）。右边实时汇总本次申请、对额度和月度上限的影响和审批路线。
+// 新建请假 / 加班 / 调休（也用来继续填写草稿、修改被退回的申请）：单独一页，分三步：申请什么 → 哪几天 → 事由。
+// 请假和调休：在月历上点开始日和结束日，每一天选 全天 8 小时 / 上午 3 小时 / 下午 5 小时 / 自定义小时（每次 0.5）/ 不请；
+// 加班：点日期（可勾"跨多天"），按小时填（每次 0.5）。右边实时汇总本次申请、对额度和月度上限的影响和审批路线。
 // 页面里换类型会清掉类型相关的内容（假别、每天怎么请、小时数），日期和事由保留。
 import { computed, reactive, ref, watch } from 'vue';
 import {
   COMP_RULE, HOURS_STEP, LEAVE_RULES, LEAVE_RULE_DEFAULT, MAX_OVERTIME_HOURS, OVERTIME_RULE, TYPES, api, buildFields, createLatest, customCap,
-  dayNote, dayRows, formSummary, labelOfType, mergeDays, modeAvailable, modeOfHours, numText, pickMode, slotNote, stepHours, stepRole,
+  dayNote, dayRows, formSummary, isoDate, labelOfType, mergeDays, modeAvailable, modeOfHours, numText, pickMode, slotNote, stepHours, stepRole,
   subjectFor, DAY_RULE_TEXT,
 } from '../../lib/attendanceView.js';
+import { infoMap, monthGrid, monthOf, pickRange, shiftMonth } from '../../lib/attendanceFlow.js';
+import AttendancePicker from './AttendancePicker.vue';
 
 const props = defineProps({
   requestType: { type: String, required: true },
@@ -26,9 +28,14 @@ const MODES = [
   { key: 'custom', label: '自定义小时', title: '自定义小时，每次 0.5，最多 8 小时' },
   { key: 'none', label: '不请', title: '这天不请' },
 ];
+const TYPE_KIND = { 请假申请: 'personal', 加班申请: 'ot', 调休申请: 'comp' };
 
+const today = isoDate(new Date());
 const form = reactive({ leaveType: '事假', from: '', to: '', days: [], subject: '', reason: '' });
 const multiDay = ref(false);
+const awaiting = ref(false);
+const month = ref(monthOf(today));
+const monthInfo = ref(null);
 const savedName = ref('');
 const snapshot = ref('');
 const busy = ref(false);
@@ -38,6 +45,7 @@ const message = ref('');
 const error = ref('');
 const latest = createLatest();
 const draftLatest = createLatest();
+const monthLatest = createLatest();
 let zeroNew = false;
 let pendingClean = false;
 
@@ -53,7 +61,7 @@ const rule = computed(() => (props.requestType === '请假申请' ? (LEAVE_RULES
 const subjectHint = computed(() => subjectFor(props.requestType, form.leaveType, summary.value.hours, form.reason || '写一句原因'));
 const cannotSubmit = computed(() => busy.value || loadingDays.value || loadingDraft.value || !form.from || !form.to || Boolean(summary.value.blocked));
 const whyNot = computed(() => {
-  if (!form.from || !form.to) return '请先选开始和结束日期';
+  if (!form.from || !form.to) return '请先在月历上选开始和结束日期';
   if (loadingDays.value) return '正在计算每一天…';
   return summary.value.blocked;
 });
@@ -62,6 +70,18 @@ const stateKey = computed(() => JSON.stringify([form.leaveType, form.from, form.
 // 每一天还在计算时不显示逐日行（否则会先闪一下"休息日"）。
 const visibleRows = computed(() => (form.days.length || !loadingDays.value ? rows.value : []));
 const editing = computed(() => Boolean(savedName.value));
+const hasDates = computed(() => Boolean(form.from && form.to));
+
+// 类型卡片和假别上的提示：还剩多少额度。
+const typeNote = (type) => ({
+  请假申请: '事假 / 病假 / 年假等', 加班申请: '加班换调休额度',
+  调休申请: props.home?.comp ? `用加班额度，剩 ${numText(props.home.comp.available_hours)} 小时` : '用加班额度',
+}[type]);
+function leaveNote(item) {
+  if (item === '年假' && props.home?.annual) return `剩 ${numText((props.home.annual.available_hours || 0) / 8)} 天`;
+  if (item === '事假' && props.home?.month?.leave_days_by_type?.事假) return `本月已请 ${numText(props.home.month.leave_days_by_type.事假 * 8)} 小时`;
+  return '';
+}
 
 function markClean() {
   snapshot.value = stateKey.value;
@@ -76,6 +96,7 @@ function dirty() {
 function resetAll() {
   Object.assign(form, { leaveType: '事假', from: '', to: '', days: [], subject: '', reason: '' });
   multiDay.value = false;
+  awaiting.value = false;
   savedName.value = '';
   zeroNew = false;
   markClean();
@@ -108,6 +129,19 @@ async function loadDays() {
   }
 }
 
+// 月历上这个月哪些日子能选、哪些已经被占：按当前类型取这个月的可填日子（取不到就都能点，提交时服务端仍会校验）。
+async function loadMonth() {
+  const grid = monthGrid(month.value);
+  const token = monthLatest.begin();
+  const type = props.requestType;
+  try {
+    const data = await api.options(type, grid.from, grid.to);
+    if (monthLatest.isCurrent(token) && type === props.requestType) monthInfo.value = infoMap(data?.days);
+  } catch {
+    if (monthLatest.isCurrent(token)) monthInfo.value = null;
+  }
+}
+
 // 继续填写草稿 / 修改被退回的申请：取这张申请，填进表单；类型和页面上的不一样时请页面换成它自己的类型。
 async function loadDraft(name) {
   const token = draftLatest.begin();
@@ -135,6 +169,8 @@ async function loadDraft(name) {
       subject: request.subject || '', reason: request.reason || '',
     });
     multiDay.value = overtime.value && form.from !== form.to;
+    awaiting.value = false;
+    if (form.from) month.value = monthOf(form.from);
     savedName.value = request.name;
     zeroNew = true;
     pendingClean = true;
@@ -155,6 +191,7 @@ watch(multiDay, (on) => {
   if (!on && overtime.value) form.to = form.from;
 });
 watch([() => form.from, () => form.to], loadDays);
+watch([month, () => props.requestType], loadMonth, { immediate: true });
 
 // 页面里换类型：旧类型的假别、每天怎么请、主题清掉，日期和事由留着；在途的请求作废，按新类型重新算每一天。
 watch(() => props.requestType, () => {
@@ -162,6 +199,7 @@ watch(() => props.requestType, () => {
   draftLatest.begin();
   Object.assign(form, { leaveType: '事假', days: [], subject: '' });
   multiDay.value = overtime.value && Boolean(form.from) && form.from !== form.to;
+  awaiting.value = false;
   if (!overtime.value && form.to < form.from) form.to = form.from;
   message.value = '';
   error.value = '';
@@ -174,6 +212,13 @@ watch(() => props.requestType, () => {
 watch(() => props.draftName, (name) => {
   if (name && name !== savedName.value) loadDraft(name);
 }, { immediate: true });
+
+function pickDay(date) {
+  const next = pickRange({ from: form.from, to: form.to, awaiting: awaiting.value }, date, { multi: !overtime.value || multiDay.value });
+  awaiting.value = next.awaiting;
+  form.from = next.from;
+  form.to = next.to;
+}
 
 function setMode(day, mode) {
   Object.assign(day, pickMode(day, mode));
@@ -240,113 +285,115 @@ defineExpose({ dirty });
 </script>
 
 <template>
-  <div class="at-newgrid">
-    <section class="panel flush at-formcard" :aria-label="meta.title">
-      <div class="at-sec">
-        <div class="lab">类型</div>
-        <div class="seg at-types" role="group" aria-label="申请类型">
-          <button v-for="type in types" :key="type" type="button" :aria-pressed="type === requestType" :disabled="editing && type !== requestType" :title="editing && type !== requestType ? '这张草稿的类型不能改，要换类型请另外新建' : ''" @click="type !== requestType && emit('switch-type', TYPES[type].label)">{{ TYPES[type].label }}</button>
+  <div class="af-grid">
+    <div class="af-main">
+      <section class="ac-panel af-sec done" :aria-label="meta.title">
+        <div class="af-fh"><span class="n">1</span><h2>申请什么</h2></div>
+        <div class="af-types" role="group" aria-label="申请类型">
+          <button v-for="type in types" :key="type" type="button" class="af-tc" :aria-pressed="type === requestType" :disabled="editing && type !== requestType" :title="editing && type !== requestType ? '这张草稿的类型不能改，要换类型请另外新建' : ''" @click="type !== requestType && emit('switch-type', TYPES[type].label)">
+            <b><i :class="'k-' + TYPE_KIND[type]"></i>{{ TYPES[type].label }}</b><span class="ac-note">{{ typeNote(type) }}</span>
+          </button>
         </div>
-      </div>
-
-      <div v-if="requestType === '请假申请'" class="at-sec">
-        <div class="lab">假别</div>
-        <div class="at-pills">
-          <button v-for="item in leaveTypes" :key="item" type="button" class="at-pill" :class="{ on: form.leaveType === item }" :aria-pressed="form.leaveType === item" @click="form.leaveType = item">{{ item }}</button>
+        <div v-if="requestType === '请假申请'" class="af-pills" role="group" aria-label="假别">
+          <button v-for="item in leaveTypes" :key="item" type="button" class="af-pill" :aria-pressed="form.leaveType === item" @click="form.leaveType = item">{{ item }}<small v-if="leaveNote(item)">{{ leaveNote(item) }}</small></button>
         </div>
-        <div class="muted at-gap">{{ rule }}</div>
-      </div>
-      <div v-else class="at-sec"><div class="at-rule">{{ rule }}</div></div>
+        <div class="af-rule">{{ rule }}</div>
+      </section>
 
-      <div class="at-sec">
-        <div class="lab">{{ overtime ? '日期' : '时间' }}<span class="muted"> {{ overtime ? '按实际小时数填，可以选休息日' : `${DAY_RULE_TEXT}；休息日和已经占用的日子自动去掉` }}</span></div>
-        <div class="at-dates">
-          <label>{{ overtime && !multiDay ? '日期' : '开始' }}<input v-model="form.from" type="date" /></label>
-          <label v-if="!overtime || multiDay">结束<input v-model="form.to" type="date" :min="form.from" /></label>
-          <label v-if="overtime" class="at-multi"><input v-model="multiDay" type="checkbox" /> 跨多天</label>
+      <section :class="['ac-panel', 'af-sec', { done: hasDates }]">
+        <div class="af-fh">
+          <span class="n">2</span><h2>{{ overtime ? '哪一天' : '哪几天' }}</h2>
+          <span class="ac-note">{{ overtime ? '按实际小时数填，可以选休息日' : '先点开始日，再点结束日；只请一天点一次' }}</span>
+          <label v-if="overtime" class="af-multi"><input v-model="multiDay" type="checkbox" /> 跨多天</label>
         </div>
-      </div>
-
-      <div v-if="overtime" class="at-sec">
-        <div class="lab">加班小时数</div>
-        <div v-if="!visibleRows.length" class="muted">{{ loadingDays || loadingDraft ? '正在计算每一天…' : '先选日期' }}</div>
-        <div v-for="row in visibleRows" :key="row.date" class="at-day ot" :class="{ conflict: row.kind === 'conflict' }">
-          <div v-if="visibleRows.length > 1" class="d"><b>{{ row.date }}</b> <span class="muted">{{ row.week }}</span></div>
-          <template v-if="row.kind === 'ot'">
-            <span class="at-step">
-              <button type="button" aria-label="减 0.5 小时" @click="bumpOvertime(row.day, -0.5)">−</button>
-              <b class="num">{{ numText(row.day.hours) }}</b>
-              <button type="button" aria-label="加 0.5 小时" @click="bumpOvertime(row.day, 0.5)">＋</button>
-            </span>
-            <span class="muted">小时（每次 0.5，每天最多 24 小时<template v-if="row.day.max_hours < MAX_OVERTIME_HOURS">；这天最多还能填 {{ numText(row.day.max_hours) }} 小时</template>）</span>
-          </template>
-          <span v-else-if="row.kind === 'conflict'" class="x">{{ row.day.conflict.text }}，不能重复申请</span>
-        </div>
-      </div>
-
-      <div v-else class="at-sec">
-        <div class="lab">每一天怎么请</div>
-        <div v-if="!visibleRows.length" class="muted">{{ loadingDays || loadingDraft ? '正在计算每一天…' : '先选起止日期' }}</div>
-        <div v-for="row in visibleRows" :key="row.date" class="at-day" :class="{ rest: row.kind === 'rest', conflict: row.kind === 'conflict' }">
-          <div class="d"><b>{{ row.date }}</b> <span class="muted">{{ row.week }}</span></div>
-          <template v-if="row.kind === 'work'">
-            <div class="at-mid">
-              <div class="at-modes" role="group" :aria-label="`${row.label}怎么请`">
-                <button v-for="mode in MODES" :key="mode.key" type="button" class="at-m" :class="{ on: row.day.mode === mode.key }" :aria-pressed="row.day.mode === mode.key" :disabled="!modeAvailable(row.day, mode.key)" :title="mode.title" @click="setMode(row.day, mode.key)">{{ mode.label }}</button>
+        <div class="af-datebox">
+          <AttendancePicker :month="month" :from="form.from" :to="form.to" :info="monthInfo" :overtime="overtime" :today="today" @pick="pickDay" @shift="(delta) => (month = shiftMonth(month, delta))" />
+          <div class="af-days">
+            <template v-if="overtime">
+              <div class="ac-note af-lab">加班小时数</div>
+              <div v-if="!visibleRows.length" class="ac-note">{{ loadingDays || loadingDraft ? '正在计算每一天…' : '先在月历上选日期' }}</div>
+              <div v-for="row in visibleRows" :key="row.date" :class="['af-day', { conflict: row.kind === 'conflict' }]">
+                <div v-if="visibleRows.length > 1" class="d"><b>{{ row.date }}</b> <span class="ac-note">{{ row.week }}</span></div>
+                <template v-if="row.kind === 'ot'">
+                  <span class="af-step">
+                    <button type="button" aria-label="减 0.5 小时" @click="bumpOvertime(row.day, -0.5)">−</button>
+                    <b>{{ numText(row.day.hours) }}</b>
+                    <button type="button" aria-label="加 0.5 小时" @click="bumpOvertime(row.day, 0.5)">＋</button>
+                  </span>
+                  <span class="ac-note">小时（每次 0.5，每天最多 24 小时<template v-if="row.day.max_hours < MAX_OVERTIME_HOURS">；这天最多还能填 {{ numText(row.day.max_hours) }} 小时</template>）</span>
+                </template>
+                <span v-else-if="row.kind === 'conflict'" class="af-x">{{ row.day.conflict.text }}，不能重复申请</span>
               </div>
-              <div v-if="row.day.mode === 'custom'" class="at-cust">
-                <span class="at-step">
-                  <button type="button" aria-label="减 0.5 小时" @click="bump(row.day, -0.5)">−</button>
-                  <b class="num">{{ numText(row.day.hours) }}</b>
-                  <button type="button" aria-label="加 0.5 小时" @click="bump(row.day, 0.5)">＋</button>
-                </span>
-                <span class="muted">小时（每次 0.5，这天最多 {{ numText(customCap(row.day)) }}）</span>
+            </template>
+            <template v-else>
+              <div class="ac-note af-lab">每一天怎么请 · {{ DAY_RULE_TEXT }}</div>
+              <div v-if="!visibleRows.length" class="ac-note">{{ loadingDays || loadingDraft ? '正在计算每一天…' : '选好日期后，这里按天选全天、上午、下午或自定义小时' }}</div>
+              <div v-for="row in visibleRows" :key="row.date" :class="['af-day', { rest: row.kind === 'rest', conflict: row.kind === 'conflict' }]">
+                <div class="d"><b>{{ row.date }}</b> <span class="ac-note">{{ row.week }}</span></div>
+                <template v-if="row.kind === 'work'">
+                  <div class="mid">
+                    <div class="af-modes" role="group" :aria-label="`${row.label}怎么请`">
+                      <button v-for="mode in MODES" :key="mode.key" type="button" class="af-mode" :aria-pressed="row.day.mode === mode.key" :disabled="!modeAvailable(row.day, mode.key)" :title="mode.title" @click="setMode(row.day, mode.key)">{{ mode.label }}</button>
+                    </div>
+                    <div v-if="row.day.mode === 'custom'" class="af-cust">
+                      <span class="af-step">
+                        <button type="button" aria-label="减 0.5 小时" @click="bump(row.day, -0.5)">−</button>
+                        <b>{{ numText(row.day.hours) }}</b>
+                        <button type="button" aria-label="加 0.5 小时" @click="bump(row.day, 0.5)">＋</button>
+                      </span>
+                      <span class="ac-note">小时（每次 0.5，这天最多 {{ numText(customCap(row.day)) }}）</span>
+                    </div>
+                    <div v-if="slotNote(row.day)" class="af-hint">{{ slotNote(row.day) }}</div>
+                    <div v-if="dayNote(row.day)" class="af-hint">{{ dayNote(row.day) }}</div>
+                  </div>
+                  <div class="hrs"><b>{{ numText(row.day.hours) }}</b> 小时</div>
+                </template>
+                <span v-else-if="row.kind === 'rest'" class="ac-note">休息日，不计</span>
+                <span v-else class="af-x">{{ row.day.conflict.text }}，不能重复申请</span>
               </div>
-              <div v-if="slotNote(row.day)" class="at-hint">{{ slotNote(row.day) }}</div>
-              <div v-if="dayNote(row.day)" class="at-hint">{{ dayNote(row.day) }}</div>
-            </div>
-            <div class="at-hours num"><b>{{ numText(row.day.hours) }}</b> 小时</div>
-          </template>
-          <span v-else-if="row.kind === 'rest'" class="muted">休息日，不计</span>
-          <span v-else class="x">{{ row.day.conflict.text }}，不能重复申请</span>
+            </template>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div class="at-sec">
-        <div class="lab">事由</div>
-        <textarea v-model="form.reason" class="at-area" rows="3" placeholder="简单写一下原因，主管审批时会看到，例如：陪家人到外地就医"></textarea>
-        <label class="at-subject muted">主题（自动生成，可以改）<input v-model="form.subject" class="at-input" :placeholder="subjectHint" maxlength="120" /></label>
-      </div>
-    </section>
+      <section :class="['ac-panel', 'af-sec', { done: form.reason.trim() }]">
+        <div class="af-fh"><span class="n">3</span><h2>事由</h2><span class="ac-note">申请人和审批人都会看到</span></div>
+        <textarea v-model="form.reason" class="af-area" rows="3" aria-label="事由" placeholder="简单写一下原因，主管审批时会看到，例如：陪家人到外地就医"></textarea>
+        <label class="af-subject ac-note">主题（自动生成，可以改）<input v-model="form.subject" class="af-input" :placeholder="subjectHint" maxlength="120" /></label>
+      </section>
+    </div>
 
-    <aside class="panel at-sumcard" aria-label="本次申请汇总">
+    <aside class="ac-panel af-sum" aria-label="本次申请汇总">
       <div>
-        <div class="muted">本次申请</div>
-        <div class="at-big"><span class="n">{{ summary.big }}</span><span>小时</span><span class="muted">{{ summary.breakdown || '还没选时段' }}</span></div>
-        <div v-if="summary.detail" class="muted">{{ summary.detail }}</div>
+        <div class="ac-note">本次申请</div>
+        <div class="af-big"><span class="n">{{ summary.big }}</span><span>小时</span><span class="ac-note">{{ summary.breakdown || '还没选时段' }}</span></div>
+        <div v-if="summary.detail" class="ac-note">{{ summary.detail }}</div>
       </div>
-      <div class="at-sumblock">
-        <div class="muted">通过后的影响</div>
-        <div v-for="line in summary.lines" :key="line.label" class="at-line2"><span>{{ line.label }}</span><b class="num">{{ line.value }}</b></div>
-        <div v-if="summary.blocked && form.from && form.to" class="at-impact warn">{{ summary.blocked }}</div>
-        <div v-else-if="summary.note" class="muted">{{ summary.note }}</div>
+      <div class="af-block">
+        <div class="ac-note">通过后的影响</div>
+        <div v-for="line in summary.lines" :key="line.label" class="af-ln"><span>{{ line.label }}</span><b>{{ line.value }}</b></div>
+        <div v-if="summary.blocked && form.from && form.to" class="af-warn">{{ summary.blocked }}</div>
+        <div v-else-if="summary.note" class="ac-note">{{ summary.note }}</div>
       </div>
-      <div class="at-sumblock">
-        <div class="muted">审批路线（自动带出）</div>
-        <ol v-if="route?.steps?.length" class="at-route">
-          <li v-for="step in route.steps" :key="step.step_index"><i>{{ step.step_index }}</i><b>{{ step.approvers.map((person) => person.name).join(' / ') || '待指定' }}</b><span class="muted">{{ stepRole(step.label) }}</span></li>
+      <div class="af-block">
+        <div class="ac-note">审批路线（自动带出）</div>
+        <ol v-if="route?.steps?.length" class="af-route">
+          <li v-for="step in route.steps" :key="step.step_index"><i>{{ step.step_index }}</i><b>{{ step.approvers.map((person) => person.name).join(' / ') || '待指定' }}</b><span class="ac-note">{{ stepRole(step.label) }}</span></li>
         </ol>
-        <div v-else-if="route?.error" class="err">{{ route.error }}</div>
-        <div v-else class="muted">审批路线加载中…</div>
-        <div v-if="route?.copied_to?.length" class="muted">抄送：{{ route.copied_to.map((item) => item.label || item.name).join('、') }}</div>
+        <div v-else-if="route?.error" class="af-err">{{ route.error }}</div>
+        <div v-else class="ac-note">审批路线加载中…</div>
+        <div v-if="route?.copied_to?.length" class="ac-note">抄送：{{ route.copied_to.map((item) => item.label || item.name).join('、') }}</div>
       </div>
-      <div v-if="error" class="err" role="alert">{{ error }}</div>
-      <div v-if="message" class="ok" role="status">{{ message }}</div>
-      <div class="at-submit">
-        <button type="button" class="btn pri lg" :disabled="cannotSubmit" :title="whyNot" @click="save(false)">{{ busy ? '提交中…' : '提交申请' }}</button>
-        <button type="button" class="btn" :disabled="busy" @click="save(true)">{{ editing ? '保存修改' : '保存草稿' }}</button>
-        <button type="button" class="btn" :disabled="busy" @click="emit('cancel')">取消</button>
-        <div v-if="editing" class="muted">正在编辑草稿：{{ savedName }}</div>
+      <div class="af-block">
+        <div v-if="error" class="af-err" role="alert">{{ error }}</div>
+        <div v-if="message" class="af-ok" role="status">{{ message }}</div>
+        <div v-if="cannotSubmit && whyNot && !busy" class="af-need">{{ whyNot }}</div>
+        <button type="button" class="ac-btn pri af-submit" :disabled="cannotSubmit" :title="whyNot" @click="save(false)">{{ busy ? '提交中…' : '提交申请' }}</button>
+        <div class="af-two">
+          <button type="button" class="ac-btn" :disabled="busy" @click="save(true)">{{ editing ? '保存修改' : '保存草稿' }}</button>
+          <button type="button" class="ac-btn" :disabled="busy" @click="emit('cancel')">取消</button>
+        </div>
+        <div v-if="editing" class="ac-note">正在编辑草稿：{{ savedName }}</div>
       </div>
     </aside>
   </div>

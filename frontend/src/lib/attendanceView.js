@@ -842,6 +842,7 @@ export const api = {
   reviewed: () => callApi('attendance_entry.list_attendance_reviewed', { limit: 100 }, { method: 'GET' }),
   board: () => callApi('attendance_board_entry.get_attendance_board', {}, { method: 'GET' }),
   department: (department) => callApi('attendance_board_entry.get_department_attendance', { department }, { method: 'GET' }),
+  overlap: (name) => callApi('attendance_board_entry.get_request_overlap', { name }, { method: 'GET' }),
   all: (requestType = '') => callApi('attendance_entry.list_attendance_all', { request_type: requestType, limit: 100 }, { method: 'GET' }),
   detail: (name) => callApi('attendance_entry.get_attendance_request', { name }, { method: 'GET' }),
   options: (requestType, from, to) => callApi('oa_entry.get_attendance_options', { request_type: requestType, from_date: from || '', to_date: to || '' }, { method: 'GET' }),

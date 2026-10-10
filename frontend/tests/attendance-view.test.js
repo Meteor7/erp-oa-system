@@ -546,7 +546,7 @@ test("the four views are wired: home buttons, list header, detail actions and th
   assert.doesNotMatch(list, /emit\('new'\)/);
   assert.match(list, /listTitle\(filter\.value\)/);
   assert.match(list, /批量同意/);
-  assert.match(list, /v-if="scope === 'todo'" class="at-check"/);
+  assert.match(list, /v-if="scope === 'todo'" type="checkbox" aria-label="全选"/);   // 只有待我审批的列表有全选
   const detail = read("../src/components/attendance/AttendanceDetail.vue");
   for (const text of ["审批意见（驳回时必填）", "驳回必须写意见", "撤回申请", "继续填写", "修改后重新提交", "逐日明细", "通过后的影响", "审批进度", "抄送", "操作记录", "暂不能撤回"]) assert.ok(detail.includes(text), text);
   assert.match(detail, /expected_step_key: request\.value\?\.current_step_key/);

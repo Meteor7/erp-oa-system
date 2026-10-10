@@ -11,6 +11,7 @@ import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import '../styles/attendanceUi.css';
 import '../styles/attendanceBoardUi.css';
+import '../styles/attendanceFlowUi.css';
 import AttendanceDetail from '../components/attendance/AttendanceDetail.vue';
 import AttendanceForm from '../components/attendance/AttendanceForm.vue';
 import AttendanceHome from '../components/attendance/AttendanceHome.vue';
@@ -379,42 +380,42 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
     <AttendanceList
       v-else-if="view === 'list'" :page="page" :sets="listSets" :names="listNames" :loaded="loaded" :now="now" :busy="busy"
       :is-approver="isApprover" :can-view-all="canViewAll" :has-employee="hasEmployee"
-      @home="goHome" @scope="setScope" @filter="setFilter" @today-off="clearToday" @new="goNew" @open="openRow" @approve-many="approveMany" />
+      @home="goHome" @scope="setScope" @filter="setFilter" @today-off="clearToday" @new="goNew" @open="openRow" @approve-many="approveMany"
+      @changed="refreshLists" @navigate="go" />
 
     <AttendanceDetail
       v-else-if="view === 'detail'" :key="page.request" :name="page.request" :origin="origin" :reject-mode="page.reject"
       @home="goHome" @back="goBack" @navigate="go" @loaded="onDetailLoaded" @changed="refreshLists" />
 
-    <template v-else>
-      <div class="ph">
+    <div v-else class="acx af-page">
+      <div class="af-head">
         <div>
-          <div class="crumb">
-            <button type="button" class="link" @click="goHome">考勤中心</button> ›
-            <button type="button" class="link" @click="goBack">{{ backLabel(origin) }}</button> › {{ newTitle(page.newType) }}
+          <div class="af-crumb">
+            <button type="button" class="ac-link" @click="goHome">考勤中心</button> ›
+            <button type="button" class="ac-link" @click="goBack">{{ backLabel(origin) }}</button> › {{ newTitle(page.newType) }}
           </div>
-          <h3>{{ newTitle(page.newType) }}</h3>
-          <div class="muted">{{ subtitle }}</div>
+          <h1>{{ newTitle(page.newType) }}</h1>
+          <div class="ac-note">{{ subtitle }}</div>
         </div>
       </div>
 
-      <div v-if="!loaded.home" class="panel empty">正在加载…</div>
+      <div v-if="!loaded.home" class="ac-panel ac-empty">正在加载…</div>
       <div v-else-if="!hasEmployee" class="banner err">{{ noEmployeeText }}</div>
 
-      <section v-else-if="!page.newType" class="panel at-picker" aria-label="选择申请类型">
+      <section v-else-if="!page.newType" class="ac-panel af-sec" aria-label="选择申请类型">
         <b>你要新建哪一种？</b>
-        <div class="muted">三种申请的规则不一样，先选好再填，避免填错。</div>
-        <div class="at-pick-cards">
-          <button v-for="card in pickCards" :key="card.type" type="button" class="at-kpi" @click="switchType(card.label)">
-            <span class="at-pick-title">新建{{ card.label }}</span>
-            <span class="at-kpi-sub">{{ card.rule }}</span>
+        <div class="ac-note">三种申请的规则不一样，先选好再填，避免填错。</div>
+        <div class="af-types">
+          <button v-for="card in pickCards" :key="card.type" type="button" class="af-tc" @click="switchType(card.label)">
+            <b>新建{{ card.label }}</b><span class="ac-note">{{ card.rule }}</span>
           </button>
         </div>
-        <div class="actions"><button type="button" class="btn" @click="goBack">取消</button></div>
+        <div class="af-two"><button type="button" class="ac-btn" @click="goBack">取消</button></div>
       </section>
 
       <AttendanceForm
         v-else ref="formRef" :request-type="newTypeRequest" :draft-name="page.draft" :home="home" :route="approval" :types="availableTypes"
         @switch-type="switchType" @draft-type="onDraftType" @draft-saved="onDraftSaved" @submitted="onSubmitted" @cancel="goBack" />
-    </template>
+    </div>
   </div>
 </template>
