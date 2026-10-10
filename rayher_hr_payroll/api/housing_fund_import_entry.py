@@ -177,6 +177,8 @@ def get_fund_workbench(period, company=None, batch=None):
         "batches": [_display_batch(row) for row in batches],
         "pending": [row for row in rows if row.get("status") == "Pending"],
         "details": [row for row in rows if row.get("status") in ("Matched", "Confirmed Difference") and row.get("row_type") != "missing"],
+        # 已经人工处理过的（确认纳入 / 忽略），页面的"已处理"里要看得到，包括被忽略的。
+        "handled": [row for row in rows if row.get("status") in ("Confirmed Difference", "Ignored")],
         "default_rates": {"employee": float(DEFAULT_EMPLOYEE_RATE), "company": float(DEFAULT_COMPANY_RATE)},
     }
 
