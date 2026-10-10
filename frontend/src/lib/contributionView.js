@@ -157,7 +157,7 @@ export function drawerOptions(kind, item) {
 // ---------------------------------------------------------------- 进度
 export function batchOf(data) {
   const batches = data?.batches || [];
-  return batches.find((item) => item.status === 'Pending Activation') || batches.find((item) => item.is_current) || null;
+  return batches.find((item) => item.status === 'Pending Activation') || batches.find((item) => item.is_current || item.status === 'Current') || null;
 }
 
 export function progress(data) {
