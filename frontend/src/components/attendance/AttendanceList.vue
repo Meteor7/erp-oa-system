@@ -46,7 +46,7 @@ const today = computed(() => todayText(new Date(props.now)));
 const state = computed(() => ({ type: filter.value, time: time.value, slow: slow.value, query: query.value }));
 const rows = computed(() => {
   let list = applyFilters(base.value, state.value, { today: today.value, now: props.now });
-  if (todayOnly.value) list = awayToday(list, today.value);
+  if (todayOnly.value) list = awayToday(list, todayText(new Date(props.now)));
   return scope.value === 'todo' ? byWait(list, props.now) : list;
 });
 const slowCount = computed(() => base.value.filter((row) => isSlow(row, props.now)).length);
