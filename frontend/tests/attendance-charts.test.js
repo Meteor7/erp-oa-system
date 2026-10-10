@@ -223,8 +223,8 @@ test("the style sheet covers the type colours and a dark theme, scoped under .ac
   assert.match(css, /\.ac-cal th\.t \{ color: var\(--ac-accent\); font-weight: 700; \}/);       // 今天只把表头日期标成橙色加粗
   assert.doesNotMatch(css, /\.ac-cal [^{]*t0[^{]*\{[^}]*(outline|border)/);                     // 不描边
   assert.match(css, /\.ac-cal td\.we \{ background: var\(--ac-we\); \}/);                        // 周末格子很浅的底色
-  // expenseUi.css 里 .xp .r 是右对齐、.xp .bar 是 6px 高的进度条：这一页自己的类名不能撞上
-  for (const name of ["AttendanceCharts", "AttendanceQueue", "AttendanceDeptTable", "AttendanceCalendar", "AttendanceHome"]) {
+  // expenseUi.css 里 .xp .r 是右对齐、.xp .bar 是 6px 高的进度条：这一页的布局类名不能撞上（部门表的数字列要右对齐，故意用 .r）
+  for (const name of ["AttendanceCharts", "AttendanceQueue", "AttendanceCalendar", "AttendanceHome"]) {
     assert.doesNotMatch(read(`../src/components/attendance/${name}.vue`), /class="(bar|r)"/, name);
   }
   const bare = css.split("\n").filter((line) => /^\s*\.[a-z]/.test(line) && !line.includes(".acx"));
