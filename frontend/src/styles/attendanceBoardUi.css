@@ -72,7 +72,7 @@ html[data-theme="dark"] .xp.at .acx {
 .xp.at .acx .ac-tag.ot { background: var(--ac-b-ot); color: var(--ac-x-ot); }
 .xp.at .acx .ac-tag.trip { background: var(--ac-b-trip); color: var(--ac-x-trip); }
 .xp.at .acx .ac-tag.other { background: var(--ac-b-other); color: var(--ac-x-other); }
-.xp.at .acx .ac-av { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 650; background: var(--ac-soft); color: var(--ac-ink2); flex: none; }
+.xp.at .acx .ac-av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: 0; background: var(--ac-soft); color: var(--ac-ink2); flex: none; }
 .xp.at .acx .ac-av.annual { background: var(--ac-b-annual); color: var(--ac-x-annual); }
 .xp.at .acx .ac-av.personal { background: var(--ac-b-personal); color: var(--ac-x-personal); }
 .xp.at .acx .ac-av.sick { background: var(--ac-b-sick); color: var(--ac-x-sick); }
@@ -160,7 +160,7 @@ html[data-theme="dark"] .xp.at .acx {
 /* 待办：一人一行，点开才看影响 */
 .xp.at .acx .ac-q { border-top: 1px solid var(--ac-line); }
 .xp.at .acx .ac-q:first-of-type { border-top: 0; }
-.xp.at .acx .ac-q .row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 16px; }
+.xp.at .acx .ac-q .row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 16px; }
 .xp.at .acx .ac-q .row:hover { background: var(--ac-soft); }
 .xp.at .acx .ac-q .who { min-width: 0; cursor: pointer; }
 .xp.at .acx .ac-q .who:focus-visible { outline: 2px solid var(--ac-accent); outline-offset: 2px; border-radius: 6px; }
@@ -168,9 +168,9 @@ html[data-theme="dark"] .xp.at .acx {
 .xp.at .acx .ac-q .l1 b { font-weight: 600; }
 .xp.at .acx .ac-q .l2 { font-size: 12px; color: var(--ac-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .xp.at .acx .ac-q .acts { display: flex; gap: 6px; align-items: center; }
-.xp.at .acx .ac-q .more { padding: 0 16px 10px 56px; display: grid; gap: 6px; }
+.xp.at .acx .ac-q .more { padding: 0 16px 10px 60px; display: grid; gap: 6px; }
 .xp.at .acx .ac-q .more .tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-.xp.at .acx .ac-rj { display: grid; gap: 8px; padding: 0 16px 12px 56px; }
+.xp.at .acx .ac-rj { display: grid; gap: 8px; padding: 0 16px 12px 60px; }
 .xp.at .acx .ac-rj textarea { width: 100%; min-height: 54px; border: 1px solid var(--ac-line2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; resize: vertical; background: var(--ac-panel); color: var(--ac-ink); }
 .xp.at .acx .ac-rj textarea[aria-invalid="true"] { border-color: var(--ac-bad); }
 .xp.at .acx .ac-rj select { max-width: 260px; border: 1px solid var(--ac-line2); border-radius: 8px; padding: 4px 8px; background: var(--ac-panel); color: var(--ac-ink); font: inherit; font-size: 13px; }
@@ -213,7 +213,7 @@ html[data-theme="dark"] .xp.at .acx {
 .xp.at .acx .ac-gl { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11px; color: var(--ac-muted); padding: 0 16px 10px; }
 .xp.at .acx .ac-gl i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
 .xp.at .acx .ac-gl .t0 { color: var(--ac-accent); }
-.xp.at .acx .ac-p { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--ac-line); }
+.xp.at .acx .ac-p { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--ac-line); }
 .xp.at .acx .ac-p:first-of-type { border-top: 0; }
 
 /* 员工：我未来 14 天；我的申请沿用 AttendanceMineCard */
@@ -239,7 +239,7 @@ html[data-theme="dark"] .xp.at .acx {
 @media (max-width: 640px) {
   .xp.at .acx .ac-metrics > * { border-right: 0; border-bottom: 1px solid var(--ac-line); }
   .xp.at .acx .ac-metrics > *:last-child { border-bottom: 0; }
-  .xp.at .acx .ac-q .row { grid-template-columns: 30px minmax(0, 1fr); }
+  .xp.at .acx .ac-q .row { grid-template-columns: 34px minmax(0, 1fr); }
   .xp.at .acx .ac-q .acts { grid-column: 2; }
   .xp.at .acx .ac-q .more, .xp.at .acx .ac-rj { padding-left: 16px; }
   .xp.at .acx .ac-cal { padding-left: 8px; padding-right: 8px; }
