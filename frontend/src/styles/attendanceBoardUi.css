@@ -224,6 +224,11 @@ html[data-theme="dark"] .xp.at .acx {
 .xp.at .acx .ac-strip div.t0 { color: var(--ac-accent); font-weight: 700; }
 .xp.at .acx .ac-strip i.pend { opacity: .45; }
 .xp.at .acx .ac-mine .panel, .xp.at .acx .panel { background: var(--ac-panel); border-color: var(--ac-line); color: var(--ac-ink); }
+/* 沿用的"我的申请"卡片（AttendanceMineCard）里的按钮和文字跟着这一块的主题走 */
+.xp.at .acx .btn { background: var(--ac-panel); color: var(--ac-ink); border-color: var(--ac-line2); }
+.xp.at .acx .btn:hover { border-color: var(--ac-accent); color: var(--ac-accent); }
+.xp.at .acx .btn.pri { background: var(--ac-accent); border-color: var(--ac-accent); color: var(--ac-accent-ink); }
+.xp.at .acx .muted { color: var(--ac-muted); }
 
 @media (max-width: 1100px) {
   .xp.at .acx .ac-grid, .xp.at .acx .ac-grid.wide { grid-template-columns: minmax(0, 1fr); }
