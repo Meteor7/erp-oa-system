@@ -38,15 +38,16 @@ test("payroll: ?status=draft filters the rows and clearing it goes back to no pa
 
 test("payroll page: period and the draft filter are bound to the address before the first request", () => {
   const source = read("Payroll.vue");
-  assert.match(source, /bindRouteFilters\(\{route:useRoute\(\),router:useRouter\(\),specs:\[periodRouteSpec\(\),\{/);
-  assert.match(source, /keys:PAYROLL_QUERY_KEYS/);
-  assert.match(source, /sources:\[statusFilter\]/);
-  assert.ok(indexOf(source, "bindRouteFilters(") < indexOf(source, 'createResource({url:api+"get_payroll_rows"'), "period must be read before the first fetch");
-  assert.match(source, /filterPayrollRows\(rows\.data,statusFilter\.value\)/);
-  assert.match(source, /v-for="\(row,index\) in shownRows"/);
+  assert.match(source, /bindRouteFilters\(\{ route: useRoute\(\), router: useRouter\(\), specs: \[periodRouteSpec\(\), \{/);
+  assert.match(source, /keys: PAYROLL_QUERY_KEYS/);
+  assert.match(source, /sources: \[statusFilter\]/);
+  assert.ok(indexOf(source, "bindRouteFilters(") < indexOf(source, 'createResource({ url: api + "get_payroll_rows"'), "period must be read before the first fetch");
+  // 页签「草稿」就是地址里的 ?status=draft：点它写进地址，别的页签清掉
+  assert.match(source, /statusFilter\.value = key === "draft" \? "draft" : ""/);
   assert.match(source, /data-payroll-draft-only/);
   assert.match(source, /只看草稿工资条/);
   assert.match(source, /本期没有草稿工资条/);
+  assert.match(source, /v-for="item in CHIPS"/);
 });
 
 // ---------- 只带期间的页面 ----------
