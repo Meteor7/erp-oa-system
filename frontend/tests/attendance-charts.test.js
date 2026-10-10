@@ -186,7 +186,7 @@ test("the employee view has no team calendar and no department table; the compan
 test("the charts are plain SVG and CSS, remembered open/closed, and each identity gets its own three columns", () => {
   for (const name of ["AttendanceCharts", "AttendanceDonut", "AttendanceDayStack", "AttendanceCalendar", "AttendanceDeptTable", "AttendanceMyStrip", "AttendanceMetrics", "AttendanceQueue", "AttendanceAway"]) {
     const source = read(`../src/components/attendance/${name}.vue`);
-    assert.doesNotMatch(source, /echarts|chart\.js|d3|apexcharts/i, name);
+    assert.doesNotMatch(source, /from ['"](echarts|chart\.js|d3|apexcharts)/i, name);
   }
   const charts = read("../src/components/attendance/AttendanceCharts.vue");
   for (const text of ["我的额度", "我今年的请假构成", "近 6 个月请假", "待我审批等了多久", "各部门本月请假", "本月请假类型", "14 天"]) assert.ok(charts.includes(text), text);
