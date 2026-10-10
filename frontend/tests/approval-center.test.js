@@ -82,8 +82,8 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /InvoiceFolder\.vue/);
   assert.match(source, /ClaimCenter\.vue/);
   assert.match(source, /PaymentRequestCenter\.vue/);
-  assert.match(source, /RequestBoard\.vue/);
-  assert.match(source, /PaymentBoard\.vue/);
+  // 申请看板 / 付款看板现在嵌在分组首页里，router 只认识分组首页
+  assert.match(source, /ApprovalGroupHome\.vue/);
 });
 
 test("procurement pages save and submit through the real workflow engine", () => {
