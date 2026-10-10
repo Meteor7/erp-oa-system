@@ -5,6 +5,7 @@ import {
   buildTargetTable, dashboardFrom, mergeQuery, resolveTarget, targetHint, targetState,
 } from "../src/lib/dashboardTargets.js";
 import { canSee } from "../src/lib/access.js";
+import { BOARD_REDIRECTS } from "../src/lib/approvalGroupPaths.js";
 
 // 前后端共用同一份目标表；测试直接读后端那份 JSON（页面里是 vite 打包进去的，见 lib/dashboardTargetsData.js）。
 const json = JSON.parse(readFileSync(new URL("../../rayher_hr_payroll/dashboard/targets.json", import.meta.url), "utf8"));
@@ -24,7 +25,7 @@ test("every backend target is in the front-end table and points at a real route"
   assert.deepEqual(Object.keys(table).sort(), keys.sort());
   for (const [key, spec] of Object.entries(table)) {
     assert.ok(spec.path.startsWith("/"), `${key} path`);
-    const routed = routerSource.includes(`path: '${spec.path}'`);
+    const routed = routerSource.includes(`path: '${spec.path}'`) || spec.path in BOARD_REDIRECTS;   // 旧看板地址是重定向
     assert.ok(routed || PENDING_ROUTES.includes(spec.path), `${key}: ${spec.path} has no route in router.js (and is not in the pending list)`);
   }
 });

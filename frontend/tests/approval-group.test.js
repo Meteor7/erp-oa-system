@@ -142,7 +142,8 @@ test("the group home page, routes and sidebar are wired (2026-10-10)", () => {
   assert.match(router, /Object\.entries\(BOARD_REDIRECTS\)/);
   assert.match(router, /query: route\.query, hash: route\.hash/);      // 旧看板地址带着页签和锚点跳过来
   const app = read("../src/App.vue");
-  assert.doesNotMatch(app, /expense-request-board|expense-payment-board|request-dashboard|payment-dashboard/);
+  // 侧栏菜单不再有看板条目（App.vue 里另有一份「已知页面」路径表，会提到旧地址，所以只看菜单项的 to）
+  assert.doesNotMatch(app, /to: '\/approval\/(expense-request-board|expense-payment-board|request-dashboard|payment-dashboard)'/);
   assert.match(app, /:class='isNavActive\(n\.to\)/);
   assert.equal(existsSync(new URL("../src/components/procurement/work.js", import.meta.url)), true);
 });

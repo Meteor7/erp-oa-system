@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { ATTENDANCE_HOME_PATH } from "../src/lib/attendanceView.js";
 import { canSee } from "../src/lib/access.js";
+import { BOARD_REDIRECTS } from "../src/lib/approvalGroupPaths.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 // 点击目标表是后端那一份 JSON（前端直接读它，不手写）。
@@ -25,7 +26,7 @@ const openable = (keys) => keys.filter((key) => canSee(targets[key].path));
 test("every dashboard target lands on a registered route", () => {
   assert.ok(Object.keys(targets).length > 30);
   for (const [key, target] of Object.entries(targets)) {
-    assert.ok(router.includes(`path: '${target.path}'`), `${key} -> ${target.path} has no route`);
+    assert.ok(router.includes(`path: '${target.path}'`) || target.path in BOARD_REDIRECTS, `${key} -> ${target.path} has no route`);
   }
 });
 

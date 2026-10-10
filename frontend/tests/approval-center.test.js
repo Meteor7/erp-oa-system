@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { BOARD_REDIRECTS } from "../src/lib/approvalGroupPaths.js";
 import { APPROVAL_CENTER_ROUTES, isApprovalMenuVisible, isApprovalRouteEnabled } from "../src/lib/approvalCenter.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -69,7 +70,8 @@ test("closed procurement routes require explicit server boot flags", () => {
 test("router registers each page without replacing the existing leave implementation", () => {
   const source = read("../src/router.js");
   for (const path of Object.keys(APPROVAL_CENTER_ROUTES)) {
-    assert.ok(source.includes(`path: '${path}'`), path);
+    // 两个旧看板地址现在由分组首页的重定向接住，router.js 里不再逐条写 path。
+    assert.ok(source.includes(`path: '${path}'`) || path in BOARD_REDIRECTS, path);
   }
   assert.match(source, /OAApprovals\.vue/);
   assert.match(source, /PreRequestCenter\.vue/);
