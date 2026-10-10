@@ -64,7 +64,7 @@ const round = (value) => Math.round(value * 10) / 10;
       <div v-if="kind === 'company'" class="ac-cc">
         <h3>各部门本月请假<span>小时 · 人均</span></h3>
         <div class="ac-hb">
-          <div v-for="item in ranked" :key="item.department" class="r">
+          <div v-for="item in ranked" :key="item.department" class="hbr">
             <span :title="item.label">{{ item.label }}</span>
             <div class="t"><i class="k-personal" :style="{ width: item.month_hours / deptMax * 100 + '%' }"></i></div>
             <span><b>{{ item.month_hours }}</b> <span class="ac-note">{{ item.per_capita }}</span></span>
@@ -75,7 +75,7 @@ const round = (value) => Math.round(value * 10) / 10;
       <div v-else class="ac-cc">
         <h3>{{ kind === 'dept' ? '这个部门待审批等了多久' : '待我审批等了多久' }}<span>平均 {{ wait.average }} 天</span></h3>
         <div class="ac-hb">
-          <div v-for="(bucket, index) in wait.buckets" :key="bucket.key" class="r">
+          <div v-for="(bucket, index) in wait.buckets" :key="bucket.key" class="hbr">
             <span>{{ bucket.label }}</span>
             <div class="t"><i :class="waitColors[index]" :style="{ width: bucket.count / waitMax * 100 + '%' }"></i></div>
             <span><b>{{ bucket.count }}</b> 张</span>

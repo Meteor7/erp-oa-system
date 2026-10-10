@@ -115,7 +115,7 @@ async function confirmReject(row) {
         <textarea v-model="note" :aria-invalid="noteError" aria-label="驳回原因" placeholder="驳回原因（必填），申请人会看到" rows="2"></textarea>
         <div v-if="noteError" class="ac-err" role="alert">驳回必须写原因</div>
         <div v-if="rejectError" class="ac-err" role="alert">{{ rejectError }}</div>
-        <div class="bar">
+        <div class="rjbar">
           <select v-if="row.rejection_targets?.length" v-model="target" aria-label="驳回给谁">
             <option v-for="item in row.rejection_targets" :key="item.target" :value="item.target">驳回至：{{ item.label }}</option>
           </select>
