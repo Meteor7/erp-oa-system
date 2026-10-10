@@ -66,8 +66,7 @@ def api(monkeypatch):
         monkeypatch.setattr(module.frappe, "throw", throw, raising=False)
         monkeypatch.setattr(module.frappe, "get_all", get_all, raising=False)
         monkeypatch.setattr(module.frappe, "session", SimpleNamespace(user=state.user), raising=False)
-    monkeypatch.setattr(scope.frappe, "db", SimpleNamespace(exists=exists), raising=False)
-    monkeypatch.setattr(entry.frappe, "db", SimpleNamespace(sql=sql), raising=False)
+    monkeypatch.setattr(scope.frappe, "db", SimpleNamespace(exists=exists, sql=sql), raising=False)   # 两个模块用的是同一个 frappe
     monkeypatch.setattr(scope, "position_users", lambda *keys: {"hr@tests-x.example.invalid", "person014@tests-x.example.invalid"})
     monkeypatch.setattr(entry, "can_access_request_type", lambda _type: True)
     monkeypatch.setattr(entry, "resolve_monthly_calendar", lambda year, month: {
@@ -182,3 +181,21 @@ def test_the_feature_gate_still_applies(api, monkeypatch):
     monkeypatch.setattr(entry, "can_access_request_type", lambda _type: False)
     with pytest.raises(Exception, match="暂未开放"):
         board(api, "hr@tests-x.example.invalid")
+
+
+def test_the_review_endpoint_hides_the_who_is_away_grid_from_plain_employees(monkeypatch):
+    module = importlib.import_module("rayher_hr_payroll.api.attendance_entry")
+    monkeypatch.setattr(module, "_user", lambda: "emp@tests-x.example.invalid")
+    monkeypatch.setattr(module, "_require_types", lambda: list(att.ATTENDANCE_TYPES))
+    monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])
+    monkeypatch.setattr(module, "_department_mates", lambda employees: {"研发软件部": [{"name": "E2", "employee_name": "杨员工"}]})
+    monkeypatch.setattr(module, "_team", lambda departments, today: [{"department": "研发软件部", "headcount": 1, "days": [{"approved": ["演示员工120"]}]}])
+    monkeypatch.setattr(module, "_absence_rows", lambda employees, start, end: [])
+    monkeypatch.setattr(module.frappe, "db", SimpleNamespace(get_value=lambda *args, **kwargs: "E1"), raising=False)
+    monkeypatch.setattr(module.frappe, "get_all", lambda *args, **kwargs: ["E2"], raising=False)
+    raw = getattr(module.list_attendance_review, "__wrapped__", module.list_attendance_review)
+    for level, shown in (("employee", 0), ("manager", 1), ("company", 1)):
+        monkeypatch.setattr(module, "resolve_scope", lambda level=level: {"level": level})
+        result = raw()
+        assert len(result["team"]) == shown, level
+        assert ("演示员工120" in json.dumps(result, ensure_ascii=False)) is bool(shown)

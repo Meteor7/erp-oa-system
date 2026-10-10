@@ -8,7 +8,7 @@ import {
   invalidLeaveDays, kindOf, listLocation, listTitle, mergeDays, mineSummary, modeAvailable, modeOfHours, newButtonLabel, newLocation,
   newTitle, nodeText, numText, originOf, originQuery, parseLocation, pathForFilter, personShort, pickMode, rangeText,
   actedText, rejectionOf, requestTitle, returnedDrafts, reviewedResult, rowChips, rowDays, scopeTabs, shiftText, slotClash, slotNote, statusTag,
-  stepHours, stepRole, stepStates, stepTracker, subjectFor, submittedText, teamGrid, totalHours, totalOf, typeChips, typeCounts,
+  stepHours, stepRole, stepStates, stepTracker, subjectFor, submittedText, totalHours, totalOf, typeChips, typeCounts,
   typeForPath, validLeaveHours, validScope, waitText, workedSpan,
 } from "../src/lib/attendanceView.js";
 
@@ -469,30 +469,6 @@ test("my applications: in-progress count and the step tracker", () => {
   assert.equal(rejectionOf({}), null);
 });
 
-test("who is away in the next two weeks: one row per person, one cell per day, only names and dates", () => {
-  const day = (date, off, approved = [], pending = [], label = "") => ({ date, label, weekday: "", off_day: off, approved, pending });
-  const team = { note: "10/26–10/27 会有 2 人以上同时不在（演示员工108、演示员工186）。", days: [
-    day("2026-10-23", false, ["演示员工186", "演示员工108"], [], "10/23"), day("2026-10-24", true), day("2026-10-25", true),
-    day("2026-10-26", false, ["演示员工186"], [], "10/26"), day("2026-10-27", false, ["演示员工186"], ["演示员工112", "演示员工186"], "10/27"), day("2026-10-28", false, ["演示员工108"], [], "10/28"),
-  ] };
-  const grid = teamGrid(team);
-  assert.deepEqual(grid.rows.map((row) => row.name), ["演示员工108", "演示员工186", "演示员工112"]);   // 先按最早不在的那天排，同一天按名字
-  const by = Object.fromEntries(grid.rows.map((row) => [row.name, row]));
-  assert.deepEqual(by["演示员工186"].cells.map((cell) => cell.state), ["approved", "", "", "approved", "approved", ""]);   // 同一天已通过又审批中，只算已通过
-  assert.deepEqual(by["演示员工112"].cells.map((cell) => cell.state), ["", "", "", "", "pending", ""]);
-  assert.equal(by["演示员工112"].pending, true);
-  assert.equal(by["演示员工186"].pending, false);
-  assert.equal(by["演示员工112"].cells[4].title, "演示员工112 · 10/27（审批中）");
-  assert.deepEqual(grid.days.map((item) => [item.label, item.off]), [["23", false], ["24", true], ["25", true], ["26", false], ["27", false], ["28", false]]);
-  assert.deepEqual(grid.totals.map((item) => item.n), [2, 0, 0, 1, 2, 1]);
-  assert.deepEqual(grid.totals.map((item) => item.crowded), [true, false, false, false, true, false]);   // 工作日 2 人以上
-  assert.equal(grid.range, "10/23 至 10/28");
-  assert.equal(grid.note, team.note);
-  assert.ok(!JSON.stringify(grid).includes("事假"));                                                          // 不带类型和事由
-  assert.deepEqual(teamGrid({ days: [] }).rows, []);
-  assert.deepEqual(teamGrid(null), { days: [], rows: [], totals: [], note: "", range: "" });
-});
-
 test("the reviewed list says what I did and when", () => {
   assert.deepEqual(reviewedResult({ my_status: "已通过" }), { text: "已同意", tone: "ok" });
   assert.deepEqual(reviewedResult({ my_status: "已拒绝" }), { text: "已驳回", tone: "bad" });
@@ -548,22 +524,21 @@ test("the four views are wired: home buttons, list header, detail actions and th
   assert.match(home, /v-for="\(type, index\) in availableTypes"/);
   assert.match(home, /emit\('new', TYPES\[type\]\.label\)/);
   assert.match(home, /＋ 新建\{\{ TYPES\[type\]\.label \}\}/);
-  for (const text of ["年假可用", "调休可用", "我的申请", "待我审批", "我审批过的 · 最近", "批之前先看影响", "确认驳回", "驳回原因（必填），申请人会看到", "驳回必须写原因", "去详情处理"]) assert.ok(home.includes(text), text);
-  assert.match(home, /emit\('list', 'todo', 'all'\)/);
+  for (const text of ["年假可用", "调休可用", "我的申请", "待我审批", "本月已请假", "团队今日请假", "团队本月请假", "今日在岗", "出勤率", "今日请假"]) assert.ok(home.includes(text), text);
   assert.match(home, /emit\('list', 'done', 'all'\)/);
-  // 驳回在卡片上完成：原因必填、可以选退回给谁；点申请人那一块才进详情，按钮不会同时触发进详情
-  assert.match(home, /props\.rejectRow \? await props\.rejectRow\(row, note\.value\.trim\(\), target\.value\)/);
-  assert.match(home, /row\.rejection_targets/);
-  assert.match(home, /class="at-rv-top" role="button"/);
-  assert.match(home, /row\.hints/);
-  assert.doesNotMatch(home, /emit\('reject'/);
+  // 待我审批是一人一行的紧凑列表：驳回在行内完成（原因必填、可以选退回给谁），点一行才展开影响，按钮不会同时触发进详情
+  const queue = read("../src/components/attendance/AttendanceQueue.vue");
+  for (const text of ["批之前先看影响", "确认驳回", "驳回原因（必填），申请人会看到", "驳回必须写原因", "去详情处理"]) assert.ok(queue.includes(text), text);
+  assert.match(queue, /emit\('list', 'todo', 'all'\)/);
+  assert.match(queue, /props\.rejectRow \? await props\.rejectRow\(row, note\.value\.trim\(\), target\.value\)/);
+  assert.match(queue, /row\.rejection_targets/);
+  assert.match(queue, /row\.hints/);
+  assert.match(queue, /class="who" role="button"/);
+  assert.doesNotMatch(queue, /emit\('reject'/);
   assert.match(home, /<AttendanceMineCard/);
-  assert.match(home, /<AttendanceTeamGrid :teams="review\.team/);
-  assert.doesNotMatch(home, /AttendanceCalendar/);
+  assert.doesNotMatch(home, /AttendanceTeamGrid/);
   const mineCard = read("../src/components/attendance/AttendanceMineCard.vue");
   for (const text of ["我的申请 · 进行中", "继续填写", "撤回", "查看", "没有进行中的申请"]) assert.ok(mineCard.includes(text), text);
-  const grid = read("../src/components/attendance/AttendanceTeamGrid.vue");
-  for (const text of ["部门这两周谁不在", "不在人数", "这两周没有人请假或调休", "请假和调休，不含加班；只显示日期。"]) assert.ok(grid.includes(text), text);
   const list = read("../src/components/attendance/AttendanceList.vue");
   assert.match(list, /newButtonLabel\(filter\)/);
   // 列表的新建按钮把当前类型筛选带出去：加班列表新建加班，全部列表才让用户先选
@@ -630,6 +605,6 @@ test("the routes stay as they were, and the replaced components are gone", () =>
   assert.match(router, /path: '\/approval\/reimbursement', component: approvalPage/);
   assert.equal(exists("../src/components/attendance/AttendanceCards.vue"), false);
   assert.equal(exists("../src/components/attendance/AttendanceReview.vue"), false);
-  for (const name of ["AttendanceHome", "AttendanceList", "AttendanceDetail", "AttendanceForm", "AttendanceMineCard", "AttendanceTeamGrid"]) assert.equal(exists(`../src/components/attendance/${name}.vue`), true, name);
-  assert.equal(exists("../src/components/attendance/AttendanceCalendar.vue"), false);   // 首页的月历换成了部门两周网格
+  for (const name of ["AttendanceHome", "AttendanceList", "AttendanceDetail", "AttendanceForm", "AttendanceMineCard", "AttendanceQueue", "AttendanceCalendar", "AttendanceDeptTable", "AttendanceMyStrip", "AttendanceCharts", "AttendanceMetrics"]) assert.equal(exists(`../src/components/attendance/${name}.vue`), true, name);
+  assert.equal(exists("../src/components/attendance/AttendanceTeamGrid.vue"), false);   // 两周网格换成了团队日历
 });

@@ -4,11 +4,13 @@
 //   ?view=home 首页；?view=list&scope=todo|mine|done|all&type=请假|加班|调休|all 列表；
 //   ?request=单号（或 /approval/<类型>/<单号>）详情；?view=new&type=…[&draft=单号] 新建（缺类型先让用户选）。
 //   来源用 from=list&fscope=&ftype= / from=home 带着走，详情和新建页的"返回"、取消回到原处。
-// 提交、审批、驳回、撤回沿用 oa_entry 的接口，数据取自 attendance_entry。
+// 提交、审批、驳回、撤回沿用 oa_entry 的接口，数据取自 attendance_entry；首页的图表和团队日历取自 attendance_board_entry
+// （服务端按身份只给能看的范围：员工只有自己、部门主管只有本部门、人事和管理层先是各部门汇总，点进部门才有人名）。
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import '../styles/attendanceUi.css';
+import '../styles/attendanceBoardUi.css';
 import AttendanceDetail from '../components/attendance/AttendanceDetail.vue';
 import AttendanceForm from '../components/attendance/AttendanceForm.vue';
 import AttendanceHome from '../components/attendance/AttendanceHome.vue';
@@ -33,7 +35,11 @@ const mine = reactive({ items: [], names: {} });
 const review = reactive({ items: [], team: [] });
 const reviewed = ref([]);
 const everyone = reactive({ items: [], names: {} });
-const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false });
+const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false, board: false });
+const board = ref(null);
+// 人事 / 领导在首页点进的部门（服务端的部门名）和它的明细。
+const drillDept = ref('');
+const drill = ref(null);
 const approval = ref(null);
 const banner = reactive({ ok: '', err: '' });
 // 地址要求看「全部」但没有这个权限（比如看板的「今天不在岗」链接发给了普通员工）：退回「我的」，并说一声。
@@ -44,7 +50,7 @@ const now = ref(Date.now());
 let timer = null;
 let alive = true;
 let keepBanner = false;
-const latest = { home: createLatest(), mine: createLatest(), review: createLatest(), reviewed: createLatest(), all: createLatest(), route: createLatest() };
+const latest = { home: createLatest(), mine: createLatest(), review: createLatest(), reviewed: createLatest(), all: createLatest(), board: createLatest(), drill: createLatest(), route: createLatest() };
 
 const availableTypes = computed(() => home.value?.types || TYPE_ORDER);
 const hasEmployee = computed(() => Boolean(home.value?.employee));
@@ -77,7 +83,31 @@ const loadHome = () => guarded('home', () => api.home({ request_type: TYPE_ORDER
 const loadMine = () => guarded('mine', () => api.mine(), (data) => { mine.items = data?.items || []; mine.names = data?.names || {}; });
 const loadReview = () => guarded('review', () => api.review(), (data) => { review.items = data?.items || []; review.team = data?.team || []; });
 const loadReviewed = () => guarded('reviewed', () => api.reviewed(), (data) => { reviewed.value = data?.items || []; });
+const loadBoard = () => guarded('board', () => api.board(), (data) => { board.value = data || null; });
 const loadEveryone = () => guarded('all', () => api.all(), (data) => { everyone.items = data?.items || []; everyone.names = data?.names || {}; });
+
+async function loadDrill() {
+  const department = drillDept.value;
+  if (!department) return;
+  const token = latest.drill.begin();
+  try {
+    const data = await api.department(department);
+    if (latest.drill.isCurrent(token)) drill.value = data?.detail || null;
+  } catch (failure) {
+    if (latest.drill.isCurrent(token)) {
+      flash('', messageOf(failure));
+      drillDept.value = '';
+      drill.value = null;
+    }
+  }
+}
+
+function pickDept(department) {
+  drillDept.value = department || '';
+  drill.value = null;
+  latest.drill.begin();
+  if (department) loadDrill();
+}
 
 async function loadRoute(requestType) {
   approval.value = null;
@@ -92,7 +122,8 @@ async function loadRoute(requestType) {
 }
 
 function refreshLists() {
-  const jobs = [loadHome(), loadMine(), loadReview(), loadReviewed()];
+  const jobs = [loadHome(), loadMine(), loadReview(), loadReviewed(), loadBoard()];
+  if (drillDept.value) jobs.push(loadDrill());
   if (page.value.scope === 'all' && canViewAll.value) jobs.push(loadEveryone());
   return Promise.allSettled(jobs);
 }
@@ -341,7 +372,8 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
     <AttendanceHome
       v-if="view === 'home'" :home="home" :mine="mine" :review="review" :reviewed="reviewed" :loaded="loaded" :now="now" :busy="busy"
       :has-employee="hasEmployee" :is-approver="isApprover" :available-types="availableTypes" :no-employee-text="noEmployeeText" :reject-row="rejectNow"
-      @new="goNew" @list="goList" @open="openRow" @approve="approveRow" @withdraw="withdrawRow"
+      :board="board" :drill-dept="drillDept" :drill="drill"
+      @dept="pickDept" @new="goNew" @list="goList" @open="openRow" @approve="approveRow" @withdraw="withdrawRow"
       @continue="continueDraft" />
 
     <AttendanceList
