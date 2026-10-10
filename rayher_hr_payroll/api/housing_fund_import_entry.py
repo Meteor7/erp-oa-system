@@ -31,6 +31,7 @@ BATCH = "Housing Fund Import Batch"
 ROW = "Housing Fund Import Row"
 IMPORT_REMARK = "公积金导入批次"
 MISSING_REASON = "本月申报表里没有这个人"
+CATCHUP_PREFIX = "需补缴："   # 前端对“申报表里没有”的两个答复之一（另一个是“无需缴纳：”），见 contributionView.js 的 drawerOptions
 ROW_FIELDS = [
     "name", "batch", "company", "period", "row_type", "source_row", "excel_name", "masked_identity", "employee", "employee_name",
     "contribution_base", "employee_amount", "company_amount", "receivable_total",
@@ -276,6 +277,21 @@ def _write_monthly_records(batch_doc):
             base = row["contribution_base"]
             employee_rate, company_rate = rates_from_amounts(base, row["employee_amount"], row["company_amount"])
         _save_monthly_record(batch_doc.period, row["employee"], base, employee_rate, company_rate, remark)
+        written.add(row["employee"])
+    # 档案里有基数、申报表里却没有的人，HR 答复了：需补缴 → 这个月照系统复算记一笔（薪酬照常扣，申报下月补）；
+    # 无需缴纳 → 记一笔 0，薪酬才不会因为缺记录而卡住。
+    for row in frappe.get_all(
+        ROW, filters={"batch": batch_doc.name, "row_type": "missing", "status": "Ignored"},
+        fields=["employee", "remark", "reference_base", "reference_employee_rate", "reference_company_rate"],
+    ):
+        if not row.get("employee") or row["employee"] in written:
+            continue
+        answer = str(row.get("remark") or "")
+        if answer.startswith(CATCHUP_PREFIX):
+            base, employee_rate, company_rate = row["reference_base"], row["reference_employee_rate"], row["reference_company_rate"]
+        else:
+            base, employee_rate, company_rate = 0, 0, 0
+        _save_monthly_record(batch_doc.period, row["employee"], base, employee_rate, company_rate, f"{remark}（{answer}）")
         written.add(row["employee"])
     stale = frappe.get_all(
         "Employee Housing Fund",

@@ -66,6 +66,7 @@ def test_activation_writes_monthly_records_and_clears_stale_imported_ones(monkey
     assert "rates_from_amounts" in source          # a confirmed difference is stored as the Excel's figures
     assert "delete_doc" in source and "IMPORT_REMARK" in source
     assert "Matched" in source and "Confirmed Difference" in source
+    assert "CATCHUP_PREFIX" in source and '"missing"' in source      # people missing from the file still get a record (system figures or 0)
 
 
 def test_missing_rows_follow_the_archive_when_the_batch_is_rechecked(monkeypatch):
