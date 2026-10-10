@@ -51,15 +51,12 @@ test("payroll page: period and the draft filter are bound to the address before 
 
 // ---------- 只带期间的页面 ----------
 test("social insurance, housing fund and allocation read ?period before their first request", () => {
-  const social = read("SocialInsurance.vue");
-  assert.match(social, /usePeriodFromRoute\(useRoute\(\), useRouter\(\)\)/);
-  assert.ok(indexOf(social, "usePeriodFromRoute(") < indexOf(social, "const workbench = createResource"));
-
-  // 公积金页只是 MonthlyContributionPage 的壳，社保月度表也共用它
-  const monthly = read("MonthlyContributionPage.vue");
-  assert.match(monthly, /usePeriodFromRoute\(useRoute\(\), useRouter\(\)\)/);
-  assert.ok(indexOf(monthly, "usePeriodFromRoute(") < indexOf(monthly, "const rows = createResource"));
-  assert.match(read("HousingFund.vue"), /MonthlyContributionPage/);
+  // 社保页和公积金页都是 ContributionWorkbench 的壳，期间在共用的工作台里读
+  const workbench = readFileSync(new URL("../src/components/contribution/ContributionWorkbench.vue", import.meta.url), "utf8");
+  assert.match(workbench, /usePeriodFromRoute\(useRoute\(\), useRouter\(\)\)/);
+  assert.ok(indexOf(workbench, "usePeriodFromRoute(") < indexOf(workbench, "const workbench = createResource"));
+  assert.match(read("SocialInsurance.vue"), /<ContributionWorkbench kind="si" \/>/);
+  assert.match(read("HousingFund.vue"), /<ContributionWorkbench kind="fund" \/>/);
 
   const allocation = read("Allocation.vue");
   assert.match(allocation, /usePeriodFromRoute\(useRoute\(\), useRouter\(\)\)/);

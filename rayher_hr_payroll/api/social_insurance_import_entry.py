@@ -196,6 +196,8 @@ def get_social_workbench(period, company=None, batch=None):
         company_summaries.append(summary)
     pending = [row for row in rows if row.get("status") == "Pending"]
     details = [row for row in rows if row.get("status") in ("Matched", "Confirmed Difference")]
+    # 已经人工处理过的（确认纳入 / 忽略），页面的"已处理"里要看得到，包括被忽略的。
+    handled = [row for row in rows if row.get("status") in ("Confirmed Difference", "Ignored")]
     return {
         "period": period,
         "company": company or "all",
@@ -204,6 +206,7 @@ def get_social_workbench(period, company=None, batch=None):
         "batches": [_display_batch(row) for row in batches],
         "pending": pending,
         "details": details,
+        "handled": handled,
     }
 
 
