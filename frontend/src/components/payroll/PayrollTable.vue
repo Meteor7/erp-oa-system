@@ -48,7 +48,7 @@ const cell = (value) => (value == null ? '—' : money(value));
           <td class="r num">{{ money(row.income_tax) }}</td><td class="r num">{{ money(row.accommodation) }}</td><td class="r num">{{ money(row.advanced_paid) }}</td><td class="r num"><b>{{ money(figures(row).net) }}</b></td>
           <td>{{ row.bank_name || '-' }}</td><td>{{ row.bank_ac_no || '-' }}</td><td>{{ row.cell_number || '-' }}</td><td><span :class="['pill', rowState(row).tone]">{{ rowState(row).label }}</span></td>
         </tr>
-        <tr v-if="!rows.length"><td colspan="32" class="empty">{{ emptyText }}</td></tr>
+        <tr v-if="!rows.length"><td colspan="31" class="empty">{{ emptyText }}</td></tr>
       </tbody>
     </table>
   </div>
