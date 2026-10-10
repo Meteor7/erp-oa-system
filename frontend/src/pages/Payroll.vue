@@ -119,7 +119,7 @@ async function generateAll() {
       <section class="panel" aria-label="员工工资">
         <div class="pr-tools">
           <span class="pr-seg" role="group" aria-label="筛选">
-            <button v-for="item in CHIPS" :key="item.key" type="button" :aria-pressed="chip === item.key" :data-payroll-draft-only="item.key === 'draft' ? '' : undefined" @click="setChip(item.key)">{{ item.key === "draft" ? "只看草稿工资条" : item.label }} {{ counts[item.key] }}</button>
+            <button v-for="item in CHIPS" :key="item.key" type="button" :aria-pressed="chip === item.key" :data-payroll-draft-only="item.key === 'draft' ? '' : undefined" :title="item.key === 'draft' ? '只看草稿工资条' : undefined" @click="setChip(item.key)">{{ item.label }} {{ counts[item.key] }}</button>
           </span>
           <span class="pr-ctl">
             <input v-model="query" class="pr-in" placeholder="按姓名查找" aria-label="按姓名查找">
