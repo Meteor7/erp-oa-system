@@ -13,6 +13,8 @@ import { boardAccess, boardRoute, boardTab, budgetBars, flowBars, requestKpis, s
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 import { hereAsFrom, withFrom } from '../lib/navContext.js';
 
+// embedded：放在审批中心的分组首页下面时不再自己写标题，只留页签。
+defineProps({ embedded: { type: Boolean, default: false } });
 const route = useRoute();
 const router = useRouter();
 const tab = computed(() => boardTab(route.query));
@@ -59,9 +61,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="xp board bd">
+  <div :class="['xp board bd', { 'bd-embedded': embedded }]">
     <div class="ph">
-      <div>
+      <div v-if="!embedded">
         <div class="crumb">审批中心 · 看板<template v-if="scopeText(data)"> · {{ scopeText(data) }}</template></div>
         <h1 class="bd-title">申请看板</h1>
         <div class="muted">本月申请了什么、走到哪一步、批下来的额度用了多少、哪些卡在审批上。</div>

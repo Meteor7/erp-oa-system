@@ -21,8 +21,11 @@ test('app shell exposes approval children and project management in the nav', ()
   assert.ok(source.includes("label: '付款/报销'"));
   assert.ok(!source.includes("to: '/approval/corporate-payment'"));
   assert.ok(source.includes("label: '请假审批'"));
-  assert.ok(source.includes("label: '申请看板'"));
-  assert.ok(source.includes("label: '付款看板'"));
+  // 看板并进了分组首页：点分组名进首页，侧栏不再有独立的看板项（2026-10-10）
+  assert.ok(source.includes("to: '/approval/requests', step: '02', label: '采购/购买申请'"));
+  assert.ok(source.includes("to: '/approval/payments', step: '03', label: '付款申请'"));
+  assert.ok(!source.includes("label: '申请看板'"));
+  assert.ok(!source.includes("label: '付款看板'"));
   assert.ok(source.includes('\\u9879\\u76ee\\u7ba1\\u7406'));
   assert.ok(source.includes('/projects'));
 });

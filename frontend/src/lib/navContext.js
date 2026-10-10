@@ -99,6 +99,8 @@ export function splitPath(value) {
 
 const ORIGIN_LABELS = Object.freeze({
   '/dashboard': '首页',
+  '/approval/requests': '采购/购买申请',
+  '/approval/payments': '付款申请',
   '/approval/expense-request-board': '申请看板',
   '/approval/expense-payment-board': '付款看板',
   '/approval/request-dashboard': '申请看板',

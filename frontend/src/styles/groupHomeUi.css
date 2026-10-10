@@ -1,0 +1,57 @@
+/* 审批中心分组首页（采购/购买申请、付款申请）。挂在 .xp 下（expenseUi.css 定义颜色变量和 .btn / .panel / .chip 等）。 */
+.xp.gh { display: flex; flex-direction: column; gap: 16px; max-width: 1180px; }
+.xp.gh > .ph { margin-bottom: 0; }
+.xp .gh-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.xp .gh-kpi { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; text-align: left; font: inherit; color: var(--xp-ink); cursor: pointer; border: 1px solid var(--xp-line); border-radius: 12px; background: #fff; }
+.xp .gh-kpi:hover { border-color: var(--xp-line2); background: var(--xp-soft); }
+.xp .gh-kpi .l { font-size: 12px; color: var(--xp-ink3); }
+.xp .gh-kpi .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.xp .gh-kpi .v small { font-size: 12px; font-weight: 400; color: var(--xp-ink3); margin-left: 4px; }
+.xp .gh-kpi .s { font-size: 12px; color: var(--xp-ink3); }
+.xp .gh-kpi.hot { border-color: #F0D3A6; background: #FFFAF0; }
+.xp .gh-kpi.hot .v { color: #8F4A06; }
+.xp .gh-kpi.warn .v { color: #B42318; }
+.xp .gh-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
+.xp .gh-grid.solo { grid-template-columns: minmax(0, 1fr); }
+.xp .gh-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.xp .gh .panel.flush { margin-bottom: 0; }
+.xp .gh-hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid #EFF0F3; }
+.xp .gh-hd b { font-size: 15px; }
+.xp .gh-cnt { background: #FDF0DE; color: #8F4A06; border-radius: 99px; padding: 0 8px; font-size: 12px; }
+.xp .gh-cnt.cobalt { background: #E8EEFF; color: #2F4BC0; }
+.xp .gh-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: 4px; }
+.xp .gh-right { margin-left: auto; }
+.xp .gh-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid #EFF0F3; }
+.xp .gh-item:last-child { border-bottom: 0; }
+.xp .gh-main { min-width: 0; }
+.xp .gh-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.xp .gh-line b { font-size: 14px; }
+.xp .gh-gap { margin-top: 6px; }
+.xp .gh-meta { font-size: 12px; color: var(--xp-ink3); margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.xp .gh-foot { padding: 8px 18px 12px; }
+.xp .gh-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; background: #EEF0F3; color: #4B5563; white-space: nowrap; }
+.xp .gh-tag.g-blue { background: #E8EEFF; color: #2F4BC0; }
+.xp .gh-tag.g-green { background: #E6F4EA; color: #1E6B3A; }
+.xp .gh-tag.g-purple { background: #F1E9FB; color: #5B2F9E; }
+.xp .gh-tag.g-orange, .xp .gh-tag.warn { background: #FDF0DE; color: #8F4A06; }
+.xp .gh-tag.g-teal { background: #E0F4F4; color: #0E6B6B; }
+.xp .gh-steps { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; color: var(--xp-ink3); }
+.xp .gh-st { display: inline-flex; align-items: center; gap: 5px; }
+.xp .gh-st i { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 10px; background: #EDEFF2; color: #6B7280; }
+.xp .gh-st.done i { background: #2F855A; color: #fff; }
+.xp .gh-st.cur i { background: var(--xp-brand); color: #fff; }
+.xp .gh-st.cur { color: #8F4A06; font-weight: 600; }
+.xp .gh-tip { padding: 14px 18px; font-size: 13px; color: #4B5563; line-height: 1.7; display: flex; flex-direction: column; gap: 8px; }
+.xp .gh-self { align-self: flex-start; }
+.xp .gh-sec { display: flex; align-items: baseline; gap: 10px; font-size: 15px; margin-top: 6px; }
+.xp .gh-sec .muted { font-size: 12px; }
+@media (max-width: 1000px) {
+  .xp .gh-grid { grid-template-columns: minmax(0, 1fr); }
+  .xp .gh-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .xp .gh-item { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 并进来的看板：不再自己写标题，只留页签 */
+.xp .bd-embedded > .ph { margin-bottom: 0; justify-content: flex-start; }

@@ -16,24 +16,21 @@ const groups = [
       { to: '/approval/overtime', label: '加班审批' },
       { to: '/approval/comp-time', label: '调休审批' },
     ] },
-    { step: '02', label: '采购/购买申请', children: [
+    // 分组名本身是这一组的首页（我要处理的、我提交的、快捷新建，下面是看板统计），子项照旧。
+    { to: '/approval/requests', step: '02', label: '采购/购买申请', children: [
       { to: '/approval/procurement', label: '采购申请' },
       { to: '/approval/procurement/price-approvals', label: '价格审批' },
       { to: '/approval/direct-purchase', label: '购买申请' },
       { to: '/approval/travel', label: '出差申请' },
     ] },
-    { to: '/approval/request-dashboard', step: '03', label: '申请看板' },
-    { to: '/approval/expense-request-board', step: '03', label: '申请看板' },
-    { step: '04', label: '付款申请', children: [
+    { to: '/approval/payments', step: '03', label: '付款申请', children: [
       { to: '/approval/procurement-payment', label: '采购付款' },
       { to: '/approval/reimbursement', label: '付款/报销' },
       { to: '/approval/invoice-folder', label: '发票夹' },
       { to: '/approval/claim', label: '报销' },
       { to: '/approval/payment', label: '付款' },
     ] },
-    { to: '/approval/payment-dashboard', step: '05', label: '付款看板' },
-    { to: '/approval/expense-payment-board', step: '05', label: '付款看板' },
-    { to: '/approval/material-progress', step: '06', label: '物料进度看板' },
+    { to: '/approval/material-progress', step: '04', label: '物料进度看板' },
   ] },
   { label: '人事中心', items: [
     { to: '/personnel', step: '01', label: '员工信息管理' },
@@ -261,7 +258,7 @@ function logout() {
           <template v-for='n in g.items' :key='n.to || n.label'>
             <div v-if='n.children'>
               <div v-if='n.to' class='flex items-center rounded-lg hover:bg-gray-50'>
-                <router-link :to='n.to' class='flex min-w-0 flex-1 items-center gap-1.5 px-2 py-2 text-sm font-medium text-gray-700' @click='openNavGroups.add(n.label)'>
+                <router-link :to='n.to' class='flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-gray-700' :class='isNavActive(n.to) ? NAV_ACTIVE_CLASS : ""' @click='openNavGroups.add(n.label)'>
                   <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>
                   <span class='flex-1'>{{ n.label }}</span>
                 </router-link>

@@ -1,5 +1,6 @@
 import { displayUser } from './displayBrand.js';
 import { isApprovalMenuVisible, isApprovalRouteEnabled } from './approvalCenter.js';
+import { GROUP_HOME_CHILDREN } from './approvalGroupPaths.js';
 // Role-aware page access for the SPA nav + route gating.
 // Expense/allocation stay finance-only; HR pages stay HR-only.
 // Employees and department supervisors can use the R&D timesheet entry and approval pages.
@@ -143,6 +144,8 @@ export function canOpenMaterialBoard() {
 
 export function canSee(path) {
   if (isHrSensitiveHidden() && (path === '/social-insurance' || path === '/housing-fund')) return false;
+  // 审批中心的分组首页：下面任何一个子页面能进，首页就能进。
+  if (GROUP_HOME_CHILDREN[path]) return GROUP_HOME_CHILDREN[path].some((child) => canSee(child));
   if (path === '/approval/procurement/price-approvals' || /^\/approval\/procurement\/[^/]+\/price-approval$/.test(path)) {
     return hasEnabledFeature('/approval/procurement') && (canSeeProcurementPrice() || canSeeProcurementPO());
   }

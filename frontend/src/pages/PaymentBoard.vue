@@ -14,6 +14,8 @@ import { agingTiles, boardAccess, boardRoute, boardTab, bottomColumns, dueText, 
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 import { hereAsFrom, withFrom } from '../lib/navContext.js';
 
+// embedded：放在审批中心的分组首页下面时不再自己写标题，只留页签。
+defineProps({ embedded: { type: Boolean, default: false } });
 const route = useRoute();
 const router = useRouter();
 const tab = computed(() => boardTab(route.query));
@@ -66,9 +68,9 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="xp board bd">
+  <div :class="['xp board bd', { 'bd-embedded': embedded }]">
     <div class="ph">
-      <div>
+      <div v-if="!embedded">
         <div class="crumb">审批中心 · 看板<template v-if="scopeText(data)"> · {{ scopeText(data) }}</template></div>
         <h1 class="bd-title">付款看板</h1>
         <div class="muted">{{ tab === 'procurement' ? '采购付款单独统计，不和报销、对外付款的数字混在一起。按 PO 付款期次的真实状态统计。' : '钱付出去多少、花在哪、出纳还有多少没付、谁的发票没交。' }}</div>

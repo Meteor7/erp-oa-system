@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { canSee, firstVisiblePath } from './lib/access';
+import { BOARD_REDIRECTS } from './lib/approvalGroupPaths';
 import { stripAppPrefix } from './lib/navContext';
 import { setDeniedNotice } from './lib/routeNotice';
 
@@ -46,8 +47,10 @@ const routes = [
   { path: '/approval/claim', component: () => import('./pages/ClaimCenter.vue') },
   { path: '/approval/payment', component: () => import('./pages/PaymentRequestCenter.vue') },
   { path: '/approval/payment-dashboard', component: () => import('./pages/ApprovalDashboard.vue') },
-  { path: '/approval/expense-request-board', component: () => import('./pages/RequestBoard.vue') },
-  { path: '/approval/expense-payment-board', component: () => import('./pages/PaymentBoard.vue') },
+  // 审批中心两个分组的首页：我要处理的 + 我提交的 + 快捷新建，下面并进原来的看板；旧的看板地址带着查询跳过来。
+  { path: '/approval/requests', component: () => import('./pages/ApprovalGroupHome.vue'), props: { group: 'request' } },
+  { path: '/approval/payments', component: () => import('./pages/ApprovalGroupHome.vue'), props: { group: 'payment' } },
+  ...Object.entries(BOARD_REDIRECTS).map(([from, to]) => ({ path: from, redirect: (route) => ({ path: to, query: route.query, hash: route.hash }) })),
   { path: '/approval/material-progress', component: () => import('./pages/MaterialProgress.vue') },
   { path: '/approval/purchase', component: approvalPage },
   { path: '/timesheet', component: () => import('./pages/Timesheet.vue') },
