@@ -1,0 +1,37 @@
+"""考勤中心里"能看到谁"的身份判断（服务端定，前端只是照着显示）。
+
+三档：
+- company：人事经理、副总经理、总经理（按岗位任命判断，不看角色名）和 Administrator。先看各部门的汇总数字，点进某个部门才看到人名；
+- manager：有在职直接下属的员工，只看自己所在的部门（先按本部门做；副总同人事经理一样看全公司，还没有"只看分管部门"的数据）；
+- employee：其他人，只看自己的数据，看不到同事的请假。
+"""
+from __future__ import annotations
+
+import frappe
+
+from rayher_hr_payroll.position_access import position_users
+
+COMPANY_POSITIONS = ("hr_manager", "vice_manager", "general_manager")
+COMPANY = "company"
+MANAGER = "manager"
+EMPLOYEE = "employee"
+
+
+def resolve_scope(user=None):
+    """当前登录人的档次：{level, user, employee, employee_name, department}。没登录直接拒绝。"""
+    user = str(user or frappe.session.user or "").strip().lower()
+    if not user or user == "guest":
+        frappe.throw(frappe._("请先登录。"), frappe.PermissionError)
+    scope = {"level": EMPLOYEE, "user": user, "employee": "", "employee_name": "", "department": ""}
+    rows = frappe.get_all(
+        "Employee", filters={"user_id": user, "status": "Active"},
+        fields=["name", "employee_name", "department"], order_by="name asc", limit_page_length=2,
+    )
+    if len(rows) == 1:
+        scope.update(employee=rows[0].get("name") or "", employee_name=rows[0].get("employee_name") or "",
+                     department=rows[0].get("department") or "")
+    if user == "administrator" or user in position_users(*COMPANY_POSITIONS):
+        scope["level"] = COMPANY
+    elif scope["employee"] and scope["department"] and frappe.db.exists("Employee", {"reports_to": scope["employee"], "status": "Active"}):
+        scope["level"] = MANAGER
+    return scope

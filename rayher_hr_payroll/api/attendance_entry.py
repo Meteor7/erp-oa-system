@@ -15,6 +15,7 @@ import frappe
 
 from rayher_hr_payroll import annual_leave, attendance_center as center, attendance_requests as att
 from rayher_hr_payroll.api import oa_entry
+from rayher_hr_payroll.attendance_scope import EMPLOYEE, resolve_scope
 from rayher_hr_payroll.oa_approval import ApprovalRouteError
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar, resolve_monthly_work_limit
@@ -345,7 +346,9 @@ def list_attendance_review():
         reports = frappe.get_all("Employee", filters={"reports_to": mine, "status": "Active"}, pluck="name", limit_page_length=500)
         for department, members in _department_mates(set(reports)).items():
             departments.setdefault(department, members)
-    return {"items": enriched, "team": _team(departments, date.today())}
+    # 没有管理职责的员工不返回"谁不在"：同事的请假不给他们看（部门主管、人事、管理层照旧）。
+    team = [] if resolve_scope()["level"] == EMPLOYEE else _team(departments, date.today())
+    return {"items": enriched, "team": team}
 
 
 def _leave_count_in_year(employee, row):
