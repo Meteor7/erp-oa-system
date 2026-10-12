@@ -11,6 +11,7 @@ import {
 import { cleanQuery, detailQuery, formQuery, originLabel, originOf, splitPath } from '../../lib/navContext.js';
 import { apiGet, errText } from './procData.js';
 import { useProc } from './context.js';
+import PipelineBar from './PipelineBar.vue';
 
 const ctx = useProc();
 const route = useRoute();
@@ -152,7 +153,7 @@ function open(row) {
               <td>{{ row.employee_name }}<div class="muted">{{ row.department }}</div></td>
               <td class="ellipsis-cell">{{ projectText(row, ctx.projectName) }}</td>
               <td class="r">{{ (row.business_lines || []).length }} 项</td>
-              <td><span :class="['pill', statusOf(row).tone]">{{ statusOf(row).label }}</span></td>
+              <td class="pr-pipe-cell"><span :class="['pill', statusOf(row).tone]">{{ statusOf(row).label }}</span><PipelineBar :row="row" :now="now" /></td>
               <td class="ellipsis-cell">{{ whereText(row) }}</td>
               <td :class="['r', { warn: (approvalWait(row, now) || 0) >= 3 }]">{{ approvalWait(row, now) === null ? '—' : waitText(approvalWait(row, now)) }}</td>
             </tr>

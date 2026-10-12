@@ -9,6 +9,7 @@ import {
 import { canCreatePr, canEditPrice, canOpenBoard, canSeePo, canSeePrice, isViceManager } from './access.js';
 import { apiGet, errText, loadPurchaseOrders, settle } from './procData.js';
 import { useProc } from './context.js';
+import PipelineBar from './PipelineBar.vue';
 
 const ctx = useProc();
 const router = useRouter();
@@ -234,7 +235,7 @@ function openItem(item) {
             <button type="button" class="link" @click="ctx.go({ view: 'list', scope: ctx.globalAccess ? 'all' : 'mine' })">全部 →</button>
           </div>
           <button v-for="row in mineRows" :key="row.name" type="button" class="mine-row" @click="openRow(row)">
-            <span class="grow-col"><span class="ellipsis">{{ row.subject || '（无主题）' }}</span><span class="muted">{{ row.name }} · {{ shortDate(row.creation) }} · {{ (row.business_lines || []).length }} 项</span></span>
+            <span class="grow-col"><span class="ellipsis">{{ row.subject || '（无主题）' }}</span><span class="muted">{{ row.name }} · {{ shortDate(row.creation) }} · {{ (row.business_lines || []).length }} 项<template v-if="row.employee_name && row.employee !== ctx.currentEmployee"> · {{ row.employee_name }}</template></span><PipelineBar :row="row" :now="now" where /></span>
             <span :class="['pill', statusOf(row).tone]">{{ statusOf(row).label }}</span>
           </button>
           <div v-if="!mineRows.length" class="empty">还没有，点右上角新建</div>

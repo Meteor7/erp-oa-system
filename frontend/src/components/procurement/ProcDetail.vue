@@ -7,7 +7,7 @@ import '../../styles/navUi.css';
 import MaterialExecutionProgress from '../MaterialExecutionProgress.vue';
 import ProcDocuments from './ProcDocuments.vue';
 import {
-  REQUEST_DIRECT, approvalButtonLabel, approveBlocker, canActOn, canMaintainLines, canWithdrawRow, chainRoute, chainStrip,
+  REQUEST_DIRECT, approvalButtonLabel, approveBlocker, canActOn, canMaintainLines, canNudge, canWithdrawRow, chainRoute, chainStrip,
   currentStepKey, detailBanner, formatDateTime, money, pmcButtonLabel, projectText, quantityText, relatedDocuments,
   requestFacts, stageOf, statusOf, stepTimeline, unboundLines,
 } from '../../lib/procurementView.js';
@@ -16,6 +16,7 @@ import { backLocation, carryQuery, fromValue, originLabel } from '../../lib/navC
 import { canCreatePr, canOpenBoard, isInsider } from './access.js';
 import { apiGet, apiPost, errText, loadPurchaseOrders, settle } from './procData.js';
 import { useProc } from './context.js';
+import PipelineBar from './PipelineBar.vue';
 
 const ctx = useProc();
 const route = useRoute();
@@ -99,6 +100,12 @@ const related = computed(() => (isProcurement.value && row.value ? relatedDocume
 const showExec = computed(() => isProcurement.value && stage.value.index >= 1);
 const directTotal = computed(() => lines.value.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0));
 const log = computed(() => [...(row.value?.operation_log || [])].reverse());
+// 催一下：申请人 / 项目负责人对等了 3 天以上的申请，提醒当前审批人（后端按同一套规则再校验、一天一次）。
+const nudgeable = computed(() => canNudge(row.value, { user: ctx.currentUser, employee: ctx.currentEmployee }));
+// 项目负责人看别人提的申请：只读，不能审批也不能改；这里写明白，免得以为是按钮丢了。
+const ownerReadOnly = computed(() => Boolean(row.value && ctx.currentUser && String(row.value.project_owner || '').toLowerCase() === ctx.currentUser.toLowerCase()
+  && String(row.value.owner || '').toLowerCase() !== ctx.currentUser.toLowerCase() && row.value.employee !== ctx.currentEmployee
+  && !canApprove.value && !canReject.value));
 const targets = computed(() => row.value?.rejection_targets || []);
 
 // 下一步要去哪里办：PMC 去物料看板提 PR；采购 / 副总去价格审批单（只有行标志允许的人才看到）。
@@ -163,6 +170,21 @@ async function withdraw() {
   }
 }
 
+async function nudge() {
+  const current = row.value;
+  if (!current || ctx.busy) return;
+  ctx.setBusy(true);
+  ctx.flash();
+  try {
+    const result = await apiPost('request_nudge.nudge_request', { name: current.name });
+    ctx.flash(`已提醒当前审批人（${result?.sent || 0} 位），申请已等 ${result?.waited_days ?? ''} 天`);
+  } catch (error) {
+    ctx.flash('', errText(error, '催办失败'));
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 function resume() {
   ctx.goNew({ draft: row.value.name, ...carryQuery(route.query) });
 }
@@ -209,7 +231,10 @@ function toggleLine(index) {
         <div :class="['pr-banner', banner.tone]" role="status">
           <span>{{ banner.text }}</span>
           <router-link v-if="chainAction" :to="chainAction.to" class="btn sm">{{ chainAction.label }}</router-link>
+          <button v-if="nudgeable" type="button" class="btn sm" :disabled="ctx.busy" @click="nudge">催一下</button>
         </div>
+        <div v-if="ownerReadOnly" class="pr-banner pr-ownerhint" role="note"><span>你是这个项目的项目负责人，可以看到这张申请的进度（只读）；价格、供应商不显示。</span></div>
+        <PipelineBar :row="row" where foot-only />
 
         <div v-if="withdrawOpen" class="pr-inline-form">
           <input v-model="withdrawNote" placeholder="撤回原因（可选）" aria-label="撤回原因" maxlength="500" @keydown.enter.prevent="withdraw" />

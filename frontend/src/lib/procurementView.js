@@ -895,3 +895,47 @@ export function clearMaterial(line) {
 export function lineCodeText(line) {
   return line?.material_code || (line?.category_code ? `${line.category_code} · 待 PMC 完善` : '');
 }
+
+// ---------------------------------------------------------------- 进度条（首页、列表、详情共用）
+// 采购申请 6 格：需求审批 → 提 PR → 比价 → 价格审批 → PO 执行 → 完成；购买申请 3 格：审批 → 付款 → 完成。
+export const PIPE_LABELS = Object.freeze(['需求审批', '提 PR', '比价', '价格审批', 'PO 执行', '完成']);
+export const PURCHASE_PIPE_LABELS = Object.freeze(['审批', '付款', '完成']);
+export const NUDGE_AFTER_DAYS = 3;
+
+function pipeCells(labels, index) {
+  const last = labels.length - 1;
+  return labels.map((_, position) => (index >= last || position < index ? 'done' : position === index ? 'cur' : 'todo'));
+}
+
+// 草稿、被驳回 / 撤回的没有进度条（返回 null）。
+export function pipeline(row) {
+  if (!row) return null;
+  if (row.request_type === REQUEST_DIRECT) {
+    if (isActive(row)) return { labels: PURCHASE_PIPE_LABELS, index: 0, cells: pipeCells(PURCHASE_PIPE_LABELS, 0), current: '审批' };
+    if (String(row.workflow_status || '') !== '已完成') return null;
+    const business = String(row.business_status || '');
+    const index = ['待付款', '部分付款'].includes(business) ? 1 : 2;
+    return { labels: PURCHASE_PIPE_LABELS, index, cells: pipeCells(PURCHASE_PIPE_LABELS, index), current: index === 1 ? '付款' : '完成' };
+  }
+  const index = stageIndex(row);
+  if (index < 0) return null;
+  return { labels: PIPE_LABELS, index, cells: pipeCells(PIPE_LABELS, index), current: PIPE_LABELS[index] };
+}
+
+// 到货进度：已到 / 订购的物料数量（有 PO 并登记了到货才有）。
+export function arrivalOf(row) {
+  const total = Number(row?.ordered_quantity || 0);
+  if (!(total > 0)) return null;
+  const got = Math.min(total, Number(row?.received_quantity || 0));
+  return { got, total, pct: Math.round((got / total) * 100) };
+}
+
+// 能不能“催一下”：和后端 request_nudge.nudge_problem 同一套规则（后端才是准的，这里只决定按钮显不显示）。
+export function canNudge(row, { user = '', employee = '', now = Date.now() } = {}) {
+  if (!row || !isActive(row) || ![REQUEST_PROCUREMENT, REQUEST_DIRECT].includes(row.request_type)) return false;
+  const me = String(user || '').toLowerCase();
+  const mine = (me && String(row.owner || '').toLowerCase() === me) || Boolean(employee && row.employee === employee);
+  const projectOwner = Boolean(me && String(row.project_owner || '').toLowerCase() === me);
+  if (!(mine || projectOwner)) return false;
+  return (waitedDays(row, now) || 0) >= NUDGE_AFTER_DAYS;
+}
