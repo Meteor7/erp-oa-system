@@ -716,7 +716,7 @@ def _load_urgent():
         "OA Approval Request",
         filters={"request_type": ["in", list(URGENT_TYPES)], "urgency": "加急", "workflow_status": ["not in", list(URGENT_SKIP_STATUS)]},
         fields=["name", "request_type", "subject", "employee_name", "project", "workflow_status", "business_status",
-                "current_step_label", "expected_delivery_date", "modified", "creation"], limit_page_length=0)
+                "current_step_label", "expected_delivery_date", "operation_log", "modified", "creation"], limit_page_length=0)
     acted = {}
     if rows:
         for step in frappe.get_all("OA Approval Step", filters={"parent": ["in", [row["name"] for row in rows]], "parenttype": "OA Approval Request"},
@@ -741,9 +741,21 @@ def _load_urgent():
         out.append({"name": row["name"], "type": row["request_type"], "subject": (row.get("subject") or "").strip(),
                     "applicant": row.get("employee_name") or "", "project": (row.get("project") or "").strip(),
                     "expected": _iso(row.get("expected_delivery_date")), "approving": approving, "label": label,
-                    # 和申请页上的“已等几天”、催一下同一个起点：最近一次签批，没有就从最后修改（再没有就从创建）算起
-                    "since": acted.get(row["name"]) or _iso(row.get("modified")) or _iso(row.get("creation"))})
+                    # 和申请页上的“已等几天”同一个起点：最近一次签批，没有就从最近一次“提交申请”（再没有就从最后修改、创建）算起
+                    "since": acted.get(row["name"]) or _submitted_day(row) or _iso(row.get("modified")) or _iso(row.get("creation"))})
     return out
+
+
+def _submitted_day(row):
+    """最近一次“提交申请”的日期（操作记录里取，同申请页的 submitted_on）；没有记录返回空。"""
+    try:
+        events = json.loads(row.get("operation_log") or "[]")
+    except (TypeError, ValueError):
+        return ""
+    for event in reversed(events if isinstance(events, list) else []):
+        if isinstance(event, dict) and event.get("action") == "提交申请":
+            return _iso(event.get("acted_on"))
+    return ""
 
 
 def _urgent(ctx):

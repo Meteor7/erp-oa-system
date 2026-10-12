@@ -729,7 +729,8 @@ def test_load_urgent_keeps_unfinished_ones_and_names_where_each_one_is(monkeypat
         {"name": "U1", "request_type": "采购申请", "subject": " 伺服电机 ", "employee_name": "演示员工129", "project": "RD03", "workflow_status": "已完成",
          "business_status": "需求已批准/待询价", "current_step_label": "", "expected_delivery_date": "2026-10-20", "creation": "2026-09-28 09:00:00"},
         {"name": "U2", "request_type": "购买申请", "subject": "打印机", "employee_name": "演示员工146", "project": None, "workflow_status": "待审批",
-         "business_status": "待审批", "current_step_label": "财务主管", "expected_delivery_date": None, "creation": "2026-10-06 09:00:00"},
+         "business_status": "待审批", "current_step_label": "财务主管", "expected_delivery_date": None, "creation": "2026-10-06 09:00:00",
+         "operation_log": json.dumps([{"action": "提交申请", "acted_on": "2026-10-05 08:00:00"}])},
         {"name": "U3", "request_type": "购买申请", "subject": "显示器", "employee_name": "演示员工157", "project": "", "workflow_status": "已完成",
          "business_status": "已付款", "current_step_label": "", "expected_delivery_date": None, "creation": "2026-09-01 09:00:00"},
         {"name": "U4", "request_type": "采购申请", "subject": "导轨", "employee_name": "演示员工175", "project": "", "workflow_status": "已完成",
@@ -753,8 +754,8 @@ def test_load_urgent_keeps_unfinished_ones_and_names_where_each_one_is(monkeypat
     got = {item["name"]: item for item in proc._load_urgent()}
     assert sorted(got) == ["U1", "U2", "U5"]                       # 已付款、采购已关闭的不算在途
     assert (got["U1"]["label"], got["U1"]["since"], got["U1"]["subject"], got["U1"]["expected"]) == ("PO 执行中", "2026-10-04", "伺服电机", "2026-10-20")
-    assert (got["U2"]["label"], got["U2"]["approving"], got["U2"]["since"], got["U2"]["project"]) == ("财务主管", True, "2026-10-06", "")
-    # 最近一次签批 > 最后修改 > 创建：和申请页上的“已等几天”同一个起点
+    assert (got["U2"]["label"], got["U2"]["approving"], got["U2"]["since"], got["U2"]["project"]) == ("财务主管", True, "2026-10-05", "")
+    # 最近一次签批 > 最近一次“提交申请”（操作记录）> 最后修改 > 创建：和申请页上的“已等几天”同一个起点
     assert (got["U5"]["label"], got["U5"]["approving"], got["U5"]["since"]) == ("待付款", False, "2026-10-02")
 
 

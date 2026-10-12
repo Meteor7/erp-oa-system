@@ -32,6 +32,21 @@ def _as_date(value):
         return None
 
 
+def _submitted_on(doc):
+    """最近一次“提交申请”的时间：单据上有 submitted_on 就用它，否则从操作记录里取（申请页上的“已等几天”也是这么算的）。"""
+    value = _clean(getattr(doc, "submitted_on", None))
+    if value:
+        return value
+    try:
+        events = json.loads(_clean(getattr(doc, "operation_log", None)) or "[]")
+    except (TypeError, ValueError):
+        return ""
+    for event in reversed(events if isinstance(events, list) else []):
+        if isinstance(event, dict) and event.get("action") == "提交申请":
+            return _clean(event.get("acted_on"))
+    return ""
+
+
 def waited_days(doc, today):
     """从最近一次签批起算，没有就从提交（再没有就从最后修改、创建）起算。"""
     stamps = sorted(
@@ -40,7 +55,7 @@ def waited_days(doc, today):
     )
     stamps = [stamp for stamp in stamps if stamp]
     since = _as_date(stamps[-1]) if stamps else None
-    since = since or _as_date(getattr(doc, "submitted_on", None)) or _as_date(getattr(doc, "modified", None)) or _as_date(getattr(doc, "creation", None))
+    since = since or _as_date(_submitted_on(doc)) or _as_date(getattr(doc, "modified", None)) or _as_date(getattr(doc, "creation", None))
     return max(0, (today - since).days) if since else 0
 
 

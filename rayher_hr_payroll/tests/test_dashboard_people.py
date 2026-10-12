@@ -437,6 +437,10 @@ def test_dorm_blocks(monkeypatch):
     summary = run(ctx, "block.dorm_summary")
     assert [(r["label"], r["value"]) for r in summary["rows"]] == [
         ("入住率", "60%"), ("空置房租", "¥ 3,550 元"), ("租约 60 天内到期", "3 间"), ("已离职员工仍占房", "1 人")]
+    # 空置房租在宿舍看板上没有这个数：这一行点进去是空置房间的清单（加起来正好是这个数）
+    vacant = core.get_detail_for(ctx, "hr.dorm_vacant")
+    assert summary["rows"][1]["target"] == {"key": "drill", "params": {"item": "hr.dorm_vacant", "period": PERIOD}}
+    assert vacant["summary"] == "共 2 间空置，每月房租 ¥ 3,550.00" and [row["cells"][0] for row in vacant["rows"]] == ["B201", "A103"]
     cost = run(ctx, "block.dorm_cost")
     assert cost["type"] == "stack" and cost["sub"] == "10 月 · ¥ 1,600 元"
     assert [(r["label"], r["value"]) for r in cost["rows"]] == [("房租", "1,300 元"), ("水费", "50 元"), ("电费", "250 元")]

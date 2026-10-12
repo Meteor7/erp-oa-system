@@ -781,7 +781,8 @@ def block_dorm_summary(ctx):
     rows = [
         list_row("入住率", f"{occupancy.get('入住', 0)} / {occupancy.get('residential', 0)} 间", f"{rate}%",
                  "ok" if rate >= 90 else ("warn" if rate < 70 else ""), target("dorm.board")),
-        list_row("空置房租", "每月", f"¥ {value} {unit}", "warn" if occupancy.get("vacant_rent") else "", target("dorm.board")),
+        list_row("空置房租", "每月", f"¥ {value} {unit}", "warn" if occupancy.get("vacant_rent") else "",
+                 drill_to("hr.dorm_vacant", ctx) if occupancy.get("vacant_rent") else None),
         list_row(f"租约 {LEASE_DAYS} 天内到期", f"最早 {lease['earliest_date'][5:]}" if lease.get("earliest_date") else "",
                  f"{int(lease.get('count') or 0)} 间", "warn" if lease.get("count") or lease.get("expired_count") else "", target("dorm.lease")),
         list_row("已离职员工仍占房", "", f"{len(leavers)} 人", "bad" if leavers else "", target("dorm.leaver")),

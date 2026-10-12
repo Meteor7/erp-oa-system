@@ -31,6 +31,18 @@ def test_waiting_counts_from_the_last_signature_then_from_the_submission():
     assert nudge.waited_days(make_doc(steps=[], submitted_on=None, modified=None, creation=None), TODAY) == 0
 
 
+def test_a_real_document_has_no_submitted_on_so_it_is_read_from_the_operation_log_like_the_request_page():
+    log = json.dumps([{"action": "提交申请", "acted_on": "2026-10-01 09:00:00"}, {"action": "驳回", "acted_on": "2026-10-03 09:00:00"},
+                      {"action": "提交申请", "acted_on": "2026-10-09 15:30:00"}])
+    doc = make_doc(steps=[], modified="2026-10-11 08:00:00")
+    del doc.submitted_on
+    doc.operation_log = log
+    assert nudge._submitted_on(doc) == "2026-10-09 15:30:00"                  # 被驳回再提交的，从重新提交算起
+    assert nudge.waited_days(doc, TODAY) == 3
+    doc.operation_log = "不是 json"
+    assert nudge._submitted_on(doc) == "" and nudge.waited_days(doc, TODAY) == 1
+
+
 def test_only_approvers_who_have_not_signed_yet_are_reminded():
     assert nudge._current_approvers(make_doc()) == ["pmc@tests-x.example.invalid"]
     assert nudge._current_approvers(make_doc(current_step_index=9)) == []
