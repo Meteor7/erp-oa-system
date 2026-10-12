@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { Spinner, createResource } from 'frappe-ui';
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from '../lib/period';
 import { importForeignRdWorkbookFile, parseForeignRdPaste } from '../lib/foreignRdImport';
+import { HOUR_STEP, daysOfHours, payloadRow, stepHours, validateForeignRows } from '../lib/foreignRdHours';
 import { exportTableWorkbook } from '../lib/tableExport';
 import RdPage from '../components/rd/RdPage.vue';
 import RdPeriod from '../components/rd/RdPeriod.vue';
@@ -19,7 +20,7 @@ const TEXT = {
   entity: '研发主体',
   project: '项目',
   occurrenceDays: '发生天数',
-  hours: '工时',
+  hours: '工时（小时）',
   remark: '备注',
   addProject: '添加项目',
   save: '保存并重新计算费用',
@@ -68,7 +69,7 @@ const foreignExpenseCards = computed(() => [
   { key: 'total', label: TEXT.importedTotal, value: importedTotalAmount.value, unit: '元', sub: '本期研发费用导入' },
   { key: 'common', label: TEXT.commonExpense, value: commonAmount.value, unit: '元', sub: '按境外工时比例分摊' },
   { key: 'direct', label: TEXT.projectExpense, value: directAmount.value, unit: '元', sub: '直接归属项目' },
-  { key: 'hours', label: TEXT.totalHours, value: totalHours.value, unit: 'h', sub: `${fmtNum(totalHours.value / 8)} 天` },
+  { key: 'hours', label: TEXT.totalHours, value: totalHours.value, unit: 'h', sub: `${fmtNum(daysOfHours(totalHours.value))} 天（工时 ÷ 8）` },
 ]);
 const statusNotes = computed(() => {
   const notes = [];
@@ -111,30 +112,24 @@ function normalizeRows(list = []) {
     project: row.project || '',
     project_code: row.project_code || row.rd_project_code || '',
     project_name: row.project_name || '',
-    occurrence_days: row.occurrence_days ?? (Number(row.hours || 0) / 8),
+    // 工时（小时）是源头，天数 = 工时 ÷ 8，只用来显示。
     hours: Number(row.hours || 0),
+    occurrence_days: daysOfHours(row.hours),
     remark: row.remark ?? row.description ?? '',
     period: row.period || '',
   }));
 }
 
 function rowHasInput(row) {
-  return Boolean(row.project || Number(row.occurrence_days || 0) || String(row.remark || '').trim());
+  return Boolean(row.project || Number(row.hours || 0) || String(row.remark || '').trim());
 }
 
 function activeRows() {
   return rows.value.filter(rowHasInput);
 }
 
-function recalculateHours(row) {
-  const hours = Math.round(Number(row.occurrence_days || 0) * 8 * 100) / 100;
-  row.hours = Number.isFinite(hours) ? hours : 0;
-}
-
-function stepDays(row, delta) {
-  const next = Math.round((Number(row.occurrence_days || 0) + delta) * 100) / 100;
-  row.occurrence_days = Math.max(0, Number.isFinite(next) ? next : 0);
-  recalculateHours(row);
+function stepRowHours(row, delta) {
+  row.hours = stepHours(row.hours, delta);
 }
 
 function selectProject(row) {
@@ -154,7 +149,6 @@ function addProject(project) {
     project: project.name,
     project_code: '',
     project_name: '',
-    occurrence_days: 1,
     hours: 8,
     remark: '',
   };
@@ -194,35 +188,14 @@ async function load() {
   }
 }
 
+// 校验和保存的规则都在 lib/foreignRdHours.js：填小时（最多两位小数），天数 = 小时 ÷ 8，
+// 每行不超过当月自然日数 × 8 小时。
 function validateRows() {
-  const filled = activeRows();
-  if (!filled.length) return commonAmount.value > 0 ? '有境外公共费用时，必须录入至少一条工时' : '请至少填写一条境外工时';
-  const keys = new Set();
-  for (let index = 0; index < filled.length; index += 1) {
-    const row = filled[index];
-    const daysText = String(row.occurrence_days ?? '').trim();
-    const days = Number(daysText);
-    if (!foreignEntities.includes(row.foreign_entity)) return `${index + 1}. 请选择研发主体`;
-    if (!row.project || !row.project_code || !row.project_name) return `${index + 1}. 请选择项目`;
-    if (!/^\d+(?:\.\d{1,2})?$/.test(daysText) || !Number.isFinite(days) || days <= 0) return `${index + 1}. 发生天数必须大于 0，且最多保留两位小数`;
-    const key = `${row.foreign_entity}|${row.project}`;
-    if (keys.has(key)) return `${index + 1}. 同一主体和项目只能填写一行`;
-    keys.add(key);
-    recalculateHours(row);
-  }
-  return '';
+  return validateForeignRows(activeRows(), { period: period.value, entities: foreignEntities, commonAmount: commonAmount.value });
 }
 
 function payloadRows() {
-  return activeRows().map((row) => ({
-    foreign_entity: row.foreign_entity,
-    project: row.project,
-    project_code: row.project_code,
-    project_name: row.project_name,
-    occurrence_days: Number(row.occurrence_days),
-    hours: Number(row.hours),
-    remark: String(row.remark || '').trim(),
-  }));
+  return activeRows().map(payloadRow);
 }
 
 async function save() {
@@ -245,7 +218,7 @@ async function save() {
 }
 
 function importOptions() {
-  return { projects: projectOptions.value, foreignEntities, existingRows: activeRows() };
+  return { projects: projectOptions.value, foreignEntities, existingRows: activeRows(), period: period.value };
 }
 
 function openBatch() {
@@ -295,8 +268,8 @@ async function exportCurrentForeignRd() {
       columns: [
         { label: isYearScope.value ? '月份' : TEXT.entity, value: (row) => isYearScope.value ? row.period : row.foreign_entity, width: 24 },
         { label: TEXT.project, value: (row) => `${row.project_code} ${row.project_name}`.trim(), width: 28 },
-        { label: TEXT.occurrenceDays, key: 'occurrence_days', width: 14 },
         { label: TEXT.hours, key: 'hours', width: 14 },
+        { label: TEXT.occurrenceDays, value: (row) => daysOfHours(row.hours), width: 14 },
         { label: TEXT.remark, key: 'remark', width: 32 },
       ],
     });
@@ -342,7 +315,7 @@ load();
       </div>
 
       <div class="card foreign-rd-entry">
-        <div class="hd"><b>{{ TEXT.entry }}</b><span class="muted">{{ TEXT.entity }} {{ DEFAULT_ENTITY }} · 1 天 = 8 小时</span></div>
+        <div class="hd"><b>{{ TEXT.entry }}</b><span class="muted">{{ TEXT.entity }} {{ DEFAULT_ENTITY }} · 填小时，天数 = 小时 ÷ 8 · 每行不超过当月自然日数 × 8 小时</span></div>
         <div v-for="(row, index) in rows" :key="`${row.period || period}-${index}`" class="line">
           <div style="min-width:0">
             <div style="font-weight:500">{{ row.project_name || row.project }}</div>
@@ -354,13 +327,13 @@ load();
               <template v-else-if="foreignEntities.length > 1"> · {{ row.foreign_entity }}</template>
             </div>
           </div>
-          <div v-if="readonly" class="num" style="font-weight:700">{{ fmtNum(row.occurrence_days) }} 天</div>
+          <div v-if="readonly" class="num" style="font-weight:700">{{ fmtNum(row.hours) }} h</div>
           <div v-else class="step">
-            <button type="button" aria-label="减 0.5 天" @click="stepDays(row, -0.5)">−</button>
-            <input v-model="row.occurrence_days" inputmode="decimal" aria-label="发生天数" @input="recalculateHours(row)" />
-            <button type="button" aria-label="加 0.5 天" @click="stepDays(row, 0.5)">＋</button>
+            <button type="button" aria-label="减 1 小时" @click="stepRowHours(row, -HOUR_STEP)">−</button>
+            <input v-model="row.hours" inputmode="decimal" aria-label="工时（小时）" />
+            <button type="button" aria-label="加 1 小时" @click="stepRowHours(row, HOUR_STEP)">＋</button>
           </div>
-          <div class="num sub r">{{ fmtNum(row.hours) }} h</div>
+          <div class="num sub r">≈ {{ fmtNum(daysOfHours(row.hours)) }} 天</div>
           <span v-if="readonly" class="muted">{{ row.remark || '–' }}</span>
           <input v-else v-model="row.remark" class="field" placeholder="备注" :aria-label="TEXT.remark" />
           <button v-if="!readonly" type="button" class="btn quiet sm bad" :aria-label="`删除 ${row.project_code}`" @click="deleteRow(index)"><RdIcon name="trash" /></button>
@@ -386,7 +359,7 @@ load();
       </div>
 
       <div v-if="!isYearScope" class="savebar">
-        <div class="row"><span><b class="num">{{ fmtNum(totalHours / 8) }}</b> <span class="muted">天 · {{ fmtNum(totalHours) }} h</span></span></div>
+        <div class="row"><span><b class="num">{{ fmtNum(totalHours) }}</b> <span class="muted">小时 · ≈ {{ fmtNum(daysOfHours(totalHours)) }} 天</span></span></div>
         <div class="row">
           <span v-if="message" style="color:var(--rd-ok);font-size:13px">{{ message }}</span>
           <span v-if="errorMessage" style="color:var(--rd-bad);font-size:13px">{{ errorMessage }}</span>
@@ -401,8 +374,8 @@ load();
       <aside class="rd-drawer" role="dialog" aria-label="批量导入境外工时" @keydown.esc="closeBatch">
         <header>批量导入境外工时<button type="button" class="btn quiet sm" aria-label="关闭" @click="closeBatch"><RdIcon name="x" /></button></header>
         <div class="body">
-          <div class="muted">每行一条：主体、项目代码、项目名称、发生天数、备注。支持制表符、逗号或多个空格分隔，也可以直接选择 Excel。</div>
-          <textarea v-model="batchPasteText" class="field" rows="5" placeholder="QIHENG DEMO OVERSEAS  RD16  EFEM-8-2LP-EG-A  1.5  验收"></textarea>
+          <div class="muted">每行一条：主体、项目代码、项目名称、工时（小时）、备注。支持制表符、逗号或多个空格分隔，也可以直接选择 Excel；老模板里只有“发生天数”的，按 1 天 = 8 小时换算。</div>
+          <textarea v-model="batchPasteText" class="field" rows="5" placeholder="QIHENG DEMO OVERSEAS  RD16  EFEM-8-2LP-EG-A  12  验收"></textarea>
           <div class="row">
             <button type="button" class="btn" @click="chooseWorkbook"><RdIcon name="upload" />选择 Excel</button>
             <input ref="batchWorkbookInput" type="file" accept=".xlsx,.xls" style="display:none" @change="importWorkbook" />
@@ -416,7 +389,7 @@ load();
           </div>
           <div v-else-if="batchRows.length">
             <div v-for="(row, index) in batchRows" :key="index" class="row between" style="padding:7px 0;border-bottom:1px solid var(--rd-line)">
-              <span>{{ row.project_code }} · {{ row.project_name }} · <b class="num">{{ fmtNum(row.occurrence_days) }}</b> 天</span>
+              <span>{{ row.project_code }} · {{ row.project_name }} · <b class="num">{{ fmtNum(row.hours) }}</b> 小时 · ≈ {{ fmtNum(daysOfHours(row.hours)) }} 天</span>
               <span class="tag ok">通过</span>
             </div>
           </div>

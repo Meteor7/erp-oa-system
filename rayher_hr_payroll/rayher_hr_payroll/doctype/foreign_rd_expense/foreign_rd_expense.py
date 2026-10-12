@@ -51,11 +51,15 @@ class ForeignRDExpense(Document):
             days = number(getattr(line, "occurrence_days", None), "境外发生天数")
             number(line.allocated_amount, "境外分摊金额")
             if days > 0:
-                # Monthly rows represent aggregated days, not one workday.
-                line.occurrence_days = round(days, 5)
-                line.hours = round(line.occurrence_days * 8, 2)
+                # Monthly rows represent aggregated hours, not one workday. 工时是源头，天数 = 工时 / 8
+                # （2026-10-12，和研发工时填报一致）；行里没有工时、只有天数的旧数据才按 1 天 = 8 小时换算。
+                hours = number(line.hours, "境外工时")
+                if hours <= 0:
+                    hours = days * 8
+                line.hours = round(hours, 2)
+                line.occurrence_days = round(line.hours / 8, 5)
                 if line.hours <= 0:
-                    frappe.throw("境外发生天数须对应至少0.01小时。")
+                    frappe.throw("境外工时须至少0.01小时。")
             else:
                 # Legacy daily rows have a NULL/zero occurrence_days column.
                 if not line.activity_type:

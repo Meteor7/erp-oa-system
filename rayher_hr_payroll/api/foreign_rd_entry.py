@@ -74,6 +74,27 @@ def _parse_work_date(value):
         frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u65e5\u671f\u683c\u5f0f\u4e0d\u6b63\u786e\u3002"))
 
 
+def _monthly_hours(row):
+    """月度行的 (工时, 天数)：工时（小时）是源头，天数永远是 工时 / 8，和国内研发工时填报同一个规则。
+
+    行里没有工时、只有天数（旧模板、旧页面、老数据）时，才按 1 天 = 8 小时换算成工时。工时保留两位小数。
+    """
+    hours = _number(_value(row, "hours"))
+    raw_days = _value(row, "occurrence_days", None)
+    days = _number(raw_days) if raw_days not in (None, "") else 0.0
+    if hours <= 0 and days > 0:
+        hours = days * MAX_DAILY_HOURS
+    hours = round(hours, 2)
+    return hours, hours / MAX_DAILY_HOURS
+
+
+def _check_hour_precision(row):
+    """保存时：提交的工时最多两位小数（和研发工时填报一致），不静默四舍五入。"""
+    hours = _number(_value(row, "hours"))
+    if hours and abs(hours * 100 - round(hours * 100)) > 1e-6:
+        frappe.throw(frappe._("境外工时最多保留两位小数。"))
+
+
 def _monthly_foreign_rows(rows, year, month):
     grouped = {}
     for row in rows or []:
@@ -81,13 +102,7 @@ def _monthly_foreign_rows(rows, year, month):
         if not project:
             continue
         entity = _clean(_value(row, "foreign_entity")) or DEFAULT_FOREIGN_ENTITY
-        hours = _number(_value(row, "hours"))
-        raw_days = _value(row, "occurrence_days", None)
-        submitted_days = _number(raw_days) if raw_days not in (None, "") else 0.0
-        has_monthly_days = submitted_days > 0
-        occurrence_days = submitted_days if has_monthly_days else hours / MAX_DAILY_HOURS
-        if has_monthly_days:
-            hours = occurrence_days * MAX_DAILY_HOURS
+        hours, occurrence_days = _monthly_hours(row)
         key = (entity, project)
         description = _clean(_value(row, "remark")) or _clean(_value(row, "description"))
         if key not in grouped:
@@ -298,8 +313,11 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
         project = _clean(_value(row, "project"))
         raw_days = _value(row, "occurrence_days", None)
         is_monthly = raw_days not in (None, "")
-        occurrence_days = _number(raw_days) if is_monthly else 0.0
-        hours = occurrence_days * MAX_DAILY_HOURS if is_monthly else _number(_value(row, "hours"))
+        if is_monthly:
+            hours, occurrence_days = _monthly_hours(row)
+        else:
+            occurrence_days = 0.0
+            hours = _number(_value(row, "hours"))
         description = _clean(_value(row, "remark")) or _clean(_value(row, "description"))
         has_content = bool(project or _clean(_value(row, "project_code")) or _clean(_value(row, "project_name")) or _clean(_value(row, "activity_type")) or description or hours)
         if not has_content:
@@ -323,8 +341,11 @@ def _allocate_foreign_rows(common_amount, rows, project_info, direct_amounts_by_
         if not is_monthly and hours > MAX_DAILY_HOURS:
             frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u5355\u65e5\u4e0d\u80fd\u8d85\u8fc7 8 \u5c0f\u65f6\u3002"))
         # 修复（2026-09-29，审查 17-d，决定 D13）：发生天数不能超过当月自然日数，和国内一致。
-        if strict and is_monthly and year and month and occurrence_days > monthrange(int(year), int(month))[1]:
-            frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u53d1\u751f\u5929\u6570\u4e0d\u80fd\u8d85\u8fc7\u6240\u9009\u6708\u4efd\u7684\u81ea\u7136\u65e5\u5929\u6570\u3002"))
+        # 2026-10-12：工时是源头（天数 = 工时 / 8），上限也按小时：当月自然日数 × 8 小时；提交的工时最多两位小数。
+        if strict and is_monthly:
+            _check_hour_precision(row)
+        if strict and is_monthly and year and month and hours > monthrange(int(year), int(month))[1] * MAX_DAILY_HOURS + 1e-9:
+            frappe.throw(frappe._("\u5883\u5916\u5de5\u65f6\u4e0d\u80fd\u8d85\u8fc7\u6240\u9009\u6708\u4efd\u7684\u81ea\u7136\u65e5\u5929\u6570 \u00d7 8 \u5c0f\u65f6\u3002"))
         info = project_info.get(project)
         if strict:
             if not info:

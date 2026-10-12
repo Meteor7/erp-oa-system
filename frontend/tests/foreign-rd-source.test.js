@@ -22,11 +22,14 @@ test('overseas page preserves the dashboard and save-recalculation endpoints', (
   assert.match(page, /totalHours/);
 });
 
-test('overseas editor uses monthly subject-project occurrence-day rows', () => {
+test('overseas editor uses monthly subject-project hour rows with the days derived from the hours', () => {
   assert.match(page, /QIHENG DEMO OVERSEAS/);
   assert.match(page, /foreign_entity/);
-  assert.match(page, /occurrence_days/);
-  assert.match(page, /occurrence_days[^\n]*\*\s*8|\*\s*8[^\n]*occurrence_days/);
+  // 填的是小时，天数 = 小时 ÷ 8 只用来显示（规则在 lib/foreignRdHours.js，和研发工时填报一致）。
+  assert.match(page, /from '\.\.\/lib\/foreignRdHours'/);
+  assert.match(page, /v-model="row\.hours"/);
+  assert.doesNotMatch(page, /v-model="row\.occurrence_days"/);
+  assert.match(page, /daysOfHours\(row\.hours\)/);
   assert.match(page, /remark/);
   assert.doesNotMatch(page, /type=["']date["']/);
   assert.doesNotMatch(page, /v-model=["'][^"']*activity_type/);
@@ -53,15 +56,16 @@ test('overseas status card keeps the three notices, status and source expense ta
   assert.match(page, /data\.expense_import/);
 });
 
-test('overseas rows use half-day steppers, are read-only when frozen or yearly, and keep validations', () => {
-  assert.match(page, /stepDays\(row, -0\.5\)/);
-  assert.match(page, /stepDays\(row, 0\.5\)/);
+test('overseas rows use one-hour steppers and are read-only when frozen or yearly; validation lives in the shared hours lib', () => {
+  assert.match(page, /stepRowHours\(row, -HOUR_STEP\)/);
+  assert.match(page, /stepRowHours\(row, HOUR_STEP\)/);
   assert.match(page, /const readonly = computed\(\(\) => isYearScope\.value \|\| allocationSubmitted\.value\)/);
-  assert.match(page, /\\d\+\(\?:\\\.\\d\{1,2\}\)\?/);
-  assert.match(page, /发生天数必须大于 0，且最多保留两位小数/);
-  assert.match(page, /同一主体和项目只能填写一行/);
-  assert.match(page, /有境外公共费用时，必须录入至少一条工时/);
-  assert.match(page, /请至少填写一条境外工时/);
+  assert.match(page, /validateForeignRows\(activeRows\(\)/);
+  assert.match(page, /payloadRow/);
+  const lib = readFileSync(new URL('../src/lib/foreignRdHours.js', import.meta.url), 'utf8');
+  for (const text of ['工时最多保留两位小数', '同一主体和项目只能填写一行', '有境外公共费用时，必须录入至少一条工时', '请至少填写一条境外工时', '当月自然日数 × 8']) {
+    assert.ok(lib.includes(text), text);
+  }
 });
 
 test('overseas page adds projects through a searchable picker and saves from a sticky bar', () => {

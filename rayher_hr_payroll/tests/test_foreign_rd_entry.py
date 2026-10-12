@@ -329,6 +329,43 @@ def test_monthly_foreign_row_calculates_hours_from_occurrence_days(monkeypatch):
     assert allocated[0]["description"] == "monthly input"
 
 
+def test_monthly_foreign_row_takes_the_hours_as_the_source_and_derives_the_days(monkeypatch):
+    # 2026-10-12：和国内研发工时填报一致，填的是小时，天数 = 小时 / 8。
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    rows = [{
+        "foreign_entity": "QIHENG DEMO OVERSEAS", "project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546",
+        "hours": 18.8, "occurrence_days": 2.35, "remark": "hours input",
+    }]
+
+    allocated = mod._allocate_foreign_rows(1000, rows, _project_info(), year=2026, month=6)
+
+    assert allocated[0]["hours"] == 18.8
+    assert allocated[0]["occurrence_days"] == 2.35
+    # 客户端带来的天数和工时对不上时，以工时为准。
+    stale = mod._allocate_foreign_rows(1000, [dict(rows[0], occurrence_days=1)], _project_info(), year=2026, month=6)
+    assert stale[0]["hours"] == 18.8 and stale[0]["occurrence_days"] == 2.35
+
+
+def test_saved_foreign_hours_never_drift_from_the_hours_that_were_typed(monkeypatch):
+    # 以前填天数再乘 8，两位小数的天数会让小时对不上；现在填多少小时就是多少小时。
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    for typed in (0.01, 0.1, 7.99, 13.37, 172.96, 247.99):
+        row = {"foreign_entity": "QIHENG DEMO OVERSEAS", "project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546", "hours": typed, "occurrence_days": typed / 8}
+        assert mod._allocate_foreign_rows(0, [row], _project_info(), year=2026, month=7)[0]["hours"] == typed
+
+
+def test_foreign_hours_have_at_most_two_decimals_and_are_capped_by_the_month_in_hours(monkeypatch):
+    mod, _frappe = _load_foreign_rd_entry(monkeypatch)
+    row = {"foreign_entity": "QIHENG DEMO OVERSEAS", "project": "RD06", "project_code": "RD06", "project_name": "MUSHI 7546", "occurrence_days": 1}
+    with pytest.raises(RuleError, match="两位小数"):
+        mod._allocate_foreign_rows(100, [dict(row, hours=8.001)], _project_info(), year=2026, month=6)
+    with pytest.raises(RuleError, match="自然日"):
+        mod._allocate_foreign_rows(100, [dict(row, hours=240.01)], _project_info(), year=2026, month=6)
+    assert mod._allocate_foreign_rows(100, [dict(row, hours=240)], _project_info(), year=2026, month=6)[0]["hours"] == 240.0
+    # 7 月 31 天：248 小时
+    assert mod._allocate_foreign_rows(100, [dict(row, hours=248)], _project_info(), year=2026, month=7)[0]["hours"] == 248.0
+
+
 def test_legacy_daily_rows_are_grouped_for_monthly_entry(monkeypatch):
     mod, _frappe = _load_foreign_rd_entry(monkeypatch)
     rows = [

@@ -67,12 +67,24 @@ def test_open_foreign_period_cannot_be_moved_to_locked_period(monkeypatch):
         doc._check_period_lock()
 
 
-def test_monthly_row_without_activity_derives_hours_and_accepts_multiple_days(monkeypatch):
+def test_monthly_row_keeps_the_hours_and_derives_the_days(monkeypatch):
+    # 2026-10-12：工时（小时）是源头，天数 = 工时 / 8，和研发工时填报一致。
     mod = _load_foreign_rd_expense(monkeypatch)
-    line = SimpleNamespace(work_date="2026-07-01", project_code="P1", project_name="Project", activity_type="", occurrence_days=2.5, hours=999, allocated_amount=0)
+    line = SimpleNamespace(work_date="2026-07-01", project_code="P1", project_name="Project", activity_type="", occurrence_days=1, hours=18.8, allocated_amount=0)
+    doc = mod.ForeignRDExpense(year=2026, month=7, total_amount=0, lines=[line])
+    doc._check_amounts()
+    assert line.hours == 18.8
+    assert line.occurrence_days == 2.35
+
+
+def test_monthly_row_with_only_days_is_converted_at_eight_hours_a_day(monkeypatch):
+    # 旧模板、老数据只有天数：按 1 天 = 8 小时换算成工时。
+    mod = _load_foreign_rd_expense(monkeypatch)
+    line = SimpleNamespace(work_date="2026-07-01", project_code="P1", project_name="Project", activity_type="", occurrence_days=2.5, hours=0, allocated_amount=0)
     doc = mod.ForeignRDExpense(year=2026, month=7, total_amount=0, lines=[line])
     doc._check_amounts()
     assert line.hours == 20
+    assert line.occurrence_days == 2.5
 
 
 def test_legacy_daily_row_still_requires_activity_and_daily_limit(monkeypatch):
