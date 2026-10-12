@@ -41,7 +41,7 @@ test("timesheet entry is a master-detail sheet with a searchable project picker"
   assert.ok(sheet.includes("上月用过"));
   assert.ok(sheet.includes("复制上月"));
   assert.ok(sheet.includes("批量导入"));
-  assert.ok(sheet.includes("把剩余平均分给现有项目"));
+  assert.ok(sheet.includes("把剩余小时平均分给现有项目"));
   assert.ok(sheet.includes("清空"));
   assert.match(page, /class="split ts-split"[^>]*solo/);
   // 项目可能有几十个：用搜索选择器，不再一排 chip

@@ -44,8 +44,8 @@ test('the stepper moves by one hour and never goes below half an hour', () => {
   assert.equal(stepHours('10', -1), '9');
   assert.equal(stepHours('1', -1), '0.5');
   assert.equal(stepHours('0.5', 1), '1.5');
-  assert.equal(stepHours('', 1), '1.5');
-  assert.equal(stepHours('abc', 1), '1.5');
+  assert.equal(stepHours('', 1), '1');                         // 空的当 0
+  assert.equal(stepHours('abc', 1), '1');
   assert.equal(stepHours('2.25', 1), '3.25');
   assert.equal(canStepDown('1'), true);
   assert.equal(canStepDown('0.5'), false);
