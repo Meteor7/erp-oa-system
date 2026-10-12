@@ -7,7 +7,7 @@ import { Spinner } from 'frappe-ui';
 import RdIcon from '../rd/RdIcon.vue';
 import '../../styles/rdTimesheet.css';
 import {
-  REMIND_CLOSED_TEXT, barColor, boardKindLabel, daysLeft, deadlineLabel, departmentBars, fmtDays, followUpCounts, followUpRows,
+  REMIND_CLOSED_TEXT, barColor, boardKindLabel, daysLeft, deadlineLabel, departmentBars, fmtDays, fmtHours, followUpCounts, followUpRows,
   gapText, gapTone, lastRemindedText, matchesDepartment, namesText, needsRemind, progressPercent, remindClosed, statusMeta, summarizeProgress,
 } from '../../lib/timesheetEntryView.js';
 import { entryRowsFor } from '../../lib/dashboardLanding.js';
@@ -165,7 +165,7 @@ const emptyText = computed(() => {
                 <th v-if="remindOpen" class="pick"><input type="checkbox" aria-label="全选当前列表中可催办的人" :checked="allPicked" :indeterminate="somePicked" :disabled="!remindable.length" @change="toggleAll($event.target.checked)" /></th>
                 <th>姓名</th>
                 <th v-if="showDepartment">部门</th>
-                <th class="r">已填 / 上限（天）</th>
+                <th class="r">已填 / 上限（小时）</th>
                 <th>进度</th>
                 <th class="r">还差</th>
                 <th>状态</th>
@@ -179,7 +179,7 @@ const emptyText = computed(() => {
                 </td>
                 <td><button type="button" class="btn quiet sm" style="font-weight: 600" @click="emit('open', item.employee)">{{ item.employee_name || item.employee }}</button></td>
                 <td v-if="showDepartment" class="sub">{{ item.department || '-' }}</td>
-                <td class="r num">{{ fmtDays(item.used_days, 1) }} / {{ fmtDays(item.limit_days, 1) }}</td>
+                <td class="r num" :title="`约 ${fmtDays(item.used_days, 2)} / ${fmtDays(item.limit_days, 2)} 天`">{{ fmtHours(item.used_hours ?? item.used_days * 8) }} / {{ fmtHours(item.limit_hours ?? item.limit_days * 8) }}</td>
                 <td><div class="ts-track"><i :style="{ width: progressPercent(item.used_days, item.limit_days) + '%', background: barColor(item.status) }"></i></div></td>
                 <td class="r"><span class="ts-gap" :class="gapTone(item)">{{ gapText(item) }}</span></td>
                 <td><span v-if="item.status === 'none' || item.status === 'over'" class="tag" :class="statusMeta(item.status).tone">{{ statusMeta(item.status).label }}</span></td>

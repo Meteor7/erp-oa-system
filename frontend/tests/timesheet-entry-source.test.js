@@ -70,13 +70,16 @@ test("the sheet shows a stacked per-project meter with remaining text", () => {
   assert.match(sheet, /aria-label="删除|:aria-label="`删除/);
 });
 
-test("occurrence days keep two decimals, step by half a day and hours are days times eight", () => {
+test("hours keep two decimals, step by one hour, and the days shown are hours divided by eight", () => {
   assert.match(view, /\\d\+\(\?:\\\.\\d\{1,2\}\)\?/);
-  assert.match(view, /DAY_STEP = 0\.5/);
+  assert.match(view, /HOUR_STEP = 1/);
   assert.match(view, /HOURS_PER_DAY = 8/);
-  assert.match(view, /\* HOURS_PER_DAY/);
+  assert.match(view, /\/ HOURS_PER_DAY/);
   assert.match(page, /toFixed\(2\)/);
+  assert.match(page, /hours: Number\(row\.hours\)\.toFixed\(2\)/);          // 保存时只发小时，天数由服务端按 小时 ÷ 8 反推
+  assert.doesNotMatch(page, /occurrence_days: Number/);
   assert.match(sheet, /rowHours\(row\)/);
+  assert.match(sheet, /daysOfHours\(rowHours\(row\)\)/);
   assert.doesNotMatch(source, /v-model[^>]+hours/);
 });
 
@@ -104,12 +107,13 @@ test("entry mutations remain role-gated and show server validation messages", ()
   assert.match(page, /serverMessage\(error/);
 });
 
-test("monthly import and export contain days and hours but no technical dates", () => {
+test("monthly import and export contain hours and the derived days but no technical dates", () => {
   assert.match(drawer, /parseTimesheetPaste/);
   assert.match(drawer, /importTimesheetWorkbookFile/);
   assert.match(page, /exportTableWorkbook/);
   assert.match(page, /async function exportCurrent/);
-  assert.ok(page.includes("发生天数"));
+  assert.ok(page.includes("折合天数"));
+  assert.ok(page.includes("工时(小时)"));
   assert.doesNotMatch(source, /label: "日期"/);
   // 抽屉挂到 body，外层带 rd 类才能吃到样式；导入只收当前所选人员
   assert.match(drawer, /<Teleport to="body">/);

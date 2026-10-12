@@ -3,7 +3,7 @@
 import { computed, ref } from 'vue';
 import RdIcon from '../rd/RdIcon.vue';
 import '../../styles/rdTimesheet.css';
-import { avatarText, barColor, departmentsOf, filterRoster, fmtDays, progressPercent, rosterCounts } from '../../lib/timesheetEntryView.js';
+import { avatarText, barColor, departmentsOf, filterRoster, fmtDaysExact, fmtHours, progressPercent, rosterCounts } from '../../lib/timesheetEntryView.js';
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -52,7 +52,7 @@ const hasProgress = computed(() => props.items.some((item) => item.status));
           <span class="muted"> {{ kind === 'all' && item.department ? item.department : item.employee }}</span>
           <div v-if="item.status" class="meter"><i :style="{ width: progressPercent(item.used, item.limit) + '%', background: barColor(item.status) }"></i></div>
         </span>
-        <span v-if="item.status" class="num muted" style="text-align: right; font-size: 12px">{{ fmtDays(item.used, 1) }}<br />/ {{ fmtDays(item.limit, 1) }}</span>
+        <span v-if="item.status" class="num muted" style="text-align: right; font-size: 12px" :title="`约 ${fmtDaysExact(item.usedDays)} / ${fmtDaysExact(item.limitDays)} 天`">{{ fmtHours(item.used) }}<br />/ {{ fmtHours(item.limit) }} h</span>
         <span v-else></span>
       </button>
       <div v-if="!visible.length" class="muted" style="padding: 20px; text-align: center">没有符合条件的员工</div>

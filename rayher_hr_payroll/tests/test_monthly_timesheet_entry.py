@@ -999,3 +999,30 @@ def test_department_managers_outside_rd_can_open_monthly_timesheets(monthly_modu
     assert mod._monthly_employee_scope("edit") == ["EMP-RD"]
     _install_monthly_scope_frappe(frappe, ["Employee", "Department Manager"], staff)
     assert mod._monthly_employee_scope("view") == ["EMP-RD"]
+
+
+# ---- 2026-10-12：月度工时按小时填，天数 = 小时 ÷ 8（显示用） ----
+def test_a_173_hour_entry_is_stored_as_hours_with_the_days_derived_and_no_day_above_eight_hours(monthly_module):
+    mod, _frappe = monthly_module
+    row = {
+        "project": "PROJ-1", "project_code": "RD14", "project_name": "ACONCA 7961", "remark": "",
+        "calculated_hours": Decimal("173.00"), "occurrence_days": mod.days_from_hours(173),
+    }
+    logs = mod.build_technical_time_logs(
+        2026, 10, mod.split_hour_chunks(row["calculated_hours"]), project=row["project"], project_code=row["project_code"],
+        project_name=row["project_name"], remark="", occupied_hours={},
+    )
+    payload = mod.build_timesheet_payload(employee="EMP-1", company="Rayher", period="2026-10", entry_id="e1", row=row, time_logs=logs)
+    assert payload["rd_calculated_hours"] == 173.0 and payload["rd_occurrence_days"] == 21.63
+    assert sum(Decimal(str(log["hours"])) for log in logs) == Decimal("173")
+    assert max(log["hours"] for log in logs) == 8.0 and len(logs) == 22      # 21 个整天 + 5 小时
+
+
+def test_the_list_row_shows_days_derived_from_the_hours_not_the_stored_days(monthly_module):
+    mod, _frappe = monthly_module
+    source = {"employee": "E1", "project": "P", "monthly_entry_id": "m1", "occurrence_days": 99, "hours": 173, "employee_name": "甲"}
+    row = mod._monthly_view_row(source, "2026-10", "monthly")
+    assert row["hours"] == 173.0 and row["occurrence_days"] == 21.63
+    merged = mod._merge_monthly_entry_rows(
+        [source], [{"employee": "E1", "project": "P", "occurrence_days": 1, "hours": 3, "employee_name": "甲"}], "2026-10")
+    assert merged[0]["hours"] == 176.0 and merged[0]["occurrence_days"] == 22.0

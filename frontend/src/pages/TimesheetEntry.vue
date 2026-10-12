@@ -7,9 +7,9 @@ import { canEditTimesheetEntry } from "../lib/access";
 import { entryQuery, parseEntryQuery } from "../lib/dashboardLanding";
 import { exportTableWorkbook } from "../lib/tableExport";
 import {
-  HOURS_PER_DAY, capText, daysInMonth, lastRemindedText, needsRemind, newRowKey,
+  HOURS_PER_DAY, capText, daysInMonth, daysOfHours, lastRemindedText, needsRemind, newRowKey,
   previousPeriod, remindClosed, remindResultText, rosterItemsFromOptions, rosterItemsFromProgress, rowHours, rowsFromPrevious, round2,
-  serverMessage, statusMeta, sumDays, trimDays, validateEntryRows,
+  serverMessage, statusMeta, sumHours, trimHours, validateEntryRows,
 } from "../lib/timesheetEntryView";
 import "../styles/rdTimesheet.css";
 import RdPage from "../components/rd/RdPage.vue";
@@ -117,8 +117,7 @@ const selectedPerson = computed(() => {
 });
 const selectedStatus = computed(() => rosterItems.value.find((entry) => entry.employee === selectedEmployee.value)?.status || "");
 const monthNumber = computed(() => Number(String(period.value).slice(5, 7)) || new Date().getMonth() + 1);
-const dayLimit = computed(() => Number(monthly.data?.day_limit ?? daysInMonth(period.value)));
-const hourLimit = computed(() => Number(monthly.data?.hour_limit ?? dayLimit.value * HOURS_PER_DAY));
+const hourLimit = computed(() => Number(monthly.data?.hour_limit ?? daysInMonth(period.value) * HOURS_PER_DAY));
 const calendarSource = computed(() => String(monthly.data?.calendar_source || "weekday_fallback"));
 const usesWeekdayFallback = computed(() => calendarSource.value === "weekday_fallback");
 const hasLegacySources = computed(() => Boolean(monthly.data?.has_legacy_sources));
@@ -131,11 +130,10 @@ const readOnlyNote = computed(() => {
   if (canEditSelection.value || hasLegacySources.value || !selectedEmployee.value) return "";
   return `只读：当前账号只能查看 ${selectedPerson.value.name} 的工时，不能修改。`;
 });
-const totalDays = computed(() => sumDays(entries.value));
-const overLimit = computed(() => totalDays.value > dayLimit.value + 1e-6);
+const totalHours = computed(() => sumHours(entries.value));
+const overLimit = computed(() => totalHours.value > hourLimit.value + 1e-6);
 const capLine = computed(() => capText({
   month: monthNumber.value,
-  dayLimit: dayLimit.value,
   hourLimit: hourLimit.value,
   baseHourLimit: monthly.data?.base_hour_limit,
   leaveHours: monthly.data?.leave_hours,
@@ -163,8 +161,8 @@ function hydrateEntries() {
     ...row,
     key: row.monthly_entry_id,
     employee: row.employee || selectedEmployee.value,
-    occurrence_days: trimDays(row.occurrence_days),
-    hours: Number(row.hours || 0),
+    hours: trimHours(row.hours),
+    occurrence_days: daysOfHours(row.hours),
     remark: row.remark || "",
   }));
   dirty.value = false;
@@ -262,7 +260,7 @@ async function copyPrevious() {
   }
   entries.value = rows;
   dirty.value = true;
-  notify(`已复制上月 ${rows.length} 个项目的天数，请确认后保存${skipped ? `（${skipped} 个项目已不可选，已跳过）` : ""}`);
+  notify(`已复制上月 ${rows.length} 个项目的工时，请确认后保存${skipped ? `（${skipped} 个项目已不可选，已跳过）` : ""}`);
 }
 
 async function saveRows() {
@@ -270,7 +268,7 @@ async function saveRows() {
   errMsg.value = validateEntryRows(entries.value, {
     employee: selectedEmployee.value,
     hasLegacy: hasLegacySources.value,
-    dayLimit: dayLimit.value,
+    hourLimit: hourLimit.value,
   });
   okMsg.value = "";
   if (errMsg.value) return;
@@ -281,7 +279,7 @@ async function saveRows() {
       project: row.project,
       project_code: row.project_code,
       project_name: row.project_name,
-      occurrence_days: Number(row.occurrence_days).toFixed(2),
+      hours: Number(row.hours).toFixed(2),
       remark: String(row.remark || "").trim(),
     }));
     await saver.submit({
@@ -306,8 +304,8 @@ function applyImport(rows) {
     ...row,
     key: `${stamp}-${index}`,
     monthly_entry_id: "",
-    occurrence_days: trimDays(row.occurrence_days),
-    hours: round2(Number(row.occurrence_days) * HOURS_PER_DAY),
+    hours: trimHours(row.hours),
+    occurrence_days: daysOfHours(row.hours),
   })));
   dirty.value = true;
   notify(`已导入 ${rows.length} 行，请确认后保存`);
@@ -341,8 +339,8 @@ async function exportCurrent() {
         { label: "研发人员", key: "employee_name", width: 18 },
         { label: "项目代码", key: "project_code", width: 14 },
         { label: "项目名称", key: "project_name", width: 28 },
-        { label: "发生天数", value: (row) => Number(row.occurrence_days || 0), width: 12 },
-        { label: "工时(h)", value: (row) => rowHours(row), width: 12 },
+        { label: "工时(小时)", value: (row) => rowHours(row), width: 12 },
+        { label: "折合天数", value: (row) => daysOfHours(rowHours(row)), width: 12 },
         { label: "备注", key: "remark", width: 36 },
       ],
     });
@@ -366,8 +364,8 @@ async function exportAllEmployees() {
         { label: "工号", key: "employee", width: 14 },
         { label: "项目代码", key: "project_code", width: 14 },
         { label: "项目名称", key: "project_name", width: 28 },
-        { label: "发生天数", value: (row) => Number(row.occurrence_days || 0), width: 12 },
-        { label: "工时(h)", value: (row) => Number(row.hours ?? rowHours(row)), width: 12 },
+        { label: "工时(小时)", value: (row) => Number(row.hours || 0), width: 12 },
+        { label: "折合天数", value: (row) => daysOfHours(Number(row.hours || 0)), width: 12 },
         { label: "备注", key: "remark", width: 36 },
       ],
     });
@@ -387,6 +385,8 @@ async function exportFollowUp(list) {
       { label: "姓名", key: "employee_name", width: 14 },
       { label: "工号", key: "employee", width: 14 },
       { label: "部门", key: "department", width: 18 },
+      { label: "已填小时", value: (row) => Number(row.used_hours ?? (Number(row.used_days || 0) * HOURS_PER_DAY)), width: 12 },
+      { label: "上限小时", value: (row) => Number(row.limit_hours ?? (Number(row.limit_days || 0) * HOURS_PER_DAY)), width: 12 },
       { label: "已填天数", value: (row) => Number(row.used_days || 0), width: 12 },
       { label: "上限天数", value: (row) => Number(row.limit_days || 0), width: 12 },
       { label: "状态", value: (row) => statusMeta(row.status).label, width: 10 },
@@ -430,7 +430,7 @@ onBeforeUnmount(() => clearTimeout(okTimer));
 </script>
 
 <template>
-  <RdPage title="研发工时填报" subtitle="按月登记每位研发人员在各项目上发生的天数，1 天 = 8 小时。">
+  <RdPage title="研发工时填报" subtitle="按月登记每位研发人员在各项目上的小时数，一天最多 8 小时；页面会反推出折合的天数（天数 = 小时 ÷ 8）。">
     <template #ctl><RdPeriod /></template>
 
     <div class="bar">
@@ -464,7 +464,6 @@ onBeforeUnmount(() => clearTimeout(okTimer));
       <EntrySheet
         :rows="entries"
         :person="selectedPerson"
-        :day-limit="dayLimit"
         :hour-limit="hourLimit"
         :cap-line="capLine"
         :editable="canEditSelection"

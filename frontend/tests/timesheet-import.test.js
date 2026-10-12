@@ -16,7 +16,7 @@ function options(extra = {}) {
   return { employees, projects, period: '2026-07', existingRows: [], ...extra };
 }
 
-test('parses two-decimal monthly occurrence days and calculates hours', () => {
+test('an old template with 发生天数 still imports: days times eight become the hours', () => {
   const text = [
     '研发人员\t项目代码\t项目名称\t发生天数\t备注',
     '演示员工134\tRD14\tACONCA 7961\t2.35\t方案设计',
@@ -79,7 +79,7 @@ test('rejects employee monthly total above the selected calendar-month limit', (
   ], options());
 
   assert.deepEqual(result.rows, []);
-  assert.match(result.errors.join('\n'), /演示员工134当月累计发生天数不能超过 31.00 天/);
+  assert.match(result.errors.join('\n'), /演示员工134当月累计工时不能超过 248 小时/);          // 31 天 × 8
 });
 
 test('uses the accounting period to enforce February day capacity', () => {
@@ -89,5 +89,64 @@ test('uses the accounting period to enforce February day capacity', () => {
   ], options({ period: '2026-02' }));
 
   assert.deepEqual(result.rows, []);
-  assert.match(result.errors.join('\n'), /不能超过 28.00 天/);
+  assert.match(result.errors.join('\n'), /不能超过 224 小时/);                         // 28 天 × 8
+});
+
+test('parses the hours column: hours are the source, the days are derived from them', () => {
+  const text = [
+    '研发人员\t项目代码\t项目名称\t工时（小时）\t备注',
+    '演示员工134\tRD14\tACONCA 7961\t100\t方案设计',
+    'EMP-2\tRD16\tEFEM-8-2LP-EG-A\t73.5小时\t接口联调',
+  ].join('\n');
+  const result = parseTimesheetPaste(text, options({ period: '2026-10' }));
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.rows.map((row) => [row.employee, row.hours, row.occurrence_days]), [['EMP-1', 100, 12.5], ['EMP-2', 73.5, 9.19]]);   // 73.5 / 8 = 9.1875
+});
+
+test('rows without a header read the fourth column as hours', () => {
+  const result = parseTimesheetTableRows([['演示员工134', 'RD14', 'ACONCA 7961', '16', '联调']], options());
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual([result.rows[0].hours, result.rows[0].occurrence_days, result.rows[0].remark], [16, 2, '联调']);
+});
+
+test('when both columns are present the hours win', () => {
+  const result = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '发生天数', '工时', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '3', '10', ''],
+  ], options());
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual([result.rows[0].hours, result.rows[0].occurrence_days], [10, 1.25]);
+});
+
+test('hour errors: precision, zero, text, and the monthly total in hours', () => {
+  const result = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '工时', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '1.005', ''],
+    ['演示员工107', 'RD16', 'EFEM-8-2LP-EG-A', '0', ''],
+    ['演示员工107', 'RD14', 'ACONCA 7961', 'abc', ''],
+  ], options());
+  assert.deepEqual(result.rows, []);
+  assert.match(result.errors.join('\n'), /第 2 行：工时最多保留两位小数/);
+  assert.match(result.errors.join('\n'), /第 3 行：工时必须大于 0/);
+  assert.match(result.errors.join('\n'), /第 4 行：工时必须是有效数字/);
+  const over = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '工时', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '200', ''],
+    ['演示员工134', 'RD16', 'EFEM-8-2LP-EG-A', '48.01', ''],
+  ], options({ period: '2026-10' }));
+  assert.match(over.errors.join('\n'), /演示员工134当月累计工时不能超过 248 小时/);
+  const exact = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '工时', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '200', ''],
+    ['演示员工134', 'RD16', 'EFEM-8-2LP-EG-A', '48', ''],
+  ], options({ period: '2026-10' }));
+  assert.deepEqual(exact.errors, []);
+});
+
+test('hours already in the sheet count towards the monthly total', () => {
+  const result = parseTimesheetTableRows([
+    ['研发人员', '项目代码', '项目名称', '工时', '备注'],
+    ['演示员工134', 'RD14', 'ACONCA 7961', '100', ''],
+  ], options({ period: '2026-10', existingRows: [{ employee: 'EMP-1', project: 'PROJ-9', hours: 150 }] }));
+  assert.match(result.errors.join('\n'), /演示员工134当月累计工时不能超过 248 小时/);
 });

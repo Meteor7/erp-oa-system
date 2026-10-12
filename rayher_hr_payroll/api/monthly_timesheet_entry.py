@@ -23,8 +23,8 @@ from rayher_hr_payroll.working_calendar import resolve_monthly_work_limit
 DAY_QUANTUM = Decimal("0.01")
 HOUR_QUANTUM = Decimal("0.01")
 HOURS_PER_DAY = Decimal("8.00")
-# 「已填满」的容差：剩余工时小于 0.08 小时（= 0.01 天，天数最多保留两位小数时填不进去的零头）。
-FULL_TOLERANCE_HOURS = Decimal("0.08")
+# 月度工时按小时填（2026-10-12 起）：小时是真实的数，天数只是 小时 ÷ 8 的显示值（保留两位小数）。
+# 一天最多 8 小时这条没变：月度上限 = 工作日 × 8 − 已批事假小时，保存时系统自动把小时摊到各个工作日，每天不超过 8 小时。
 # 暂时不用填研发工时的人（特例，决定 2026-10-09）：演示员工21的研发人员类型保持“研发辅助”不变，
 # 只是不出现在工时填报名单里，也不能登记工时。要恢复填工时，把这个账号从这里删掉即可。
 TIMESHEET_EXEMPT_USERS = frozenset({"person046@staff.example.invalid"})
@@ -177,6 +177,31 @@ def parse_occurrence_days(value, year: int, month: int) -> Decimal:
     return days
 
 
+def parse_occurrence_hours(value, year: int, month: int) -> Decimal:
+    """一条月度工时的小时数：大于 0，最多两位小数，不超过当月自然日 × 8 小时。"""
+    text = str(value if value is not None else "").strip()
+    try:
+        hours = Decimal(text)
+    except (InvalidOperation, ValueError):
+        frappe.throw(frappe._("工时必须是有效数字。"))
+
+    if not hours.is_finite() or hours <= 0:
+        frappe.throw(frappe._("工时必须大于 0。"))
+    if hours.as_tuple().exponent < -2:
+        frappe.throw(frappe._("工时最多保留两位小数。"))
+
+    ceiling = Decimal(monthrange(int(year), int(month))[1]) * HOURS_PER_DAY
+    hours = hours.quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
+    if hours > ceiling:
+        frappe.throw(frappe._("工时不能超过所选月份自然日天数 × 8 小时。"))
+    return hours
+
+
+def days_from_hours(hours) -> Decimal:
+    """小时反推的天数（显示用，保留两位小数）：1 天 = 8 小时。"""
+    return (_as_decimal(hours) / HOURS_PER_DAY).quantize(DAY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
 def calculated_hours(days: Decimal) -> Decimal:
     return (days * HOURS_PER_DAY).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
 
@@ -189,15 +214,9 @@ def _as_decimal(value) -> Decimal:
     return number if number.is_finite() else Decimal("0")
 
 
-def max_entry_days(day_limit) -> Decimal:
-    """当月最多能填的天数：可填工时折成天后向下取整到 0.01 天，绝不进位。
-
-    请假可以是 3 / 5 小时或任意 0.5 小时，上限折成天常常不是 0.01 的倍数
-    （176 − 3 = 173 小时 = 21.625 天）。天数最多保留两位小数，所以能填的最大值是 21.62 天，
-    填 21.63 天（173.04 小时）会超出上限。页面上显示的「还差 / 最多」都用这个值，照着填一定能保存。
-    """
-    hundredths = (_as_decimal(day_limit) * 100 + Decimal("0.000001")).to_integral_value(rounding=ROUND_FLOOR)
-    return max(Decimal("0"), hundredths / 100).quantize(DAY_QUANTUM)
+def display_days(hours) -> float:
+    """页面上显示的天数（小时 ÷ 8，两位小数）。"""
+    return float(days_from_hours(hours))
 
 
 def split_day_hours(days: Decimal) -> list[Decimal]:
@@ -209,10 +228,29 @@ def split_day_hours(days: Decimal) -> list[Decimal]:
     return result
 
 
-def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project, day_limit=None) -> list[dict]:
+def split_hour_chunks(hours) -> list[Decimal]:
+    """小时拆成每天最多 8 小时的块：整 8 小时若干块，余下的一块（保存时按块摊到工作日）。"""
+    total = _as_decimal(hours).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
+    full_days = int(total // HOURS_PER_DAY)
+    result = [HOURS_PER_DAY] * full_days
+    remainder = (total - HOURS_PER_DAY * full_days).quantize(HOUR_QUANTUM)
+    if remainder > 0:
+        result.append(remainder)
+    return result
+
+
+def _row_hours(raw: dict, year: int, month: int) -> Decimal:
+    """这一行填的小时：优先用 hours；老的调用方只给 occurrence_days 时按 天 × 8 换算。"""
+    value = raw.get("hours")
+    if value is not None and str(value).strip() != "":
+        return parse_occurrence_hours(value, year, month)
+    return calculated_hours(parse_occurrence_days(raw.get("occurrence_days"), year, month))
+
+
+def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project, day_limit=None, hour_limit=None) -> list[dict]:
     prepared = []
     projects = set()
-    total_days = Decimal("0.00")
+    total_hours = Decimal("0.00")
     for raw in raw_rows or []:
         if not isinstance(raw, dict):
             frappe.throw(frappe._("月度工时明细格式不正确。"))
@@ -224,29 +262,29 @@ def prepare_monthly_rows(raw_rows, year: int, month: int, resolve_project, day_l
             frappe.throw(frappe._("同一员工、月份和项目只能填写一条月度工时。"))
         projects.add(project)
 
-        days = parse_occurrence_days(raw.get("occurrence_days"), year, month)
-        total_days += days
+        hours = _row_hours(raw, year, month)
+        total_hours += hours
         prepared.append(
             {
                 "monthly_entry_id": str(raw.get("monthly_entry_id") or "").strip(),
                 "project": project,
                 "project_code": project_code,
                 "project_name": project_name,
-                "occurrence_days": days,
-                "calculated_hours": calculated_hours(days),
+                "occurrence_days": days_from_hours(hours),
+                "calculated_hours": hours,
                 "remark": str(raw.get("remark") or raw.get("description") or "").strip(),
             }
         )
 
-    day_limit = Decimal(
-        str(day_limit if day_limit is not None else monthrange(int(year), int(month))[1])
-    )
-    max_days = max_entry_days(day_limit)
-    if total_days > max_days:
-        limit_hours = f"{calculated_hours(day_limit):f}".rstrip("0").rstrip(".")
+    if hour_limit is not None:
+        limit_hours = Decimal(str(hour_limit))
+    else:
+        days = day_limit if day_limit is not None else monthrange(int(year), int(month))[1]
+        limit_hours = Decimal(str(days)) * HOURS_PER_DAY
+    if total_hours > limit_hours:
         frappe.throw(
-            frappe._("该员工当月累计工时不能超过扣除请假后的可填报上限：当前 {0} 天，本月最多 {1} 天（可填 {2} 小时）。").format(
-                total_days, max_days, limit_hours
+            frappe._("该员工当月累计工时不能超过扣除请假后的可填报上限：当前 {0} 小时，本月最多 {1} 小时（约 {2} 天）。").format(
+                f"{total_hours:f}".rstrip("0").rstrip("."), f"{limit_hours:f}".rstrip("0").rstrip("."), days_from_hours(limit_hours)
             )
         )
     return prepared
@@ -331,7 +369,7 @@ def build_timesheet_payload(
         "rd_system_generated": 1,
         "rd_monthly_entry_id": entry_id,
         "rd_entry_period": period,
-        "rd_occurrence_days": float(Decimal(row["occurrence_days"])),
+        "rd_occurrence_days": float(days_from_hours(expected)),
         "rd_calculated_hours": float(expected),
         "time_logs": time_logs,
     }
@@ -485,7 +523,7 @@ def _monthly_view_row(source, period: str, source_kind: str) -> dict:
         "project": project,
         "project_code": _value(source, "project_code") or "",
         "project_name": _value(source, "project_name") or "",
-        "occurrence_days": round(float(_value(source, "occurrence_days", 0) or 0), 2),
+        "occurrence_days": display_days(_value(source, "hours", 0) or 0),
         "hours": round(float(_value(source, "hours", 0) or 0), 2),
         "remark": _value(source, "remark") or "",
         "review_status": _value(source, "review_status") or "",
@@ -504,8 +542,8 @@ def _merge_monthly_entry_rows(monthly_rows: list, legacy_rows: list, period: str
             if current is None:
                 grouped[key] = row
                 continue
-            current["occurrence_days"] = round(current["occurrence_days"] + row["occurrence_days"], 2)
             current["hours"] = round(current["hours"] + row["hours"], 2)
+            current["occurrence_days"] = display_days(current["hours"])
             remarks = []
             for value in (current.get("remark"), row.get("remark")):
                 for item in str(value or "").split("；"):
@@ -552,8 +590,8 @@ def list_monthly_entries(period, employee=None):
         _query_legacy_monthly_entries(period_text, employee),
         period_text,
     )
-    total_days = round(sum(float(row["occurrence_days"]) for row in rows), 2)
     total_hours = round(sum(float(row["hours"]) for row in rows), 2)
+    total_days = display_days(total_hours)
     has_legacy_sources = any(row["source_kind"] in {"legacy_daily", "mixed"} for row in rows)
     employee_count = len({row["employee"] for row in rows if row["employee"]})
     limit = resolve_monthly_work_limit(
@@ -570,7 +608,7 @@ def list_monthly_entries(period, employee=None):
         "total_hours": total_hours,
         "employee_count": employee_count,
         "day_limit": limit["day_limit"],
-        "max_day_limit": float(max_entry_days(limit["day_limit"])),
+        "max_day_limit": display_days(limit["hour_limit"]),
         "hour_limit": limit["hour_limit"],
         "base_hour_limit": limit.get("base_hour_limit", limit["hour_limit"]),
         "leave_hours": limit.get("leave_hours", 0),
@@ -649,7 +687,7 @@ def _replace_monthly_documents(
         logs = build_technical_time_logs(
             year,
             month,
-            split_day_hours(row["occurrence_days"]),
+            split_hour_chunks(row["calculated_hours"]),
             project=row["project"],
             project_code=row["project_code"],
             project_name=row["project_name"],
@@ -704,6 +742,7 @@ def save_monthly_entries(period, employee, rows, expected_revision=None):
         month,
         daily._resolve_rd_project,
         day_limit=Decimal(str(limit["day_limit"])),
+        hour_limit=Decimal(str(limit["hour_limit"])) if limit.get("hour_limit") is not None else None,
     )
 
     lock_period_import(year, month)
@@ -778,20 +817,26 @@ def _department_label(value) -> str:
     return re.sub(r"\s+-\s+[A-Za-z0-9]{1,8}$", "", str(value or "").strip())
 
 
-def _fill_status(used: float, limit: float) -> str:
+def _fill_status(used_hours, limit_hours) -> str:
     """none 一天没填；over 超过上限；full 已填满；part 还没填满。
 
-    按工时比较（1 天 = 8 小时，保留两位小数）：剩余工时小于 0.08 小时（= 0.01 天，
-    天数最多保留两位小数时填不进去的零头）就算填满。前端 deriveStatus 用同一条规则。
-    例：可填 173 小时（21.625 天）时，填 21.62 天（172.96 小时）= 已填满，21.5 天 = 未填满，21.63 天 = 超上限。
+    都按小时比较（两位小数）：填的小时等于可填小时才算已填满，不再有"零头容差"。
+    例：可填 173 小时时，填 173 = 已填满，172.5 = 未填满，173.5 = 超上限。
     """
-    used_hours = (_as_decimal(used) * HOURS_PER_DAY).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
-    limit_hours = (_as_decimal(limit) * HOURS_PER_DAY).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
-    if used_hours <= 0:
-        return "none" if limit_hours > 0 else "full"
-    if used_hours > limit_hours:
+    used = _as_decimal(used_hours).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
+    limit = _as_decimal(limit_hours).quantize(HOUR_QUANTUM, rounding=ROUND_HALF_UP)
+    if used <= 0:
+        return "none" if limit > 0 else "full"
+    if used > limit:
         return "over"
-    return "full" if limit_hours - used_hours < FULL_TOLERANCE_HOURS else "part"
+    return "full" if used == limit else "part"
+
+
+def _limit_hours(limit) -> float:
+    """一个月可填的小时数：用 hour_limit；只有 day_limit 的（老数据、测试替身）按 天 × 8。"""
+    if limit.get("hour_limit") is not None:
+        return float(limit["hour_limit"])
+    return float(limit.get("day_limit") or 0) * float(HOURS_PER_DAY)
 
 
 def _fill_scope_kind(scope) -> str:
@@ -818,22 +863,23 @@ def _fill_rows(year: int, month: int, scope) -> list[dict]:
     for row in _merge_monthly_entry_rows(
         _query_monthly_entries(period_text), _query_legacy_monthly_entries(period_text), period_text
     ):
-        used[row["employee"]] = round(used.get(row["employee"], 0) + float(row["occurrence_days"]), 2)
+        used[row["employee"]] = round(used.get(row["employee"], 0) + float(row["hours"]), 2)
     result = []
     for name in names:
         detail = info.get(name) or {}
-        limit = resolve_monthly_work_limit(year, month, employee=name)["day_limit"]
-        days = round(used.get(name, 0), 2)
+        limit_hours = _limit_hours(resolve_monthly_work_limit(year, month, employee=name))
+        used_hours = round(used.get(name, 0), 2)
         result.append({
             "employee": name,
             "employee_name": str(_value(detail, "employee_name") or _value(next((r for r in employees if _row_name(r) == name), {}), "employee_name") or name),
             "department": _department_label(_value(detail, "department")),
             "user_id": str(_value(detail, "user_id") or ""),
-            "used_days": days,
-            # 上限天数 = 最多能填的天数（向下取整到 0.01 天），和 status 的判定、保存时的校验一致。
-            "limit_days": float(max_entry_days(limit)),
-            "limit_hours": float(calculated_hours(_as_decimal(limit))),
-            "status": _fill_status(days, limit),
+            # 小时是真实的数；天数 = 小时 ÷ 8，只用来显示。状态按小时判定，和保存时的校验一致。
+            "used_hours": used_hours,
+            "limit_hours": round(limit_hours, 2),
+            "used_days": display_days(used_hours),
+            "limit_days": display_days(limit_hours),
+            "status": _fill_status(used_hours, limit_hours),
         })
     return result
 

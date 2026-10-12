@@ -1,10 +1,13 @@
-// 研发工时填报页（/entry）用到的纯函数：状态判定、天数微调、平均分配、项目选择器筛选、
+// 研发工时填报页（/entry）用到的纯函数：状态判定、小时微调、平均分配、项目选择器筛选、
 // 截止倒计时、填报进度汇总、服务器报错解析。不依赖 Vue，方便用 node:test 单独测。
+// 2026-10-12 起月度工时按小时填：小时是真实的数，天数 = 小时 ÷ 8，只用来显示；一天最多 8 小时这条不变
+// （月度上限 = 工作日 × 8 − 已批事假小时，保存时系统自动把小时摊到各个工作日）。
 
 export const HOURS_PER_DAY = 8;
-export const DAY_STEP = 0.5;
+export const HOUR_STEP = 1;
+export const MIN_HOURS = 0.5;
 const EPS = 1e-6;
-const DAY_PATTERN = /^\d+(?:\.\d{1,2})?$/;
+const HOURS_PATTERN = /^\d+(?:\.\d{1,2})?$/;
 
 export const STATUS_META = {
   full: { label: '已填满', tone: 'ok' },
@@ -33,30 +36,40 @@ export function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
-export function validDays(value) {
+export function validHours(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 // 1.50 -> "1.5"，2.00 -> "2"
-export function trimDays(value) {
+export function trimHours(value) {
   return String(round2(value));
+}
+
+// 小时反推的天数（显示用，两位小数）：173 小时 = 21.63 天（21.625）
+export function daysOfHours(hours) {
+  return round2((Number(hours) || 0) / HOURS_PER_DAY);
 }
 
 export function fmtDays(value, digits = 1) {
   return Number(value || 0).toFixed(digits);
 }
 
+// 一行填的小时数
 export function rowHours(row) {
-  return round2(validDays(row?.occurrence_days) * HOURS_PER_DAY);
+  return round2(validHours(row?.hours));
 }
 
-export function sumDays(rows) {
-  return round2((rows || []).reduce((sum, row) => sum + validDays(row?.occurrence_days), 0));
+export function rowDays(row) {
+  return daysOfHours(rowHours(row));
 }
 
 export function sumHours(rows) {
   return round2((rows || []).reduce((sum, row) => sum + rowHours(row), 0));
+}
+
+export function sumDays(rows) {
+  return daysOfHours(sumHours(rows));
 }
 
 export function daysInMonth(period) {
@@ -72,40 +85,19 @@ export function previousPeriod(period) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// ---- 上限、剩余、状态（统一按工时算，1 天 = 8 小时） ----
-// 请假可以是 3 / 5 小时或任意 0.5 小时，可填工时折成天常常不是 0.01 的倍数（173 小时 = 21.625 天）。
-// 天数最多保留两位小数，所以能填的最大值是向下取整的 21.62 天；「还差多少」也一律向下取整到 0.01 天，
-// 绝不进位——照着页面上显示的数字填，一定能保存。后端 _fill_status / prepare_monthly_rows 用同一条规则。
-export const FULL_TOLERANCE_HOURS = 0.08;
-
-function hoursOf(days) {
-  return round2((Number(days) || 0) * HOURS_PER_DAY);
-}
-
-// 当月最多能填的天数：上限向下取整到 0.01 天（21.625 -> 21.62）
-export function maxEntryDays(limit) {
-  const hundredths = Math.floor((Number(limit) || 0) * 100 + 1e-6);
-  return Math.max(0, hundredths) / 100;
-}
-
-// 还能填的天数：向下取整到 0.01 天，超上限 / 已填满为 0
-export function remainingDays(used, limit) {
-  const hundredths = Math.floor(((Number(limit) || 0) - (Number(used) || 0)) * 100 + 1e-6);
-  return Math.max(0, hundredths) / 100;
-}
-
-// 离上限还差多少小时（精确值，可能带填不进去的零头，比如 5 小时 = 0.625 天）
+// ---- 上限、剩余、状态（都按小时算，精确比较，没有零头容差） ----
+// 离上限还差多少小时
 export function remainingHours(used, limit) {
-  return Math.max(0, round2(hoursOf(limit) - hoursOf(used)));
+  return Math.max(0, round2((Number(limit) || 0) - (Number(used) || 0)));
 }
 
-// 超上限 > 未填 > 已填满（剩余工时 < 0.08 小时）> 未填满；可填 0 小时的人没有什么要填，算已填满
-export function deriveStatus(used, limit) {
-  const usedHours = hoursOf(used);
-  const limitHours = hoursOf(limit);
-  if (usedHours > limitHours + EPS) return 'over';
-  if (usedHours <= EPS) return limitHours > EPS ? 'none' : 'full';
-  return limitHours - usedHours < FULL_TOLERANCE_HOURS - EPS ? 'full' : 'part';
+// 超上限 > 未填 > 已填满（填的小时等于可填小时）> 未填满；可填 0 小时的人没有什么要填，算已填满
+export function deriveStatus(usedHours, limitHours) {
+  const used = round2(usedHours);
+  const limit = round2(limitHours);
+  if (used > limit + EPS) return 'over';
+  if (used <= EPS) return limit > EPS ? 'none' : 'full';
+  return Math.abs(limit - used) < 0.005 ? 'full' : 'part';
 }
 
 export function needsRemind(status) {
@@ -141,8 +133,13 @@ export function newRowKey(prefix = 'new') {
   return `${prefix}-${Date.now()}-${keySeed}`;
 }
 
-export function rowFromProject(project, employee, days) {
-  const value = validDays(days) || DAY_STEP;
+// 把一行的小时设成 hours（字符串，同时更新反推的天数）
+export function withHours(row, hours) {
+  return { ...row, hours: trimHours(hours), occurrence_days: daysOfHours(hours) };
+}
+
+export function rowFromProject(project, employee, hours) {
+  const value = validHours(hours) || HOUR_STEP;
   return {
     key: newRowKey(),
     monthly_entry_id: '',
@@ -150,64 +147,58 @@ export function rowFromProject(project, employee, days) {
     project: project?.name || '',
     project_code: projectCode(project),
     project_name: projectName(project),
-    occurrence_days: trimDays(value),
-    hours: round2(value * HOURS_PER_DAY),
+    hours: trimHours(value),
+    occurrence_days: daysOfHours(value),
     remark: '',
   };
 }
 
-// 新增项目时的默认天数：剩余不足 1 天就只给剩余的整 0.5 天，至少 0.5。
-export function defaultNewDays(left) {
-  const steps = Math.floor((Number(left) || 0) / DAY_STEP + 1e-9) * DAY_STEP;
-  return Math.max(DAY_STEP, Math.min(1, steps));
+// 新增项目时的默认小时：剩余够一天就给整数小时（最多 8），不够 1 小时就按 0.5 小时往下取，至少 0.5。
+export function defaultNewHours(left) {
+  const room = Number(left) || 0;
+  if (room >= 1) return Math.min(HOURS_PER_DAY, Math.floor(room + 1e-9));
+  return Math.max(MIN_HOURS, Math.floor(room * 2 + 1e-9) / 2);
 }
 
 export function canStepDown(value) {
-  return validDays(value) > DAY_STEP + EPS;
+  return validHours(value) > MIN_HOURS + EPS;
 }
 
-export function stepDays(value, delta) {
-  return trimDays(Math.max(DAY_STEP, round2(validDays(value) + delta)));
+export function stepHours(value, delta) {
+  return trimHours(Math.max(MIN_HOURS, round2(validHours(value) + delta)));
 }
 
-export function isValidDaysText(value) {
+export function isValidHoursText(value) {
   const text = String(value ?? '').trim();
-  return DAY_PATTERN.test(text) && Number(text) > 0;
+  return HOURS_PATTERN.test(text) && Number(text) > 0;
 }
 
-// 把某一行补到上限：该行的天数 = 现有 + 剩余（向下取整到 0.01 天），合计正好到「已填满」。
+// 把某一行补到上限：该行的小时 = 现有 + 剩余，合计正好到「已填满」。
 // index 是想补的那一行（最后编辑的那行），没有或越界就补最后一行。
 export function topUpRow(rows, limit, index) {
   const list = rows || [];
   const target = Number.isInteger(index) && index >= 0 && index < list.length ? index : list.length - 1;
-  const add = remainingDays(sumDays(list), limit);
+  const add = remainingHours(sumHours(list), limit);
   if (target < 0 || add <= 0) return { rows: list, added: 0, index: target };
-  const next = list.map((row, i) => {
-    if (i !== target) return row;
-    const days = round2(validDays(row.occurrence_days) + add);
-    return { ...row, occurrence_days: trimDays(days), hours: round2(days * HOURS_PER_DAY) };
-  });
+  const next = list.map((row, i) => (i === target ? withHours(row, rowHours(row) + add) : row));
   return { rows: next, added: add, index: target };
 }
 
-// 把剩余天数平均分给现有项目：先每行加 floor(剩余 / 行数 / 0.5) × 0.5，
-// 分不尽的零头（向下取整到 0.01 天）全部加在最后一行，合计正好到上限，绝不超过。
+// 把剩余小时平均分给现有项目：先每行加 floor(剩余 / 行数 / 1) 个整小时，分不尽的零头全部加在最后一行，合计正好到上限，绝不超过。
 export function averageFill(rows, limit) {
   const list = rows || [];
-  const left = remainingDays(sumDays(list), limit);
+  const left = remainingHours(sumHours(list), limit);
   if (!list.length || left <= 0) return { rows: list, added: 0 };
-  const add = Math.floor(left / list.length / DAY_STEP + 1e-9) * DAY_STEP;
+  const add = Math.floor(left / list.length / HOUR_STEP + 1e-9) * HOUR_STEP;
   const rest = round2(left - add * list.length);
   const next = list.map((row, index) => {
     const extra = add + (index === list.length - 1 ? rest : 0);
-    if (extra <= 0) return row;
-    const days = round2(validDays(row.occurrence_days) + extra);
-    return { ...row, occurrence_days: trimDays(days), hours: round2(days * HOURS_PER_DAY) };
+    return extra <= 0 ? row : withHours(row, rowHours(row) + extra);
   });
   return { rows: next, added: left };
 }
 
-// 复制上月：只取仍然可选的项目，去重，天数 > 0，备注不带过来。
+// 复制上月：只取仍然可选的项目，去重，小时 > 0，备注不带过来。
 export function rowsFromPrevious(entries, { employee = '', projects = [] } = {}) {
   const available = new Set((projects || []).map((item) => item.name));
   const seen = new Set();
@@ -215,8 +206,9 @@ export function rowsFromPrevious(entries, { employee = '', projects = [] } = {})
   let skipped = 0;
   for (const entry of entries || []) {
     const project = String(entry?.project || '');
-    const days = validDays(entry?.occurrence_days);
-    if (!project || days <= 0 || seen.has(project)) continue;
+    // 老记录只有天数时按 天 × 8 换算
+    const hours = validHours(entry?.hours) || validHours(entry?.occurrence_days) * HOURS_PER_DAY;
+    if (!project || hours <= 0 || seen.has(project)) continue;
     seen.add(project);
     if (available.size && !available.has(project)) {
       skipped += 1;
@@ -229,16 +221,27 @@ export function rowsFromPrevious(entries, { employee = '', projects = [] } = {})
       project,
       project_code: entry.project_code || '',
       project_name: entry.project_name || '',
-      occurrence_days: trimDays(days),
-      hours: round2(days * HOURS_PER_DAY),
+      hours: trimHours(hours),
+      occurrence_days: daysOfHours(hours),
       remark: '',
     });
   }
   return { rows, skipped };
 }
 
-// 保存前的逐行校验，文案与原页面一致。返回空串表示通过。
-export function validateEntryRows(rows, { employee, hasLegacy = false, dayLimit } = {}) {
+// 小时显示：去掉多余的 0（173 -> "173"，172.5 -> "172.5"）
+export function fmtHours(value) {
+  return String(round2(value));
+}
+
+// 天数显示：至少一位小数，最多两位（20 -> "20.0"，21.63 -> "21.63"）
+export function fmtDaysExact(value) {
+  const text = String(round2(value));
+  return text.includes('.') ? text : `${text}.0`;
+}
+
+// 保存前的逐行校验。返回空串表示通过。
+export function validateEntryRows(rows, { employee, hasLegacy = false, hourLimit } = {}) {
   if (!employee) return '请选择研发人员';
   if (hasLegacy) return '历史按日记录不能在月度视图中直接修改';
   const seen = new Set();
@@ -248,34 +251,22 @@ export function validateEntryRows(rows, { employee, hasLegacy = false, dayLimit 
     if (!row.project || !row.project_code || !row.project_name) return `第 ${index + 1} 行请选择项目`;
     if (seen.has(row.project)) return `第 ${index + 1} 行项目重复`;
     seen.add(row.project);
-    const text = String(row.occurrence_days ?? '').trim();
-    if (!DAY_PATTERN.test(text)) return `第 ${index + 1} 行发生天数最多保留两位小数`;
-    const days = Number(text);
-    if (!Number.isFinite(days) || days <= 0) return `第 ${index + 1} 行发生天数必须大于 0`;
-    sum = round2(sum + days);
+    const text = String(row.hours ?? '').trim();
+    if (!text) return `第 ${index + 1} 行请填写工时`;
+    if (!HOURS_PATTERN.test(text)) return `第 ${index + 1} 行工时必须是不超过两位小数的数字`;
+    const hours = Number(text);
+    if (!Number.isFinite(hours) || hours <= 0) return `第 ${index + 1} 行工时必须大于 0`;
+    sum = round2(sum + hours);
   }
-  if (Number.isFinite(Number(dayLimit)) && deriveStatus(sum, dayLimit) === 'over') {
-    const max = maxEntryDays(dayLimit).toFixed(2);
-    return `当月累计发生天数不能超过 ${max} 天：当前 ${sum.toFixed(2)} 天，本月最多 ${max} 天`;
+  if (Number.isFinite(Number(hourLimit)) && deriveStatus(sum, hourLimit) === 'over') {
+    return `当月累计工时不能超过 ${fmtHours(hourLimit)} 小时：当前 ${fmtHours(sum)} 小时，本月最多 ${fmtHours(hourLimit)} 小时`;
   }
   return '';
 }
 
-// 天数显示：至少一位小数，最多两位（20 -> "20.0"，21.62 -> "21.62"），不四舍五入进位。
-export function fmtDaysExact(value) {
-  const text = String(round2(value));
-  return text.includes('.') ? text : `${text}.0`;
-}
-
-// 小时显示：去掉多余的 0（173 -> "173"，172.5 -> "172.5"）
-export function fmtHours(value) {
-  return String(round2(value));
-}
-
-// 「4 月可填 20.0 天（160 小时）= 日历工时 176 小时 − 已批请假 16 小时」等说明文字。
-// 可填天数是最多能填的天数（向下取整到 0.01 天）：173 小时显示「可填 21.62 天（173 小时）」。
-export function capText({ month, dayLimit, hourLimit, baseHourLimit, leaveHours, joinedOn, relievedOn } = {}) {
-  const parts = [`${month ? `${month} 月` : '本月'}可填 ${fmtDaysExact(maxEntryDays(dayLimit))} 天（${fmtHours(hourLimit)} 小时）`];
+// 「4 月可填 160 小时（约 20.0 天）= 日历工时 176 小时 − 已批请假 16 小时」等说明文字。
+export function capText({ month, hourLimit, baseHourLimit, leaveHours, joinedOn, relievedOn } = {}) {
+  const parts = [`${month ? `${month} 月` : '本月'}可填 ${fmtHours(hourLimit)} 小时（约 ${fmtDaysExact(daysOfHours(hourLimit))} 天）`];
   const base = baseHourLimit ?? hourLimit;
   parts.push(`= 日历工时 ${fmtHours(base)} 小时 − 已批请假 ${fmtHours(leaveHours || 0)} 小时`);
   let text = parts.join(' ');
@@ -287,14 +278,16 @@ export function capText({ month, dayLimit, hourLimit, baseHourLimit, leaveHours,
 // ---- 名单（左侧列表） ----
 export function rosterItemsFromProgress(employees) {
   return (employees || []).map((item) => {
-    const used = Number(item.used_days) || 0;
-    const limit = Number(item.limit_days) || 0;
+    const used = Number(item.used_hours ?? (Number(item.used_days) || 0) * HOURS_PER_DAY) || 0;
+    const limit = Number(item.limit_hours ?? (Number(item.limit_days) || 0) * HOURS_PER_DAY) || 0;
     return {
       employee: item.employee,
       name: item.employee_name || item.employee,
       department: item.department || '',
       used,
       limit,
+      usedDays: daysOfHours(used),
+      limitDays: daysOfHours(limit),
       status: item.status || deriveStatus(used, limit),
       lastReminded: item.last_reminded || '',
     };
@@ -560,48 +553,45 @@ export function projectColor(index) {
 }
 
 // 占本月上限的百分比（四舍五入到整数，上限 0 时为 0）
-export function sharePercent(days, limit) {
+export function sharePercent(hours, limit) {
   const l = Number(limit) || 0;
   if (l <= 0) return 0;
-  return Math.round((validDays(days) / l) * 100);
+  return Math.round((validHours(hours) / l) * 100);
 }
 
-// 分段条：每个天数 > 0 的项目一段，宽度 = 天数 / max(上限, 合计)，颜色按它在表格里的行号取。
+// 分段条：每个小时 > 0 的项目一段，宽度 = 小时 / max(上限, 合计)，颜色按它在表格里的行号取。
 export function stackedSegments(rows, limit) {
   const list = rows || [];
-  const denom = Math.max(Number(limit) || 0, sumDays(list)) || 1;
+  const denom = Math.max(Number(limit) || 0, sumHours(list)) || 1;
   const segments = [];
   list.forEach((row, index) => {
-    const days = validDays(row?.occurrence_days);
-    if (days <= 0) return;
+    const hours = validHours(row?.hours);
+    if (hours <= 0) return;
     segments.push({
       key: row.key || row.monthly_entry_id || row.project || String(index),
       index,
       code: row.project_code || row.project || '',
       name: row.project_name || '',
-      days,
+      hours,
+      days: daysOfHours(hours),
       color: projectColor(index),
-      width: Math.round((days / denom) * 10000) / 100,
-      pct: sharePercent(days, limit),
+      width: Math.round((hours / denom) * 10000) / 100,
+      pct: sharePercent(hours, limit),
     });
   });
   return segments;
 }
 
-// 「还差 0.62 天（5 小时）」（琥珀）/「已分配满 ✓」（绿）/「超出上限 X 天…」（红）
-// 还差的天数向下取整到 0.01 天（照着填一定能保存）；不是整天 / 半天时括号里写精确的剩余小时数。
+// 「还差 5 小时（约 0.63 天）」（琥珀）/「已分配满 ✓」（绿）/「超出上限 X 小时…」（红）
 export function remainingMeta(used, limit) {
   const status = deriveStatus(used, limit);
-  const max = maxEntryDays(limit);
-  const days = remainingDays(used, limit);
   const hours = remainingHours(used, limit);
   if (status === 'over') {
-    return { tone: 'bad', days: 0, hours: 0, text: `超出上限 ${trimDays((Number(used) || 0) - max)} 天，最多 ${max.toFixed(2)} 天，请调整后再保存` };
+    return { tone: 'bad', days: 0, hours: 0, text: `超出上限 ${fmtHours(round2(used) - round2(limit))} 小时，最多 ${fmtHours(limit)} 小时，请调整后再保存` };
   }
   if (status === 'full') return { tone: 'ok', days: 0, hours: 0, text: '已分配满 ✓' };
-  const wholeOrHalf = Math.abs(days * 2 - Math.round(days * 2)) < EPS;
-  const text = wholeOrHalf ? `还差 ${fmtDaysExact(days)} 天` : `还差 ${fmtDaysExact(days)} 天（${fmtHours(hours)} 小时）`;
-  return { tone: 'warn', days, hours, text };
+  const days = daysOfHours(hours);
+  return { tone: 'warn', days, hours, text: `还差 ${fmtHours(hours)} 小时（约 ${fmtDaysExact(days)} 天）` };
 }
 
 // ---- 服务器报错 ----

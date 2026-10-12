@@ -19,11 +19,12 @@ const HEADER_ALIASES = {
   employee_text: ['研发人员', '员工', '姓名', '员工编号', 'employee', 'employee_name'],
   project_code: ['项目代码', '项目编号', 'project_code', 'rd_project_code'],
   project_name: ['项目名称', 'project_name', 'rd_project_name'],
+  hours: ['工时', '小时', '工时小时', '工时h', '工时(h)', 'hours'],
   occurrence_days: ['发生天数', '天数', 'days', 'occurrence_days'],
   remark: ['备注', '工作内容', '内容', '描述', 'remark', 'description'],
 };
 
-const REQUIRED_HEADERS = ['employee_text', 'project_code', 'project_name', 'occurrence_days'];
+const REQUIRED_HEADERS = ['employee_text', 'project_code', 'project_name'];
 
 function headerField(value) {
   const key = aliasKey(value);
@@ -36,7 +37,8 @@ function headerMap(cells) {
     const field = headerField(cell);
     if (field && map[field] === undefined) map[field] = index;
   });
-  return REQUIRED_HEADERS.every((field) => map[field] !== undefined) ? map : null;
+  // 工时（小时）和发生天数（老模板）至少有一列；两列都有时用小时
+  return REQUIRED_HEADERS.every((field) => map[field] !== undefined) && (map.hours !== undefined || map.occurrence_days !== undefined) ? map : null;
 }
 
 function rowFromHeader(cells, map) {
@@ -45,6 +47,7 @@ function rowFromHeader(cells, map) {
     employee_text: pick('employee_text'),
     project_code: pick('project_code'),
     project_name: pick('project_name'),
+    hours: pick('hours'),
     occurrence_days: pick('occurrence_days'),
     remark: pick('remark'),
   };
@@ -56,7 +59,8 @@ function rowFromPosition(cells) {
     employee_text: values[0] || '',
     project_code: values[1] || '',
     project_name: values[2] || '',
-    occurrence_days: values[3] || '',
+    hours: values[3] || '',
+    occurrence_days: '',
     remark: values.slice(4).join(' ').trim(),
   };
 }
@@ -86,19 +90,23 @@ function findProject(codeValue, nameValue, projects = []) {
   return projects.find((project) => projectCode(project) === code && projectName(project) === name) || null;
 }
 
-function parseDays(value) {
-  const text = clean(value).replace(/天/g, '');
+// 小时（优先）或天数（老模板，按 1 天 = 8 小时换算）→ 小时。返回 { value: 小时或 null, precisionError, fromDays }
+function parseHours(rawRow) {
+  const hoursText = clean(rawRow.hours).replace(/小时|h/gi, '');
+  const daysText = clean(rawRow.occurrence_days).replace(/天/g, '');
+  const fromDays = !hoursText && Boolean(daysText);
+  const text = fromDays ? daysText : hoursText;
   if (!/^\d+(?:\.\d{1,2})?$/.test(text)) {
-    return { value: null, precisionError: /^\d+\.\d{3,}$/.test(text) };
+    return { value: null, precisionError: /^\d+\.\d{3,}$/.test(text), fromDays };
   }
-  const number = Number(text);
-  return { value: Number.isFinite(number) ? number : null, precisionError: false };
+  const number = Number(text) * (fromDays ? 8 : 1);
+  return { value: Number.isFinite(number) ? Math.round(number * 100) / 100 : null, precisionError: false, fromDays };
 }
 
-function monthDayLimit(period) {
+function monthHourLimit(period) {
   const match = clean(period).match(/^(\d{4})-(\d{2})$/);
-  if (!match) return 31;
-  return new Date(Number(match[1]), Number(match[2]), 0).getDate();
+  const days = match ? new Date(Number(match[1]), Number(match[2]), 0).getDate() : 31;
+  return days * 8;
 }
 
 function rowKey(employee, project) {
@@ -112,7 +120,7 @@ function buildExistingState(existingRows = []) {
     const employee = clean(row?.employee);
     const project = clean(row?.project);
     if (employee && project) keys.add(rowKey(employee, project));
-    if (employee) totals.set(employee, (totals.get(employee) || 0) + Number(row?.occurrence_days || 0));
+    if (employee) totals.set(employee, (totals.get(employee) || 0) + Number(row?.hours || 0));
   });
   return { keys, totals };
 }
@@ -129,24 +137,24 @@ function normalizeRawRow(rawRow, options, lineNo, state) {
   const project = findProject(rawRow.project_code, rawRow.project_name, options.projects || []);
   if (!project) errors.push(`第 ${lineNo} 行：项目代码和项目名称未匹配`);
 
-  const parsedDays = parseDays(rawRow.occurrence_days);
-  if (parsedDays.precisionError) {
-    errors.push(`第 ${lineNo} 行：发生天数最多保留两位小数`);
-  } else if (parsedDays.value === null) {
-    errors.push(`第 ${lineNo} 行：发生天数必须是有效数字`);
-  } else if (parsedDays.value <= 0) {
-    errors.push(`第 ${lineNo} 行：发生天数必须大于 0`);
+  const parsed = parseHours(rawRow);
+  if (parsed.precisionError) {
+    errors.push(`第 ${lineNo} 行：${parsed.fromDays ? '发生天数' : '工时'}最多保留两位小数`);
+  } else if (parsed.value === null) {
+    errors.push(`第 ${lineNo} 行：${parsed.fromDays ? '发生天数' : '工时'}必须是有效数字`);
+  } else if (parsed.value <= 0) {
+    errors.push(`第 ${lineNo} 行：${parsed.fromDays ? '发生天数' : '工时'}必须大于 0`);
   }
 
-  if (employeeMatch.employee && project && parsedDays.value !== null && parsedDays.value > 0) {
+  if (employeeMatch.employee && project && parsed.value !== null && parsed.value > 0) {
     const employee = employeeMatch.employee.name;
     const key = rowKey(employee, project.name);
     if (state.seenKeys.has(key)) errors.push(`第 ${lineNo} 行：导入内容中存在重复的员工和项目`);
     if (state.existingKeys.has(key)) errors.push(`第 ${lineNo} 行：系统中已存在相同员工和项目的月度工时`);
 
-    const total = Math.round(((state.totals.get(employee) || 0) + parsedDays.value) * 100) / 100;
-    if (total > state.dayLimit) {
-      errors.push(`第 ${lineNo} 行：${employeeMatch.employee.employee_name || employee}当月累计发生天数不能超过 ${state.dayLimit.toFixed(2)} 天`);
+    const total = Math.round(((state.totals.get(employee) || 0) + parsed.value) * 100) / 100;
+    if (total > state.hourLimit) {
+      errors.push(`第 ${lineNo} 行：${employeeMatch.employee.employee_name || employee}当月累计工时不能超过 ${state.hourLimit} 小时`);
     }
 
     if (!errors.length) {
@@ -159,8 +167,8 @@ function normalizeRawRow(rawRow, options, lineNo, state) {
           project: project.name,
           project_code: projectCode(project),
           project_name: projectName(project),
-          occurrence_days: parsedDays.value,
-          hours: Math.round(parsedDays.value * 8 * 100) / 100,
+          hours: parsed.value,
+          occurrence_days: Math.round((parsed.value / 8) * 100) / 100,
           remark: clean(rawRow.remark),
         },
         errors: [],
@@ -178,7 +186,7 @@ export function parseTimesheetTableRows(tableRows, options = {}) {
     existingKeys: existing.keys,
     seenKeys: new Set(),
     totals: existing.totals,
-    dayLimit: monthDayLimit(options.period),
+    hourLimit: monthHourLimit(options.period),
   };
   let map = null;
   let seenContentRow = false;

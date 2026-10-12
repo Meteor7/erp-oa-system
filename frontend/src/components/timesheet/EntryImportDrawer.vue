@@ -86,8 +86,8 @@ watch(() => props.open, async (open) => {
       <aside class="rd-drawer" role="dialog" aria-modal="true" aria-label="批量导入">
         <header>批量导入工时<button type="button" class="btn quiet sm" aria-label="关闭" @click="emit('close')"><RdIcon name="x" /></button></header>
         <div class="body">
-          <div class="muted">每行一条：研发人员、项目代码、项目名称、发生天数、备注。支持制表符、逗号或多个空格分隔。只能导入当前所选研发人员的记录。</div>
-          <textarea ref="textarea" v-model="pasteText" class="field" placeholder="研发人员　项目代码　项目名称　发生天数　备注"></textarea>
+          <div class="muted">每行一条：研发人员、项目代码、项目名称、工时（小时）、备注。支持制表符、逗号或多个空格分隔。老模板里的“发生天数”也能导入，按 1 天 = 8 小时换算。只能导入当前所选研发人员的记录。</div>
+          <textarea ref="textarea" v-model="pasteText" class="field" placeholder="研发人员　项目代码　项目名称　工时（小时）　备注"></textarea>
           <div class="row">
             <button type="button" class="btn" @click="chooseWorkbook"><RdIcon name="upload" />选择 Excel</button>
             <input ref="workbookInput" type="file" accept=".xlsx,.xls" style="display: none" @change="onWorkbook" />
@@ -103,7 +103,7 @@ watch(() => props.open, async (open) => {
             </div>
             <div v-else>
               <div v-for="(row, index) in rows" :key="index" class="row between" style="padding: 7px 0; border-bottom: 1px solid var(--rd-line)">
-                <span>{{ row.employee_name }} · {{ row.project_code }} · <b class="num">{{ row.occurrence_days }}</b> 天</span>
+                <span>{{ row.employee_name }} · {{ row.project_code }} · <b class="num">{{ row.hours }}</b> 小时 <span class="muted">约 {{ row.occurrence_days }} 天</span></span>
                 <span class="tag ok">通过</span>
               </div>
               <div class="note ok" style="margin-top: 10px"><RdIcon name="check" /><span>共 {{ rows.length }} 行，全部通过。</span></div>

@@ -1,20 +1,19 @@
 <script setup>
-// 工时填报：个人工作表。顶部卡片 = 人员 + 保存按钮 + 已分配汇总 + 分段进度条，下面是工具栏和项目分配行（± 0.5 天微调、可直接输入）。
+// 工时填报：个人工作表。顶部卡片 = 人员 + 保存按钮 + 已分配汇总 + 分段进度条，下面是工具栏和项目分配行（按小时填，± 1 小时微调、可直接输入，旁边给出反推的天数）。
 // 行数据由页面持有：这里不直接改 props，所有改动通过事件交给页面（change 带新数组，remove 带行号，save 通知页面保存）。
 import { computed, ref } from 'vue';
 import { Spinner } from 'frappe-ui';
 import RdIcon from '../rd/RdIcon.vue';
 import '../../styles/rdTimesheet.css';
 import {
-  DAY_STEP, HOURS_PER_DAY, averageFill, avatarText, canStepDown, defaultNewDays, deriveStatus, fmtDays, fmtDaysExact, fmtHours, isValidDaysText,
-  findProject, maxEntryDays, pickerOptions, projectCode, projectColor, projectName, projectOwner, remainingDays, remainingMeta, round2,
-  rowFromProject, rowHours, sharePercent, stackedSegments, statusMeta, stepDays, sumDays, sumHours, topUpRow,
+  HOUR_STEP, averageFill, avatarText, canStepDown, daysOfHours, defaultNewHours, deriveStatus, fmtDaysExact, fmtHours, isValidHoursText,
+  findProject, pickerOptions, projectCode, projectColor, projectName, projectOwner, remainingHours, remainingMeta, round2,
+  rowFromProject, rowHours, sharePercent, stackedSegments, statusMeta, stepHours, sumHours, topUpRow, withHours,
 } from '../../lib/timesheetEntryView.js';
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
   person: { type: Object, default: () => ({ employee: '', name: '', department: '' }) },
-  dayLimit: { type: Number, default: 0 },
   hourLimit: { type: Number, default: 0 },
   capLine: { type: String, default: '' },
   editable: { type: Boolean, default: false },
@@ -33,19 +32,18 @@ const props = defineProps({
 });
 const emit = defineEmits(['change', 'remove', 'copy', 'import', 'remind', 'save']);
 
-const used = computed(() => sumDays(props.rows));
+// 一切按小时算（精确，没有零头）；天数 = 小时 ÷ 8，只是反推出来给人看。
 const hours = computed(() => sumHours(props.rows));
-// 剩余一律先按工时算、再换成天并向下取整到 0.01 天（173 小时 = 21.625 天，最多填 21.62 天），所以照着显示的数字填一定能保存。
-const left = computed(() => remainingDays(used.value, props.dayLimit));
-const maxDays = computed(() => maxEntryDays(props.dayLimit));
-const status = computed(() => deriveStatus(used.value, props.dayLimit));
+const days = computed(() => daysOfHours(hours.value));
+const limitDays = computed(() => daysOfHours(props.hourLimit));
+const left = computed(() => remainingHours(hours.value, props.hourLimit));
+const status = computed(() => deriveStatus(hours.value, props.hourLimit));
 const over = computed(() => status.value === 'over');
-const overDays = computed(() => round2(used.value - maxDays.value));
-const overHours = computed(() => round2((used.value - props.dayLimit) * HOURS_PER_DAY));
+const overHours = computed(() => round2(hours.value - props.hourLimit));
 const meta = computed(() => statusMeta(status.value));
-const remaining = computed(() => remainingMeta(used.value, props.dayLimit));
-const segments = computed(() => stackedSegments(props.rows, props.dayLimit));
-const average = computed(() => averageFill(props.rows, props.dayLimit));
+const remaining = computed(() => remainingMeta(hours.value, props.hourLimit));
+const segments = computed(() => stackedSegments(props.rows, props.hourLimit));
+const average = computed(() => averageFill(props.rows, props.hourLimit));
 // 「补满剩余」补哪一行：最后编辑的那一行，找不到就补最后一行
 const lastEditedKey = ref('');
 function rowKeyOf(row, index) {
@@ -55,10 +53,10 @@ const topUpIndex = computed(() => {
   const found = props.rows.findIndex((row, index) => lastEditedKey.value && rowKeyOf(row, index) === lastEditedKey.value);
   return found >= 0 ? found : props.rows.length - 1;
 });
-const topUp = computed(() => topUpRow(props.rows, props.dayLimit, topUpIndex.value));
+const topUp = computed(() => topUpRow(props.rows, props.hourLimit, topUpIndex.value));
 const topUpTitle = computed(() => {
   const row = props.rows[topUpIndex.value];
-  return row ? `把还差的 ${fmtDaysExact(topUp.value.added)} 天补到「${row.project_name || row.project}」` : '';
+  return row ? `把还差的 ${fmtHours(topUp.value.added)} 小时补到「${row.project_name || row.project}」` : '';
 });
 const canRemindNow = computed(() => props.canRemind && (status.value === 'none' || status.value === 'part') && !props.editable);
 const saveHint = computed(() => {
@@ -88,20 +86,19 @@ function patchRow(index, patch) {
   emit('change', props.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
 }
 
-function setDays(index, text) {
+function setHours(index, text) {
   lastEditedKey.value = rowKeyOf(props.rows[index], index);
-  patchRow(index, { occurrence_days: text, hours: rowHours({ occurrence_days: text }) });
+  patchRow(index, { hours: text, occurrence_days: daysOfHours(text) });
 }
 
 function step(index, delta) {
   lastEditedKey.value = rowKeyOf(props.rows[index], index);
-  const next = stepDays(props.rows[index].occurrence_days, delta);
-  patchRow(index, { occurrence_days: next, hours: rowHours({ occurrence_days: next }) });
+  const next = stepHours(props.rows[index].hours, delta);
+  patchRow(index, { hours: next, occurrence_days: daysOfHours(next) });
 }
 
 function addProject(project) {
-  const days = defaultNewDays(left.value);
-  const row = rowFromProject(project, props.person.employee, days);
+  const row = rowFromProject(project, props.person.employee, defaultNewHours(left.value));
   lastEditedKey.value = row.key;
   emit('change', [...props.rows, row]);
   addQuery.value = '';
@@ -144,7 +141,7 @@ function fillRemaining() {
       <button v-if="canRemindNow" type="button" class="btn sm" :disabled="reminding" @click="emit('remind', person.employee)"><RdIcon name="bell" />催办</button>
     </div>
     <div v-if="legacy" class="note warn"><RdIcon name="alert" /><span class="grow">历史按日记录不能在月度视图中直接修改</span></div>
-    <div v-if="over" class="note bad"><RdIcon name="alert" /><span class="grow">超出本月上限 {{ fmtDaysExact(overDays) }} 天（{{ fmtHours(overHours) }} 小时），本月最多 {{ maxDays.toFixed(2) }} 天，请调整后再保存。</span></div>
+    <div v-if="over" class="note bad"><RdIcon name="alert" /><span class="grow">超出本月上限 {{ fmtHours(overHours) }} 小时，本月最多 {{ fmtHours(hourLimit) }} 小时（约 {{ fmtDaysExact(limitDays) }} 天），请调整后再保存。</span></div>
 
     <div class="card ts-sheet">
       <div class="ts-top">
@@ -167,15 +164,15 @@ function fillRemaining() {
 
         <div>
           <div class="ts-total">
-            <span class="big" :class="{ bad: over }">{{ fmtDaysExact(used) }}</span>
-            <span class="muted">/ {{ fmtDaysExact(maxDays) }} 天</span>
-            <span class="muted" style="margin-left: 6px">{{ fmtHours(hours) }} h</span>
+            <span class="big" :class="{ bad: over }">{{ fmtHours(hours) }}</span>
+            <span class="muted">/ {{ fmtHours(hourLimit) }} 小时</span>
+            <span class="muted" style="margin-left: 6px" title="天数 = 小时 ÷ 8，只用来显示">约 {{ fmtDaysExact(days) }} / {{ fmtDaysExact(limitDays) }} 天</span>
             <span class="left" :class="remaining.tone" style="margin-left: auto">{{ remaining.text }}</span>
             <button v-if="editable && rows.length && topUp.added > 0" type="button" class="btn sm" :title="topUpTitle" @click="fillRemaining">补满剩余</button>
-            <button v-if="editable && rows.length > 1 && average.added > 0" type="button" class="ts-link" @click="fillEvenly">把剩余平均分给现有项目</button>
+            <button v-if="editable && rows.length > 1 && average.added > 0" type="button" class="ts-link" @click="fillEvenly">把剩余小时平均分给现有项目</button>
           </div>
-          <div class="ts-meter" role="img" aria-label="各项目已分配天数占本月上限的比例">
-            <i v-for="seg in segments" :key="seg.key" :style="{ width: seg.width + '%', background: seg.color }" :title="`${seg.code} ${seg.name} ${fmtDays(seg.days, 1)} 天`"></i>
+          <div class="ts-meter" role="img" aria-label="各项目已分配小时占本月上限的比例">
+            <i v-for="seg in segments" :key="seg.key" :style="{ width: seg.width + '%', background: seg.color }" :title="`${seg.code} ${seg.name} ${fmtHours(seg.hours)} 小时（约 ${fmtDaysExact(seg.days)} 天）`"></i>
           </div>
           <div v-if="segments.length" class="ts-legend">
             <span v-for="seg in segments" :key="seg.key"><i class="ts-dot" :style="{ background: seg.color }"></i>{{ seg.code }} {{ seg.pct }}%</span>
@@ -239,9 +236,9 @@ function fillRemaining() {
       <div v-else role="table" aria-label="项目分配">
         <div class="ts-tr th" role="row">
           <div role="columnheader">项目</div>
-          <div role="columnheader">发生天数</div>
+          <div role="columnheader">工时（小时）</div>
           <div role="columnheader">占本月</div>
-          <div class="r" role="columnheader">工时</div>
+          <div class="r" role="columnheader">约合天数</div>
           <div role="columnheader">备注</div>
           <div role="columnheader"></div>
         </div>
@@ -251,17 +248,17 @@ function fillRemaining() {
             <div class="muted">{{ row.project_code }}<template v-if="ownerOf(row)"> · {{ ownerOf(row) }}</template></div>
           </div>
           <div role="cell">
-            <div class="step" :style="editable && !isValidDaysText(row.occurrence_days) ? { borderColor: 'var(--rd-bad)' } : null">
-              <button type="button" :disabled="!editable || !canStepDown(row.occurrence_days)" :aria-label="`减 ${DAY_STEP} 天`" @click="step(index, -DAY_STEP)">−</button>
-              <input :value="row.occurrence_days" inputmode="decimal" :disabled="!editable" :aria-label="`${row.project_name || row.project} 发生天数`" @input="setDays(index, $event.target.value)" />
-              <button type="button" :disabled="!editable" :aria-label="`加 ${DAY_STEP} 天`" @click="step(index, DAY_STEP)">＋</button>
+            <div class="step" :style="editable && !isValidHoursText(row.hours) ? { borderColor: 'var(--rd-bad)' } : null">
+              <button type="button" :disabled="!editable || !canStepDown(row.hours)" :aria-label="`减 ${HOUR_STEP} 小时`" @click="step(index, -HOUR_STEP)">−</button>
+              <input :value="row.hours" inputmode="decimal" :disabled="!editable" :aria-label="`${row.project_name || row.project} 工时（小时）`" @input="setHours(index, $event.target.value)" />
+              <button type="button" :disabled="!editable" :aria-label="`加 ${HOUR_STEP} 小时`" @click="step(index, HOUR_STEP)">＋</button>
             </div>
           </div>
           <div class="ts-share" role="cell">
-            <div class="ts-track"><i :style="{ width: Math.min(100, sharePercent(row.occurrence_days, dayLimit)) + '%', background: projectColor(index) }"></i></div>
-            <span class="num">{{ sharePercent(row.occurrence_days, dayLimit) }}%</span>
+            <div class="ts-track"><i :style="{ width: Math.min(100, sharePercent(rowHours(row), hourLimit)) + '%', background: projectColor(index) }"></i></div>
+            <span class="num">{{ sharePercent(rowHours(row), hourLimit) }}%</span>
           </div>
-          <div class="num sub r" role="cell">{{ fmtDays(rowHours(row), 0) }} h</div>
+          <div class="num sub r" role="cell" :title="`${fmtHours(rowHours(row))} 小时 ÷ 8`">{{ fmtDaysExact(daysOfHours(rowHours(row))) }} 天</div>
           <div role="cell">
             <input v-if="editable" class="ts-remark" placeholder="备注" :value="row.remark" aria-label="备注" @input="patchRow(index, { remark: $event.target.value })" />
             <span v-else class="sub" style="min-width: 0">{{ row.remark || '-' }}</span>
