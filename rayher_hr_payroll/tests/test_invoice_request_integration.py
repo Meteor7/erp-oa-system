@@ -1843,11 +1843,11 @@ def _install_report_requests(monkeypatch, docs):
         return int(wanted in items)
 
     connection.create_function("JSON_CONTAINS", 2, json_contains)
-    fields = ["name", "request_type", "workflow_status", "owner", "employee", "purchaser_user", "modified", "current_step_index", "copied_to"]
+    fields = ["name", "request_type", "workflow_status", "owner", "employee", "purchaser_user", "modified", "current_step_index", "copied_to", "project_owner"]
     connection.execute("CREATE TABLE `tabOA Approval Request` (" + ",".join(fields) + ")")
     connection.execute("CREATE TABLE `tabOA Approval Step` (parent,parenttype,parentfield,step_index,approvers,approved_by,action_by)")
     for doc in docs.values():
-        connection.execute("INSERT INTO `tabOA Approval Request` VALUES (?,?,?,?,?,?,?,?,?)", [getattr(doc, key, None) for key in fields])
+        connection.execute("INSERT INTO `tabOA Approval Request` VALUES (?,?,?,?,?,?,?,?,?,?)", [getattr(doc, key, None) for key in fields])
         for step in getattr(doc, "steps", []):
             connection.execute("INSERT INTO `tabOA Approval Step` VALUES (?,?,?,?,?,?,?)", [doc.name, "OA Approval Request", "steps", step.step_index, step.approvers, getattr(step, "approved_by", "[]"), getattr(step, "action_by", "")])
     def sql(query, values=None, as_dict=False):
@@ -1889,6 +1889,30 @@ def test_list_requests_includes_completed_procurement_for_purchaser(monkeypatch)
     )
 
     assert result == [{"name": "PROC-BUYER"}]
+
+
+def test_list_requests_shows_a_project_owner_the_applications_of_their_project_but_not_drafts(monkeypatch):
+    # 决定（2026-10-12）：项目主管只读可见自己负责的项目里别人提的采购申请，没提交的草稿除外。
+    def application(name, **values):
+        doc = _report_request(name, owner="bob@example.com", employee="EMP-2", employee_name="Bob")
+        doc.request_type = oa_entry.REQUEST_PROCUREMENT
+        doc.business_status = ""
+        doc.workflow_status = values.get("workflow_status", oa_entry.STATUS_COMPLETED)
+        doc.project_owner = values.get("project_owner", "alice@example.com")
+        return doc
+
+    docs = {
+        "PROC-MINE": application("PROC-MINE"),
+        "PROC-DRAFT": application("PROC-DRAFT", workflow_status=oa_entry.STATUS_DRAFT),
+        "PROC-OTHER": application("PROC-OTHER", project_owner="carol@example.com"),
+    }
+    _install_report_requests(monkeypatch, docs)
+    monkeypatch.setattr(frappe_stub, "get_roles", lambda user=None: ["Employee"])
+    monkeypatch.setattr(oa_entry, "_summarize_doc", lambda item, authorized_expense_lines=None: {"name": item.name})
+
+    result = oa_entry.list_requests(view="all", limit=100, request_type=oa_entry.REQUEST_PROCUREMENT)
+
+    assert result == [{"name": "PROC-MINE"}]
 
 
 def test_list_requests_supports_exact_name_without_bypassing_visibility(monkeypatch):

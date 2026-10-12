@@ -158,6 +158,13 @@ def _sql_row_scope(user, roles, identity, actors):
         clauses.append(f"{table}.employee = {frappe.db.escape(identity['employee'])}")
     procurement = _sql_type_scope(PROCUREMENT_REQUEST_TYPES)
     clauses.append(f"({procurement} AND {table}.purchaser_user = {frappe.db.escape(user)})")
+    # 决定（2026-10-12）：项目主管能看到自己负责的项目里别人提的采购申请 / 购买申请（只读，不含别人没提交的草稿），
+    # 不用等到轮到他审批、也不会因为别人先驳回就看不到。
+    applications = _sql_type_scope(PROCUREMENT_APPLICATION_TYPES)
+    clauses.append(
+        f"({applications} AND {table}.project_owner = {frappe.db.escape(user)}"
+        f" AND {table}.workflow_status != {frappe.db.escape(DRAFT_STATUS)})"
+    )
     if roles & PROCUREMENT_GLOBAL_ROLES:
         clauses.append(procurement)
     if "Accounts User" in roles:
@@ -270,6 +277,12 @@ def _can_read(doc, user, roles, identity):
     if _is_owner(doc, user, identity):
         return True
     if request_type in PROCUREMENT_REQUEST_TYPES and _get(doc, "purchaser_user") == user:
+        return True
+    if (
+        request_type in PROCUREMENT_APPLICATION_TYPES
+        and _get(doc, "project_owner") == user
+        and _get(doc, "workflow_status") != DRAFT_STATUS
+    ):
         return True
     actors = _actor_names(user, identity)
     return _is_current_approver(doc, actors) or _is_involved(doc, actors)
