@@ -165,8 +165,8 @@
 .db-cal-s.we { background: none; color: var(--db-ink3); font-weight: 400; }
 .db-cal-lg { padding: 10px 16px 12px; }
 .db-cal-lg .db-mut { margin-left: auto; }
-.is-low-t { color: var(--db-red); }
-.is-mid-t { color: var(--db-sun); }
+.db .is-low-t { color: var(--db-red); }
+.db .is-mid-t { color: var(--db-sun); }
 
 /* 页签里的分段（人事页的“人员 / 考勤”） */
 .db-sec { display: flex; flex-direction: column; gap: 16px; }

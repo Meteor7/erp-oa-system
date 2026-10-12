@@ -43,11 +43,11 @@ test('views are chosen by route query like ClaimWorkbench: home, list, detail; n
   assert.match(workbench, /procurement-pmc-edit/);
 });
 
-test('queues: mine + pending merged and de-duplicated, view=all only for global procurement access, client side filters', () => {
+test('queues: mine + pending + all merged and de-duplicated (the server scopes all by permission), client side filters', () => {
   assert.match(home, /procurement_global_access|globalAccess/);
   assert.match(workbench, /procurement_global_access/);
-  assert.match(list, /listFor\('mine'\), listFor\('pending'\), ctx\.globalAccess \? listFor\('all'\)/);
-  assert.match(list, /mergeRows\(ctx\.requestType, data\.mine, data\.pending\)/);
+  assert.match(list, /listFor\('mine'\), listFor\('pending'\), listFor\('all'\)/);
+  assert.match(list, /mergeRows\(ctx\.requestType, data\.mine, data\.pending, data\.all\)/);
   assert.match(list, /LIST_LIMIT/);
   assert.match(view, /LIST_LIMIT = 200/);
   assert.match(view, /PAGE_SIZE = 50/);

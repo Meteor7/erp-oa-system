@@ -77,9 +77,9 @@ test('procurement queue distinguishes loading from a real empty result and avoid
   assert.match(requestCenter, /业务单据加载失败/);
   assert.match(requestCenter, /重新加载/);
   assert.match(requestCenter, /procurement_global_access/);
-  // 全局角色只取 all，其余人取 mine + pending（按单号去重）
-  assert.match(requestCenter, /ctx\.globalAccess \? listFor\('all'\) : \[\]/);
-  assert.match(requestCenter, /mergeRows\(ctx\.requestType, data\.mine, data\.pending\)/);
+  // mine + pending + all 一起取（all 服务端按权限限定：非全局角色只拿到自己提的、经手的、自己负责的项目里别人提的），按单号去重
+  assert.match(requestCenter, /listFor\('mine'\), listFor\('pending'\), listFor\('all'\)/);
+  assert.match(requestCenter, /mergeRows\(ctx\.requestType, data\.mine, data\.pending, data\.all\)/);
   assert.doesNotMatch(requestCenter, /createResource/);
   assert.doesNotMatch(requestCenter, /auto: true/);
 });

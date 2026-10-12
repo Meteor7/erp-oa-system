@@ -122,6 +122,40 @@ def test_department_manager_scope_is_self_and_active_rd_direct_reports(monthly_m
     assert mod._monthly_employee_scope("edit") == ["EMP-ACTIVE", "EMP-MANAGER"]
 
 
+def test_department_manager_scope_follows_the_reporting_line_below_not_just_direct_reports(monthly_module):
+    # 决定 2026-10-12：团队 = 汇报关系向下。下属的下属也算；不是下属的同部门研发人员不算。
+    mod, frappe = monthly_module
+    _install_monthly_scope_frappe(
+        frappe,
+        ["Employee", "Department Manager"],
+        [
+            _rd_employee("EMP-MANAGER", user_id="worker@example.com"),
+            _rd_employee("EMP-LEAD", user_id="lead@example.com", reports_to="EMP-MANAGER"),
+            _rd_employee("EMP-UNDER-LEAD", user_id="under@example.com", reports_to="EMP-LEAD"),
+            _rd_employee("EMP-PEER", user_id="peer@example.com"),
+        ],
+    )
+
+    assert mod._monthly_employee_scope("edit") == ["EMP-LEAD", "EMP-MANAGER", "EMP-UNDER-LEAD"]
+
+
+def test_a_left_person_in_the_chain_does_not_hide_the_people_below_them(monthly_module):
+    mod, frappe = monthly_module
+    from datetime import date
+    _install_monthly_scope_frappe(
+        frappe,
+        ["Employee", "Department Manager"],
+        [
+            _rd_employee("EMP-MANAGER", user_id="worker@example.com"),
+            _rd_employee("EMP-GONE", user_id="gone@example.com", reports_to="EMP-MANAGER", status="Left"),
+            _rd_employee("EMP-BELOW", user_id="below@example.com", reports_to="EMP-GONE"),
+        ],
+    )
+
+    assert mod._monthly_employee_scope("edit") == ["EMP-BELOW", "EMP-MANAGER"]
+    assert "EMP-BELOW" in mod._team_research_names("EMP-MANAGER")
+
+
 @pytest.mark.parametrize(
     "employees, message",
     [
