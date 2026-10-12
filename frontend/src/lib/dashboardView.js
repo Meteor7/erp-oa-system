@@ -182,7 +182,9 @@ export function calendarView(block = {}) {
       return { kind: cell.kind, pending, title: `${person.name ?? ''} ${day.label} ${CALENDAR_KINDS[cell.kind]}${pending ? '（审批中）' : ''}` };
     }),
   }));
-  const totals = days.map((day, index) => {
+  // 没有 totals（比如我自己的“下两周”只有一行）就不画最下面的在岗人数。
+  const wantTotals = Array.isArray(block.totals) && block.totals.length > 0;
+  const totals = !wantTotals ? [] : days.map((day, index) => {
     const total = block.totals?.[index] || {};
     const present = total.present === null || total.present === undefined ? null : Number(total.present);
     return { off: Number(total.off) || 0, present, level: present === null ? '' : staffLevel(total.off, people.length), title: present === null ? '休息日' : `${Number(total.off) || 0} 人不在岗` };

@@ -10,7 +10,7 @@ from __future__ import annotations
 import calendar
 
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, kpi, list_row, listing, provider, target, todo_item,
+    alert, bar_row, bars, calendar as calendar_block, kpi, list_row, listing, provider, target, todo_item,
 )
 
 MAX_ROWS = 8
@@ -47,6 +47,19 @@ def _load_attendance_home(period):
         return get_attendance_home(period=period)
     except frappe.PermissionError:      # 请假 / 加班 / 调休功能还没对这个账号开放
         return {}
+
+
+def _load_my_strip(ctx):
+    """我未来 14 天的安排（考勤中心首页同一份数据：已批准和审批中的请假、调休、出差、加班，休息日标出来）。"""
+    from datetime import date
+
+    from rayher_hr_payroll.api import attendance_board_entry
+    from rayher_hr_payroll.attendance_scope import resolve_scope
+
+    scope = resolve_scope()
+    if not scope.get("employee"):
+        return []
+    return attendance_board_entry._personal(scope, date.fromisoformat(ctx.today)).get("strip") or []
 
 
 def _load_my_requests(limit):
@@ -200,6 +213,35 @@ def alert_me_leave_unused(ctx):
     if not annual.get("eligible") or annual.get("available", 0) <= 0 or annual.get("used", 0) or annual.get("reserved", 0):
         return None
     return alert("alert.me_leave_unused", "info", f"年假还有 {_n(annual['available'])} 天一天没休", "年底前记得安排", "考勤中心", target("attendance.home"))
+
+
+@provider("block.me_strip", "block", visible=_has_employee, title="我的下两周")
+def block_me_strip(ctx):
+    strip = ctx.memo("me.strip", lambda: _load_my_strip(ctx))
+    if not strip:
+        return None
+    days = [{key: day.get(key) for key in ("date", "label", "day", "weekday", "off_day")} for day in strip]
+    cells = [{"kind": day["kind"], "pending": bool(day.get("pending"))} if day.get("kind") else None for day in strip]
+    return calendar_block("block.me_strip", "我的下两周", days, [{"name": "我", "cells": cells}], [],
+                          sub="假期、出差、加班 · 虚线是还在审批", more="考勤中心", to=target("attendance.home"),
+                          hint="未来 14 天我的请假、调休、出差、加班（和考勤中心首页同一份数据）；周末和节假日是浅灰。")
+
+
+@provider("block.me_balances", "block", visible=_has_employee, title="我的假期")
+def block_me_balances(ctx):
+    summary = _leave(ctx)
+    if not summary:
+        return None
+    annual, comp = summary["annual"], summary["comp"]
+    rows = []
+    if annual.get("eligible"):
+        granted = float(annual.get("granted") or 0)
+        rows.append(bar_row("年假", f"可用 {_n(annual['available'])} / {_n(granted)} 天", annual["available"] / granted * 100 if granted else 0, "ok"))
+    credit = float(comp.get("credit") or 0)
+    rows.append(bar_row("调休", f"可用 {_n(comp['available'] * 8)} 小时", comp["available"] / credit * 100 if credit else 0, "info"))
+    sub = "已用 " + _n(annual.get("used")) + " 天" + (f" · 审批中 {_n(annual['reserved'])} 天" if annual.get("reserved") else "") if annual.get("eligible") else "年假暂未发放"
+    return bars("block.me_balances", "我的假期", rows, sub=sub, more="考勤中心", to=target("attendance.home"),
+                hint="年假和调休余额（年假按天，调休按小时；条的长短是剩下的占已发放 / 累计加班的比例）。")
 
 
 # ---------------------------------------------------------------- 我的申请 / 报销

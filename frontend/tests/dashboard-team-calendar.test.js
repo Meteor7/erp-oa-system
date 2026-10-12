@@ -110,3 +110,14 @@ test('the procurement list knows the project-owner scope and never lists the own
   assert.match(home, /scope: 'owned'/);
   assert.match(read('../src/components/procurement/ProcurementWorkbench.vue'), /currentUser: computed/);
 });
+
+test('a one-row calendar (my own next two weeks) has no staff totals row and no staff note', () => {
+  const block = calendarBlock({ totals: [], people: [{ name: '我', cells: [{ kind: 'annual', pending: false }, ...Array(13).fill(null)] }] });
+  const view = calendarView(block);
+  assert.deepEqual(view.totals, []);
+  assert.equal(view.people.length, 1);
+  assert.equal(blockView(block).empty, false);
+  const source = read('../src/components/dashboard/DashBlock.vue');
+  assert.match(source, /v-if="block\.calendar\.totals\.length" class="db-cal-l"/);
+  assert.match(source, /v-if="block\.calendar\.totals\.length" class="db-mut"/);
+});

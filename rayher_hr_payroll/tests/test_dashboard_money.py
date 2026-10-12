@@ -113,7 +113,7 @@ ALWAYS = {"pay.todo", "claim.todo", "me.processed", "block.aging"}
 COST = {"cost.total", "cost.rd", "cost.po", "cost.expense", "cost.rd_pending", "alloc.status", "block.cost_mix", "block.cost_trend", "block.cost_projects"}
 ALLOC = {"cost.cap", "cost.unknown", "alert.alloc_unknown", "alert.alloc_preview", "block.alloc_mix"}
 BOARD = {"pay.unpaid", "pay.waiting", "pay.in_approval", "pay.paid_month", "pay.cashier_queue", "approval.stuck", "alert.pay_waiting",
-         "alert.stuck", "block.pay_wait_dist", "block.pay_steps", "block.claim_category"}
+         "alert.stuck", "block.pay_wait_dist", "block.pay_steps", "block.claim_category", "block.pay_trend"}
 SUPPLIER = {"block.pay_suppliers", "block.pay_stage"}
 INVOICE = {"invoice.review", "alert.invoice", "block.invoice_status"}
 LABOR = {"block.labor_cost"}
@@ -126,7 +126,7 @@ def visible_keys(ctx, po_view=False):
 
 def test_every_block_is_classified():
     assert ALWAYS | COST | ALLOC | BOARD | SUPPLIER | INVOICE | LABOR == MONEY_KEYS
-    assert len(MONEY_KEYS) == 35
+    assert len(MONEY_KEYS) == 36
 
 
 @pytest.mark.parametrize("name, ctx_args, po_view, expected", [
@@ -643,3 +643,34 @@ def test_small_helpers():
     assert money._json_list('["a", 1]') == ["a", "1"] and money._json_list("oops") == [] and money._json_list('{"a": 1}') == []
     rows = money._top_bars([("甲", 30000.0), ("乙", 20000.0), ("丙", 10000.0), ("丁", 0.0)], 2, "家")
     assert [(row["label"], row["value"], row["pct"]) for row in rows] == [("甲", "3.0", 100.0), ("乙", "2.0", 66.7), ("其他 1 家", "1.0", 33.3)]
+
+
+def test_pay_trend_covers_six_months_in_wan_and_marks_the_selected_month():
+    totals = {"2026-07": 1500000.0, "2026-08": 0.0, "2026-09": 2124000.0, "2026-10": 1000000.0}
+    block = run("block.pay_trend", make_ctx(**FINANCE), **{"money.paid_by_month": totals})
+    assert block["type"] == "cols" and [r["label"] for r in block["rows"]] == ["5月", "6月", "7月", "8月", "9月", "10月"]
+    assert [r["value"] for r in block["rows"]] == ["0", "0", "150", "0", "212.4", "100"]
+    assert block["rows"][-1]["last"] is True and block["rows"][4]["pct"] == 100.0
+    assert run("block.pay_trend", make_ctx(**FINANCE), **{"money.paid_by_month": {}}) is None
+
+
+def test_pay_trend_is_only_for_those_who_see_the_payment_board():
+    assert run("block.pay_trend", make_ctx(), **{"money.paid_by_month": {"2026-10": 1.0}}) is None
+
+
+def test_paid_by_month_sums_all_three_payment_kinds_by_the_actual_paid_date(monkeypatch):
+    import frappe
+
+    seen = {}
+
+    def get_all(doctype, **kwargs):
+        seen.update(kwargs)
+        return [{"amount": 100, "paid_on": "2026-10-03"}, {"amount": 50, "paid_on": "2026-10-20"}, {"amount": 70, "paid_on": "2026-08-31"},
+                {"amount": 9, "paid_on": None}]
+
+    monkeypatch.setattr(frappe, "get_all", get_all, raising=False)
+    totals = money._paid_by_month(make_ctx(**FINANCE))
+    assert totals == {"2026-10": 150.0, "2026-08": 70.0}
+    assert seen["filters"]["workflow_status"] == "已付款"
+    assert seen["filters"]["paid_on"] == ["between", ["2026-05-01", "2026-10-31"]]
+    assert set(seen["filters"]["request_type"][1]) >= {"报销单", "付款单", "采购付款"}

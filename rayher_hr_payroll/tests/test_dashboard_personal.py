@@ -18,7 +18,7 @@ def run(key, ctx):
 
 
 ME_KEYS = ["me.annual", "me.comp", "me.overtime_month", "me.requests", "me.timesheet", "me.claim", "me.cc", "me.unread", "me.approvals",
-           "alert.me_timesheet", "alert.me_leave_unused", "block.me_requests", "block.me_timesheet", "todo.queue"]
+           "alert.me_timesheet", "alert.me_leave_unused", "block.me_requests", "block.me_timesheet", "block.me_strip", "block.me_balances", "todo.queue"]
 
 
 @pytest.fixture
@@ -366,3 +366,46 @@ def test_loaders_call_the_real_apis(monkeypatch):
     assert kw["filters"]["workflow_status"] == ["in", ["草稿", "待审批", "待办理"]]
     monkeypatch.setattr(oa_feature_gate, "can_access_request_type", lambda request_type, user=None: False)
     assert personal._load_my_claims("u@example.com", "E0") is None
+
+
+# ---------------------------------------------------------------- 我的下两周 / 我的假期
+def strip_days():
+    out = []
+    for index in range(14):
+        day = 9 + index
+        out.append({"date": f"2026-10-{day:02d}", "label": f"10/{day}", "day": day, "weekday": "五", "off_day": index in (1, 2, 8, 9),
+                    "kind": {0: "annual", 3: "comp", 4: "trip"}.get(index), "pending": index == 3, "hours": 8})
+    return out
+
+
+def test_my_strip_is_one_calendar_row_without_staff_totals(data, monkeypatch):
+    monkeypatch.setattr(personal, "_load_my_strip", lambda ctx: strip_days())
+    block = run("block.me_strip", make_ctx())
+    assert block["type"] == "calendar" and block["title"] == "我的下两周" and block["totals"] == []
+    assert [person["name"] for person in block["people"]] == ["我"] and len(block["days"]) == 14
+    cells = block["people"][0]["cells"]
+    assert cells[0] == {"kind": "annual", "pending": False} and cells[3] == {"kind": "comp", "pending": True} and cells[1] is None
+    assert block["days"][1]["off_day"] is True
+    assert block["target"]["key"] == "attendance.home"
+
+
+def test_my_strip_is_left_out_without_an_employee_record_or_without_data(data, monkeypatch):
+    monkeypatch.setattr(personal, "_load_my_strip", lambda ctx: pytest.fail("没有员工档案不能取"))
+    assert run("block.me_strip", make_ctx(employee="")) is None
+    monkeypatch.setattr(personal, "_load_my_strip", lambda ctx: [])
+    assert run("block.me_strip", make_ctx()) is None
+
+
+def test_my_balances_show_annual_and_comp_as_bars(data):
+    data["leave"]["annual"] = {"available": 6.5, "granted": 10.0, "used": 3.5, "reserved": 1.0, "eligible": True, "message": ""}
+    data["leave"]["comp"] = {"available": 1.5, "credit": 3.0, "used": 0.0, "reserved": 0.0}
+    block = run("block.me_balances", make_ctx())
+    assert [(r["label"], r["value"], r["pct"], r["tone"]) for r in block["rows"]] == [
+        ("年假", "可用 6.5 / 10 天", 65.0, "ok"), ("调休", "可用 12 小时", 50.0, "info")]
+    assert block["sub"] == "已用 3.5 天 · 审批中 1 天"
+    data["leave"]["annual"] = {"eligible": False, "message": "试用期内暂无年假"}
+    only_comp = run("block.me_balances", make_ctx())
+    assert [r["label"] for r in only_comp["rows"]] == ["调休"] and only_comp["sub"] == "年假暂未发放"
+    data["leave"] = {"visible": False}
+    assert run("block.me_balances", make_ctx()) is None
+    assert run("block.me_balances", make_ctx(employee="")) is None

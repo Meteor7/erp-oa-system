@@ -60,13 +60,13 @@ const stackSegments = computed(() => props.block.rows.filter((row) => row.width 
             <span class="db-cal-n" :title="person.name">{{ person.name }}</span>
             <i v-for="(cell, index) in person.cells" :key="index" class="db-cal-c" :class="[cell ? `k-${cell.kind}` : '', { we: block.calendar.days[index].off, pend: cell && cell.pending }]" :title="cell ? cell.title : undefined"></i>
           </template>
-          <span class="db-cal-l">在岗人数</span>
+          <span v-if="block.calendar.totals.length" class="db-cal-l">在岗人数</span>
           <b v-for="(total, index) in block.calendar.totals" :key="index" class="db-cal-s" :class="[total.level ? `is-${total.level}` : '', { we: total.present === null }]" :title="total.title">{{ total.present === null ? '—' : total.present }}</b>
         </div>
       </div>
       <ul class="db-lg db-cal-lg">
         <li v-for="item in block.calendar.legend" :key="item.kind"><em :class="`k-${item.kind}`"></em>{{ item.label }}</li>
-        <li class="db-mut">下方数字 = 当天在岗人数（共 {{ block.calendar.headcount }} 人）；<b class="is-low-t">红</b> 缺 4 人以上或占 40%，<b class="is-mid-t">橙</b> 缺 3 人以上</li>
+        <li v-if="block.calendar.totals.length" class="db-mut">下方数字 = 当天在岗人数（共 {{ block.calendar.headcount }} 人）；<b class="is-low-t">红</b> 缺 4 人以上或占 40%，<b class="is-mid-t">橙</b> 缺 3 人以上</li>
       </ul>
     </div>
 

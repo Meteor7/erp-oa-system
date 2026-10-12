@@ -20,7 +20,7 @@ from datetime import date, timedelta
 import frappe
 
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, kpi, list_row, listing, money_wan, provider, target,
+    alert, bar_row, bars, col_row, cols, kpi, list_row, listing, money_wan, provider, target,
 )
 
 # 合同已生效、货还在路上或还没结清的 PO 状态（草稿 / 待确认 / 待合同复核 / 待电子用印的合同还没生效；已关闭 / 已取消不看）
@@ -776,3 +776,111 @@ def _block_week_schedule(ctx):
         rows.append(list_row(f"{day[5:]} 周{WEEKDAYS[weekday]}", sub=sub, value=f"{len(items)} 项", tone=tone))
     return listing("block.week_schedule", "本周预计到货", rows, sub="按合同交期 · 物料行" if rows else "本周没有预计到货的物料",
                    to=target("procpay.work"), hint="合同交期落在本周（周一到周日）、还没收齐的物料，按日期排；红色 = 交期已过还没到，黄色 = 今天。")
+
+
+# ================================================================ 图表块：日程、账龄、趋势（2026-10-12 按岗位看板方案补）
+def _pct(part, peak):
+    return part / peak * 100 if peak else 0
+
+
+@provider("block.week_cols", "block", visible=_po_ok, title="本周到货日程")
+def _block_week_cols(ctx):
+    """本周每天预计到货的物料数（柱），比文字列表更容易看出哪天货多；今天标橙。"""
+    today = _today(ctx)
+    monday = today - timedelta(days=today.weekday())
+    counts = {(monday + timedelta(days=offset)).isoformat(): 0 for offset in range(7)}
+    for row in _lines(ctx)["week"]:
+        day = _iso(row["due"])
+        if day in counts:
+            counts[day] += 1
+    if not any(counts.values()):
+        return None
+    peak = max(counts.values()) or 1
+    rows = [col_row(f"周{WEEKDAYS[offset]}", counts[day], _pct(counts[day], peak), day == today.isoformat())
+            for offset, day in enumerate(sorted(counts))]
+    return cols("block.week_cols", "本周到货日程", rows, sub="预计到货的物料行 · 按合同交期", to=target("procpay.work"),
+                hint="合同交期落在本周（周一到周日）、还没收齐的物料，按天数；今天标橙；已过交期的也在里面（同时算进逾期）。")
+
+
+def _age_groups(days_list, edges):
+    """按天数分档：edges [(标签, 上限天数含)] 最后一档无上限。"""
+    groups = []
+    low = None
+    for label, high in edges:
+        groups.append((label, sum(1 for days in days_list if (low is None or days > low) and (high is None or days <= high))))
+        low = high
+    return groups
+
+
+@provider("block.inspect_aging", "block", visible=_po_ok, title="待验收等了多久")
+def _block_inspect_aging(ctx):
+    waited = list(_inspect_info(ctx)["waited"].values())
+    if not waited:
+        return None
+    groups = _age_groups(waited, [("1 天内", 1), ("2–3 天", 3), ("4–7 天", STALE_INSPECT_DAYS), (f"超过 {STALE_INSPECT_DAYS} 天", None)])
+    peak = max(count for _label, count in groups) or 1
+    rows = [bar_row(label, count, _pct(count, peak), "bad" if label.startswith("超过") and count else "") for label, count in groups]
+    return bars("block.inspect_aging", "待验收等了多久", rows, sub="PO 个数 · 从最近一次到货登记起算", to=target("procpay.work", status="待验收"),
+                hint=f"已有到货、还没验收的 PO，按最近一次到货登记到今天的天数分档；超过 {STALE_INSPECT_DAYS} 天算久拖。")
+
+
+@provider("block.overdue_aging", "block", visible=_board_ok, title="逾期了多久")
+def _block_overdue_aging(ctx):
+    late = list(_overdue_info(ctx)["materials"].values())
+    if not late:
+        return None
+    groups = _age_groups(late, [("1–3 天", 3), ("4–7 天", 7), ("超过 7 天", None)])
+    peak = max(count for _label, count in groups) or 1
+    rows = [bar_row(label, count, _pct(count, peak), "bad" if label.startswith("超过") and count else "") for label, count in groups]
+    return bars("block.overdue_aging", "逾期了多久", rows, sub="物料（按采购申请的行去重）", to=target("material.overdue"),
+                hint="合同交期已过、还没收齐的物料，按逾期天数分档（从合同交期的次日起算）。")
+
+
+@provider("block.proc_month_trend", "block", visible=_money_ok, title="近 6 个月采购金额")
+def _block_proc_month_trend(ctx):
+    def build():
+        year, month = int(ctx.period[:4]), int(ctx.period[5:7])
+        start = date(year, month, 1)
+        for _ in range(5):
+            start = (start - timedelta(days=1)).replace(day=1)
+        nxt = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        return _load_month_pos(start.isoformat(), nxt.isoformat())
+    totals = {}
+    for row in ctx.memo("proc.trend_pos", build):
+        totals[row["month"]] = totals.get(row["month"], 0.0) + row["amount"]
+    if not totals:
+        return None
+    year, month = int(ctx.period[:4]), int(ctx.period[5:7])
+    months = []
+    for _ in range(6):
+        months.append(f"{year:04d}-{month:02d}")
+        year, month = (year - 1, 12) if month == 1 else (year, month - 1)
+    months.reverse()
+    peak = max(totals.get(key, 0.0) for key in months) or 1
+    rows = [col_row(f"{int(key[5:])}月", f"{totals.get(key, 0.0) / 10000:.1f}", _pct(totals.get(key, 0.0), peak), key == ctx.period) for key in months]
+    return cols("block.proc_month_trend", "近 6 个月采购金额", rows, sub="万元 · 按 PO 创建月份", to=target("price.approvals", tab="po"),
+                hint="每月创建的 PO（不含已取消）金额合计；供应商、项目分布看右边两块。")
+
+
+@provider("block.pay_next30", "block", visible=_pay_ok, title="未来 30 天要付多少")
+def _block_pay_next30(ctx):
+    """按计划付款日，采购付款期次里还没付清的金额：已过计划日、本周、下周、第 3 周、第 4 周、更晚、没排期。"""
+    today = _today(ctx)
+    labels = ["已过计划日", "本周", "下周", "第 3 周", "第 4 周", "更晚", "没排期"]
+    totals = dict.fromkeys(labels, 0.0)
+    for item in _payment_items(ctx):
+        owed = max(item["amount"] - item["paid"], 0)
+        if item["work_status"] == "已付款" or owed <= 0:
+            continue
+        if not item["planned"]:
+            totals["没排期"] += owed
+            continue
+        delta = (date.fromisoformat(item["planned"]) - today).days
+        key = "已过计划日" if delta < 0 else "本周" if delta < 7 else "下周" if delta < 14 else "第 3 周" if delta < 21 else "第 4 周" if delta < 28 else "更晚"
+        totals[key] += owed
+    if not any(totals.values()):
+        return None
+    peak = max(totals.values()) or 1
+    rows = [col_row(label, f"{totals[label] / 10000:.1f}", _pct(totals[label], peak), label == "已过计划日" and totals[label] > 0) for label in labels]
+    return cols("block.pay_next30", "未来 30 天要付多少", rows, sub="万元 · 采购付款，按计划付款日", to=target("procpay.work"),
+                hint="采购付款期次里还没付清的金额（合同金额 − 已付），按计划付款日分到各周；已过计划日的标橙；没填计划日的单独一栏。报销单、付款单没有计划日，不在这里。")

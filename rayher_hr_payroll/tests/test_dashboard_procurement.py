@@ -289,7 +289,7 @@ def test_production_owner_page_only_has_arrival_and_inspection(world):
     assert [item["key"] for item in page["kpis"]] == ["proc.to_arrive", "proc.to_inspect", "proc.week_arrive", "proc.po_overdue",
                                                       "proc.exchange", "proc.return", "proc.month_inspected", "proc.month_arrived"]
     assert [item["key"] for item in page["alerts"]] == ["alert.inspect_stale", "alert.po_overdue"]
-    assert [item["key"] for item in page["blocks"]] == ["block.week_schedule", "block.arrival_inspect"]
+    assert [item["key"] for item in page["blocks"]] == ["block.week_cols", "block.inspect_aging", "block.week_schedule", "block.arrival_inspect"]
     for item in page["kpis"] + page["alerts"]:      # 生产主管看不了价格审批页，点击去采购付款页
         assert item["target"]["key"] == "procpay.work"
     assert not re.search(r"¥|\d\s*(万|元)", json.dumps(page, ensure_ascii=False))
@@ -732,3 +732,67 @@ def test_payment_items_are_trimmed_to_what_the_board_needs(monkeypatch):
     assert proc._load_payment_items() == [{"po": "PO-A", "work_status": "待验收", "amount": 100.0, "paid": 0.0,
                                            "planned": "2026-10-01"}]
     assert calls == [1000]
+
+
+# ---------------------------------------------------------------- 日程、账龄、趋势（按岗位看板方案补的块）
+NEW_BLOCKS = ["block.week_cols", "block.inspect_aging", "block.overdue_aging", "block.proc_month_trend", "block.pay_next30"]
+
+
+def test_the_new_blocks_are_registered_and_used_by_a_layout():
+    for key in NEW_BLOCKS:
+        assert core.REGISTRY[key].kind == "block", key
+        assert key in layout.all_block_keys(), key
+
+
+def test_the_week_columns_count_the_weeks_materials_per_day_and_mark_today(world):
+    fill(world)
+    block = run("block.week_cols", full_ctx())
+    assert block["type"] == "cols"
+    assert [(r["label"], r["value"], r["last"]) for r in block["rows"]] == [
+        ("周一", "0", False), ("周二", "0", False), ("周三", "0", False), ("周四", "0", False),
+        ("周五", "1", True), ("周六", "1", False), ("周日", "0", False)]
+    world["lines"] = []
+    assert run("block.week_cols", full_ctx()) is None
+
+
+def test_inspect_aging_groups_waiting_pos_by_days_since_the_last_arrival(world):
+    fill(world)
+    block = run("block.inspect_aging", full_ctx())
+    assert [(r["label"], r["value"], r["tone"]) for r in block["rows"]] == [
+        ("1 天内", "0", ""), ("2–3 天", "0", ""), ("4–7 天", "1", ""), ("超过 7 天", "1", "bad")]
+    world["lines"] = []
+    assert run("block.inspect_aging", full_ctx()) is None
+
+
+def test_overdue_aging_groups_late_materials_and_needs_the_material_board_right(world):
+    fill(world)
+    block = run("block.overdue_aging", make_ctx(positions=("pmc",), roles=("Employee", "Purchase User")))
+    assert [(r["label"], r["value"], r["tone"]) for r in block["rows"]] == [("1–3 天", "0", ""), ("4–7 天", "0", ""), ("超过 7 天", "2", "bad")]
+    world["calls"].clear()
+    assert run("block.overdue_aging", make_ctx(positions=("production_asset_owner",))) is None
+    assert world["calls"] == []
+
+
+def test_the_monthly_purchase_trend_covers_six_months_and_is_never_shown_to_pmc(world):
+    fill(world)
+    block = run("block.proc_month_trend", full_ctx())
+    assert [r["label"] for r in block["rows"]] == ["5月", "6月", "7月", "8月", "9月", "10月"]
+    assert [r["value"] for r in block["rows"]] == ["0.0", "0.0", "0.0", "0.0", "20.0", "22.0"]
+    assert block["rows"][-1]["last"] is True and block["rows"][-1]["pct"] == 100.0
+    world["calls"].clear()
+    assert run("block.proc_month_trend", make_ctx(positions=("pmc",), roles=("Employee", "Purchase User"))) is None
+    assert world["calls"] == []
+
+
+def test_next_thirty_days_groups_unpaid_purchase_payments_by_planned_week(world):
+    fill(world)
+    block = run("block.pay_next30", full_ctx())
+    assert [(r["label"], r["value"]) for r in block["rows"]] == [
+        ("已过计划日", "4.5"), ("本周", "0.0"), ("下周", "5.0"), ("第 3 周", "0.0"), ("第 4 周", "0.0"), ("更晚", "0.0"), ("没排期", "2.0")]
+    assert block["rows"][0]["last"] is True                      # 已过计划日的标橙
+    world["calls"].clear()
+    for blocked in (make_ctx(positions=("pmc",), roles=("Employee", "Purchase User")), make_ctx(positions=("production_asset_owner",))):
+        assert run("block.pay_next30", blocked) is None
+    assert world["calls"] == []                                  # PMC、生产主管不碰付款数据
+    world["pay"] = [{"po": "PO-C", "work_status": "已付款", "amount": 10000, "paid": 10000, "planned": "2026-09-01"}]
+    assert run("block.pay_next30", full_ctx()) is None

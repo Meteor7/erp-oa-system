@@ -837,6 +837,50 @@ def block_claim_category(ctx):
                 hint="本期已付款的报销单、付款单，按费用明细的科目（一级 / 二级）汇总，前 5 名，其余合并。来源：付款看板。")
 
 
+def _paid_by_month(ctx):
+    """近 6 个月（含所选月份）每月已付金额：{"2026-05": 元}。报销单 + 付款单 + 采购付款，按实际付款日期。"""
+    def load():
+        import frappe
+        from rayher_hr_payroll.oa_document_types import REQUEST_PROCUREMENT_PAYMENT
+
+        year, month = int(ctx.period[:4]), int(ctx.period[5:7])
+        start = date(year, month, 1)
+        for _ in range(5):
+            start = (start - timedelta(days=1)).replace(day=1)
+        _first, last = _month_bounds(ctx.period)
+        rows = frappe.get_all(
+            "OA Approval Request",
+            filters={"request_type": ["in", [*boards.CLAIM_TYPES, REQUEST_PROCUREMENT_PAYMENT]], "workflow_status": boards.PAID,
+                     "paid_on": ["between", [start.isoformat(), last]]},
+            fields=["amount", "paid_on"], limit_page_length=0)
+        totals = {}
+        for row in rows:
+            key = boards.month_key(row.get("paid_on"))
+            if key:
+                totals[key] = totals.get(key, 0.0) + float(row.get("amount") or 0)
+        return totals
+
+    return ctx.memo("money.paid_by_month", load)
+
+
+@provider("block.pay_trend", "block", visible=_board_all, title="近 6 个月已付金额")
+def block_pay_trend(ctx):
+    totals = _paid_by_month(ctx)
+    if not any(totals.values()):
+        return None
+    year, month = int(ctx.period[:4]), int(ctx.period[5:7])
+    months = []
+    for _ in range(6):
+        months.append(f"{year:04d}-{month:02d}")
+        year, month = (year - 1, 12) if month == 1 else (year, month - 1)
+    months.reverse()
+    peak = max(totals.get(key, 0.0) for key in months) or 1
+    rows = [col_row(f"{int(key[5:])}月", _wan(totals.get(key, 0.0)).replace(".0", ""), _pct(totals.get(key, 0.0), peak), key == ctx.period)
+            for key in months]
+    return cols("block.pay_trend", "近 6 个月已付金额", rows, sub="万元 · 报销 + 付款 + 采购付款", more="付款看板", to=target("board.payment"),
+                hint="每月实际付出去的金额（按付款日期；报销单、付款单、采购付款合计）。")
+
+
 @provider("block.aging", "block", visible=_always, title="待处理账龄")
 def block_aging(ctx):
     queue = _my_queue(ctx)
