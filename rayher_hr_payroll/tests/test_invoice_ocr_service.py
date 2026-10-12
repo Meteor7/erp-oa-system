@@ -261,7 +261,7 @@ class Environment:
         return doc
 
     def add_record(self, name="INV-1", **values):
-        defaults = dict(doctype=service.RECORD_DOCTYPE, name=name, owner="alice@example.com", batch="BATCH-1", uploaded_by="alice@example.com", invoice_file="/private/files/invoice.pdf", original_filename="invoice.pdf", mime_type="application/pdf", file_size=9, file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(), recognition_status="待确认", invoice_category="", project_name="", issue_date=None, invoice_number="", amount_before_tax=None, tax_amount=None, total_amount=None, expense_description="测试费用说明", ocr_payload="", field_warnings="[]", duplicate_of="", duplicate_reason="", request="", expense_line_key="", confirmed_by="", confirmed_on=None, processing_started_on=None, processing_claim_id="", processing_error="", retry_count=0)
+        defaults = dict(doctype=service.RECORD_DOCTYPE, name=name, owner="alice@example.com", batch="BATCH-1", uploaded_by="alice@example.com", invoice_file="/private/files/invoice.pdf", original_filename="invoice.pdf", mime_type="application/pdf", file_size=9, file_sha256=hashlib.sha256(b"%PDF-1.7\n").hexdigest(), recognition_status="待确认", invoice_category="", project_name="测试项目", issue_date="2026-07-14", invoice_number="", amount_before_tax=None, tax_amount=None, total_amount=Decimal("106.00"), expense_description="测试费用说明", ocr_payload="", field_warnings="[]", duplicate_of="", duplicate_reason="", request="", expense_line_key="", confirmed_by="", confirmed_on=None, processing_started_on=None, processing_claim_id="", processing_error="", retry_count=0)
         defaults.update(values)
         doc = Doc(self, defaults); self.docs[service.RECORD_DOCTYPE][name] = doc; return doc
 
@@ -501,13 +501,16 @@ def test_missing_ocr_total_no_longer_hides_a_duplicate_number(env):
     assert key == "000123" and duplicate["name"] == "INV-OLD-ZERO"
 
 
-def test_confirm_allows_missing_fields_but_stamps_server_audit(env):
-    env.add_batch(); record = env.add_record(invoice_number="", issue_date=None, total_amount=None)
-    # 修复（2026-09-28）：没有发票号码不能确认；其余字段仍可以空着。
+def test_confirm_needs_the_required_fields_but_not_the_category_and_stamps_server_audit(env):
+    env.add_batch(); record = env.add_record(invoice_number="", project_name="", issue_date=None, total_amount=None)
+    # 2026-10-12：确认必填 = 项目名称、开票日期、合计、发票号码、费用说明（和发票夹页面的 * 一致）；发票类别可以空着。
+    with pytest.raises(ValidationError, match="项目名称、开票日期、合计"):
+        service.confirm_invoice(record.name, {"invoice_category": ""})
     with pytest.raises(ValidationError, match="发票号码"):
-        service.confirm_invoice(record.name, {"invoice_category": "电子发票（普通发票）"})
-    result = service.confirm_invoice(record.name, {"invoice_category": "电子发票（普通发票）", "invoice_number": "000999"})
+        service.confirm_invoice(record.name, {"invoice_category": "", "project_name": "打印纸", "issue_date": "2026-07-14", "total_amount": "106.00"})
+    result = service.confirm_invoice(record.name, {"invoice_category": "", "project_name": "打印纸", "issue_date": "2026-07-14", "total_amount": "106.00", "invoice_number": "000999"})
     assert result["recognition_status"] == "已确认" and record.confirmed_by == "alice@example.com" and record.confirmed_on == datetime(2026, 7, 21, 9, 0, 0)
+    assert result["invoice_category"] == ""
 
 
 def test_confirm_detects_business_duplicate_under_lock(env):
@@ -771,9 +774,9 @@ def test_whitelisted_api_has_explicit_bounded_signatures_and_delegates(env, monk
 
 def test_api_source_whitelists_only_public_endpoints():
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 20
+    assert source.count("@frappe.whitelist") == 21
     assert "@frappe.whitelist\ndef _" not in source
-    assert source.count('methods=["POST"]') == 18
+    assert source.count('methods=["POST"]') == 19
     assert source.count('methods=["GET"]') == 0
 
 
@@ -1803,7 +1806,7 @@ def test_preview_serve_api_is_explicit_post_and_bounded(env, monkeypatch):
     api_module.serve_invoice_preview("x" * 43)
     delegated.assert_called_once_with("x" * 43)
     source = Path("rayher_hr_payroll/api/invoice_entry.py").read_text(encoding="utf-8")
-    assert source.count("@frappe.whitelist") == 20
+    assert source.count("@frappe.whitelist") == 21
     assert 'methods=["POST"]' in source
     assert 'methods=["GET"]' not in source
 
@@ -2031,7 +2034,7 @@ def test_manual_state_transition_uses_for_update_current_read(env):
         service.update_invoice(record.name, {"project_name": "must-not-write-stale"})
 
     assert ("get_doc", service.RECORD_DOCTYPE, record.name) in env.current_read_calls
-    assert record.project_name == ""
+    assert record.project_name == "测试项目"
 
 
 def test_confirm_duplicate_query_is_current_read_under_business_lock(env):
@@ -2415,7 +2418,7 @@ def test_write_authorization_rechecks_current_batch_and_request_grants(env, gran
     with pytest.raises(ValidationError, match="\u65e0\u6743"):
         service.update_invoice(record.name, {"project_name": "must-not-write"})
 
-    assert record.project_name == ""
+    assert record.project_name == "测试项目"
     assert ("get_doc", service.BATCH_DOCTYPE, batch.name) in env.current_read_calls
     if grant != "batch_owner":
         assert any(
