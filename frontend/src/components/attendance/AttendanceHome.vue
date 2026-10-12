@@ -127,7 +127,7 @@ const todayBar = computed(() => (view.value === 'company' && stats.value
   ? { title: `今日出勤 · ${longDate(stats.value.days[0]?.date)}`, today: stats.value.today, headcount: stats.value.headcount, rate: ratePercent(stats.value.rate) } : null));
 const toolsText = computed(() => ({
   employee: '仅显示你自己的数据',
-  manager: `只显示你的团队（${detail.value?.label || ''}）`,
+  manager: '只显示你的团队：汇报关系向下的在职员工',
   company: '先看部门汇总；点进某个部门才显示具体的人',
   dept: '图表只统计这个部门',
 }[view.value] || ''));

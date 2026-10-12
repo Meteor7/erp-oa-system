@@ -1,5 +1,5 @@
 <script setup>
-// 图表块：bars 横条 / cols 竖柱 / stack 堆叠条 / list 列表，纯 CSS，不用 echarts。
+// 图表块：bars 横条 / cols 竖柱 / stack 堆叠条 / list 列表 / calendar 团队日历（行 = 人，列 = 天），纯 CSS，不用 echarts。
 // 块自己出错时（block.error）只显示"这一块暂时加载失败"，不影响别的块。
 import { computed } from 'vue';
 import { EMPTY_BLOCK_TEXT } from '../../lib/dashboardView.js';
@@ -16,7 +16,7 @@ const stackSegments = computed(() => props.block.rows.filter((row) => row.width 
 </script>
 
 <template>
-  <section class="db-card db-block" :class="{ 'is-failed': block.failed }" :data-block="block.key" :aria-label="block.title">
+  <section class="db-card db-block" :class="{ 'is-failed': block.failed, 'is-wide': block.wide }" :data-block="block.key" :aria-label="block.title">
     <div class="db-hd db-hd-block">
       <h2>{{ block.title }}</h2>
       <span v-if="block.sub" class="db-mut">{{ block.sub }}</span>
@@ -48,6 +48,25 @@ const stackSegments = computed(() => props.block.rows.filter((row) => row.width 
       <div class="db-stack" aria-hidden="true"><i v-for="(row, index) in stackSegments" :key="index" :style="{ width: row.width + '%', background: row.color }"></i></div>
       <ul class="db-lg">
         <li v-for="(row, index) in block.rows" :key="index"><em :style="{ background: row.color }"></em>{{ row.label }} <b>{{ row.value }}</b></li>
+      </ul>
+    </div>
+
+    <div v-else-if="block.type === 'calendar'" class="db-calbox">
+      <div class="db-calwrap">
+        <div class="db-cal" :style="{ '--cols': block.calendar.days.length }" role="table" :aria-label="block.title">
+          <span></span>
+          <div v-for="(day, index) in block.calendar.days" :key="day.date" class="db-cal-h" :class="{ we: day.off, t0: index === 0 }">{{ day.weekday }}<b>{{ day.day }}</b></div>
+          <template v-for="person in block.calendar.people" :key="person.name">
+            <span class="db-cal-n" :title="person.name">{{ person.name }}</span>
+            <i v-for="(cell, index) in person.cells" :key="index" class="db-cal-c" :class="[cell ? `k-${cell.kind}` : '', { we: block.calendar.days[index].off, pend: cell && cell.pending }]" :title="cell ? cell.title : undefined"></i>
+          </template>
+          <span class="db-cal-l">在岗人数</span>
+          <b v-for="(total, index) in block.calendar.totals" :key="index" class="db-cal-s" :class="[total.level ? `is-${total.level}` : '', { we: total.present === null }]" :title="total.title">{{ total.present === null ? '—' : total.present }}</b>
+        </div>
+      </div>
+      <ul class="db-lg db-cal-lg">
+        <li v-for="item in block.calendar.legend" :key="item.kind"><em :class="`k-${item.kind}`"></em>{{ item.label }}</li>
+        <li class="db-mut">下方数字 = 当天在岗人数（共 {{ block.calendar.headcount }} 人）；<b class="is-low-t">红</b> 缺 4 人以上或占 40%，<b class="is-mid-t">橙</b> 缺 3 人以上</li>
       </ul>
     </div>
 

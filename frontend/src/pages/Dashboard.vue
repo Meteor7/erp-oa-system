@@ -111,6 +111,16 @@ function setPeriod(value) {
           <DashBlock v-for="item in page.blocks" :key="item.key" :block="item" :resolve="resolve" @go="go" />
         </div>
 
+        <section v-for="(section, index) in page.sections" :key="`${section.title}-${index}`" class="db-sec" :aria-label="section.title">
+          <div class="db-sec-h"><h2>{{ section.title }}</h2><span v-if="section.sub" class="db-mut">{{ section.sub }}</span></div>
+          <div v-if="section.kpis.length" class="db-kpis">
+            <DashKpi v-for="item in section.kpis" :key="item.key" :kpi="item" :state="resolve(item.target)" @go="go" />
+          </div>
+          <div v-if="section.blocks.length" class="db-blocks">
+            <DashBlock v-for="item in section.blocks" :key="item.key" :block="item" :resolve="resolve" @go="go" />
+          </div>
+        </section>
+
         <p v-if="page.isEmpty" class="db-empty db-card">{{ EMPTY_PAGE_TEXT }}</p>
       </div>
     </template>

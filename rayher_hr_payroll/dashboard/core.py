@@ -26,6 +26,9 @@ PROVIDER_MODULES = (
     "rayher_hr_payroll.dashboard.timesheet",
     "rayher_hr_payroll.dashboard.procurement",
     "rayher_hr_payroll.dashboard.personal",
+    "rayher_hr_payroll.dashboard.team",
+    "rayher_hr_payroll.dashboard.attendance",
+    "rayher_hr_payroll.dashboard.projects",
 )
 
 
@@ -119,6 +122,14 @@ def listing(key, title, rows, sub="", more="", to=None, hint=""):
     return _block("list", key, title, sub, rows, more, to, hint)
 
 
+def calendar(key, title, days, people, totals, sub="", more="", to=None, hint=""):
+    """日历块：行 = 人，列 = 天。days [{date, label, day, weekday, off_day}]；
+    people [{name, cells: [None | {kind, pending}]}]（每天一格）；totals [{off, present}]（每天不在岗 / 在岗人数）。"""
+    block = _block("calendar", key, title, sub, [], more, to, hint)
+    block.update(days=list(days), people=list(people), totals=list(totals))
+    return block
+
+
 def money_wan(amount):
     """金额 → (数字, 单位)：不到 1 万按元，其余按万保留一位小数。"""
     value = float(amount or 0)
@@ -137,7 +148,8 @@ class Ctx:
     today: str                    # "YYYY-MM-DD"
     employee: str = ""            # 本人的员工号（没有就空）
     department: str = ""
-    has_reports: bool = False     # 有在职直接下属
+    has_reports: bool = False     # 有在职直接下属（“部门主管”的唯一定义）
+    owns_projects: bool = False   # 是至少一个项目的负责人
     full_name: str = ""
     profile: str = "employee"
     _memo: dict = field(default_factory=dict)
@@ -226,17 +238,27 @@ def _run(provider_, ctx, errors):
         return None
 
 
-def build_tab(ctx, tab, include_todos=True):
-    errors = []
-    out = {"key": tab["key"], "label": tab["label"], "kpis": [], "alerts": [], "blocks": [], "todos": [], "errors": errors}
-    for bucket, kind in (("kpis", "kpi"), ("alerts", "alert"), ("blocks", "block")):
-        for key in tab.get(bucket, ()):
+def _fill_buckets(ctx, spec, out, errors, buckets):
+    for bucket, kind in buckets:
+        for key in spec.get(bucket, ()):
             provider_ = REGISTRY.get(key)
             if provider_ is None or provider_.kind != kind:
                 continue
             item = _run(provider_, ctx, errors)
             if item is not None:
                 out[bucket].append(item)
+
+
+def build_tab(ctx, tab, include_todos=True):
+    errors = []
+    out = {"key": tab["key"], "label": tab["label"], "kpis": [], "alerts": [], "blocks": [], "todos": [], "sections": [], "errors": errors}
+    _fill_buckets(ctx, tab, out, errors, (("kpis", "kpi"), ("alerts", "alert"), ("blocks", "block")))
+    # 分段：一个页签里按小标题分几段（人事页的“人员 / 考勤”），每段自己有指标卡和图表块；没有内容的段不给。
+    for section in tab.get("sections", ()):
+        built = {"title": section["title"], "sub": section.get("sub", ""), "kpis": [], "blocks": []}
+        _fill_buckets(ctx, section, built, errors, (("kpis", "kpi"), ("blocks", "block")))
+        if built["kpis"] or built["blocks"]:
+            out["sections"].append(built)
     if include_todos and tab.get("todos"):
         provider_ = REGISTRY.get("todo.queue")
         if provider_ is not None:
@@ -251,7 +273,7 @@ def assemble(ctx, layout, include_todos=True):
     tabs = []
     for tab in layout["tabs"]:
         built = build_tab(ctx, tab, include_todos)
-        if tab["key"] == "overview" or built["kpis"] or built["alerts"] or built["blocks"] or built["todos"]:
+        if tab["key"] == "overview" or built["kpis"] or built["alerts"] or built["blocks"] or built["todos"] or built["sections"]:
             tabs.append(built)
     return {
         "role": {"key": ctx.profile, "label": PROFILE_LABELS.get(ctx.profile, ctx.profile), "person": ctx.full_name,
@@ -276,14 +298,14 @@ def _cache_set(key, value, ttl):
 
 def get_home_for(ctx, layouts, cache_get=None, cache_set=None, now=time.time):
     """按用户 + 期间缓存除待办以外的部分，待办每次现取。"""
-    from rayher_hr_payroll.dashboard.layout import LAYOUTS as default_layouts
+    from rayher_hr_payroll.dashboard.layout import layout_for
 
-    layouts = layouts or default_layouts
     ctx.profile = resolve_profile(ctx)
-    layout = layouts[ctx.profile]
+    # 多个身份拼在一起：主岗位版式 + 每多一个身份（有下属、负责项目）多一个页签，互不覆盖。
+    layout = layout_for(ctx, layouts) if layouts is None else layouts[ctx.profile]
     cache_get = cache_get or _cache_get
     cache_set = cache_set or _cache_set
-    key = f"dashboard_home:{ctx.user}:{ctx.period}:{ctx.profile}"
+    key = f"dashboard_home:{ctx.user}:{ctx.period}:{ctx.profile}:{int(ctx.has_reports)}{int(ctx.owns_projects)}"
     cached = cache_get(key)
     if cached:
         payload = json.loads(cached) if isinstance(cached, (str, bytes)) else cached

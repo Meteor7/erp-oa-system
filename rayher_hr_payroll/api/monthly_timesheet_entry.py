@@ -98,6 +98,19 @@ def _single_active_linked_rd_employee() -> str:
     return _row_name(rows[0])
 
 
+def _team_research_names(manager: str, period_start=None) -> list[str]:
+    """部门主管团队里的研发人员：汇报关系向下（直接和间接下属，下属在哪个部门都算），决定 2026-10-12。
+
+    按月份看时带上本月离职的人（和 _eligible_employee_rows 的规则一致）。
+    """
+    from rayher_hr_payroll.team_scope import team_names
+
+    team = team_names(manager, statuses=("Active", "Left") if period_start else ("Active",))
+    if not team:
+        return []
+    return [_row_name(row) for row in _eligible_employee_rows(period_start, name=["in", team])]
+
+
 def _monthly_employee_scope(mode: str, period_start=None) -> list[str] | None:
     if mode not in {"view", "edit"}:
         raise ValueError("mode must be view or edit")
@@ -110,8 +123,7 @@ def _monthly_employee_scope(mode: str, period_start=None) -> list[str] | None:
             frappe.throw(frappe._("当前账号关联了多个在职研发员工，请联系 HR 清理重复关联。"))
         if own:
             current = _row_name(own[0])
-            reports = [_row_name(row) for row in _eligible_employee_rows(period_start, reports_to=current)]
-            return sorted({current, *reports})
+            return sorted({current, *_team_research_names(current, period_start)})
         # 修复（2026-09-29，审查 X3-7，决定 D4）：部门经理本人不是研发人员（总经理、财务主管、IT、
         # 生产、人事）时原来直接报"未关联在职研发员工"，页面打不开。现在：有财务角色的按财务只读看全部；
         # 其余看自己名下的研发下属。
@@ -122,7 +134,7 @@ def _monthly_employee_scope(mode: str, period_start=None) -> list[str] | None:
         )
         if len(manager) != 1:
             return []
-        return sorted(_row_name(row) for row in _eligible_employee_rows(period_start, reports_to=_row_name(manager[0])))
+        return sorted(_team_research_names(_row_name(manager[0]), period_start))
     if "Accounts User" in roles:
         return None if mode == "view" else []
     if "Employee" in roles:

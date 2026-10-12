@@ -85,6 +85,7 @@ const ctx = reactive({
   canSubmitForOthers: computed(() => Boolean(options.value?.can_submit_procurement_for_others)),
   canManageCatalog: computed(() => Boolean(options.value?.can_manage_procurement_catalog)),
   currentEmployee: computed(() => options.value?.current_applicant?.employee || ''),
+  currentUser: computed(() => options.value?.current_applicant?.user || (typeof window !== 'undefined' ? window.user : '') || ''),
   projects,
   applicants,
   departments,

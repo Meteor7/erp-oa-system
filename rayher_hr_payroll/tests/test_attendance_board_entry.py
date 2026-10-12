@@ -1,9 +1,10 @@
-"""考勤中心图表接口的权限：员工只拿到自己的，部门主管只拿到自己的部门，人事和管理层的汇总里没有人名。
+"""考勤中心图表接口的权限：员工只拿到自己的，部门主管只拿到自己的团队（汇报关系向下），人事和管理层的汇总里没有人名。
 
 这里不碰数据库：用一张内存里的员工表和申请表代替，看接口在不同身份下取了什么、返回了什么。
 """
 import importlib
 import json
+import sys
 from datetime import date, timedelta
 from types import SimpleNamespace
 
@@ -15,12 +16,12 @@ TODAY = date.today()
 IN_TWO_DAYS = (TODAY + timedelta(days=2)).isoformat()
 
 EMPLOYEES = [
-    {"name": "E1", "employee_name": "张主管", "department": "研发软件部 - RAY", "user_id": "mgr@tests-x.example.invalid", "reports_to": ""},
-    {"name": "E2", "employee_name": "杨员工", "department": "研发软件部 - RAY", "user_id": "emp@tests-x.example.invalid", "reports_to": "E1"},
-    {"name": "E3", "employee_name": "演示员工120", "department": "研发软件部 - RAY", "user_id": "mate@tests-x.example.invalid", "reports_to": "E1"},
-    {"name": "E4", "employee_name": "演示员工144", "department": "财务部 - RAY", "user_id": "fin@tests-x.example.invalid", "reports_to": ""},
-    {"name": "E5", "employee_name": "演示员工111", "department": "人事行政部 - RAY", "user_id": "hr@tests-x.example.invalid", "reports_to": ""},
-    {"name": "E6", "employee_name": "演示员工160", "department": "总经办 - RAY", "user_id": "person014@tests-x.example.invalid", "reports_to": ""},
+    {"name": "E1", "employee_name": "张主管", "department": "研发软件部 - RAY", "user_id": "mgr@tests-x.example.invalid", "reports_to": "", "status": "Active"},
+    {"name": "E2", "employee_name": "杨员工", "department": "研发软件部 - RAY", "user_id": "emp@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
+    {"name": "E3", "employee_name": "演示员工120", "department": "研发软件部 - RAY", "user_id": "mate@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
+    {"name": "E4", "employee_name": "演示员工144", "department": "财务部 - RAY", "user_id": "fin@tests-x.example.invalid", "reports_to": "", "status": "Active"},
+    {"name": "E5", "employee_name": "演示员工111", "department": "人事行政部 - RAY", "user_id": "hr@tests-x.example.invalid", "reports_to": "", "status": "Active"},
+    {"name": "E6", "employee_name": "演示员工160", "department": "总经办 - RAY", "user_id": "person014@tests-x.example.invalid", "reports_to": "", "status": "Active"},
 ]
 LEAVES = [
     {"name": "OA-1", "employee": "E2", "request_type": att.REQUEST_LEAVE, "leave_type": "年假", "workflow_status": "已完成",
@@ -44,7 +45,14 @@ def api(monkeypatch):
 
     def get_all(doctype, filters=None, fields=None, **_kwargs):
         assert doctype == "Employee"
-        rows = [row for row in EMPLOYEES if all(row.get(key) == value for key, value in (filters or {}).items() if key != "status")]
+        def match(row, key, value):
+            if key == "status":
+                return True
+            if isinstance(value, list) and value and value[0] == "in":
+                return row.get(key) in value[1]
+            return row.get(key) == value
+
+        rows = [row for row in EMPLOYEES if all(match(row, key, value) for key, value in (filters or {}).items())]
         return [{field: row.get(field) for field in fields} for row in rows]
 
     def sql(query, args=None, as_dict=False):
@@ -132,19 +140,37 @@ def test_a_user_without_an_employee_record_sees_nothing(api):
     assert result["level"] == "employee" and result["personal"]["strip"] == []
 
 
-def test_a_manager_gets_their_own_department_with_names_and_is_refused_any_other(api):
+def test_a_manager_gets_their_own_team_with_names_and_is_refused_any_other_department(api):
     result = board(api, "mgr@tests-x.example.invalid")
     assert result["level"] == "manager"
     detail = result["detail"]
-    assert detail["department"] == "研发软件部 - RAY" and detail["label"] == "研发软件部" and detail["headcount"] == 3
+    assert detail["department"] == "" and detail["label"] == "我的团队" and detail["headcount"] == 3
     assert [member["name"] for member in detail["members"]] == ["张主管", "杨员工", "演示员工120"]
     assert detail["stats"]["days"][2]["off"] == 2
-    assert department(api, "mgr@tests-x.example.invalid", "")["detail"]["department"] == "研发软件部 - RAY"
+    assert department(api, "mgr@tests-x.example.invalid", "")["detail"]["label"] == "我的团队"
     assert department(api, "mgr@tests-x.example.invalid", "研发软件部 - RAY")["level"] == "manager"
     for other in ("财务部 - RAY", "总经办 - RAY", "不存在的部门"):
-        with pytest.raises(Exception, match="只能查看自己所在部门"):
+        with pytest.raises(Exception, match="只能查看自己团队"):
             department(api, "mgr@tests-x.example.invalid", other)
     assert "演示员工144" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_the_team_follows_the_reporting_line_not_the_department(api, monkeypatch):
+    # 决定 2026-10-12：团队 = 汇报关系向下。下属在别的部门也算；同部门但不是下属的人不算；下属的下属也算。
+    extra = [
+        {"name": "E7", "employee_name": "演示员工180", "department": "财务部 - RAY", "user_id": "x7@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
+        {"name": "E8", "employee_name": "吴同部不属", "department": "研发软件部 - RAY", "user_id": "x8@tests-x.example.invalid", "reports_to": "", "status": "Active"},
+        {"name": "E9", "employee_name": "演示员工123", "department": "财务部 - RAY", "user_id": "x9@tests-x.example.invalid", "reports_to": "E7", "status": "Active"},
+    ]
+    monkeypatch.setattr(sys.modules[__name__], "EMPLOYEES", [*EMPLOYEES, *extra])
+    names = [member["name"] for member in board(api, "mgr@tests-x.example.invalid")["detail"]["members"]]
+    assert names == ["张主管", "杨员工", "演示员工120", "演示员工180", "演示员工123"]
+    assert "吴同部不属" not in names
+    # 只有下属的下属（没有上级的人不算团队）：演示员工180有下属演示员工123，所以他自己也是 manager
+    _entry, scope, state = api
+    state.login("x7@tests-x.example.invalid")
+    assert scope.resolve_scope()["level"] == "manager"
+    assert [member["name"] for member in board(api, "x7@tests-x.example.invalid")["detail"]["members"]] == ["演示员工180", "演示员工123"]
 
 
 def test_the_company_summary_has_no_names_at_all(api):
@@ -189,13 +215,14 @@ def test_the_review_endpoint_hides_the_who_is_away_grid_from_plain_employees(mon
     monkeypatch.setattr(module, "_require_types", lambda: list(att.ATTENDANCE_TYPES))
     monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])
     monkeypatch.setattr(module, "_department_mates", lambda employees: {"研发软件部": [{"name": "E2", "employee_name": "杨员工"}]})
+    monkeypatch.setattr(module, "team_members", lambda employee, include_self=True: [{"name": "E2", "employee_name": "杨员工"}])
     monkeypatch.setattr(module, "_team", lambda departments, today: [{"department": "研发软件部", "headcount": 1, "days": [{"approved": ["演示员工120"]}]}])
     monkeypatch.setattr(module, "_absence_rows", lambda employees, start, end: [])
     monkeypatch.setattr(module.frappe, "db", SimpleNamespace(get_value=lambda *args, **kwargs: "E1"), raising=False)
     monkeypatch.setattr(module.frappe, "get_all", lambda *args, **kwargs: ["E2"], raising=False)
     raw = getattr(module.list_attendance_review, "__wrapped__", module.list_attendance_review)
     for level, shown in (("employee", 0), ("manager", 1), ("company", 1)):
-        monkeypatch.setattr(module, "resolve_scope", lambda level=level: {"level": level})
+        monkeypatch.setattr(module, "resolve_scope", lambda level=level: {"level": level, "employee": "E1"})
         result = raw()
         assert len(result["team"]) == shown, level
         assert ("演示员工120" in json.dumps(result, ensure_ascii=False)) is bool(shown)

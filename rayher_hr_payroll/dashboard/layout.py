@@ -7,8 +7,27 @@
 """
 
 
-def tab(key, label, kpis=(), alerts=(), blocks=(), todos=False):
-    return {"key": key, "label": label, "kpis": list(kpis), "alerts": list(alerts), "blocks": list(blocks), "todos": todos}
+def tab(key, label, kpis=(), alerts=(), blocks=(), todos=False, sections=()):
+    return {"key": key, "label": label, "kpis": list(kpis), "alerts": list(alerts), "blocks": list(blocks), "todos": todos,
+            "sections": [dict(section) for section in sections]}
+
+
+def section(title, sub="", kpis=(), blocks=()):
+    """页签里的一段（小标题 + 自己的指标卡和图表块）。"""
+    return {"title": title, "sub": sub, "kpis": list(kpis), "blocks": list(blocks)}
+
+
+# 人事页签：人员 / 考勤 两段（考勤只有汇总，没有人名；点进考勤中心再点部门才看到人名）。
+_PEOPLE_TAB = tab(
+    "people", "人事",
+    sections=[
+        section("人员", "在职、合同、宿舍", kpis=["hr.active", "hr.joined_left", "hr.left_month"],
+                blocks=["block.dept_headcount", "block.expiring_list", "block.dorm_summary"]),
+        section("考勤", "只有人数和天数，不显示人名；要看是谁，点进考勤中心",
+                kpis=["hr.away_today", "att.trip", "att.pending", "att.leave", "att.overtime", "att.rate"],
+                blocks=["block.leave_types", "block.att_depts", "block.att_trend"]),
+    ],
+)
 
 
 _LEADER_OVERVIEW = tab(
@@ -22,8 +41,7 @@ _LEADER_TABS = [
     _LEADER_OVERVIEW,
     tab("cost", "经营", kpis=["cost.total", "cost.rd", "cost.po", "cost.expense"],
         blocks=["block.cost_trend", "block.cost_projects", "block.pay_wait_dist", "block.proc_chain", "block.labor_cost"]),
-    tab("people", "人事", kpis=["hr.active", "hr.joined_left", "hr.left_month", "hr.away_today"],
-        blocks=["block.dept_headcount", "block.leave_types", "block.expiring_list", "block.dorm_summary"]),
+    _PEOPLE_TAB,
     tab("rd", "研发", kpis=["ts.rate", "ts.rd_count", "cost.rd_pending", "hr.rd_gap"],
         blocks=["block.ts_by_dept", "block.alloc_mix"]),
 ]
@@ -59,10 +77,9 @@ LAYOUTS = {
         "tabs": [
             tab("overview", "总览",
                 kpis=["hr.active", "hr.joined_left", "hr.away_today", "hr.expiring", "hr.payroll", "hr.social_pending", "hr.dorm_rate", "hr.file_pending"],
-                alerts=["alert.probation", "alert.payroll_draft", "alert.contract", "alert.dorm_lease", "alert.dorm_leaver", "alert.dorm_register", "alert.rd_gap"],
+                alerts=["alert.att_pending", "alert.probation", "alert.payroll_draft", "alert.contract", "alert.dorm_lease", "alert.dorm_leaver", "alert.dorm_register", "alert.rd_gap"],
                 blocks=["block.pay_progress", "block.dorm_summary", "block.dept_headcount"], todos=True),
-            tab("people", "人事", kpis=["hr.active", "hr.joined_left", "hr.left_month", "hr.away_today"],
-                blocks=["block.dept_headcount", "block.leave_types", "block.expiring_list", "block.dorm_summary"]),
+            _PEOPLE_TAB,
             tab("pay", "薪酬与社保", kpis=["hr.payroll", "hr.pay_total", "hr.pay_si", "hr.pay_hf"],
                 blocks=["block.pay_progress", "block.si_hf_list", "block.pay_by_dept"]),
             tab("dorm", "宿舍", kpis=["hr.dorm_rate", "hr.dorm_vacant", "hr.dorm_lease", "hr.dorm_leaver"],
@@ -95,11 +112,16 @@ LAYOUTS = {
                      blocks=["block.week_schedule", "block.arrival_inspect"], todos=True)],
     },
     "dept_manager": {
-        "note": "本部门的审批、工时、出勤和加班。",
-        "tabs": [tab("overview", "总览",
-                     kpis=["me.approvals", "ts.team", "dept.away2w", "dept.active", "dept.overtime", "dept.leave", "dept.projects", "ts.none"],
-                     alerts=["alert.ts_open_team", "alert.dept_attendance"],
-                     blocks=["block.ts_team", "block.ts_projects"], todos=True)],
+        "note": "团队的审批、出勤、请假加班和工时。团队 = 汇报关系向下的在职员工。",
+        "tabs": [
+            tab("overview", "总览",
+                kpis=["me.approvals", "team.away", "team.away2w", "ts.team", "team.leave", "team.overtime"],
+                alerts=["alert.team_low_staff", "alert.ts_open_team"],
+                blocks=["block.team_calendar", "block.team_leave_types"], todos=True),
+            tab("team", "团队", kpis=["team.headcount", "team.leave", "team.overtime"],
+                blocks=["block.team_people_hours", "block.ts_team"]),
+            tab("ts", "工时", kpis=["ts.rate", "dept.projects", "ts.none"], blocks=["block.ts_projects", "block.ts_trend"]),
+        ],
     },
     "employee": {
         "note": "我的待办、假期、申请、报销和工时。",
@@ -111,11 +133,50 @@ LAYOUTS = {
 }
 
 
+# 多个身份拼在一起（决定 2026-10-12）：首页按优先级最高的岗位排版，再按他实际有的身份多加页签，互不覆盖——
+# 有在职直接下属的多一个“团队”页，负责项目的多一个“我负责的项目”页。每个页签只用自己的范围：
+# 团队页只给团队，项目页只给项目，不会因为他是主管就看到项目成员的考勤。
+TEAM_TAB = tab(
+    "team", "团队",
+    kpis=["team.headcount", "team.away", "team.away2w", "team.leave", "team.overtime"],
+    alerts=["alert.team_low_staff"],
+    blocks=["block.team_calendar", "block.team_people_hours", "block.team_leave_types", "block.ts_team"],
+)
+PROJECT_TAB = tab(
+    "projects", "我负责的项目",
+    kpis=["prj.count", "prj.exec", "prj.sign"],
+    blocks=["block.prj_stage", "block.prj_by_project", "block.prj_requests"],
+)
+# 这几个岗位首页本来就是公司级（或者在人事页看各部门汇总），不再另加团队页；部门主管版式里已经有团队页。
+NO_EXTRA_TEAM_TAB = ("dept_manager", "general_manager", "vice_manager", "hr_manager")
+
+
+def layout_for(ctx, layouts=None):
+    """这个人的首页版式：岗位版式 + 他多出来的身份。"""
+    layouts = layouts or LAYOUTS
+    base = layouts[ctx.profile]
+    tabs = list(base["tabs"])
+    keys = {item["key"] for item in tabs}
+    if ctx.has_reports and ctx.profile not in NO_EXTRA_TEAM_TAB and TEAM_TAB["key"] not in keys:
+        tabs.append(TEAM_TAB)
+    if ctx.owns_projects and PROJECT_TAB["key"] not in keys:
+        tabs.append(PROJECT_TAB)
+    return {**base, "tabs": tabs}
+
+
+def _tab_keys(item):
+    keys = set(item["kpis"]) | set(item["alerts"]) | set(item["blocks"])
+    for part in item.get("sections", ()):
+        keys.update(part["kpis"])
+        keys.update(part["blocks"])
+    return keys
+
+
 def all_block_keys():
     keys = {"todo.queue"}
     for layout in LAYOUTS.values():
         for t in layout["tabs"]:
-            keys.update(t["kpis"])
-            keys.update(t["alerts"])
-            keys.update(t["blocks"])
+            keys.update(_tab_keys(t))
+    for extra in (TEAM_TAB, PROJECT_TAB):
+        keys.update(_tab_keys(extra))
     return keys

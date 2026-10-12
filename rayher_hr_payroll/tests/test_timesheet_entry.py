@@ -337,7 +337,7 @@ def test_project_owner_without_all_project_access_remains_self_scoped(monkeypatc
         mod._require_visible_employee("EMP-OTHER")
 
 
-def test_department_manager_options_are_scoped_to_self_and_direct_reports(monkeypatch):
+def test_department_manager_options_are_scoped_to_self_and_the_reporting_line_below(monkeypatch):
     mod, frappe = _load_timesheet_entry(monkeypatch)
     captured = {"employee_filters": []}
 
@@ -352,9 +352,10 @@ def test_department_manager_options_are_scoped_to_self_and_direct_reports(monkey
         return None
 
     def get_all(doctype, filters=None, fields=None, order_by=None, pluck=None, **kwargs):
-        if doctype == "Employee" and pluck == "name":
-            assert filters == {"reports_to": "MGR"}
-            return ["EMP-1"]
+        if doctype == "Employee" and fields == ["name", "status"]:
+            # team_scope：汇报关系向下遍历。MGR 的直接下属 EMP-1，EMP-1 的下属 EMP-2（间接下属）也算
+            parents = filters["reports_to"][1]
+            return {"MGR": [{"name": "EMP-1", "status": "Active"}], "EMP-1": [{"name": "EMP-2", "status": "Active"}]}.get(parents[0], [])
         if doctype == "Employee":
             captured["employee_filters"].append(filters)
             return []
@@ -369,7 +370,7 @@ def test_department_manager_options_are_scoped_to_self_and_direct_reports(monkey
 
     assert captured["roles"] == mod.RD_TIMESHEET_VIEW_ROLES
     employee_filter = captured["employee_filters"][0]
-    assert set(employee_filter["name"][1]) == {"MGR", "EMP-1"}
+    assert set(employee_filter["name"][1]) == {"MGR", "EMP-1", "EMP-2"}
 
 
 def test_finance_options_are_view_only_and_unscoped(monkeypatch):

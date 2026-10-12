@@ -13,7 +13,9 @@ def _make_ctx(period=None):
     if len(month) != 7 or month[4] != "-" or not (month[:4] + month[5:]).isdigit() or not 1 <= int(month[5:]) <= 12:
         frappe.throw(frappe._("期间格式应为 YYYY-MM"))
     employee = frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, ["name", "department", "employee_name"], as_dict=True)
+    # “部门主管”以有没有在职直接下属为准（不看角色名）；项目负责人以项目上的“项目负责人”为准。
     has_reports = bool(employee and frappe.db.exists("Employee", {"reports_to": employee.name, "status": "Active"}))
+    owns_projects = bool(frappe.db.exists("Project", {"project_owner": user, "status": ["!=", "Cancelled"]}))
     return core.Ctx(
         user=user,
         roles=frozenset(frappe.get_roles(user)),
@@ -23,6 +25,7 @@ def _make_ctx(period=None):
         employee=(employee.name if employee else ""),
         department=(employee.department if employee else "") or "",
         has_reports=has_reports,
+        owns_projects=owns_projects,
         full_name=(employee.employee_name if employee else "") or frappe.utils.get_fullname(user) or user,
     )
 

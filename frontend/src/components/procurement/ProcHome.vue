@@ -3,7 +3,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  LIST_LIMIT, approveBlocker, approvalWorkItems, approvalWait, mergeRows, paymentWorkItems, poBreakdown, poWorkItems,
+  LIST_LIMIT, approveBlocker, approvalWorkItems, approvalWait, mergeRows, ownedRows, paymentWorkItems, poBreakdown, poWorkItems,
   prWorkItems, priceWorkItems, shortDate, stageDistribution, stageGroups, statusOf, longestWait, waitText, waitedDays,
 } from '../../lib/procurementView.js';
 import { canCreatePr, canEditPrice, canOpenBoard, canSeePo, canSeePrice, isViceManager } from './access.js';
@@ -24,9 +24,8 @@ const isVice = isViceManager();
 const listFor = (view) => apiGet('oa_entry.list_requests', { view, request_type: ctx.requestType, limit: LIST_LIMIT });
 
 async function loadOa() {
-  const [mine, pending, all] = await Promise.all([
-    listFor('mine'), listFor('pending'), ctx.globalAccess ? listFor('all') : [],
-  ]);
+  // “全部”服务端按权限限定（非全局角色只拿到自己提的、经手的、自己负责的项目里别人提的）。
+  const [mine, pending, all] = await Promise.all([listFor('mine'), listFor('pending'), listFor('all')]);
   Object.assign(home, { mine: mine || [], pending: pending || [], all: all || [], loaded: true });
 }
 
@@ -85,7 +84,8 @@ async function load({ silent = false } = {}) {
 onMounted(() => load());
 defineExpose({ reload: load });
 
-const related = computed(() => mergeRows(ctx.requestType, home.mine, home.pending));
+const related = computed(() => mergeRows(ctx.requestType, home.mine, home.pending, home.all));
+const owned = computed(() => ownedRows(home.all, ctx.currentUser, ctx.currentEmployee));
 const peers = computed(() => (ctx.globalAccess ? home.all : related.value));
 const mineGroups = computed(() => stageGroups(home.mine));
 const allGroups = computed(() => stageGroups(peers.value));
@@ -116,6 +116,10 @@ const stats = computed(() => {
     // 指标卡的数字是按阶段合并统计的（执行中 = 提 PR + 比价 + 价格审批 + PO），点进列表按同一口径筛（stage=exec / back），不再是"全部"。
     cards.push({ key: 'exec', label: '全部 · 采购执行中', count: allGroups.value.exec, unit: '张', tone: '#7FA38E', query: { view: 'list', scope: 'all', stage: 'exec' }, hint: '提 PR、比价、PO 都算' });
   } else {
+    if (owned.value.length) {
+      const executing = stageGroups(owned.value).exec;
+      cards.push({ key: 'owned', label: '我负责的项目 · 申请', count: owned.value.length, unit: '张', tone: '#8DB4EE', query: { view: 'list', scope: 'owned' }, hint: `其中采购执行中 ${executing} 张 · 只读` });
+    }
     cards.push({ key: 'back', label: '退回 / 已撤回', count: mineGroups.value.back, unit: '张', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', stage: 'back' }, hint: mineGroups.value.back ? '修改后重新提交' : '没有要处理的' });
     cards.push({ key: 'demand', label: '我的 · 需求审批中', count: mineGroups.value.demand, unit: '张', tone: '#5470C6', query: { view: 'list', scope: 'mine', stage: 'demand' }, hint: '点进去看卡在谁那里' });
     cards.push({ key: 'exec', label: '我的 · 采购执行中', count: mineGroups.value.exec, unit: '张', tone: '#E3B26B', query: { view: 'list', scope: 'mine', stage: 'exec' }, hint: '可以看到数量和进度' });

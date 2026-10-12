@@ -2,7 +2,8 @@
 
 三档：
 - company：人事经理、副总经理、总经理（按岗位任命判断，不看角色名）和 Administrator。先看各部门的汇总数字，点进某个部门才看到人名；
-- manager：有在职直接下属的员工，只看自己所在的部门（先按本部门做；副总同人事经理一样看全公司，还没有"只看分管部门"的数据）；
+- manager：有在职直接下属的员工，只看自己的团队——汇报关系向下的在职员工，下属在哪个部门都算，同部门但不是下属的人不算
+  （决定 2026-10-12，见 team_scope）；副总同人事经理一样看全公司，还没有"只看分管部门"的数据；
 - employee：其他人，只看自己的数据，看不到同事的请假。
 """
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import frappe
 
 from rayher_hr_payroll.position_access import position_users
+from rayher_hr_payroll.team_scope import has_direct_reports
 
 COMPANY_POSITIONS = ("hr_manager", "vice_manager", "general_manager")
 COMPANY = "company"
@@ -32,6 +34,6 @@ def resolve_scope(user=None):
                      department=rows[0].get("department") or "")
     if user == "administrator" or user in position_users(*COMPANY_POSITIONS):
         scope["level"] = COMPANY
-    elif scope["employee"] and scope["department"] and frappe.db.exists("Employee", {"reports_to": scope["employee"], "status": "Active"}):
+    elif scope["employee"] and has_direct_reports(scope["employee"]):
         scope["level"] = MANAGER
     return scope

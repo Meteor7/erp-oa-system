@@ -1,11 +1,11 @@
 <script setup>
-// 采购申请列表：待我处理 / 我提交的 / 全部（全局角色）或与我相关（其他人）。
+// 采购申请列表：待我处理 / 我提交的 / 全部（全局角色）或与我相关（其他人）/ 我负责的项目（项目负责人，只读）。
 // 搜索、阶段、项目、加急都是在已取回的最近 200 张里筛（后端没有搜索接口）；每页 50 张。
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../../styles/navUi.css';
 import {
-  LIST_LIMIT, PAGE_SIZE, STAGE_FILTERS, STAGE_GROUP_FILTERS, approvalWait, filterRows, listScope, mergeRows, normalizeStage,
+  LIST_LIMIT, PAGE_SIZE, STAGE_FILTERS, STAGE_GROUP_FILTERS, approvalWait, filterRows, listScope, mergeRows, normalizeStage, ownedRows,
   pageCount, pageSlice, projectOptions, projectText, stageFilterLabel, statusOf, waitText, whereText,
 } from '../../lib/procurementView.js';
 import { cleanQuery, detailQuery, formQuery, originLabel, originOf, splitPath } from '../../lib/navContext.js';
@@ -29,7 +29,8 @@ const listFor = (view) => apiGet('oa_entry.list_requests', { view, request_type:
 async function load({ silent = false } = {}) {
   if (!silent) loading.value = true;
   try {
-    const [mine, pending, all] = await Promise.all([listFor('mine'), listFor('pending'), ctx.globalAccess ? listFor('all') : []]);
+    // “全部”服务端按权限限定：全局角色看全部，其他人看自己提的、经手的，以及自己负责的项目里别人提的（只读）。
+    const [mine, pending, all] = await Promise.all([listFor('mine'), listFor('pending'), listFor('all')]);
     Object.assign(data, { mine: mine || [], pending: pending || [], all: all || [], loaded: true });
     loadError.value = '';
   } catch (error) {
@@ -43,15 +44,18 @@ async function load({ silent = false } = {}) {
 onMounted(() => load());
 defineExpose({ reload: load });
 
-const related = computed(() => mergeRows(ctx.requestType, data.mine, data.pending));
+const related = computed(() => mergeRows(ctx.requestType, data.mine, data.pending, data.all));
+const owned = computed(() => ownedRows(data.all, ctx.currentUser, ctx.currentEmployee));
 const byScope = computed(() => ({
   todo: data.pending,
   mine: data.mine,
+  owned: owned.value,
   all: ctx.globalAccess ? data.all : related.value,
 }));
 const scopes = computed(() => [
   { key: 'todo', label: '待我处理', count: data.pending.length },
   { key: 'mine', label: '我提交的', count: data.mine.length },
+  ...(owned.value.length || scope.value === 'owned' ? [{ key: 'owned', label: '我负责的项目', count: owned.value.length }] : []),
   { key: 'all', label: ctx.globalAccess ? '全部' : '与我相关', count: byScope.value.all.length },
 ]);
 const scopeLabel = computed(() => scopes.value.find((item) => item.key === scope.value)?.label || '');
@@ -65,6 +69,7 @@ const emptyText = computed(() => {
   if (loading.value) return '正在读取申请和待办，请稍候';
   if (loadError.value) return `业务单据加载失败：${loadError.value}`;
   if (scope.value === 'todo' && !base.value.length) return '没有要你审批的采购申请';
+  if (scope.value === 'owned' && !base.value.length) return '你负责的项目里还没有别人提的申请';
   return '没有符合条件的采购申请';
 });
 

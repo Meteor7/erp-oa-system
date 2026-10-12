@@ -35,7 +35,15 @@ export function procurementView(route = {}) {
 }
 
 export function listScope(query = {}, fallback = 'mine') {
-  return ['todo', 'mine', 'all'].includes(query.scope) ? query.scope : fallback;
+  return ['todo', 'mine', 'all', 'owned'].includes(query.scope) ? query.scope : fallback;
+}
+
+// 我负责的项目里别人提的申请（项目负责人只读可见，不含草稿；自己提的算“我提交的”，不在这里重复）。
+export function ownedRows(rows, user, employee = '') {
+  const me = String(user || '').toLowerCase();
+  if (!me) return [];
+  return (rows || []).filter((row) => String(row?.project_owner || '').toLowerCase() === me
+    && String(row?.owner || '').toLowerCase() !== me && !(employee && row?.employee === employee) && row?.workflow_status !== '草稿');
 }
 
 // ---------------------------------------------------------------- 阶段

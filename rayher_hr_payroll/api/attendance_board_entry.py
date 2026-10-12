@@ -2,11 +2,11 @@
 
 谁能看到什么由服务端按身份定（attendance_scope.resolve_scope），页面上隐藏只是展示：
 - 员工：只返回自己的数据（额度以外的请假构成、近 6 个月、未来 14 天的安排），不返回任何同事；
-- 部门主管：只返回自己所在部门，含部门每个人 14 天的日历；取别的部门被拒绝；
+- 部门主管（有在职直接下属的人）：只返回自己的团队——汇报关系向下的在职员工，含每个人 14 天的日历；取别的部门被拒绝；
 - 人事经理 / 副总经理 / 总经理：get_attendance_board 只返回各部门的汇总数字，没有人名；
   点进某个部门（get_department_attendance）才返回这个部门的人名和日历。
 员工调用 get_department_attendance 一律拒绝。
-审批时的"同期谁不在"（get_request_overlap）同样按身份：部门主管只有申请人在自己部门时给人名，人事和管理层给人名，其他人只给空列表。
+审批时的"同期谁不在"（get_request_overlap）同样按身份：部门主管只有申请人在自己团队时给团队里的人名，人事和管理层给人名，其他人只给空列表。
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from rayher_hr_payroll import attendance_requests as att
 from rayher_hr_payroll.attendance_scope import COMPANY, EMPLOYEE, MANAGER, resolve_scope
 from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
+from rayher_hr_payroll.team_scope import team_members
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar
 
 ROW_TYPES = (*att.ATTENDANCE_TYPES, REQUEST_TRAVEL)
@@ -113,6 +114,21 @@ def _department_detail(department, today):
     }
 
 
+def _team_detail(scope, today):
+    """部门主管的团队：汇报关系向下的在职员工（含他自己），汇总数字 + 每个人 14 天的日历。"""
+    window = _window(today)
+    members = team_members(scope["employee"], include_self=True)
+    ids = [member.get("name") for member in members]
+    rows = _rows(ids, window["start"], window["end"])
+    options = {"first": today, "work_dates": window["work_dates"]}
+    stats = board.build_stats(ids, rows, month_first=window["month_first"], month_last=window["month_last"], **options)
+    return {
+        "department": "", "label": "我的团队", "headcount": len(ids),
+        "pending": sum(_pending(ids).values()), "stats": stats,
+        "members": board.build_members(members, rows, **options),
+    }
+
+
 def _company_summary(today):
     """全公司和各部门的汇总数字：只有人数、小时、比例，没有人名。"""
     window = _window(today)
@@ -133,13 +149,13 @@ def get_attendance_board():
     if scope["level"] == EMPLOYEE:
         return {"level": EMPLOYEE, "personal": _personal(scope, today)}
     if scope["level"] == MANAGER:
-        return {"level": MANAGER, "detail": _department_detail(scope["department"], today)}
+        return {"level": MANAGER, "detail": _team_detail(scope, today)}
     return {"level": COMPANY, "summary": _company_summary(today)}
 
 
 @frappe.whitelist()
 def get_department_attendance(department=""):
-    """一个部门的明细（有人名）：人事和管理层可以取任何部门，部门主管只能取自己的部门，员工一律拒绝。"""
+    """一个部门的明细（有人名）：人事和管理层可以取任何部门；部门主管只有自己的团队（不能按部门取），员工一律拒绝。"""
     scope = resolve_scope()
     _require_open()
     if scope["level"] == EMPLOYEE:
@@ -147,9 +163,10 @@ def get_department_attendance(department=""):
     department = str(department or "").strip()
     if scope["level"] == MANAGER:
         if department and department != scope["department"]:
-            frappe.throw(frappe._("部门主管只能查看自己所在部门的出勤。"), frappe.PermissionError)
-        department = scope["department"]
-    elif not department:
+            frappe.throw(frappe._("部门主管只能查看自己团队的出勤。"), frappe.PermissionError)
+        detail = _team_detail(scope, date.today())
+        return {"level": scope["level"], "detail": detail}
+    if not department:
         frappe.throw(frappe._("请选择要查看的部门。"))
     detail = _department_detail(department, date.today())
     if not detail["headcount"]:
@@ -161,8 +178,8 @@ def get_department_attendance(department=""):
 def get_request_overlap(name):
     """批之前看"同期谁不在"：申请人所在部门里，和这张申请日期重叠的请假、调休、出差的人（审批中的也列，标出来）。
 
-    先走详情页同一套权限（看不到这张申请就报错）；再按身份定能不能给人名：人事和管理层可以，部门主管只有申请人在
-    自己部门时可以，其他人（没有管理职责的审批人）一律只给空列表，不泄露同事的请假。加班申请不查。
+    先走详情页同一套权限（看不到这张申请就报错）；再按身份定能不能给人名：人事和管理层给申请人所在部门的人，
+    部门主管只有申请人在自己团队时给团队里的人，其他人（没有管理职责的审批人）一律只给空列表，不泄露同事的请假。加班申请不查。
     """
     scope = resolve_scope()
     _require_open()
@@ -174,13 +191,22 @@ def get_request_overlap(name):
     employee = request.get("employee")
     if not employee or request.get("request_type") == att.REQUEST_OVERTIME:
         return empty
-    department = frappe.db.get_value("Employee", employee, "department") or ""
-    if not department or scope["level"] == EMPLOYEE or (scope["level"] == MANAGER and department != scope["department"]):
+    if scope["level"] == EMPLOYEE:
         return empty
+    if scope["level"] == MANAGER:
+        # 部门主管只给自己团队里的人名：申请人不在他的团队里，就什么都不给。
+        team = team_members(scope["employee"], include_self=True)
+        if employee not in {member.get("name") for member in team}:
+            return empty
+        members = [member for member in team if member.get("name") != employee]
+    else:
+        department = frappe.db.get_value("Employee", employee, "department") or ""
+        if not department:
+            return empty
+        members = [member for member in _members(department) if member.get("name") != employee]
     wanted = {day for day, _hours in board.days_of(request)}
     if not wanted:
         return {**empty, "visible": True}
-    members = [member for member in _members(department) if member.get("name") != employee]
     names = {member.get("name"): member.get("employee_name") or member.get("name") for member in members}
     found = {}
     for row in _rows(list(names), min(wanted), max(wanted)):

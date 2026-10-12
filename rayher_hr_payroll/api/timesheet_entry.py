@@ -93,7 +93,9 @@ def _visible_employee_names(include_finance=False):
     if current:
         names.append(current)
     if current and _has_any_role(("Department Manager",)):
-        names.extend(frappe.get_all("Employee", filters={"reports_to": current}, pluck="name"))
+        # 团队 = 汇报关系向下（直接和间接下属），和月度工时、考勤中心同一个范围（决定 2026-10-12）。
+        from rayher_hr_payroll.team_scope import team_names
+        names.extend(team_names(current, statuses=("Active", "Inactive", "Suspended", "Left")))
     return sorted({name for name in names if name})
 
 

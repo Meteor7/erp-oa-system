@@ -15,7 +15,8 @@ import frappe
 
 from rayher_hr_payroll import annual_leave, attendance_center as center, attendance_requests as att
 from rayher_hr_payroll.api import oa_entry
-from rayher_hr_payroll.attendance_scope import EMPLOYEE, resolve_scope
+from rayher_hr_payroll.attendance_scope import EMPLOYEE, MANAGER, resolve_scope
+from rayher_hr_payroll.team_scope import team_members
 from rayher_hr_payroll.oa_approval import ApprovalRouteError
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar, resolve_monthly_work_limit
@@ -346,8 +347,15 @@ def list_attendance_review():
         reports = frappe.get_all("Employee", filters={"reports_to": mine, "status": "Active"}, pluck="name", limit_page_length=500)
         for department, members in _department_mates(set(reports)).items():
             departments.setdefault(department, members)
-    # 没有管理职责的员工不返回"谁不在"：同事的请假不给他们看（部门主管、人事、管理层照旧）。
-    team = [] if resolve_scope()["level"] == EMPLOYEE else _team(departments, date.today())
+    # 没有管理职责的员工不返回"谁不在"：同事的请假不给他们看。部门主管只看自己的团队（汇报关系向下，
+    # 下属在哪个部门都算）；人事、管理层看相关部门。
+    scope = resolve_scope()
+    if scope["level"] == EMPLOYEE:
+        team = []
+    elif scope["level"] == MANAGER:
+        team = _team({"我的团队": team_members(scope["employee"], include_self=True)}, date.today())
+    else:
+        team = _team(departments, date.today())
     return {"items": enriched, "team": team}
 
 

@@ -43,15 +43,19 @@ def can_view_cost():
 
 
 def hr_scope():
-    """Return (visible, department). department None means the whole company."""
+    """Return (visible, department, team). department / team 都是 None 表示全公司。
+
+    部门主管（有在职直接下属的人）看自己的团队 team：汇报关系向下的在职员工（含他自己），
+    下属在哪个部门都算（决定 2026-10-12，和考勤中心、数据看板、工时填报进度同一个范围）。
+    """
     if _is_leader() or bool(_roles() & HR_ROLES):
-        return True, None
+        return True, None, None
     if "Department Manager" in _roles():
-        department = (frappe.db.get_value("Employee", {"user_id": _user(), "status": "Active"}, "department")
-                      or frappe.db.get_value("Employee", {"user_id": _user()}, "department"))
-        if department:
-            return True, department
-    return False, None
+        from rayher_hr_payroll.team_scope import team_of_user
+        team = team_of_user(_user())["names"]
+        if team:
+            return True, None, team
+    return False, None, None
 
 
 def parse_scope(scope, period):
@@ -470,7 +474,7 @@ def leave_stats(rows):
     }
 
 
-def _away_today(department=None):
+def _away_today(department=None, employees=None):
     """People on approved leave or comp-time today, by leave type."""
     today = date.today()
     filters = {"request_type": ["in", [attendance_requests.REQUEST_LEAVE, attendance_requests.REQUEST_COMP_TIME]],
@@ -478,6 +482,8 @@ def _away_today(department=None):
                "from_date": ["<=", today], "to_date": [">=", today]}
     if department:
         filters["department"] = department
+    if employees is not None:
+        filters["employee"] = ["in", list(employees) or ["__none__"]]
     rows = frappe.get_all("OA Approval Request", filters=filters,
                           fields=["employee", "employee_name", "leave_type", "request_type"],
                           limit_page_length=0)
@@ -489,7 +495,7 @@ def _away_today(department=None):
                               key=lambda item: item["count"], reverse=True)}
 
 
-def _attendance_rows(months, department=None):
+def _attendance_rows(months, department=None, employees=None):
     """已批准的请假、加班、调休；跨月的申请按天拆开，只算落在所选月份里的小时。
 
     修复（2026-09-29，审查 #56 P3）：原来按开始日期归月，一张 9 月 30 日到 10 月 2 日的假
@@ -501,6 +507,8 @@ def _attendance_rows(months, department=None):
                "from_date": ["<=", end], "to_date": [">=", start]}
     if department:
         filters["department"] = department
+    if employees is not None:
+        filters["employee"] = ["in", list(employees) or ["__none__"]]
     rows = frappe.get_all("OA Approval Request", filters=filters,
                           fields=["request_type", "leave_type", "duration_hours", "department",
                                   "employee", "employee_name", "from_date", "to_date", "attendance_days"],
@@ -521,19 +529,21 @@ def _attendance_rows(months, department=None):
 
 @frappe.whitelist()
 def get_hr_overview(scope="month", period=None):
-    visible, department = hr_scope()
+    visible, department, team = hr_scope()
     if not visible:
         return {"visible": False}
     scope, year, month = parse_scope(scope, period)
-    stats = leave_stats(_attendance_rows(period_months(scope, year, month), department))
+    stats = leave_stats(_attendance_rows(period_months(scope, year, month), department, team))
     trend = []
     for bucket in trend_periods(scope, year, month):
-        bucket_stats = leave_stats(_attendance_rows(bucket["months"], department))["totals"]
+        bucket_stats = leave_stats(_attendance_rows(bucket["months"], department, team))["totals"]
         trend.append({"label": bucket["label"], "leave": bucket_stats["leave_days"],
                       "overtime": bucket_stats["overtime_days"]})
     employee_filters = {"status": "Active"}
     if department:
         employee_filters["department"] = department
+    if team is not None:
+        employee_filters["name"] = ["in", team]
     employees = frappe.get_all("Employee", filters=employee_filters,
                                fields=["name", "employee_name", "department", "date_of_joining"],
                                limit_page_length=0)
@@ -549,7 +559,7 @@ def get_hr_overview(scope="month", period=None):
                          "comp_days": days(comp.get("available_hours"))})
     balances.sort(key=lambda row: row["annual_days"] + row["comp_days"], reverse=True)
     return {"visible": True, "scope": scope, "year": year, "month": month,
-            "department": department, "headcount": len(employees), "away_today": _away_today(department),
+            "department": department, "headcount": len(employees), "away_today": _away_today(department, team),
             "alerts": {"missing_joining": missing_joining,
                        "negative_comp": sum(1 for row in balances if row["comp_days"] < 0)},
             "trend": trend, "balances": balances[:8], **stats}

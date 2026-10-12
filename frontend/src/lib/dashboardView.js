@@ -3,7 +3,7 @@
 import { firstValue } from './navContext.js';
 
 export const TONES = Object.freeze(['', 'ok', 'info', 'warn', 'bad', 'hot']);
-export const BLOCK_TYPES = Object.freeze(['bars', 'cols', 'stack', 'list']);
+export const BLOCK_TYPES = Object.freeze(['bars', 'cols', 'stack', 'list', 'calendar']);
 export const BLOCK_FAILED_TEXT = '这一块暂时加载失败';
 export const EMPTY_TODO_TEXT = '没有需要你处理的事';
 export const EMPTY_ALERT_TEXT = '目前没有需要关注的事';
@@ -155,17 +155,62 @@ export function listRows(rows = []) {
   }));
 }
 
-const ROW_MAKERS = Object.freeze({ bars: barRows, cols: colRows, stack: stackRows, list: listRows });
+// ---------------------------------------------------------------- 日历块（团队日历：行 = 人，列 = 天）
+// 颜色和考勤中心一致；虚线 = 还在审批；最下面一行是当天在岗人数，人少的日子标橙 / 红。
+export const CALENDAR_KINDS = Object.freeze({ annual: '年假', personal: '事假', sick: '病假', comp: '调休', other: '其他假', trip: '出差', ot: '加班' });
+export const LOW_STAFF_MIN = 3;
+export const LOW_STAFF_SHARE = 0.2;
+export const BAD_STAFF_SHARE = 0.4;
+
+export function staffLevel(off, headcount) {
+  const count = Number(off) || 0;
+  const total = Number(headcount) || 0;
+  if (!total || count < Math.max(LOW_STAFF_MIN, Math.ceil(total * LOW_STAFF_SHARE))) return '';
+  return count / total >= BAD_STAFF_SHARE ? 'low' : 'mid';
+}
+
+export function calendarView(block = {}) {
+  const days = (Array.isArray(block.days) ? block.days : []).map((day) => ({
+    date: String(day.date || ''), label: String(day.label || ''), day: Number(day.day) || 0, weekday: String(day.weekday || ''), off: Boolean(day.off_day),
+  }));
+  const people = (Array.isArray(block.people) ? block.people : []).map((person) => ({
+    name: String(person.name ?? ''),
+    cells: days.map((day, index) => {
+      const cell = person.cells?.[index];
+      if (!cell || !CALENDAR_KINDS[cell.kind]) return null;
+      const pending = Boolean(cell.pending);
+      return { kind: cell.kind, pending, title: `${person.name ?? ''} ${day.label} ${CALENDAR_KINDS[cell.kind]}${pending ? '（审批中）' : ''}` };
+    }),
+  }));
+  const totals = days.map((day, index) => {
+    const total = block.totals?.[index] || {};
+    const present = total.present === null || total.present === undefined ? null : Number(total.present);
+    return { off: Number(total.off) || 0, present, level: present === null ? '' : staffLevel(total.off, people.length), title: present === null ? '休息日' : `${Number(total.off) || 0} 人不在岗` };
+  });
+  const legend = Object.entries(CALENDAR_KINDS).map(([kind, label]) => ({ kind, label }));
+  return { days, people, totals, legend, headcount: people.length };
+}
+
+const ROW_MAKERS = Object.freeze({ bars: barRows, cols: colRows, stack: stackRows, list: listRows, calendar: () => [] });
 
 export function blockView(block = {}) {
   const type = BLOCK_TYPES.includes(block.type) ? block.type : '';
   const failed = Boolean(block.error);
   const rows = type && !failed ? ROW_MAKERS[type](block.rows) : [];
+  const calendar = type === 'calendar' && !failed ? calendarView(block) : null;
   return {
     key: String(block.key || ''), type, title: String(block.title || ''), sub: String(block.sub || ''),
-    rows, failed, failedText: failed ? BLOCK_FAILED_TEXT : '', empty: !failed && rows.length === 0,
+    rows, calendar, wide: type === 'calendar', failed, failedText: failed ? BLOCK_FAILED_TEXT : '',
+    empty: !failed && (calendar ? calendar.people.length === 0 : rows.length === 0),
     more: String(block.more || ''), target: block.target || null, hint: String(block.hint || ''),
   };
+}
+
+// 页签里的一段：小标题 + 自己的指标卡和图表块（人事页的“人员 / 考勤”）。
+export function sectionView(section = {}) {
+  const kpis = (section.kpis || []).map(kpiView);
+  const blocks = (section.blocks || []).map(blockView).filter((block) => block.type);
+  return { title: String(section.title || ''), sub: String(section.sub || ''), kpis, blocks };
 }
 
 // ---------------------------------------------------------------- 一个页签
@@ -177,12 +222,13 @@ export function pageView(page) {
   const alerts = (source.alerts || []).map(alertView);
   const todos = (source.todos || []).map(todoView);
   const blocks = (source.blocks || []).map(blockView).filter((block) => block.type);
+  const sections = (source.sections || []).map(sectionView).filter((section) => section.kpis.length || section.blocks.length);
   const showTodos = Boolean(source.has_todos);
   const showAlerts = Boolean(source.has_alerts);
   const attention = showTodos && showAlerts ? 'both' : showTodos ? 'todos' : showAlerts ? 'alerts' : 'none';
   return {
-    kpis, alerts, todos, blocks, showTodos, showAlerts, attention,
+    kpis, alerts, todos, blocks, sections, showTodos, showAlerts, attention,
     todoCount: todos.length, alertCount: alerts.length,
-    isEmpty: !kpis.length && !blocks.length && !(showTodos || showAlerts),
+    isEmpty: !kpis.length && !blocks.length && !sections.length && !(showTodos || showAlerts),
   };
 }
