@@ -5,15 +5,19 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
+import '../styles/invoiceAttachUi.css';
 import InvoicePreviewDrawer from '../components/invoice/InvoicePreviewDrawer.vue';
 import { callApi, isFinanceUser, money, pillClass } from '../lib/expenseClaims.js';
 import {
-  confirmBlockers, duplicateText, editableByOwner, folderStatusBar, folderTabsFromCounts, missingFields, retryState, tabStatuses, usedByText,
+  canEditAttachments, confirmBlockers, duplicateText, editableByOwner, folderStatusBar, folderTabsFromCounts, isRequiredField, missingFields,
+  retryState, tabStatuses, usedByText,
 } from '../lib/invoiceFolderView.js';
 import {
-  confirmInvoice, createInvoiceBatch, excludeInvoice, resolveDuplicate, retryInvoice, unconfirmInvoice,
-  updateInvoice, updateInvoiceExpenseContext, uploadInvoiceFiles, validateInvoiceFiles,
+  confirmInvoice, createInvoiceBatch, deleteInvoiceSupplementalAttachment, excludeInvoice, fetchInvoiceSupplementalAttachmentPreview,
+  listInvoiceSupplementalAttachments, resolveDuplicate, retryInvoice, unconfirmInvoice,
+  updateInvoice, updateInvoiceExpenseContext, uploadInvoiceFiles, uploadInvoiceSupplementalAttachment, validateInvoiceFiles,
 } from '../lib/invoiceOcr.js';
+import { validateExpenseAttachments } from '../lib/expenseWorkflow.js';
 import { normalizeFolderTab } from '../lib/dashboardLanding.js';
 
 const finance = isFinanceUser();
@@ -51,6 +55,14 @@ const selected = computed(() => rows.value.find((row) => row.name === selectedNa
 const editable = computed(() => editableByOwner(selected.value, !ownView.value));
 const missing = computed(() => (selected.value && editable.value ? missingFields({ ...selected.value, ...edit }) : []));
 const currentUser = typeof window !== 'undefined' ? (window.full_name || window.user || '') : '';
+
+// 补充附件（选填：行程单、付款凭证等）：打开一张发票时读取；发票用到单据之前本人可以加、删，之后只能看。
+const attachments = ref([]);
+const attachBusy = ref(false);
+const previewAttachment = ref(null);
+const attachmentsEditable = computed(() => ownView.value && canEditAttachments(selected.value));
+let attachmentToken = 0;
+const star = (field) => (isRequiredField(field) ? '*' : '');
 
 function flash(ok = '', err = '') {
   banner.ok = ok;
@@ -144,6 +156,7 @@ function select(invoice) {
 // 原来识别中每 4 秒刷新一次都会重填，把正在修改的内容冲掉；切换页签后表单是空的，
 // 点确认会把已保存的费用说明清空。
 watch(() => (selected.value ? `${selected.value.name}|${selected.value.folder_status}` : ''), () => hydrate(selected.value), { immediate: true });
+watch(() => selected.value?.name || '', loadAttachments, { immediate: true });
 watch(tab, () => {
   selectedName.value = String(route.query.invoice || '');
   if (view.value === 'list') load();
@@ -254,6 +267,63 @@ async function notDuplicate() {
 
 async function retry() {
   await run(() => retryInvoice(selected.value.name), '已重新提交识别');
+}
+
+async function loadAttachments() {
+  const invoice = selected.value;
+  const token = ++attachmentToken;
+  attachments.value = [];
+  if (!invoice) return;
+  try {
+    const list = await listInvoiceSupplementalAttachments(invoice.name);
+    if (token === attachmentToken) attachments.value = list || [];
+  } catch {
+    // 读不到附件不挡核对和确认，当作没有。
+  }
+}
+
+async function addAttachments(event) {
+  const input = event?.target;
+  const files = Array.from(input?.files || []);
+  const invoice = selected.value;
+  if (!files.length || !invoice) return;
+  try {
+    validateExpenseAttachments(files, attachments.value.length);
+  } catch (error) {
+    flash('', String(error?.message || error));
+    if (input) input.value = '';
+    return;
+  }
+  attachBusy.value = true;
+  flash();
+  try {
+    for (const file of files) {
+      const saved = await uploadInvoiceSupplementalAttachment(invoice.name, file);
+      if (selected.value?.name === invoice.name) attachments.value = [...attachments.value, saved];
+    }
+    flash('补充附件已上传');
+  } catch (error) {
+    flash('', String(error?.message || error));
+  } finally {
+    attachBusy.value = false;
+    if (input) input.value = '';
+  }
+}
+
+async function removeAttachment(file) {
+  const invoice = selected.value;
+  if (!invoice || !window.confirm(`删除补充附件“${file.original_filename}”吗？`)) return;
+  attachBusy.value = true;
+  flash();
+  try {
+    await deleteInvoiceSupplementalAttachment(invoice.name, file.name);
+    attachments.value = attachments.value.filter((item) => item.name !== file.name);
+    flash('补充附件已删除');
+  } catch (error) {
+    flash('', String(error?.message || error));
+  } finally {
+    attachBusy.value = false;
+  }
 }
 
 onMounted(refresh);
@@ -383,15 +453,28 @@ onBeforeUnmount(() => {
 
           <h4>识别结果<template v-if="editable">（可修改）</template></h4>
           <div class="form">
-            <div class="f"><label>发票类别</label><input v-model="edit.invoice_category" :readonly="!editable" /></div>
-            <div class="f"><label>项目名称</label><input v-model="edit.project_name" :readonly="!editable" /><div class="h">发票上的货物或服务名称</div></div>
-            <div class="f"><label>开票日期<b>*</b></label><input v-model="edit.issue_date" type="date" :readonly="!editable" /></div>
-            <div class="f"><label>发票号码<b>*</b></label><input v-model="edit.invoice_number" :readonly="!editable" /><div class="h">查重只看号码；识别不出来的请对照原件填写</div></div>
+            <div class="f"><label>发票类别</label><input v-model="edit.invoice_category" :readonly="!editable" :placeholder="editable ? '识别不出来可以留空' : ''" /></div>
+            <div class="f"><label>项目名称<b>{{ star('project_name') }}</b></label><input v-model="edit.project_name" :readonly="!editable" /><div class="h">发票上的货物或服务名称</div></div>
+            <div class="f"><label>开票日期<b>{{ star('issue_date') }}</b></label><input v-model="edit.issue_date" type="date" :readonly="!editable" /></div>
+            <div class="f"><label>发票号码<b>{{ star('invoice_number') }}</b></label><input v-model="edit.invoice_number" :readonly="!editable" /><div class="h">查重只看号码；识别不出来的请对照原件填写</div></div>
             <div class="f"><label>发票代码</label><input v-model="edit.invoice_code" :readonly="!editable" /><div class="h">老版发票左上角 10 或 12 位；全电发票没有，可不填</div></div>
             <div class="f"><label>税前金额</label><input v-model="edit.amount_before_tax" type="number" step="0.01" :readonly="!editable" /></div>
             <div class="f"><label>税额</label><input v-model="edit.tax_amount" type="number" step="0.01" :readonly="!editable" /></div>
-            <div class="f"><label>合计<b>*</b></label><input v-model="edit.total_amount" type="number" step="0.01" :readonly="!editable" /></div>
-            <div class="f"><label>费用说明<b>*</b></label><input v-model="edit.expense_description" :readonly="!editable" /><div class="h">写清楚这笔钱花在什么上，审批人会看到</div></div>
+            <div class="f"><label>合计<b>{{ star('total_amount') }}</b></label><input v-model="edit.total_amount" type="number" step="0.01" :readonly="!editable" /></div>
+            <div class="f"><label>费用说明<b>{{ star('expense_description') }}</b></label><input v-model="edit.expense_description" :readonly="!editable" /><div class="h">写清楚这笔钱花在什么上，审批人会看到</div></div>
+          </div>
+
+          <h4>补充附件 <span class="muted">选填 · 行程单、付款凭证等，最多 10 个；审批人和出纳会和发票一起看到</span></h4>
+          <div class="attach-list">
+            <span v-for="file in attachments" :key="file.name" class="attach-chip">
+              <button type="button" class="link" :title="file.original_filename" @click="previewAttachment = file">{{ file.original_filename }}</button>
+              <button v-if="attachmentsEditable" type="button" class="x" title="删除附件" aria-label="删除附件" :disabled="attachBusy" @click="removeAttachment(file)">×</button>
+            </span>
+            <span v-if="!attachments.length" class="muted">暂无补充附件</span>
+            <label v-if="attachmentsEditable" class="btn sm" :class="{ disabled: attachBusy }">
+              {{ attachBusy ? '上传中…' : '＋ 添加附件' }}
+              <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png" hidden :disabled="attachBusy" @change="addAttachments" />
+            </label>
           </div>
 
           <div class="actions">
@@ -423,5 +506,6 @@ onBeforeUnmount(() => {
     </template>
 
     <InvoicePreviewDrawer :open="previewOpen" :invoice="selected?.name || ''" :current-user="currentUser" :title="selected?.invoice_number || '发票原件'" @close="previewOpen = false" />
+    <InvoicePreviewDrawer :open="Boolean(previewAttachment)" :invoice="previewAttachment?.name || ''" :current-user="currentUser" :preview-loader="fetchInvoiceSupplementalAttachmentPreview" :title="previewAttachment?.original_filename || '补充附件'" @close="previewAttachment = null" />
   </div>
 </template>

@@ -49,15 +49,27 @@ export function stillRecognizing(invoices) {
   return (invoices || []).some((invoice) => String(invoice?.folder_status || '').trim() === '识别中');
 }
 
+// 确认发票时必填的字段，和后端 invoice_ocr.service.confirm_invoice 是同一条规则（页面上用 * 标出）。
+// 发票类别可以留空：有的发票识别不出类别，不该卡住确认；留空时各处显示“—”。
+export const REQUIRED_FIELDS = Object.freeze([
+  ['project_name', '项目名称'],
+  ['issue_date', '开票日期'],
+  ['invoice_number', '发票号码'],
+  ['total_amount', '合计'],
+  ['expense_description', '费用说明'],
+]);
+
+export const isRequiredField = (field) => REQUIRED_FIELDS.some(([key]) => key === field);
+
+export const categoryText = (value) => String(value ?? '').trim() || '—';
+
+// 补充附件（行程单、付款凭证等，选填）：发票还没用到单据之前，本人都可以加、删（和后端 invoice_supplemental_attachments 一致）。
+export function canEditAttachments(invoice) {
+  return ['待确认', '疑似重复', '可用'].includes(String(invoice?.folder_status || '').trim());
+}
+
 export function missingFields(invoice) {
-  const required = [
-    ['invoice_category', '发票类别'],
-    ['project_name', '项目名称'],
-    ['issue_date', '开票日期'],
-    ['invoice_number', '发票号码'],
-    ['total_amount', '合计'],
-    ['expense_description', '费用说明'],
-  ];
+  const required = REQUIRED_FIELDS;
   return required
     .filter(([field]) => {
       const value = invoice?.[field];

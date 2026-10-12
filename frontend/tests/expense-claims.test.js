@@ -151,7 +151,9 @@ test("invoice folder status drives what the employee can do", () => {
   assert.equal(canConfirm(pending), true);
   assert.deepEqual(confirmBlockers(pending), []);
   assert.deepEqual(confirmBlockers({ ...pending, invoice_number: "", total_amount: 0 }), ["确认前请补全：发票号码、合计"]);
-  assert.deepEqual(missingFields({ folder_status: "待确认" }), ["发票类别", "项目名称", "开票日期", "发票号码", "合计", "费用说明"]);
+  // 发票类别可以留空（识别不出来也能确认），其余五项和后端 confirm_invoice 一致。
+  assert.deepEqual(missingFields({ folder_status: "待确认" }), ["项目名称", "开票日期", "发票号码", "合计", "费用说明"]);
+  assert.deepEqual(confirmBlockers({ ...pending, invoice_category: "" }), []);
   const used = { folder_status: "已使用", used_by: { name: "OA-9", request_type: "报销单", business_status: "已完结" } };
   assert.equal(canEditFields(used), false);
   assert.equal(canConfirm(used), false);

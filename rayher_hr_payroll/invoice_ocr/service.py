@@ -1065,6 +1065,20 @@ def confirm_invoice(invoice_name, values=None):
         if not description:
             _throw("确认发票前必须填写费用说明。")
         _set(record, "expense_description", description)
+        # 修复（2026-10-12）：发票夹页面早就要求项目名称、开票日期、合计才能确认，后端没有检查；
+        # 发票类别不必填（有的发票识别不出类别，也不该卡住确认），前后端同一条规则。
+        missing = [
+            label for label, value in (("项目名称", _get(record, "project_name")), ("开票日期", _get(record, "issue_date")))
+            if not str(value or "").strip()
+        ]
+        total_amount = _record_money(record, "total_amount")
+        try:
+            if float(total_amount or 0) <= 0:
+                missing.append("合计")
+        except (TypeError, ValueError):
+            missing.append("合计")
+        if missing:
+            _throw("确认发票前必须填写：" + "、".join(missing) + "。")
         # 修复（2026-09-28，第一轮 #7）：没有发票号码就没法查重，原来照样能确认。
         # 决定（2026-09-24）：识别不出号码的票据，由本人对照原件手工补号码后再确认。
         if not normalize_invoice_number(_get(record, "invoice_number")):

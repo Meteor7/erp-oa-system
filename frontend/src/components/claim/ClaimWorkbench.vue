@@ -5,7 +5,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../../styles/expenseUi.css';
+import '../../styles/invoiceAttachUi.css';
 import '../../styles/navUi.css';
+import InvoicePreviewDrawer from '../invoice/InvoicePreviewDrawer.vue';
+import { fetchInvoiceSupplementalAttachmentPreview } from '../../lib/invoiceOcr.js';
+import { categoryText } from '../../lib/invoiceFolderView.js';
 import {
   CLAIM_KINDS, accountBlockers, accountDraftFor, applicationLabel, callApi, claimDraftPayload,
   displayStatus, isFinanceUser, maskAccount, money, pillClass, quotaOf, sourceTypeLabel,
@@ -297,10 +301,29 @@ async function loadList() {
   if (!home.loaded) home.todo = scope.value === 'todo' ? docs.value : await loadTodo();
 }
 
+// 详情页的“发票与附件”：这张单据用到的每张发票（类别、原件、补充附件）。审批人和出纳核对时直接在这里看。
+const docInvoices = ref([]);
+const previewInvoice = ref('');
+const previewAttachment = ref(null);
+let docInvoicesToken = 0;
+
+async function loadDocInvoices(doc) {
+  const token = ++docInvoicesToken;
+  docInvoices.value = [];
+  if (!doc) return;
+  try {
+    const rows = (await callApi('invoice_entry.get_request_invoices', { request: doc.name }, { method: 'GET' })) || [];
+    if (token === docInvoicesToken) docInvoices.value = rows.filter((row) => row.recognition_status !== '已排除');
+  } catch {
+    // 没有查看发票的权限或接口失败时不显示这一块，单据本身照常打开。
+  }
+}
+
 async function loadDetail() {
   const name = String(route.query.request || '');
   focusDoc.value = ((await listFor('all', { name, limit: 1 })) || [])[0] || null;
   if (focusDoc.value) await prepareAccounts([focusDoc.value]);
+  loadDocInvoices(focusDoc.value);
 }
 
 async function loadPage() {
@@ -774,7 +797,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
                 <table>
                   <thead>
                     <tr>
-                      <th>{{ isClaim ? '发票号码' : '付款内容' }}</th><th>{{ isClaim ? '项目名称' : '日期' }}</th><th>所属项目</th><th>费用说明</th>
+                      <th>{{ isClaim ? '发票号码' : '付款内容' }}</th><th>{{ isClaim ? '项目名称' : '日期' }}</th><th v-if="isClaim">发票类别</th><th>所属项目</th><th>费用说明</th>
                       <th class="r">金额</th><th>一级科目</th><th>二级科目</th>
                     </tr>
                   </thead>
@@ -782,6 +805,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
                     <tr v-for="line in focusDoc.expense_lines || []" :key="line.line_key">
                       <td :class="{ num: isClaim }">{{ isClaim ? line.invoice_number : line.project_name }}</td>
                       <td :class="{ num: !isClaim }">{{ isClaim ? line.project_name : line.issue_date }}</td>
+                      <td v-if="isClaim">{{ categoryText(line.invoice_category) }}</td>
                       <td>{{ (focusDoc.claim_line_projects || {})[line.line_key] || '非项目' }}</td>
                       <td>{{ line.expense_description }}</td>
                       <td class="r num">{{ money(line.total_amount) }}</td>
@@ -815,6 +839,30 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
                 <span v-else-if="focusDoc.invoice_followup_status === '待收票'" class="pill p-sun">待补票</span>
                 <template v-else>—</template>
                 <template v-if="focusDoc.invoice_difference_note"> · 差异说明：{{ focusDoc.invoice_difference_note }}</template>
+              </div>
+            </section>
+
+            <section v-if="docInvoices.length" class="panel" data-testid="doc-invoices">
+              <div class="pt"><span>发票与附件 <span class="muted">{{ docInvoices.length }} 张</span></span></div>
+              <div class="inv-docs">
+                <div v-for="invoice in docInvoices" :key="invoice.name" class="inv-doc">
+                  <div class="inv-head">
+                    <span class="num">{{ invoice.invoice_number || '无号码' }}</span>
+                    <span class="grow-col">{{ invoice.project_name || '—' }}</span>
+                    <span class="muted">类别：{{ categoryText(invoice.invoice_category) }}</span>
+                    <span class="muted">{{ invoice.issue_date || '—' }}</span>
+                    <b class="num">¥ {{ money(invoice.total_amount) }}</b>
+                    <button type="button" class="btn sm" @click="previewInvoice = invoice.name">查看原件</button>
+                  </div>
+                  <div v-if="invoice.expense_description" class="muted">费用说明：{{ invoice.expense_description }}</div>
+                  <div class="attach-list">
+                    <span class="muted">补充附件</span>
+                    <span v-for="file in invoice.supplemental_attachments || []" :key="file.name" class="attach-chip">
+                      <button type="button" class="link" :title="file.original_filename" @click="previewAttachment = file">{{ file.original_filename }}</button>
+                    </span>
+                    <span v-if="!(invoice.supplemental_attachments || []).length" class="muted">无</span>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -1085,5 +1133,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
         </aside>
       </div>
     </template>
+    <InvoicePreviewDrawer :open="Boolean(previewInvoice)" :invoice="previewInvoice" :title="'发票原件'" @close="previewInvoice = ''" />
+    <InvoicePreviewDrawer :open="Boolean(previewAttachment)" :invoice="previewAttachment?.name || ''" :preview-loader="fetchInvoiceSupplementalAttachmentPreview" :title="previewAttachment?.original_filename || '补充附件'" @close="previewAttachment = null" />
   </div>
 </template>

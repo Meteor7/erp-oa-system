@@ -150,6 +150,13 @@ def preview_invoice(invoice_name):
 
 
 @frappe.whitelist(methods=["POST"])
+def list_supplemental_attachments(invoice_name):
+    """发票夹里打开一张发票时读它的补充附件（读权限和发票本身一致）。"""
+    _authenticated()
+    return invoice_supplemental_attachments.list_attachments(_bounded(invoice_name, "发票标识", 140))
+
+
+@frappe.whitelist(methods=["POST"])
 def upload_supplemental_attachment(invoice_name, file_url):
     _authenticated()
     return invoice_supplemental_attachments.register_attachment(

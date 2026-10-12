@@ -1,0 +1,15 @@
+/* 发票补充附件（发票夹详情、报销 / 付款详情的“发票与附件”）共用的小样式，挂在 .xp 下。 */
+.xp .attach-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.xp .attach-chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 6px 2px 10px;
+  border-radius: 999px; background: var(--xp-cobalt-bg); border: 1px solid #D5DBEE;
+}
+.xp .attach-chip .link { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--xp-cobalt); }
+.xp .attach-chip .x { border: 0; background: none; cursor: pointer; color: var(--xp-red); font-size: 15px; line-height: 1; padding: 0 3px; }
+.xp .attach-chip .x:disabled { opacity: .4; cursor: not-allowed; }
+.xp .inv-docs { display: grid; gap: 0; }
+.xp .inv-docs .inv-doc { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--xp-line); }
+.xp .inv-docs .inv-doc:first-child { border-top: 0; padding-top: 0; }
+.xp .inv-docs .inv-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 13px; }
+.xp .inv-docs .inv-head .grow-col { flex: 1; min-width: 0; }
+.xp .inv-docs .attach-list { margin: 0; }

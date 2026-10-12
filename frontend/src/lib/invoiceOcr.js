@@ -315,6 +315,10 @@ export function updateInvoiceExpenseContext(invoiceName, expenseDescription, opt
   }, options);
 }
 
+export function listInvoiceSupplementalAttachments(invoiceName, options) {
+  return invoiceApi('list_supplemental_attachments', { invoice_name: invoiceName }, options);
+}
+
 export async function uploadInvoiceSupplementalAttachment(invoiceName, file, {
   signal,
   upload = uploadInvoicePrivateFile,
