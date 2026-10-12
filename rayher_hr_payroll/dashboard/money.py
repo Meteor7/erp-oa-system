@@ -323,6 +323,21 @@ def _step_buckets_needed(claims, purchase):
         item.get("work_status") == "付款审批中" for item in ((purchase or {}).get("items") or []))
 
 
+def _verify_queue(oa_entry, frappe):
+    """财务的“待核验发票”付款单（和付款申请页的待我处理同一个查询：已付款、等核验，财务才有）。不是财务就是空的。"""
+    from rayher_hr_payroll import expense_claims
+    from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT
+
+    try:
+        oa_entry._require_finance_user()
+    except Exception:
+        return []
+    return list(frappe.get_all(
+        "OA Approval Request",
+        filters={"request_type": REQUEST_PAYMENT, "workflow_status": oa_entry.STATUS_PAID, "business_status": expense_claims.CLAIM_WAIT_VERIFY},
+        pluck="name", order_by="modified asc", limit_page_length=200))
+
+
 def _my_queue(ctx):
     """我待审批的报销、付款单、采购付款（`get_my_approval_summary`）+ 各自等待天数。"""
     def load():
@@ -331,14 +346,17 @@ def _my_queue(ctx):
 
         groups = {category["key"]: list(category.get("requests") or [])
                   for category in oa_entry.get_my_approval_summary().get("categories", [])}
-        names = sorted({name for key in ("reimbursement", "payment", "procurement_payment") for name in groups.get(key, [])})
+        verify = _verify_queue(oa_entry, frappe)
+        # 付款申请页的“待我处理”= 轮到我审批的付款单 + 财务的待核验发票的付款单（同一张不重复算）
+        verify = [name for name in verify if name not in set(groups.get("payment", []))]
+        names = sorted({name for key in ("reimbursement", "payment", "procurement_payment") for name in groups.get(key, [])} | set(verify))
         waited = {}
         if names:
             rows = frappe.get_all("OA Approval Request", filters={"name": ["in", names]},
                                   fields=["name", "creation", "modified"], limit_page_length=0)
             waited = {row["name"]: row["waited_days"] for row in board_entry._decorate(rows, _today(ctx))}
         return {"claim": groups.get("reimbursement", []), "payment": groups.get("payment", []),
-                "procpay": groups.get("procurement_payment", []), "waited": waited}
+                "procpay": groups.get("procurement_payment", []), "verify": verify, "waited": waited}
 
     return ctx.memo("money.my_queue", load)
 
@@ -804,13 +822,53 @@ def _todo_waits(queue, keys):
 @provider("pay.todo", "kpi", visible=_always, title="付款待我处理")
 def pay_todo(ctx):
     queue = _my_queue(ctx)
-    count = len(queue["payment"]) + len(queue["procpay"])
-    longest = _todo_waits(queue, ("payment", "procpay"))
-    sub = (f"付款单 {len(queue['payment'])} · 采购付款 {len(queue['procpay'])} · 最久已等 {longest} 天"
-           if count else "没有等你处理的付款")
-    to = target("payment.todo") if queue["payment"] or not queue["procpay"] else target("procpay.approvals")
-    return kpi("pay.todo", "付款待我处理", count, "张", sub, "hot" if count else "", to=to,
-               hint="轮到我审批或办理的付款单、采购付款（本人的审批待办）。")
+    count = len(queue["payment"]) + len(queue["procpay"]) + len(queue["verify"])
+    longest = _todo_waits(queue, ("payment", "procpay", "verify"))
+    parts = [f"付款单 {len(queue['payment'])}", f"采购付款 {len(queue['procpay'])}"]
+    if queue["verify"]:
+        parts.append(f"待核验发票 {len(queue['verify'])}")
+    sub = " · ".join([*parts, f"最久已等 {longest} 天"]) if count else "没有等你处理的付款"
+    # 付款单、采购付款、待核验发票在两个页面里，点进去是合在一起的清单（条数 = 卡片上的数字）
+    return kpi("pay.todo", "付款待我处理", count, "张", sub, "hot" if count else "", to=drill_to("pay.todo", ctx) if count else None,
+               hint="轮到我审批或办理的付款单、采购付款，加上财务的待核验发票（本人的待办）。点进去是合在一起的清单。")
+
+
+_QUEUE_RECORD = {"报销单": "claim.detail", "付款单": "payment.detail", "采购付款": "procpay.approvals"}
+
+
+def _queue_drill(ctx, key, title, groups, note):
+    import frappe
+
+    queue = _my_queue(ctx)
+    kind_of = {"claim": "报销单", "payment": "付款单", "procpay": "采购付款", "verify": "付款单"}
+    names = [(group, name) for group in groups for name in queue[group]]
+    details = {}
+    if names:
+        for row in frappe.get_all("OA Approval Request", filters={"name": ["in", sorted({name for _group, name in names})]},
+                                  fields=["name", "subject", "employee_name", "amount", "current_step_label"], limit_page_length=0):
+            details[row["name"]] = row
+    rows = []
+    for group, name in sorted(names, key=lambda pair: (-queue["waited"].get(pair[1], 0), pair[1])):
+        row = details.get(name, {})
+        waited = queue["waited"].get(name, 0)
+        where = "待核验发票" if group == "verify" else (row.get("current_step_label") or "—")
+        rows.append(drill_row([kind_of[group], name, str(row.get("subject") or "").strip() or "—", row.get("employee_name") or "—",
+                               _amt(row.get("amount") or 0), where, f"{waited} 天"], target(_QUEUE_RECORD[kind_of[group]], request=name),
+                              tone="bad" if waited > STUCK_DAYS else ""))
+    return drill(key, title, [("类型",), ("单号",), ("事由",), ("申请人",), ("金额", "r"), ("现在在",), ("已等", "r")], rows,
+                 summary=f"共 {len(rows)} 张", note=note)
+
+
+@provider("drill.pay.todo", "drill", visible=_always, title="付款待我处理")
+def drill_pay_todo(ctx):
+    return _queue_drill(ctx, "drill.pay.todo", "付款待我处理", ("payment", "procpay", "verify"),
+                        "轮到我审批或办理的付款单、采购付款，加上财务的待核验发票；红色 = 等待超过 3 天。")
+
+
+@provider("drill.my.queue", "drill", visible=_always, title="待处理账龄")
+def drill_my_queue(ctx):
+    return _queue_drill(ctx, "drill.my.queue", "待我处理的报销和付款", ("claim", "payment", "procpay", "verify"),
+                        "轮到我审批或办理的报销单、付款单、采购付款，加上财务的待核验发票；等得久的在前，红色 = 超过 3 天。")
 
 
 @provider("claim.todo", "kpi", visible=_always, title="报销待我审批")
@@ -981,15 +1039,15 @@ def block_pay_trend(ctx):
 @provider("block.aging", "block", visible=_always, title="待处理账龄")
 def block_aging(ctx):
     queue = _my_queue(ctx)
-    waits = [queue["waited"].get(name, 0) for key in ("claim", "payment", "procpay") for name in queue[key]]
+    waits = [queue["waited"].get(name, 0) for key in ("claim", "payment", "procpay", "verify") for name in queue[key]]
     groups = [("1 天内", "", sum(1 for days in waits if days <= 1)),
               (f"2–{STUCK_DAYS} 天", "", sum(1 for days in waits if 2 <= days <= STUCK_DAYS)),
               (f"超过 {STUCK_DAYS} 天", "bad", sum(1 for days in waits if days > STUCK_DAYS))]
     top = max((count for _label, _tone, count in groups), default=0)
     rows = [bar_row(label, count, _pct(count, top), tone if count else "") for label, tone, count in groups]
     return bars("block.aging", "待处理账龄", rows, sub=f"报销 + 付款 · 张（共 {len(waits)}）" if waits else "没有等你处理的报销和付款",
-                more="报销单", to=target("claim.todo"),
-                hint="轮到我审批的报销单、付款单、采购付款，按等待天数分组（从最近一次审批通过，没有就从提交算起）。")
+                more="查看明细" if waits else "", to=drill_to("my.queue", ctx) if waits else None,
+                hint="轮到我审批的报销单、付款单、采购付款，加上财务的待核验发票，按等待天数分组（从最近一次审批通过，没有就从提交算起）。")
 
 
 # ================================================================ 审批卡点
@@ -1105,15 +1163,31 @@ def block_labor_cost(ctx):
     social = data["social"] + data["fund"]
     rows = [
         list_row("工资（应发合计）", "已提交的工资条" if data["gross"] else "本期还没有已提交的工资条",
-                 _amt(data["gross"]) if data["gross"] else "—", tone="" if data["gross"] else "warn",
-                 to=target("payroll", period=ctx.period)),
+                 _amt(data["gross"]) if data["gross"] else "—", tone="" if data["gross"] else "warn"),
         list_row("社保 + 公积金（公司承担）", "只含已确认的记录" if data["has_contributions"] else "本期还没有已确认的记录",
-                 _amt(social) if data["has_contributions"] else "—", tone="" if data["has_contributions"] else "warn",
-                 to=target("social", period=ctx.period)),
+                 _amt(social) if data["has_contributions"] else "—", tone="" if data["has_contributions"] else "warn"),
         list_row("宿舍（公司承担）", "" if data["dorm_registered"] else "本期宿舍费用还没登记",
-                 _amt(data["dorm_company"]) if data["dorm_registered"] else "—", tone="" if data["dorm_registered"] else "warn",
-                 to=target("dorm.board")),
+                 _amt(data["dorm_company"]) if data["dorm_registered"] else "—", tone="" if data["dorm_registered"] else "warn"),
     ]
-    return listing("block.labor_cost", "人力成本汇总", rows, sub=f"{int(ctx.period[5:])} 月 · 不含个人明细", more="薪酬计算",
-                   to=target("payroll", period=ctx.period),
-                   hint="只给汇总：工资 = 已提交工资条的应发合计；社保 + 公积金 = 公司承担、状态已确认的记录；宿舍 = 公司承担的宿舍费用。")
+    return listing("block.labor_cost", "人力成本汇总", rows, sub=f"{int(ctx.period[5:])} 月 · 不含个人明细", more="查看明细",
+                   to=drill_to("cost.labor", ctx),
+                   hint="只给汇总：工资 = 已提交工资条的应发合计；社保 + 公积金 = 公司承担、状态已确认的记录；宿舍 = 公司承担的宿舍费用。"
+                        "三项来自三个不同的页面，点进去逐项列出来，再点各自的页面。")
+
+
+@provider("drill.cost.labor", "drill", visible=_can_labor, title="人力成本汇总")
+def drill_cost_labor(ctx):
+    data = _labor(ctx)
+    social = data["social"] + data["fund"]
+    rows = [
+        drill_row(["工资（应发合计）", "已提交的工资条" if data["gross"] else "本期还没有已提交的工资条", _amt(data["gross"]) if data["gross"] else "—"],
+                  target("payroll", period=ctx.period)),
+        drill_row(["社保 + 公积金（公司承担）", "员工记录里已确认的单位承担部分" if data["has_contributions"] else "本期还没有已确认的记录",
+                   _amt(social) if data["has_contributions"] else "—"], target("social", period=ctx.period)),
+        drill_row(["宿舍（公司承担）", "公司承担的宿舍费用" if data["dorm_registered"] else "本期宿舍费用还没登记",
+                   _amt(data["dorm_company"]) if data["dorm_registered"] else "—"], target("dorm.board")),
+    ]
+    total = data["gross"] + (social if data["has_contributions"] else 0) + (data["dorm_company"] if data["dorm_registered"] else 0)
+    rows.append(drill_row(["合计", "三项相加", _amt(total)], tone="hot"))
+    return drill("drill.cost.labor", f"{int(ctx.period[5:])} 月人力成本由哪几项组成", [("项",), ("口径",), ("金额", "r")], rows,
+                 summary=f"合计 {_amt(total)}", note="只给汇总，不含个人金额。社保 / 公积金信息页是按导入的 Excel 申报数据看的，口径和这里不同。")

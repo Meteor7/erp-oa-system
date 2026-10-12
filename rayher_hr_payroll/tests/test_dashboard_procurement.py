@@ -735,7 +735,8 @@ def test_load_urgent_keeps_unfinished_ones_and_names_where_each_one_is(monkeypat
         {"name": "U4", "request_type": "采购申请", "subject": "导轨", "employee_name": "演示员工175", "project": "", "workflow_status": "已完成",
          "business_status": "需求已批准/待询价", "current_step_label": "", "expected_delivery_date": None, "creation": "2026-09-01 09:00:00"},
         {"name": "U5", "request_type": "购买申请", "subject": "鼠标", "employee_name": "演示员工179", "project": "", "workflow_status": "已完成",
-         "business_status": "待付款", "current_step_label": "", "expected_delivery_date": None, "creation": "2026-09-30 09:00:00"}]
+         "business_status": "待付款", "current_step_label": "", "expected_delivery_date": None, "creation": "2026-09-30 09:00:00",
+         "modified": "2026-10-02 08:00:00"}]
     steps = [{"parent": "U1", "acted_on": "2026-10-02 10:00:00"}, {"parent": "U1", "acted_on": "2026-10-04 10:00:00"}]
     stages = {"U1": {"stage": "po", "label": "PO 执行中"}, "U4": {"stage": "closed", "label": "采购已关闭"}}
 
@@ -753,7 +754,8 @@ def test_load_urgent_keeps_unfinished_ones_and_names_where_each_one_is(monkeypat
     assert sorted(got) == ["U1", "U2", "U5"]                       # 已付款、采购已关闭的不算在途
     assert (got["U1"]["label"], got["U1"]["since"], got["U1"]["subject"], got["U1"]["expected"]) == ("PO 执行中", "2026-10-04", "伺服电机", "2026-10-20")
     assert (got["U2"]["label"], got["U2"]["approving"], got["U2"]["since"], got["U2"]["project"]) == ("财务主管", True, "2026-10-06", "")
-    assert (got["U5"]["label"], got["U5"]["approving"], got["U5"]["since"]) == ("待付款", False, "2026-09-30")
+    # 最近一次签批 > 最后修改 > 创建：和申请页上的“已等几天”同一个起点
+    assert (got["U5"]["label"], got["U5"]["approving"], got["U5"]["since"]) == ("待付款", False, "2026-10-02")
 
 
 # ---------------------------------------------------------------- 读取函数（假 frappe，验证过滤条件和 Python 侧的整理）

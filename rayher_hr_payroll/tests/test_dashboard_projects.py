@@ -79,13 +79,41 @@ def test_the_cards_count_the_owners_requests_by_stage(state):
     ctx = make_ctx()
     count = run("prj.count", ctx)
     assert (count["value"], count["sub"]) == ("2", "共 6 张采购 / 购买申请")
-    assert count["target"] == {"key": "procurement.list", "params": {"scope": "owned"}}
+    assert count["target"] == {"key": "drill", "params": {"item": "prj.projects", "period": "2026-10"}}
     execution = run("prj.exec", ctx)
     assert (execution["value"], execution["sub"]) == ("3", "需求审批中 1 · 已完成 2")
-    assert execution["target"]["params"] == {"scope": "owned", "stage": "exec"}
+    assert execution["target"]["params"]["item"] == "prj.exec"
+    assert sign_target(ctx) == "prj.sign"
     sign = run("prj.sign", ctx)
     assert (sign["value"], sign["sub"], sign["tone"]) == ("1", "伺服电机", "hot")
     assert state["calls"] == 1, "几个块共用一次取数"
+
+
+def sign_target(ctx):
+    return run("prj.sign", ctx)["target"]["params"]["item"]
+
+
+def test_the_cards_open_lists_that_add_up_and_mix_both_kinds_of_request(state):
+    """采购申请和购买申请在两个页面里，卡片上的数字是合起来的，所以点进去是合在一起的清单（原来跳到只有采购申请的页面，数字对不上）。"""
+    ctx = make_ctx()
+    execution = core.get_detail_for(ctx, "prj.exec")
+    assert len(execution["rows"]) == int(run("prj.exec", ctx)["value"]) == 3 and execution["summary"] == "共 3 张"
+    assert [(row["cells"][0], row["cells"][1], row["cells"][6]) for row in execution["rows"]] == [("DDDD", "采购申请", "采购执行"), ("BB", "采购申请", "采购执行"), ("HH", "购买申请", "待付款")]
+    assert [row["target"]["key"] for row in execution["rows"]] == ["procurement.detail", "procurement.detail", "directpurchase.detail"]
+    sign = core.get_detail_for(ctx, "prj.sign")
+    assert [row["cells"][:3] for row in sign["rows"]] == [["A", "采购申请", "伺服电机"]] and sign["rows"][0]["cells"][6] == "项目主管"
+    everything = core.get_detail_for(ctx, "prj.requests")
+    assert len(everything["rows"]) == 6 and everything["summary"] == "共 6 张"
+    by_project = core.get_detail_for(ctx, "prj.projects")
+    assert [row["cells"] for row in by_project["rows"]] == [["RD02 · ACONCA 7961", "Open", "1", "2", "1"], ["RD03 · EFEM-8", "Open", "0", "1", "1"]]
+    assert by_project["summary"] == "共 2 个项目" and len(by_project["rows"]) == int(run("prj.count", ctx)["value"])
+    assert run("block.prj_stage", ctx)["target"]["params"]["item"] == "prj.requests" and run("block.prj_by_project", ctx)["target"]["params"]["item"] == "prj.projects"
+
+
+def test_a_card_with_nothing_behind_it_does_not_link_to_an_empty_list(state):
+    state["requests"] = []
+    ctx = make_ctx()
+    assert run("prj.exec", ctx)["target"] is None and run("prj.sign", ctx)["target"] is None
 
 
 def test_nothing_waits_for_the_owner_when_no_request_needs_the_signature(state):

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from rayher_hr_payroll.dashboard.core import (
-    bar_row, bars, kpi, list_row, listing, provider, stack, stack_row, target,
+    bar_row, bars, drill, drill_row, drill_to, kpi, list_row, listing, provider, stack, stack_row, target,
 )
 
 REQUEST_TYPES = ("采购申请", "购买申请")
@@ -89,20 +89,79 @@ def _counts(items):
     return counts
 
 
+# ---------------------------------------------------------------- 明细（采购申请和购买申请在两个页面里，数字是合起来的，所以点进去是合在一起的清单）
+DETAIL_TARGET = {"采购申请": "procurement.detail", "购买申请": "directpurchase.detail"}
+
+
+def _where(row, stage):
+    if stage == STAGE_DEMAND:
+        return row.get("current_step_label") or "需求审批"
+    if row.get("request_type") == "采购申请":
+        return (row.get("procurement_chain") or {}).get("label") or "采购执行"
+    return row.get("business_status") or "待付款"
+
+
+def _request_rows(ctx, items):
+    projects = _projects(ctx)
+    return [drill_row([row.get("name"), row.get("request_type"), row.get("subject") or "—", row.get("employee_name") or "—",
+                       _project_label(projects, row.get("project")), STAGE_LABELS[stage], _where(row, stage)],
+                      target(DETAIL_TARGET[row.get("request_type")], request=row.get("name")) if row.get("request_type") in DETAIL_TARGET else None,
+                      tone="warn" if stage == STAGE_DEMAND else "") for row, stage in items]
+
+
+REQUEST_COLUMNS = [("单号",), ("类型",), ("事由",), ("申请人",), ("项目",), ("阶段",), ("现在在",)]
+
+
+@provider("drill.prj.requests", "drill", visible=visible, title="项目里的采购 / 购买申请")
+def drill_prj_requests(ctx):
+    items = _mine(ctx)
+    return drill("drill.prj.requests", "我负责的项目里的采购 / 购买申请", REQUEST_COLUMNS, _request_rows(ctx, items), summary=f"共 {len(items)} 张",
+                 note=HINT + " 采购申请和购买申请在两个页面里，这里合在一起。")
+
+
+@provider("drill.prj.exec", "drill", visible=visible, title="采购执行中")
+def drill_prj_exec(ctx):
+    items = [(row, stage) for row, stage in _mine(ctx) if stage == STAGE_EXEC]
+    return drill("drill.prj.exec", "采购执行中的申请", REQUEST_COLUMNS, _request_rows(ctx, items), summary=f"共 {len(items)} 张",
+                 note="已批准、正在提 PR、比价、下 PO 或等付款的申请（购买申请：待付款 / 部分付款）。采购申请和购买申请在两个页面里，这里合在一起。")
+
+
+@provider("drill.prj.sign", "drill", visible=visible, title="待我会签")
+def drill_prj_sign(ctx):
+    items = [(row, stage) for row, stage in _mine(ctx) if stage == STAGE_DEMAND and row.get("can_approve")]
+    return drill("drill.prj.sign", "等我会签的申请", REQUEST_COLUMNS, _request_rows(ctx, items), summary=f"共 {len(items)} 张",
+                 note="项目里别人提的申请，轮到你这个项目负责人会签；同一张申请你既是直属主管又是项目负责人时，同意一次即可。")
+
+
+@provider("drill.prj.projects", "drill", visible=visible, title="我负责的项目")
+def drill_prj_projects(ctx):
+    projects = _projects(ctx)
+    per_project = {}
+    for row, stage in _mine(ctx):
+        per_project.setdefault(row.get("project") or "", _counts([]))[stage] += 1
+    rows = []
+    for project in sorted(projects, key=lambda item: str(item.get("name"))):
+        counts = per_project.get(project.get("name")) or _counts([])
+        rows.append(drill_row([_project_label(projects, project.get("name")), project.get("status") or "—", counts[STAGE_DEMAND], counts[STAGE_EXEC], counts[STAGE_DONE]],
+                              target("procurement.list", scope="owned")))
+    return drill("drill.prj.projects", "我负责的项目", [("项目",), ("状态",), ("需求审批", "r"), ("采购执行", "r"), ("已完成", "r")], rows,
+                 summary=f"共 {len(projects)} 个项目", note=HINT)
+
+
 # ---------------------------------------------------------------- 指标卡
 @provider("prj.count", "kpi", visible=visible, title="我负责的项目")
 def prj_count(ctx):
     projects = _projects(ctx)
     items = _mine(ctx)
     return kpi("prj.count", "我负责的项目", len(projects), "个", f"共 {len(items)} 张采购 / 购买申请",
-               to=target("procurement.list", scope="owned"), hint=HINT)
+               to=drill_to("prj.projects", ctx) if projects else None, hint=HINT + " 点进去一个项目一行。")
 
 
 @provider("prj.exec", "kpi", visible=visible, title="采购执行中")
 def prj_exec(ctx):
     counts = _counts(_mine(ctx))
     return kpi("prj.exec", "采购执行中", counts[STAGE_EXEC], "张", f"需求审批中 {counts[STAGE_DEMAND]} · 已完成 {counts[STAGE_DONE]}",
-               to=target("procurement.list", scope="owned", stage="exec"),
+               to=drill_to("prj.exec", ctx) if counts[STAGE_EXEC] else None,
                hint="已批准、正在提 PR、比价、下 PO 或等付款的申请（购买申请：待付款 / 部分付款）。" + HINT)
 
 
@@ -110,7 +169,7 @@ def prj_exec(ctx):
 def prj_sign(ctx):
     waiting = [row for row, stage in _mine(ctx) if stage == STAGE_DEMAND and row.get("can_approve")]
     return kpi("prj.sign", "待我会签", len(waiting), "张", waiting[0].get("subject") or "" if waiting else "没有要你会签的",
-               "hot" if waiting else "", to=target("procurement.list", scope="todo"),
+               "hot" if waiting else "", to=drill_to("prj.sign", ctx) if waiting else None,
                hint="项目里别人提的申请，轮到你这个项目负责人会签。同一张申请你既是直属主管又是项目负责人时，同意一次即可。")
 
 
@@ -123,7 +182,7 @@ def block_prj_stage(ctx):
         return None
     rows = [stack_row(STAGE_LABELS[stage], f"{counts[stage]} 张", counts[stage] / total * 100, STAGE_COLORS[stage])
             for stage in (STAGE_DEMAND, STAGE_EXEC, STAGE_DONE) if counts[stage]]
-    return stack("block.prj_stage", "项目里的申请走到哪一步", rows, sub=f"共 {total} 张", more="采购申请", to=target("procurement.list", scope="owned"), hint=HINT)
+    return stack("block.prj_stage", "项目里的申请走到哪一步", rows, sub=f"共 {total} 张", more="查看明细", to=drill_to("prj.requests", ctx), hint=HINT)
 
 
 @provider("block.prj_requests", "block", visible=visible, title="最近的申请")
@@ -139,7 +198,7 @@ def block_prj_requests(ctx):
                              target("procurement.detail", request=row.get("name"))))
     if not rows:
         return None
-    return listing("block.prj_requests", "项目里最近的申请", rows, sub="只读", more="采购申请", to=target("procurement.list", scope="owned"), hint=HINT)
+    return listing("block.prj_requests", "项目里最近的申请", rows, sub="只读", more="全部申请", to=drill_to("prj.requests", ctx), hint=HINT)
 
 
 @provider("block.prj_by_project", "block", visible=visible, title="各项目的申请")
@@ -154,4 +213,4 @@ def block_prj_by_project(ctx):
     biggest = len(ranked[0][1]) or 1
     rows = [bar_row(_project_label(projects, key), f"{len(stages)} 张 · 执行中 {sum(1 for s in stages if s == STAGE_EXEC)}", len(stages) / biggest * 100)
             for key, stages in ranked]
-    return bars("block.prj_by_project", "各项目的申请", rows, sub="张", more="采购申请", to=target("procurement.list", scope="owned"), hint=HINT)
+    return bars("block.prj_by_project", "各项目的申请", rows, sub="张", more="查看明细", to=drill_to("prj.projects", ctx), hint=HINT)

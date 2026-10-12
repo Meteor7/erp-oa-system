@@ -11,7 +11,8 @@ MONEY_KEYS = {key for key, item in core.REGISTRY.items() if item.fn.__module__ =
 DRILL_KEYS = {key for key, item in core.REGISTRY.items() if item.fn.__module__ == money.__name__ and item.kind == "drill"}
 # 明细清单 -> 它背后的卡片 / 块：看得到卡片的人才看得到清单，不多也不少
 DRILL_OF = {"drill.cost.total": "cost.total", "drill.cost.po": "cost.po", "drill.cost.expense": "cost.expense", "drill.cost.projects": "block.cost_projects",
-            "drill.pay.in_approval": "pay.in_approval", "drill.approval.stuck": "approval.stuck", "drill.invoice.review": "invoice.review"}
+            "drill.pay.in_approval": "pay.in_approval", "drill.approval.stuck": "approval.stuck", "drill.invoice.review": "invoice.review",
+            "drill.pay.todo": "pay.todo", "drill.my.queue": "block.aging", "drill.cost.labor": "block.labor_cost"}
 
 
 def make_ctx(roles=("Employee",), positions=(), **kw):
@@ -495,7 +496,8 @@ def test_claim_category_top_five():
 
 
 # ---------------------------------------------------------------- 我的待办
-QUEUE = {"claim": ["R1", "R2"], "payment": ["P1"], "procpay": [], "waited": {"R1": 2, "R2": 5, "P1": 0}}
+QUEUE = {"claim": ["R1", "R2"], "payment": ["P1"], "procpay": [], "verify": [], "waited": {"R1": 2, "R2": 5, "P1": 0}}
+EMPTY_QUEUE = {"claim": [], "payment": [], "procpay": [], "verify": [], "waited": {}}
 
 
 def test_my_queue_cards():
@@ -503,22 +505,59 @@ def test_my_queue_cards():
     claim = run("claim.todo", ctx, **{"money.my_queue": QUEUE})
     assert (claim["value"], claim["sub"], claim["target"]["key"]) == ("2", "最久已等 5 天", "claim.todo")
     pay = run("pay.todo", ctx)
-    assert (pay["value"], pay["sub"], pay["target"]["key"]) == ("1", "付款单 1 · 采购付款 0 · 最久已等 0 天", "payment.todo")
-    only_procurement = {"claim": [], "payment": [], "procpay": ["X"], "waited": {"X": 3}}
+    # 付款单、采购付款、待核验发票在两个页面里：点进去是合在一起的清单，条数 = 卡片上的数字
+    assert (pay["value"], pay["sub"]) == ("1", "付款单 1 · 采购付款 0 · 最久已等 0 天")
+    assert pay["target"] == {"key": "drill", "params": {"item": "pay.todo", "period": "2026-10"}}
+    only_procurement = {"claim": [], "payment": [], "procpay": ["X"], "verify": [], "waited": {"X": 3}}
     pay = run("pay.todo", ctx, **{"money.my_queue": only_procurement})
-    assert (pay["value"], pay["target"]["key"]) == ("1", "procpay.approvals")
-    empty = {"claim": [], "payment": [], "procpay": [], "waited": {}}
-    assert run("claim.todo", ctx, **{"money.my_queue": empty})["sub"] == "没有等你审批的报销"
-    assert run("pay.todo", ctx)["sub"] == "没有等你处理的付款"
+    assert (pay["value"], pay["target"]["params"]["item"]) == ("1", "pay.todo")
+    assert run("claim.todo", ctx, **{"money.my_queue": EMPTY_QUEUE})["sub"] == "没有等你审批的报销"
+    nothing = run("pay.todo", ctx)
+    assert nothing["sub"] == "没有等你处理的付款" and nothing["target"] is None
+
+
+def test_finance_verify_queue_counts_in_the_payment_todo_like_the_page_does():
+    """付款申请页的“待我处理”= 轮到我审批的付款单 + 财务的待核验发票（同一张不重复）；卡片原来漏了后者，点进去数字对不上。"""
+    ctx = make_ctx(roles=("Accounts User",))
+    queue = {"claim": [], "payment": ["P1"], "procpay": ["X"], "verify": ["V1", "V2"], "waited": {"P1": 1, "X": 3, "V1": 6, "V2": 0}}
+    card = run("pay.todo", ctx, **{"money.my_queue": queue})
+    assert (card["value"], card["sub"]) == ("4", "付款单 1 · 采购付款 1 · 待核验发票 2 · 最久已等 6 天")
+
+
+def test_payment_todo_list_has_one_row_per_card_count_and_rows_open_their_pages(monkeypatch):
+    frappe = pytest.importorskip("frappe")
+    queue = {"claim": ["R1"], "payment": ["P1"], "procpay": ["X"], "verify": ["V1"], "waited": {"R1": 2, "P1": 1, "X": 3, "V1": 6}}
+    ctx = make_ctx()
+    ctx._memo["money.my_queue"] = queue
+    info = {"R1": ("报销一", "甲", 100.0, "直属主管"), "P1": ("付款一", "乙", 200.0, "财务主管"), "X": ("采购付款一", "丙", 300.0, "总经理付款"),
+            "V1": ("货款", "丁", 400.0, "")}
+
+    def fake_get_all(doctype, filters=None, **kwargs):
+        assert doctype == "OA Approval Request"
+        return [{"name": name, "subject": info[name][0], "employee_name": info[name][1], "amount": info[name][2], "current_step_label": info[name][3]}
+                for name in filters["name"][1]]
+
+    monkeypatch.setattr(frappe, "get_all", fake_get_all, raising=False)
+    card = run("pay.todo", ctx)
+    detail = core.get_detail_for(ctx, "pay.todo")
+    assert len(detail["rows"]) == int(card["value"]) == 3 and detail["summary"] == "共 3 张"          # 不含报销单
+    assert [row["cells"][:2] for row in detail["rows"]] == [["付款单", "V1"], ["采购付款", "X"], ["付款单", "P1"]]    # 等得久的在前
+    assert detail["rows"][0]["cells"][5] == "待核验发票" and detail["rows"][0]["tone"] == "bad"
+    assert [row["target"]["key"] for row in detail["rows"]] == ["payment.detail", "procpay.approvals", "payment.detail"]
+    everything = core.get_detail_for(ctx, "my.queue")
+    assert [row["cells"][1] for row in everything["rows"]] == ["V1", "X", "R1", "P1"]
+    assert everything["rows"][2]["target"] == {"key": "claim.detail", "params": {"request": "R1"}}
+    aging = run("block.aging", ctx)
+    assert aging["sub"] == "报销 + 付款 · 张（共 4）" and aging["target"]["params"]["item"] == "my.queue"
 
 
 def test_aging_groups_by_waiting_days():
-    queue = {"claim": ["a", "b", "c"], "payment": ["d"], "procpay": ["e"], "waited": {"a": 0, "b": 1, "c": 2, "d": 3, "e": 9}}
+    queue = {"claim": ["a", "b", "c"], "payment": ["d"], "procpay": ["e"], "verify": [], "waited": {"a": 0, "b": 1, "c": 2, "d": 3, "e": 9}}
     block = run("block.aging", make_ctx(), **{"money.my_queue": queue})
     assert [(row["label"], row["value"], row["tone"]) for row in block["rows"]] == [("1 天内", "2", ""), ("2–3 天", "2", ""), ("超过 3 天", "1", "bad")]
     assert block["sub"] == "报销 + 付款 · 张（共 5）"
-    empty = run("block.aging", make_ctx(), **{"money.my_queue": {"claim": [], "payment": [], "procpay": [], "waited": {}}})
-    assert [row["value"] for row in empty["rows"]] == ["0", "0", "0"] and empty["sub"] == "没有等你处理的报销和付款"
+    empty = run("block.aging", make_ctx(), **{"money.my_queue": EMPTY_QUEUE})
+    assert [row["value"] for row in empty["rows"]] == ["0", "0", "0"] and empty["sub"] == "没有等你处理的报销和付款" and empty["target"] is None
 
 
 def test_processed_this_month():
@@ -713,7 +752,14 @@ def test_labor_cost_summary_only():
     assert [(row["label"], row["value"]) for row in block["rows"]] == [
         ("工资（应发合计）", "¥ 186.4 万"), ("社保 + 公积金（公司承担）", "¥ 44.0 万"), ("宿舍（公司承担）", "¥ 5.2 万")]
     assert block["sub"] == "10 月 · 不含个人明细"
-    assert [row["target"]["key"] for row in block["rows"]] == ["payroll", "social", "dorm.board"]
+    # 三项来自三个不同的页面，每一行单独跳过去数字对不上；块点进去是三项的明细，明细里每一行再去自己的页面
+    assert all(row["target"] is None for row in block["rows"]) and block["target"]["params"]["item"] == "cost.labor"
+    ctx = make_ctx(positions=("general_manager",))
+    ctx._memo["money.labor"] = data
+    detail = core.get_detail_for(ctx, "cost.labor")
+    assert [(row["cells"][0], row["cells"][2]) for row in detail["rows"]] == [
+        ("工资（应发合计）", "¥ 186.4 万"), ("社保 + 公积金（公司承担）", "¥ 44.0 万"), ("宿舍（公司承担）", "¥ 5.2 万"), ("合计", "¥ 235.6 万")]
+    assert [row["target"] and row["target"]["key"] for row in detail["rows"]] == ["payroll", "social", "dorm.board", None]
     assert "身份证" not in str(block) and "银行" not in str(block)
 
 

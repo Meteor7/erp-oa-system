@@ -71,6 +71,8 @@ SLIPS = {
                 _slip("EMP-3", 0, 8000, "客服部 - RAY"), _slip("EMP-4", 0, 9000, "研发软件部 - RAY")],
     "2026-09": [_slip("EMP-1", 1, 25000, "研发软件部 - RAY"), _slip("EMP-2", 1, 15000, "研发算法部 - RAY")],
 }
+# 单位承担的社保 / 公积金，按人：合计 = 31200 / 12800
+CONTRIBUTIONS = {"EMP-1": {"si": 20000.0, "hf": 8000.0}, "EMP-2": {"si": 11200.0, "hf": 4800.0}, "EMP-8": {"si": 0.0, "hf": 0.0}}
 RECORDS = {
     "si": {"any": {"EMP-1", "EMP-2", "EMP-4"}, "confirmed": {"EMP-1", "EMP-2"}},
     "hf": {"any": {"EMP-1", "EMP-2", "EMP-3"}, "confirmed": {"EMP-1", "EMP-2", "EMP-3"}},
@@ -115,7 +117,7 @@ def leave_stats():
     ])
 
 
-FETCHERS = ("_fetch_employees", "_fetch_slips", "_fetch_company_contributions", "_fetch_contribution_records",
+FETCHERS = ("_fetch_employees", "_fetch_slips", "_fetch_contribution_detail", "_fetch_contribution_records",
             "_fetch_workbench", "_fetch_dorm", "_fetch_away", "_fetch_leave_stats")
 
 
@@ -124,7 +126,7 @@ def install(monkeypatch, forbid=(), calls=None, **override):
     data = {
         "_fetch_employees": lambda ctx: EMPLOYEES,
         "_fetch_slips": lambda period: SLIPS.get(period, []),
-        "_fetch_company_contributions": lambda ctx: {"si": 31200.0, "hf": 12800.0},
+        "_fetch_contribution_detail": lambda ctx: CONTRIBUTIONS,
         "_fetch_contribution_records": lambda ctx: RECORDS,
         "_fetch_workbench": lambda ctx: WORKBENCH,
         "_fetch_dorm": lambda ctx: dorm_board(),
@@ -229,7 +231,7 @@ def test_plain_employee_and_finance_get_nothing_and_never_touch_the_data(monkeyp
 
 def test_leaders_see_only_what_their_real_interfaces_allow(monkeypatch):
     # 副总 / 总经理岗位但没有 HR 角色：员工表类可以看（hr_scope 允许），工资、社保、宿舍的底层只认 HR 角色
-    install(monkeypatch, forbid=("_fetch_slips", "_fetch_company_contributions", "_fetch_contribution_records", "_fetch_workbench", "_fetch_dorm"))
+    install(monkeypatch, forbid=("_fetch_slips", "_fetch_contribution_detail", "_fetch_contribution_records", "_fetch_workbench", "_fetch_dorm"))
     for position in ("vice_manager", "general_manager"):
         got = run_all(make_ctx(roles=frozenset({"Employee"}), positions=frozenset({position})))
         assert {key for key, item in got.items() if item is not None} == EMPLOYEE_TABLE_KEYS, position
@@ -243,7 +245,7 @@ def test_hr_roles_see_everything(monkeypatch):
 
 
 def test_hidden_account_gets_no_social_or_housing_fund_data(monkeypatch):
-    install(monkeypatch, forbid=("_fetch_workbench", "_fetch_company_contributions", "_fetch_contribution_records"))
+    install(monkeypatch, forbid=("_fetch_workbench", "_fetch_contribution_detail", "_fetch_contribution_records"))
     monkeypatch.setattr(people._guards, "HR_SENSITIVE_HIDDEN_USERS", {"hr@example.com"})
     got = run_all(make_ctx(user="HR@example.com"))
     assert {key for key, item in got.items() if item is None} == SENSITIVE_KEYS
@@ -300,9 +302,21 @@ def test_payroll_cards(monkeypatch):
     total = run(ctx, "hr.pay_total")
     assert (total["value"], total["unit"], total["sub"]) == ("5.2", "万", "▲ 30.0% 较上月")
     si = run(ctx, "hr.pay_si")
-    assert (si["value"], si["unit"], si["sub"], si["target"]["key"]) == ("3.1", "万", "待确认 5 行", "social")
+    assert (si["value"], si["unit"], si["sub"], si["target"]["params"]["item"]) == ("3.1", "万", "待确认 5 行", "hr.pay_si")
     hf = run(ctx, "hr.pay_hf")
-    assert (hf["value"], hf["sub"], hf["target"]["key"]) == ("1.3", "已核对 3 / 7 人", "housing")
+    assert (hf["value"], hf["sub"], hf["target"]["params"]["item"]) == ("1.3", "已核对 3 / 7 人", "hr.pay_hf")
+    # 社保 / 公积金信息页按导入的 Excel 申报数据看，口径和卡片不同：卡片点进去先按部门看这个数是怎么来的
+    for item, field, amount in (("hr.pay_si", "si", "¥ 31,200.00"), ("hr.pay_hf", "hf", "¥ 12,800.00")):
+        detail = core.get_detail_for(ctx, item)
+        assert detail["summary"].endswith(amount), item
+        assert [row["cells"][0] for row in detail["rows"]] == ["研发软件部", "研发算法部"]          # 金额为 0 的人不列
+    assert core.get_detail_for(ctx, "hr.pay_si")["rows"][0]["target"] == {"key": "social", "params": {"period": PERIOD}}
+    assert core.get_detail_for(ctx, "hr.pay_hf")["rows"][0]["target"] == {"key": "housing", "params": {"period": PERIOD}}
+    pay_total = core.get_detail_for(ctx, "hr.pay_total")
+    assert total["target"] == {"key": "drill", "params": {"item": "hr.pay_total", "period": PERIOD}}
+    assert pay_total["summary"] == "共 4 张，应发合计 ¥ 52,000.00"
+    assert [row["cells"] for row in pay_total["rows"]] == [["研发软件部", "2 张", "1 张", "¥ 29,000.00"], ["研发算法部", "1 张", "0 张", "¥ 15,000.00"], ["客服部", "1 张", "1 张", "¥ 8,000.00"]]
+    assert "薪酬计算页顶部" in pay_total["note"]
     pending = run(ctx, "hr.social_pending")
     assert (pending["value"], pending["sub"]) == ("6", "社保待确认 5 行 · 新入职待开通 1 人")   # 演示员工156没有社保记录
 
@@ -440,7 +454,7 @@ def test_dorm_blocks(monkeypatch):
 # ---------------------------------------------------------------- 没有数据
 def test_empty_company_shows_zeros_and_empty_states_without_errors(monkeypatch):
     install(monkeypatch, _fetch_employees=lambda ctx: [], _fetch_slips=lambda period: [],
-            _fetch_company_contributions=lambda ctx: {"si": 0.0, "hf": 0.0},
+            _fetch_contribution_detail=lambda ctx: {},
             _fetch_contribution_records=lambda ctx: {"si": {"any": set(), "confirmed": set()}, "hf": {"any": set(), "confirmed": set()}},
             _fetch_workbench=lambda ctx: {"dashboard": {"pending_rows": 0}, "batches": []},
             _fetch_dorm=lambda ctx: dormitory_board.build_board([], [], [], [], PERIOD, TODAY),

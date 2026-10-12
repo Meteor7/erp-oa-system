@@ -128,7 +128,8 @@ def test_everyone_filled_is_ok_and_no_alert(calls):
 
 def test_rd_count_explains_the_two_numbers(calls):
     kpi = run("ts.rd_count", make_ctx(roles=HR))
-    assert (kpi["value"], kpi["sub"]) == ("52", "填工时 4 人")
+    # 数字 = 点进去填报进度里的名单人数（本月要填工时的人）；档案里的研发在册人数放在副标题里，两个数不同的原因一并写明
+    assert (kpi["label"], kpi["value"], kpi["sub"]) == ("需要填工时的人", "4", "研发在册 52 人，其余免填或不在名单")
     assert "免填" in kpi["hint"] and "研发" in kpi["hint"]
     calls["state"]["fill"] = fill("team")
     assert run("ts.rd_count", make_ctx(roles=DEPT_MANAGER)) is None        # 部门主管只看得到团队，不报全公司在册人数

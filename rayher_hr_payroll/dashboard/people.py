@@ -24,7 +24,7 @@ import frappe
 
 from rayher_hr_payroll.api import _guards
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, kpi, list_row, listing, money_wan, provider, stack, stack_row, target,
+    alert, bar_row, bars, drill, drill_row, drill_to, kpi, list_row, listing, money_wan, provider, stack, stack_row, target,
 )
 from rayher_hr_payroll.department_structure import DEPARTMENT_GROUP_BY_NAME
 
@@ -252,11 +252,11 @@ def _fetch_slips(period):
     )
 
 
-def _fetch_company_contributions(ctx):
+def _fetch_contribution_detail(ctx):
+    """{员工: {"si": 单位承担社保, "hf": 单位承担公积金}}：卡片上的合计和点进去的明细都从这一份来。"""
     from rayher_hr_payroll import payroll_bridge
 
-    data = payroll_bridge.period_company_contributions(ctx.period)
-    return {"si": sum(_num(item.get("si")) for item in data.values()), "hf": sum(_num(item.get("hf")) for item in data.values())}
+    return payroll_bridge.period_company_contributions(ctx.period)
 
 
 def _fetch_contribution_records(ctx):
@@ -314,8 +314,13 @@ def _payroll(ctx):
     return ctx.memo("people.payroll", lambda: summarize_payroll(_employees(ctx), _slips(ctx, ctx.period), ctx.period))
 
 
+def _contribution_detail(ctx):
+    return ctx.memo("people.contribution_detail", lambda: _fetch_contribution_detail(ctx))
+
+
 def _contributions(ctx):
-    return ctx.memo("people.contributions", lambda: _fetch_company_contributions(ctx))
+    detail = _contribution_detail(ctx)
+    return {"si": sum(_num(item.get("si")) for item in detail.values()), "hf": sum(_num(item.get("hf")) for item in detail.values())}
 
 
 def _records(ctx):
@@ -506,8 +511,34 @@ def hr_pay_total(ctx):
     else:
         change = (payroll["gross"] - previous) / previous * 100
         sub = "与上月持平" if round(change, 1) == 0 else f"{'▲' if change > 0 else '▼'} {abs(change):.1f}% 较上月"
-    return kpi("hr.pay_total", "本月应发合计", value, unit, sub, to=target("payroll", period=ctx.period),
-               hint="所选月份工资条的应发合计，含草稿；只给汇总，不含个人金额。")
+    return kpi("hr.pay_total", "本月应发合计", value, unit, sub, to=drill_to("hr.pay_total", ctx) if payroll["generated"] else None,
+               hint="所选月份已生成的工资条（含草稿）的应发合计，只给汇总，不含个人金额。薪酬计算页顶部的“应付工资合计”是按档案把全部在册的人都算一遍，"
+                    "所以工资条没生成齐时比这里大。点进去按部门看已生成的工资条。")
+
+
+def _yuan(amount):
+    return f"¥ {_num(amount):,.2f}"
+
+
+@provider("drill.hr.pay_total", "drill", visible=_hr, title="本月应发合计")
+def drill_pay_total(ctx):
+    chosen = _dedupe_slips(_slips(ctx, ctx.period))
+    dept_of = {row.get("name"): _dept_label(row.get("department")) for row in _employees(ctx)}
+    grouped = {}
+    for employee, slip in chosen.items():
+        label = _dept_label(slip.get("department")) or dept_of.get(employee) or NO_DEPARTMENT
+        entry = grouped.setdefault(label, [0, 0, 0.0])
+        entry[0] += 1
+        entry[1] += 0 if int(slip.get("docstatus") or 0) == 1 else 1
+        entry[2] += _num(slip.get("gross_pay"))
+    payroll = _payroll(ctx)
+    rows = [drill_row([label, f"{count} 张", f"{drafts} 张", _yuan(gross)], target("payroll", period=ctx.period), tone="warn" if drafts else "")
+            for label, (count, drafts, gross) in sorted(grouped.items(), key=lambda item: (-item[1][2], item[0]))]
+    note = f"本月应有 {payroll['expected']} 人的工资条，已生成 {payroll['generated']} 张（草稿 {payroll['draft']} 张）"
+    if payroll["missing"]:
+        note += f"，还有 {payroll['missing']} 人没生成；薪酬计算页顶部的“应付工资合计”把这些人也算进去了，所以比这里大"
+    return drill("drill.hr.pay_total", f"{_month_label(ctx)}已生成工资条的应发合计 · 按部门", [("部门",), ("工资条", "r"), ("其中草稿", "r"), ("应发合计", "r")], rows,
+                 summary=f"共 {payroll['generated']} 张，应发合计 {_yuan(payroll['gross'])}", note=note + "。只给部门汇总，不含个人金额。")
 
 
 @provider("hr.pay_si", "kpi", visible=_hr_si, title="社保（公司承担）")
@@ -515,8 +546,9 @@ def hr_pay_si(ctx):
     value, unit = money_wan(_contributions(ctx)["si"])
     pending = _social_pending_rows(ctx)
     return kpi("hr.pay_si", "社保（公司承担）", value, unit, f"待确认 {pending} 行" if pending else "", "hot" if pending else "",
-               to=target("social", period=ctx.period),
-               hint="所选月份单位承担的社保，只算已确认的记录。待确认 = 社保导入批次里还没处理的明细行数。")
+               to=drill_to("hr.pay_si", ctx) if _contributions(ctx)["si"] else None,
+               hint="所选月份单位承担的社保，只算已确认的记录（员工的社保记录里单位承担那一栏）。待确认 = 社保导入批次里还没处理的明细行数。"
+                    "社保信息页是按导入的 Excel 申报数据看的，口径不同，所以点进去先按部门看这个数是怎么来的。")
 
 
 @provider("hr.pay_hf", "kpi", visible=_hr_si, title="公积金（公司承担）")
@@ -524,8 +556,37 @@ def hr_pay_hf(ctx):
     value, unit = money_wan(_contributions(ctx)["hf"])
     confirmed = len(_records(ctx)["hf"]["confirmed"] & _payroll(ctx)["population"])
     return kpi("hr.pay_hf", "公积金（公司承担）", value, unit, f"已核对 {confirmed} / {_payroll(ctx)['expected']} 人",
-               to=target("housing", period=ctx.period),
-               hint="所选月份单位承担的公积金，只算已确认的记录。已核对 = 本月应有工资条的人里公积金记录已确认的人数。")
+               to=drill_to("hr.pay_hf", ctx) if _contributions(ctx)["hf"] else None,
+               hint="所选月份单位承担的公积金，只算已确认的记录。已核对 = 本月应有工资条的人里公积金记录已确认的人数。"
+                    "公积金信息页是按导入的 Excel 申报数据看的，口径不同，所以点进去先按部门看这个数是怎么来的。")
+
+
+def _contribution_drill(ctx, key, title, field, page):
+    detail = _contribution_detail(ctx)
+    dept_of = {row.get("name"): _dept_label(row.get("department")) or NO_DEPARTMENT for row in _employees(ctx)}
+    grouped = {}
+    for employee, item in detail.items():
+        amount = _num(item.get(field))
+        if amount <= 0:
+            continue
+        entry = grouped.setdefault(dept_of.get(employee) or NO_DEPARTMENT, [0, 0.0])
+        entry[0] += 1
+        entry[1] += amount
+    rows = [drill_row([label, f"{count} 人", _yuan(amount)], target(page, period=ctx.period))
+            for label, (count, amount) in sorted(grouped.items(), key=lambda item: (-item[1][1], item[0]))]
+    total = sum(entry[1] for entry in grouped.values())
+    return drill(key, title, [("部门",), ("人数", "r"), ("单位承担", "r")], rows, summary=f"共 {sum(entry[0] for entry in grouped.values())} 人，合计 {_yuan(total)}",
+                 note="员工记录里已确认的单位承担部分，按档案里的部门汇总，没有个人金额。点一行去对应的信息页。")
+
+
+@provider("drill.hr.pay_si", "drill", visible=_hr_si, title="社保（公司承担）")
+def drill_pay_si(ctx):
+    return _contribution_drill(ctx, "drill.hr.pay_si", f"{_month_label(ctx)}社保（公司承担）· 按部门", "si", "social")
+
+
+@provider("drill.hr.pay_hf", "drill", visible=_hr_si, title="公积金（公司承担）")
+def drill_pay_hf(ctx):
+    return _contribution_drill(ctx, "drill.hr.pay_hf", f"{_month_label(ctx)}公积金（公司承担）· 按部门", "hf", "housing")
 
 
 @provider("hr.social_pending", "kpi", visible=_hr_si, title="社保公积金待处理")
@@ -560,7 +621,18 @@ def hr_dorm_vacant(ctx):
     value, unit = money_wan(occupancy.get("vacant_rent"))
     vacant = occupancy.get("空置", 0)
     return kpi("hr.dorm_vacant", "空置房租（每月）", value, unit, f"{vacant} 间空置", "hot" if vacant else "",
-               to=target("dorm.board"), hint="空置房间的月租合计，公司白付的房租。")
+               to=drill_to("hr.dorm_vacant", ctx) if vacant else None, hint="空置房间的月租合计，公司白付的房租。点进去一间一行。")
+
+
+@provider("drill.hr.dorm_vacant", "drill", visible=_hr, title="空置房租")
+def drill_dorm_vacant(ctx):
+    rooms = [room for room in (_dorm(ctx).get("rooms") or []) if room.get("status") == "空置"]
+    rooms.sort(key=lambda room: (-_num(room.get("monthly_rent")), room.get("room_no") or ""))
+    rows = [drill_row([room.get("room_no") or room.get("name"), room.get("building") or "—", room.get("room_type") or "—", _yuan(room.get("monthly_rent"))],
+                      target("dorm.board")) for room in rooms]
+    total = sum(_num(room.get("monthly_rent")) for room in rooms)
+    return drill("drill.hr.dorm_vacant", "空置的房间", [("房间",), ("楼栋",), ("类型",), ("月租", "r")], rows,
+                 summary=f"共 {len(rooms)} 间空置，每月房租 {_yuan(total)}", note="没有人入住、也不是客房 / 午休室的房间；月租是公司白付的。")
 
 
 @provider("hr.dorm_lease", "kpi", visible=_hr, title="租约 60 天内到期")

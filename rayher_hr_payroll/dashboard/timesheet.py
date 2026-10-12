@@ -97,14 +97,16 @@ def ts_rate(ctx):
                tone="ok" if s["full"] == s["total"] else "hot", to=_board(ctx), hint=FILL_HINT)
 
 
-@provider("ts.rd_count", "kpi", visible=_fill_visible, title="研发人员在册")
+@provider("ts.rd_count", "kpi", visible=_fill_visible, title="需要填工时的人")
 def ts_rd_count(ctx):
     data = _fill(ctx, "all")
     if not data:
         return None
-    return kpi("ts.rd_count", "研发人员在册", _load_rd_headcount(), "人", f"填工时 {data['summary']['total']} 人",
+    # 卡片上的数字 = 点进去填报进度里的名单人数；档案里的“研发在册”人数放在副标题里，不同的原因在说明里。
+    return kpi("ts.rd_count", "需要填工时的人", data["summary"]["total"], "人", f"研发在册 {_load_rd_headcount()} 人，其余免填或不在名单",
                to=_board(ctx),
-               hint="研发 = 研发类型是全时 / 非全时 / 辅助的在职人数；填工时 = 本月工时填报名单人数（含本月离职的、不含免填账号），两个数可能不同。")
+               hint="本月工时填报名单人数（含本月离职的、不含免填账号），点进去就是这份名单。研发在册 = 研发类型是全时 / 非全时 / 辅助的在职人数，"
+                    "和名单人数可能不同（免填账号、本月离职的）。")
 
 
 @provider("ts.team", "kpi", visible=_fill_visible, title="工时已填满")
