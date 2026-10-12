@@ -73,8 +73,8 @@ def nudge_problem(doc, user, employee, today):
     days = waited_days(doc, today)
     if days < NUDGE_AFTER_DAYS:
         return f"等待还不到 {NUDGE_AFTER_DAYS} 天，先别催。"
-    if not _current_approvers(doc):
-        return "当前节点没有可提醒的审批人。"
+    if not [approver for approver in _current_approvers(doc) if approver != user]:
+        return "当前节点没有可提醒的审批人（只剩你自己）。"
     return ""
 
 

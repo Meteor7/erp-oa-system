@@ -937,5 +937,12 @@ export function canNudge(row, { user = '', employee = '', now = Date.now() } = {
   const mine = (me && String(row.owner || '').toLowerCase() === me) || Boolean(employee && row.employee === employee);
   const projectOwner = Boolean(me && String(row.project_owner || '').toLowerCase() === me);
   if (!(mine || projectOwner)) return false;
+  // 当前节点只剩我自己（比如项目负责人正好是等的那个人）就没有人可催。
+  const step = (row.steps || []).find((item) => Number(item.step_index || 0) === Number(row.current_step_index || 0));
+  if (step && Array.isArray(step.approvers)) {
+    const approved = new Set(Array.isArray(step.approved_by) ? step.approved_by : []);
+    const others = step.approvers.filter((approver) => !approved.has(approver) && String(approver).toLowerCase() !== me);
+    if (!others.length) return false;
+  }
   return (waitedDays(row, now) || 0) >= NUDGE_AFTER_DAYS;
 }

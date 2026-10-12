@@ -47,7 +47,8 @@ def test_only_approvers_who_have_not_signed_yet_are_reminded():
     ({"request_type": "出差申请"}, ("applicant@tests-x.example.invalid", ""), "只有采购申请和购买申请可以催办。"),
     ({"request_type": "购买申请"}, ("applicant@tests-x.example.invalid", ""), ""),
     ({"steps": [step(1, ["boss@tests-x.example.invalid"], ["boss@tests-x.example.invalid"], "2026-10-11 10:00:00"), step(2, ["pmc@tests-x.example.invalid"])]}, ("applicant@tests-x.example.invalid", ""), "等待还不到 3 天，先别催。"),
-    ({"steps": [step(2, ["pmc@tests-x.example.invalid"], ["pmc@tests-x.example.invalid"])]}, ("applicant@tests-x.example.invalid", ""), "当前节点没有可提醒的审批人。"),
+    ({"steps": [step(2, ["pmc@tests-x.example.invalid"], ["pmc@tests-x.example.invalid"])]}, ("applicant@tests-x.example.invalid", ""), "当前节点没有可提醒的审批人（只剩你自己）。"),
+    ({"steps": [step(2, ["person041@tests-x.example.invalid"])]}, ("person041@tests-x.example.invalid", ""), "当前节点没有可提醒的审批人（只剩你自己）。"),     # 项目负责人等的就是他自己
 ])
 def test_who_can_nudge_and_when(kw, who, expected):
     assert nudge.nudge_problem(make_doc(**kw), who[0], who[1], TODAY) == expected

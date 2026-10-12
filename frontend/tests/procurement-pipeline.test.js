@@ -58,6 +58,10 @@ test('the nudge button is for the applicant or the project owner after three day
   assert.equal(canNudge(waited(9, { workflow_status: '已完成' }), { user: 'applicant@tests-x.example.invalid', now: NOW }), false);
   assert.equal(canNudge(waited(9, { request_type: '出差申请' }), { user: 'applicant@tests-x.example.invalid', now: NOW }), false);
   assert.equal(canNudge(waited(9), { user: '', now: NOW }), false);
+  // 当前节点只剩提交人 / 项目负责人自己：没人可催
+  const onlyMe = waited(9, { current_step_index: 2, steps: [{ step_index: 2, approvers: ['person041@tests-x.example.invalid'], approved_by: [], acted_on: '2026-10-01 10:00:00' }] });
+  assert.equal(canNudge(onlyMe, { user: 'person041@tests-x.example.invalid', now: NOW }), false);
+  assert.equal(canNudge(onlyMe, { user: 'applicant@tests-x.example.invalid', now: NOW }), true, 'the applicant can still nudge the owner');
   assert.equal(canNudge(null, { user: 'applicant@tests-x.example.invalid' }), false);
 });
 
