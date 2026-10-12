@@ -83,6 +83,31 @@ def _rd_code(doc):
     return str(value or "").strip()
 
 
+PROCUREMENT_APPLICATION_TYPES = ("采购申请", "购买申请")
+
+
+def sync_request_project_owner(doc, method=None):
+    """项目负责人换人以后，这个项目名下的采购申请 / 购买申请跟着换成现在的负责人（决定 2026-10-12）。
+
+    申请上的“项目负责人”是提交时记下的；不跟着换，新负责人看不到老申请、旧负责人却还看得到，
+    后面的合同交期确认等节点也会找错人。已经走过的审批节点不动（那是当时谁批的）。
+    """
+    before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
+    if before is None:
+        return 0
+    old = str(getattr(before, "project_owner", "") or "").strip()
+    new = str(getattr(doc, "project_owner", "") or "").strip()
+    if old == new:
+        return 0
+    frappe.db.sql(
+        "UPDATE `tabOA Approval Request` SET project_owner = %(owner)s, project_owner_name = %(name)s "
+        "WHERE project = %(project)s AND request_type IN %(types)s",
+        {"owner": new or None, "name": str(getattr(doc, "project_owner_name", "") or "") or None,
+         "project": doc.name, "types": PROCUREMENT_APPLICATION_TYPES},
+    )
+    return 1
+
+
 def validate_project_stage_lock(doc, method=None):
     """Block editing a Project in a way that would alter the allocation inputs of
     a stage-locked or allocated period.

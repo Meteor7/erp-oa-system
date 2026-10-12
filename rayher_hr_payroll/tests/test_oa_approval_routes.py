@@ -313,6 +313,31 @@ def test_procurement_route_excludes_production_owner_for_production_asset():
     assert modes(steps) == ["all", "approve", "approve"]
 
 
+def test_one_person_who_is_both_direct_supervisor_and_project_owner_gets_one_node_that_names_both_roles():
+    # 演示员工132这种既是直属主管又是项目主管的人：只批一次，节点标签里两个身份都写上（审批记录里看得出）。
+    steps = build_procurement_route(
+        supervisor="演示员工132",
+        supervisor_user="junzhang@example.com",
+        project_owner="junzhang@example.com",
+        project_owner_name="演示员工132",
+        asset_category=OTHER_ASSET,
+        applicant_user="applicant@example.com",
+        roles=procurement_roles(),
+    )
+    assert labels(steps) == ["直属主管、项目主管：演示员工132", "PMC：演示员工178", "需求终审：副总经理：演示员工21"]
+    assert [step["approvers"] for step in steps] == [["junzhang@example.com"], ["pmc@example.com"], ["vice@example.com"]]
+    assert modes(steps) == ["approve", "approve", "approve"]
+
+
+def test_two_different_people_keep_the_cosign_labels_unchanged():
+    steps = build_procurement_route(
+        supervisor="直属领导", supervisor_user="boss@example.com", project_owner="owner@example.com", project_owner_name="项目主管",
+        asset_category=OTHER_ASSET, roles=procurement_roles(),
+    )
+    assert labels(steps)[0] == "直属主管：直属领导、项目主管：项目主管（会签）"
+    assert modes(steps)[0] == "all"
+
+
 def test_procurement_route_skips_top_supervisor_and_omits_project_for_non_project():
     steps = build_procurement_route(
         supervisor="演示员工21",
@@ -370,7 +395,7 @@ def test_procurement_route_deduplicates_same_supervisor_and_project_owner():
         roles=roles,
     )
     assert labels(steps) == [
-        "直属主管：主管", "需求终审：副总经理：演示员工21",
+        "直属主管、项目主管：主管", "需求终审：副总经理：演示员工21",
     ]
 
 

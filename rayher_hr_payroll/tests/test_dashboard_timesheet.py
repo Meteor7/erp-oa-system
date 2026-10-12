@@ -99,9 +99,9 @@ def test_rate_for_the_whole_company_and_one_call_is_shared(calls):
 def test_rate_for_a_department_head_is_labelled_as_the_team(calls):
     calls["state"]["fill"] = fill("team", [person("演示员工181", "研发一部", "full", 20), person("演示员工149", "研发一部", "part", 12.5)])
     ctx = make_ctx(roles=DEPT_MANAGER)
-    assert run("ts.rate", ctx)["label"] == "本部门工时填报率"
+    assert run("ts.rate", ctx)["label"] == "团队工时填报率"
     team = run("ts.team", ctx)
-    assert (team["label"], team["value"], team["sub"], team["tone"]) == ("本部门工时已填满", "1 / 2", "1 人没填满", "hot")
+    assert (team["label"], team["value"], team["sub"], team["tone"]) == ("团队工时已填满", "1 / 2", "1 人没填满", "hot")
     assert team["target"]["params"] == {"status": "open", "period": "2026-10"}
     assert "汇报关系" in team["hint"]
 
@@ -175,7 +175,7 @@ def test_team_block_lists_people_who_still_owe_hours_first(calls):
     ctx = make_ctx(roles=DEPT_MANAGER)
     calls["state"]["fill"] = fill("team")
     block = run("block.ts_team", ctx)
-    assert block["title"] == "本部门工时填报进度"
+    assert block["title"] == "团队工时填报进度"
     assert [(r["label"], r["value"], r["tone"]) for r in block["rows"]] == [
         ("演示员工185", "0 / 20", "bad"), ("演示员工149", "12.5 / 20", "warn"), ("演示员工119", "21 / 20", "warn"), ("演示员工181", "20 / 20", "ok")]
     assert [r["pct"] for r in block["rows"]] == [0.0, 62.5, 100, 100]

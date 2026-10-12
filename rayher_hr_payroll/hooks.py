@@ -37,6 +37,7 @@ doc_events = {
     },
     "Project": {
         "validate": "rayher_hr_payroll.project_controls.validate_project_stage_lock",
+        "on_update": "rayher_hr_payroll.project_controls.sync_request_project_owner",
     },
     "Employee": {
         "validate": [

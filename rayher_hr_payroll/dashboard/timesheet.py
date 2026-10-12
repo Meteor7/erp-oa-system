@@ -66,7 +66,7 @@ def _prev_period(period):
 
 
 def _scope_label(kind):
-    return "本部门" if kind == "team" else "全公司"
+    return "团队" if kind == "team" else "全公司"
 
 
 # ---------------------------------------------------------------- 工时填报
@@ -92,7 +92,7 @@ def ts_rate(ctx):
     if not data:
         return None
     s = data["summary"]
-    label = "工时填报率" if data["kind"] == "all" else "本部门工时填报率"
+    label = "工时填报率" if data["kind"] == "all" else "团队工时填报率"
     return kpi("ts.rate", label, f"{s['rate']:g}", "%", f"{s['full']} / {s['total']} 人已填满",
                tone="ok" if s["full"] == s["total"] else "hot", to=_board(ctx), hint=FILL_HINT)
 
@@ -181,7 +181,7 @@ _STATUS_ORDER = {"none": 0, "part": 1, "over": 2, "full": 3}
 _STATUS_TONE = {"none": "bad", "part": "warn", "over": "warn", "full": "ok"}
 
 
-@provider("block.ts_team", "block", visible=_fill_visible, title="本部门工时填报进度")
+@provider("block.ts_team", "block", visible=_fill_visible, title="团队工时填报进度")
 def block_ts_team(ctx):
     data = _fill(ctx, "team", "all")
     if not data:
@@ -205,7 +205,7 @@ def _project_hours(entries):
     return sorted(totals.values(), key=lambda item: (-item[1], item[0]))
 
 
-@provider("block.ts_projects", "block", visible=_fill_visible, title="本部门工时按项目")
+@provider("block.ts_projects", "block", visible=_fill_visible, title="团队工时按项目")
 def block_ts_projects(ctx):
     data = _fill(ctx, "team", "all")
     if not data:

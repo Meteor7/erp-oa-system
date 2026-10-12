@@ -331,7 +331,15 @@ def build_procurement_route(
         if not user and label.startswith(SUPERVISOR_LABEL_PREFIX):
             # 修复（2026-09-29，审查 X3-12）：直属上级没有启用的账号时原来悄悄去掉主管节点。
             raise ApprovalRouteError(f"直属上级 {_clean(supervisor)} 没有关联可用账号，不能生成采购审批路线")
-        if not user or user in seen_parallel_users:
+        if user and user in seen_parallel_users:
+            # 同一个人既是直属主管又是项目主管：只留一个节点，标签里两个身份都写上（审批记录里看得出他是以哪两个身份批的）。
+            position = next(index for index, (_label, other) in enumerate(deduped_parallel) if other == user)
+            role, _, person = deduped_parallel[position][0].partition("：")
+            extra = label.partition("：")[0]
+            if extra and extra not in role.split("、"):
+                deduped_parallel[position] = (f"{role}、{extra}：{person}", user)
+            continue
+        if not user:
             continue
         seen_parallel_users.add(user)
         deduped_parallel.append((label, user))
