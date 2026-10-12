@@ -167,7 +167,7 @@ const emptyText = computed(() => {
                 <th v-if="showDepartment">部门</th>
                 <th class="r">已填 / 上限（小时）</th>
                 <th>进度</th>
-                <th class="r">还差</th>
+                <th class="r" title="天数 = 小时 ÷ 8，反推出来给人看">还差（天）</th>
                 <th>状态</th>
                 <th v-if="remindOpen" class="r">操作</th>
               </tr>
