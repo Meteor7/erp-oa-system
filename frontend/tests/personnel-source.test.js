@@ -29,7 +29,7 @@ test("the R&D type follows the department: group header shows who fills the time
 });
 
 test("every filter resets employee pagination", () => {
-  assert.match(source, /watch\(\[companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode,expiringOnly,joinedMonth,groupFilter\]/);
+  assert.match(source, /watch\(\[companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode,expiringOnly,joinedMonth,leftMonth,groupFilter\]/);
   assert.match(source, /watch\(pageCount/);
 });
 

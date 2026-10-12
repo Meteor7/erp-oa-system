@@ -128,6 +128,7 @@ function accessPath(path) {
   }
   if (path === '/approval/procurement/new' || /^\/approval\/procurement\/[^/]+\/pmc-edit$/.test(path)) return '/approval/procurement';
   if (path === '/approval/direct-purchase/new') return '/approval/direct-purchase';
+  if (path === '/dashboard/detail') return '/dashboard';   // 看板明细：和数据看板同一个入口权限
   return path;
 }
 

@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from rayher_hr_payroll import attendance_requests as att
 from rayher_hr_payroll.dashboard import people
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, col_row, cols, kpi, provider, target,
+    alert, bar_row, bars, col_row, cols, drill, drill_row, drill_to, kpi, provider, target,
 )
 
 STUCK_DAYS = 3
@@ -40,6 +40,28 @@ def _load_waiting(ctx):
     return {"total": int(row.get("total") or 0), "old": int(row.get("old") or 0)}
 
 
+def _load_waiting_rows(ctx):
+    """还在审批的请假 / 加班 / 调休，一演示员工128行（明细用；条数口径同 _load_waiting）。"""
+    import frappe
+
+    return frappe.db.sql(
+        "SELECT name, request_type, employee_name, department, from_date, to_date, duration_hours, current_step_label, "
+        "DATEDIFF(%(today)s, DATE(modified)) AS waited FROM `tabOA Approval Request` "
+        "WHERE request_type IN %(types)s AND workflow_status IN %(statuses)s ORDER BY waited DESC, name",
+        {"today": ctx.today, "types": tuple(att.ATTENDANCE_TYPES), "statuses": ("待审批", "待办理")}, as_dict=True)
+
+
+def _load_month_rows(ctx):
+    """所选月份已批准的请假 / 加班 / 调休（跨月的申请只留落在这个月里的小时）：和本月请假 / 加班同一份数据。"""
+    from rayher_hr_payroll.api import overview_entry
+
+    return overview_entry._attendance_rows([(int(ctx.period[:4]), int(ctx.period[5:7]))], None)
+
+
+def _month_rows(ctx):
+    return ctx.memo("att.month_rows", lambda: _load_month_rows(ctx))
+
+
 def _summary(ctx):
     return ctx.memo("att.summary", lambda: _load_summary(ctx))
 
@@ -64,31 +86,33 @@ def _visible(ctx):
 @provider("att.trip", "kpi", visible=_visible, title="出差中")
 def att_trip(ctx):
     today = _summary(ctx)["stats"]["today"]
-    return kpi("att.trip", "出差中", today["trip"], "人", "不算请假，不进出勤率", to=target("attendance.today"),
-               hint="今天在已批准的出差申请期间的人数（已在请假的不重复算）。" + HINT)
+    return kpi("att.trip", "出差中", today["trip"], "人", "不算请假，不进出勤率", to=drill_to("att.trip", ctx) if today["trip"] else None,
+               hint="今天在已批准的出差申请期间的人数（已在请假的不重复算）。点进去按部门看。" + HINT)
 
 
 @provider("att.pending", "kpi", visible=_visible, title="考勤待审批")
 def att_pending(ctx):
     waiting = _waiting(ctx)
     return kpi("att.pending", "考勤待审批", waiting["total"], "张", f"其中 {waiting['old']} 张超过 {STUCK_DAYS} 天" if waiting["old"] else "没有等得久的",
-               "hot" if waiting["old"] else "", to=target("attendance.all"),
-               hint=f"请假、加班、调休里还在审批的申请张数（所有审批人手上的，不只是你的）；“超过 {STUCK_DAYS} 天”从最近一次处理（没有就从提交）算起。")
+               "hot" if waiting["old"] else "", to=drill_to("att.pending", ctx) if waiting["total"] else None,
+               hint=f"请假、加班、调休里还在审批的申请张数（所有审批人手上的，不只是你的）；“超过 {STUCK_DAYS} 天”从最近一次处理（没有就从提交）算起。"
+                    "点进去一演示员工128行，每一行进申请详情。")
 
 
 @provider("att.leave", "kpi", visible=_visible, title="本月请假")
 def att_leave(ctx):
     stats = people._leave_stats(ctx)["totals"]
     return kpi("att.leave", f"{_month_word(ctx)}请假", _n(stats["leave_days"]), "天",
-               f"其中调休 {_n(stats['comp_days'])} 天", to=target("attendance.all"),
-               hint="已批准的请假天数（含调休；跨月申请按天拆到各月；小时 ÷ 8）。" + HINT)
+               f"另有调休 {_n(stats['comp_days'])} 天", to=drill_to("att.leave", ctx) if stats["leave_days"] else None,
+               hint="已批准的请假天数（不含调休，调休单独算；跨月申请按天拆到各月；小时 ÷ 8）。点进去按部门看。" + HINT)
 
 
 @provider("att.overtime", "kpi", visible=_visible, title="本月加班")
 def att_overtime(ctx):
     stats = people._leave_stats(ctx)["totals"]
     return kpi("att.overtime", f"{_month_word(ctx)}加班", _n(stats["overtime_days"]), "天", "提交后按 1:1 计入调休额度",
-               to=target("attendance.all"), hint="已批准的加班天数（小时 ÷ 8；跨月申请按天拆到各月）。")
+               to=drill_to("att.overtime", ctx) if stats["overtime_days"] else None,
+               hint="已批准的加班天数（小时 ÷ 8；跨月申请按天拆到各月）。点进去按部门看。")
 
 
 @provider("att.rate", "kpi", visible=_visible, title="出勤率")
@@ -108,7 +132,78 @@ def alert_att_pending(ctx):
     if not waiting["old"]:
         return None
     return alert("alert.att_pending", "warn", f"{waiting['old']} 张考勤申请等了超过 {STUCK_DAYS} 天", f"共 {waiting['total']} 张在审批中",
-                 "考勤中心", target("attendance.all"))
+                 "查看明细", drill_to("att.pending_old", ctx))
+
+
+# ---------------------------------------------------------------- 明细：和指标卡同一份数据，点进去逐条 / 逐部门列出来
+def _waiting_drill(ctx, key, title, only_old):
+    rows = _load_waiting_rows(ctx)
+    if only_old:
+        rows = [row for row in rows if int(row.get("waited") or 0) > STUCK_DAYS]
+    out = [drill_row([row["request_type"], row.get("employee_name") or "—", people._dept_label(row.get("department")) or "—",
+                      f"{str(row.get('from_date') or '')[5:10]} ～ {str(row.get('to_date') or row.get('from_date') or '')[5:10]}",
+                      row.get("current_step_label") or "—", f"{int(row.get('waited') or 0)} 天"],
+                     target("attendance.detail", request=row["name"]), tone="bad" if int(row.get("waited") or 0) > STUCK_DAYS else "")
+           for row in rows]
+    summary = f"共 {len(rows)} 张" + (f"，都等了超过 {STUCK_DAYS} 天" if only_old else "")
+    return drill(key, title, [("类型",), ("申请人",), ("部门",), ("日期",), ("现在在",), ("已等", "r")], out, summary=summary,
+                 note=f"“已等”从最近一次处理（没有就从提交）算起；红色 = 超过 {STUCK_DAYS} 天。")
+
+
+@provider("drill.att.pending", "drill", visible=_visible, title="考勤待审批")
+def drill_att_pending(ctx):
+    return _waiting_drill(ctx, "drill.att.pending", "考勤待审批", only_old=False)
+
+
+@provider("drill.att.pending_old", "drill", visible=_visible, title="考勤申请等得久")
+def drill_att_pending_old(ctx):
+    return _waiting_drill(ctx, "drill.att.pending_old", f"等了超过 {STUCK_DAYS} 天的考勤申请", only_old=True)
+
+
+def _by_department(ctx, request_types):
+    """所选月份已批准的申请按部门合计：{部门: [张数, 天数]}（天数 = 落在这个月里的小时 ÷ 8，同本月请假 / 加班）。"""
+    from rayher_hr_payroll.api import overview_entry
+
+    grouped = {}
+    for row in _month_rows(ctx):
+        if row.get("request_type") not in request_types:
+            continue
+        label = people._dept_label(row.get("department")) or "未分配部门"
+        entry = grouped.setdefault(label, [0, 0.0])
+        entry[0] += 1
+        entry[1] += overview_entry.days(float(row.get("duration_hours") or 0))
+    return grouped
+
+
+def _department_drill(ctx, key, title, request_types, noun, note):
+    grouped = _by_department(ctx, request_types)
+    ranked = sorted(grouped.items(), key=lambda item: (-item[1][1], item[0]))
+    rows = [drill_row([label, f"{count} 张", f"{_n(days)} 天"], target("attendance.home")) for label, (count, days) in ranked]
+    total_count = sum(entry[0] for entry in grouped.values())
+    total_days = sum(entry[1] for entry in grouped.values())
+    return drill(key, title, [("部门",), (noun, "r"), ("天数", "r")], rows, summary=f"共 {total_count} 张，合计 {_n(total_days)} 天", note=note)
+
+
+@provider("drill.att.leave", "drill", visible=_visible, title="本月请假")
+def drill_att_leave(ctx):
+    return _department_drill(ctx, "drill.att.leave", f"{_month_word(ctx)}请假 · 按部门", {att.REQUEST_LEAVE}, "请假单",
+                             "已批准的请假（不含调休），跨月申请只算落在这个月里的天数；" + HINT)
+
+
+@provider("drill.att.overtime", "drill", visible=_visible, title="本月加班")
+def drill_att_overtime(ctx):
+    return _department_drill(ctx, "drill.att.overtime", f"{_month_word(ctx)}加班 · 按部门", {att.REQUEST_OVERTIME}, "加班单",
+                             "已批准的加班，跨月申请只算落在这个月里的天数；" + HINT)
+
+
+@provider("drill.att.trip", "drill", visible=_visible, title="出差中")
+def drill_att_trip(ctx):
+    departments = [item for item in _summary(ctx).get("departments") or [] if int(item.get("today_trip") or 0) > 0]
+    departments.sort(key=lambda item: (-int(item["today_trip"]), item["label"]))
+    rows = [drill_row([item["label"], f"{int(item['today_trip'])} 人", f"{int(item['headcount'])} 人"], target("attendance.home")) for item in departments]
+    total = sum(int(item["today_trip"]) for item in departments)
+    return drill("drill.att.trip", "今天出差的人 · 按部门", [("部门",), ("出差", "r"), ("部门人数", "r")], rows, summary=f"共 {total} 人",
+                 note="今天在已批准的出差申请期间的人（已在请假的不重复算）。" + HINT)
 
 
 # ---------------------------------------------------------------- 图表块

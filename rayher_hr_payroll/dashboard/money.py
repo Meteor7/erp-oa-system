@@ -22,7 +22,8 @@ from datetime import date, timedelta
 
 from rayher_hr_payroll import expense_boards as boards
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, col_row, cols, kpi, list_row, listing, money_wan, provider, stack, stack_row, target,
+    alert, bar_row, bars, col_row, cols, drill, drill_row, drill_to, kpi, list_row, listing, money_wan, provider, stack,
+    stack_row, target,
 )
 
 STUCK_DAYS = boards.STUCK_DAYS            # 3：等待超过 3 天（> 3）算卡住 / 算等得久
@@ -426,10 +427,30 @@ def _cost_card(ctx, key, label, field, to, hint, with_share=False):
 
 @provider("cost.total", "kpi", visible=_can_cost, title="费用合计")
 def cost_total(ctx):
+    # 合计由三部分相加，研发费用汇总页只有研发那一部分，直接跳过去数字对不上；点进去是三部分的明细（相加正好等于这个数）。
     return _cost_card(
-        ctx, "cost.total", _month_label(ctx, "费用合计"), "total", target("cost.summary", period=ctx.period),
+        ctx, "cost.total", _month_label(ctx, "费用合计"), "total", drill_to("cost.total", ctx),
         "费用合计 = 研发分摊 + 采购（PO 金额，按下单日期）+ 报销付款（按实际付款日期）；已有研发分摊的月份，研发项目的采购和报销不重复计入；"
-        "没定版的月份研发部分用预览。来源：首页费用概览。")
+        "没定版的月份研发部分用预览。来源：首页费用概览。点进去看三部分各是多少。")
+
+
+@provider("drill.cost.total", "drill", visible=_can_cost, title="费用合计")
+def drill_cost_total(ctx):
+    """三部分相加 = 指标卡上的费用合计；每一部分再点进它自己的页面。"""
+    data = _overview(ctx)
+    if not data:
+        return None
+    totals = data["totals"]
+    rows = [
+        drill_row(["研发分摊", "工资、社保公积金、境外委托研发" + ("（预览，还没定版）" if data.get("preview") else ""), _amt(totals["rd"])],
+                  target("cost.summary", period=ctx.period)),
+        drill_row(["采购", "本期新下的 PO 金额，按下单日期，不含已取消", _amt(totals["po"])], target("price.approvals", tab="po")),
+        drill_row(["报销付款", "本期已付款的报销单、付款单，按实际付款日期", _amt(totals["expense"])], target("board.payment")),
+    ]
+    rows.append(drill_row(["合计", "三部分相加", _amt(totals["total"])], tone="hot"))
+    return drill("drill.cost.total", f"{_month_label(ctx, '费用合计')}由哪几部分组成",
+                 [("部分",), ("口径",), ("金额", "r")], rows, summary=f"合计 {_amt(totals['total'])}",
+                 note="已有研发分摊的月份，研发项目的采购和报销已经包含在研发分摊里，不重复计入。")
 
 
 @provider("cost.rd", "kpi", visible=_can_cost, title="研发分摊")
@@ -441,14 +462,71 @@ def cost_rd(ctx):
 
 @provider("cost.po", "kpi", visible=_can_cost, title="采购")
 def cost_po(ctx):
-    return _cost_card(ctx, "cost.po", "采购（PO 金额）", "po", target("procpay.work"),
-                      "本期新下的 PO 金额合计（不含已取消），按下单日期；不是付款额。来源：首页费用概览。")
+    return _cost_card(ctx, "cost.po", "采购（PO 金额）", "po", drill_to("cost.po", ctx),
+                      "本期新下的 PO 金额合计（不含已取消），按下单日期；不是付款额。来源：首页费用概览。点进去按 PO 列出来。")
+
+
+@provider("drill.cost.po", "drill", visible=_can_cost, title="采购（PO 金额）")
+def drill_cost_po(ctx):
+    """和 overview_entry._po_rows 同一个口径：本期创建、没取消的 PO，金额取物料行合计（已有研发分摊的月份，研发项目的行不重复计入）。"""
+    import frappe
+    from rayher_hr_payroll.api import overview_entry as overview
+
+    data = _overview(ctx)
+    start, end = overview.month_range([(int(ctx.period[:4]), int(ctx.period[5:7]))])
+    pos = frappe.get_all("OA Purchase Order", filters={"status": ["not in", list(overview.PO_DEAD_STATUS)], "creation": ["between", [start, end]]},
+                         fields=["name", "supplier", "status", "creation"], limit_page_length=0)
+    amounts = {}
+    if pos:
+        for line in frappe.get_all("OA Purchase Order Line", filters={"parent": ["in", [po["name"] for po in pos]]},
+                                   fields=["parent", "amount"], limit_page_length=0):
+            amounts[line["parent"]] = amounts.get(line["parent"], 0.0) + float(line.get("amount") or 0)
+    pos.sort(key=lambda po: -amounts.get(po["name"], 0.0))
+    rows = [drill_row([po["name"], str(po.get("supplier") or "").strip() or "—", po.get("status") or "", str(po.get("creation"))[:10],
+                       _amt(amounts.get(po["name"], 0.0))], target("price.po", po=po["name"])) for po in pos]
+    total = sum(amounts.values())
+    shown = ((data or {}).get("totals") or {}).get("po", total)
+    note = ("本期已有研发分摊，研发项目的采购包含在研发分摊里，所以费用合计里的采购比这张清单少。"
+            if abs(float(shown) - total) > 0.5 else "")
+    return drill("drill.cost.po", _month_label(ctx, "新下的 PO"), [("PO",), ("供应商",), ("状态",), ("下单日",), ("PO 金额", "r")], rows,
+                 summary=f"共 {len(pos)} 个 PO，合计 {_amt(total)}", note=note)
 
 
 @provider("cost.expense", "kpi", visible=_can_cost, title="报销")
 def cost_expense(ctx):
-    return _cost_card(ctx, "cost.expense", "报销付款", "expense", target("board.payment"),
-                      "本期已付款的报销单、付款单费用明细合计，按实际付款日期。来源：首页费用概览。")
+    return _cost_card(ctx, "cost.expense", "报销付款", "expense", drill_to("cost.expense", ctx),
+                      "本期已付款的报销单、付款单费用明细合计，按实际付款日期。来源：首页费用概览。点进去按单据列出来。")
+
+
+_COST_DETAIL_TARGET = {"报销单": "claim.detail", "付款单": "payment.detail", "费用付款申请": "reimbursement.detail"}
+
+
+@provider("drill.cost.expense", "drill", visible=_can_cost, title="报销付款")
+def drill_cost_expense(ctx):
+    """和 overview_entry._expense_rows 同一个口径：本期已付款的报销单、付款单，金额取费用明细行合计。"""
+    import frappe
+    from rayher_hr_payroll.api import overview_entry as overview
+
+    start, end = overview.month_range([(int(ctx.period[:4]), int(ctx.period[5:7]))])
+    requests = frappe.get_all("OA Approval Request",
+                              filters={"request_type": ["in", list(overview.COST_REQUEST_TYPES)], "workflow_status": "已付款", "paid_on": ["between", [start, end]]},
+                              fields=["name", "request_type", "subject", "employee_name", "paid_on"], limit_page_length=0)
+    amounts = {}
+    if requests:
+        for line in frappe.get_all("OA Approval Expense Line", filters={"parent": ["in", [row["name"] for row in requests]]},
+                                   fields=["parent", "total_amount", "amount"], limit_page_length=0):
+            amounts[line["parent"]] = amounts.get(line["parent"], 0.0) + float(line.get("total_amount") or line.get("amount") or 0)
+    requests.sort(key=lambda row: -amounts.get(row["name"], 0.0))
+    rows = []
+    for row in requests:
+        key = _COST_DETAIL_TARGET.get(row["request_type"])
+        rows.append(drill_row([row["name"], row["request_type"], str(row.get("subject") or "").strip() or "—", str(row.get("employee_name") or "—"),
+                               str(row.get("paid_on"))[:10], _amt(amounts.get(row["name"], 0.0))],
+                              target(key, request=row["name"]) if key else None))
+    total = sum(amounts.values())
+    return drill("drill.cost.expense", _month_label(ctx, "已付款的报销和付款"),
+                 [("单号",), ("类型",), ("事由",), ("申请人",), ("付款日",), ("金额", "r")], rows,
+                 summary=f"共 {len(requests)} 张，合计 {_amt(total)}")
 
 
 @provider("cost.rd_pending", "kpi", visible=_can_cost, title="本期研发分摊")
@@ -553,13 +631,13 @@ def block_cost_mix(ctx):
     if not data:
         return None
     totals = data["totals"]
-    to = target("cost.summary", period=ctx.period)
+    to = drill_to("cost.total", ctx)
     if totals["total"] <= 0:
-        return stack("block.cost_mix", "费用构成", [], sub=_month_label(ctx, "还没有费用数据"), more="经营", to=to)
+        return stack("block.cost_mix", "费用构成", [], sub=_month_label(ctx, "还没有费用数据"), more="明细", to=to)
     rows = [stack_row("研发分摊", f"{_wan(totals['rd'])} 万", _pct(totals["rd"], totals["total"]), ORANGE),
             stack_row("采购", f"{_wan(totals['po'])} 万", _pct(totals["po"], totals["total"]), BLUE),
             stack_row("报销付款", f"{_wan(totals['expense'])} 万", _pct(totals["expense"], totals["total"]), GREEN)]
-    return stack("block.cost_mix", "费用构成", rows, sub=_month_label(ctx, f"费用合计 {_amt(totals['total'])}"), more="经营", to=to,
+    return stack("block.cost_mix", "费用构成", rows, sub=_month_label(ctx, f"费用合计 {_amt(totals['total'])}"), more="明细", to=to,
                  hint="研发分摊 + 采购（PO 金额）+ 报销付款（已付款）；口径同「费用合计」。")
 
 
@@ -574,7 +652,6 @@ def block_cost_trend(ctx):
             for index, item in enumerate(trend)]
     preview = any(item.get("preview") for item in trend)
     return cols("block.cost_trend", "月度费用趋势", rows, sub="近 6 个月 · 万元" + ("（含预览月份）" if preview else ""),
-                more="研发费用汇总", to=target("cost.summary", period=ctx.period),
                 hint="每月费用合计（研发分摊 + 采购 + 报销付款），没定版的月份研发部分是预览。")
 
 
@@ -585,8 +662,21 @@ def block_cost_projects(ctx):
         return None
     pairs = [(project["label"], project["total"]) for project in data.get("projects") or []]
     return bars("block.cost_projects", "项目费用排行", _top_bars(pairs, 5, "个项目"), sub=_month_label(ctx, " · 万元"),
-                more="全部项目", to=target("cost.summary", period=ctx.period),
+                more="全部项目", to=drill_to("cost.projects", ctx),
                 hint="按项目汇总的费用合计（研发分摊 + 采购 + 报销付款），前 5 名，其余合并。")
+
+
+@provider("drill.cost.projects", "drill", visible=_can_cost, title="项目费用排行")
+def drill_cost_projects(ctx):
+    data = _overview(ctx)
+    if not data:
+        return None
+    projects = sorted(data.get("projects") or [], key=lambda project: -float(project["total"] or 0))
+    rows = [drill_row([project["label"], _amt(project["total"])]) for project in projects]
+    total = sum(float(project["total"] or 0) for project in projects)
+    return drill("drill.cost.projects", _month_label(ctx, "各项目的费用"), [("项目",), ("费用合计", "r")], rows,
+                 summary=f"共 {len(projects)} 个项目，合计 {_amt(total)}",
+                 note="研发分摊 + 采购 + 报销付款，口径同「费用合计」。")
 
 
 @provider("block.alloc_mix", "block", visible=_can_alloc, title="分摊构成")
@@ -656,16 +746,24 @@ def pay_in_approval(ctx):
     breakdown = " · ".join(f"{name} {counts[name]}" for name in STEP_ORDER if counts[name])
     stuck = _waiting(items)
     return kpi("pay.in_approval", "付款审批中", len(items), "张", breakdown or "没有在审批的付款",
-               "hot" if stuck else "", to=_review_target(items),
-               hint="报销单、付款单状态「待审批」+ 采购付款期次「付款审批中」；括号按当前审批节点的岗位拆（对不上的归「其他」）。")
+               "hot" if stuck else "", to=drill_to("pay.in_approval", ctx) if items else None,
+               hint="报销单、付款单状态「待审批」+ 采购付款期次「付款审批中」；括号按当前审批节点的岗位拆（对不上的归「其他」）。"
+                    "三种单据在三个页面里，点进去是合在一起的清单。")
 
 
-def _review_target(items):
-    counts = {kind: sum(1 for item in items if item["kind"] == kind) for kind in ("报销单", "付款单", "采购付款")}
-    if not any(counts.values()):
-        return target("board.payment")
-    kind = max(counts, key=lambda name: counts[name])
-    return {"报销单": target("claim.review"), "付款单": target("payment.review"), "采购付款": target("procpay.approvals")}[kind]
+_PAY_DETAIL_TARGET = {"报销单": "claim.detail", "付款单": "payment.detail", "采购付款": "procpay.approvals"}
+
+
+@provider("drill.pay.in_approval", "drill", visible=_board_all, title="付款审批中")
+def drill_pay_in_approval(ctx):
+    items = sorted(_pay(ctx)["approving"], key=lambda item: -item["waited"])
+    rows = [drill_row([item["kind"], item["name"], item["bucket"], _amt(item["amount"]), f"{item['waited']} 天"],
+                      target(_PAY_DETAIL_TARGET[item["kind"]], request=item["name"]) if item["kind"] in _PAY_DETAIL_TARGET else None,
+                      tone="bad" if item["waited"] > STUCK_DAYS else "")
+            for item in items]
+    return drill("drill.pay.in_approval", "付款审批中", [("类型",), ("单号",), ("现在在",), ("金额", "r"), ("已等", "r")], rows,
+                 summary=f"共 {len(items)} 张，合计 {_amt(sum(item['amount'] for item in items))}",
+                 note="报销单、付款单（待审批）+ 采购付款期次（付款审批中）；红色 = 等待超过 3 天。")
 
 
 @provider("pay.paid_month", "kpi", visible=_board_all, title="本月已付")
@@ -793,9 +891,8 @@ def block_pay_steps(ctx):
             continue
         tone = "bad" if _waiting(part) else ("warn" if len(part) == top and top > 1 else "")
         rows.append(bar_row(name, len(part), _pct(len(part), top), tone))
-    to = _review_target(items)
     return bars("block.pay_steps", "付款审批卡在哪一步", rows, sub=f"付款审批中 {len(items)} 张" if items else "没有在审批的付款",
-                more="付款看板" if to and to["key"] == "board.payment" else "查看审批", to=to,
+                more="查看明细" if items else "", to=drill_to("pay.in_approval", ctx) if items else None,
                 hint="按当前审批节点的岗位拆（审批人账号反查岗位，对不上的归「其他」）；标红 = 这一步有等待超过 3 天的。"
                      "报销/付款路线：出纳审核 → 直属主管 → 财务主管 → 副总/总经理；采购付款路线：副总 → 总账 → 财务主管 → 出纳 → 总经理。")
 
@@ -896,29 +993,36 @@ def block_aging(ctx):
 
 
 # ================================================================ 审批卡点
-_STUCK_TARGET = {
-    "报销单": ("claim.stuck", {}, "报销单"), "付款单": ("payment.stuck", {}, "付款申请"),
-    "采购付款": ("procpay.approvals", {}, "采购付款"), "采购申请": ("procurement.list", {"scope": "all"}, "采购申请"),
-    "购买申请": ("board.request", {}, "申请看板"), "出差申请": ("board.request", {}, "申请看板"),
-    "价格审批": ("price.approvals", {"view": "approvals"}, "价格审批"),
+# 一张卡住的单据点进去看什么：目标名 + 放单号的参数名。
+_STUCK_RECORD = {
+    "报销单": ("claim.detail", "request"), "付款单": ("payment.detail", "request"), "采购付款": ("procpay.approvals", "request"),
+    "采购申请": ("procurement.detail", "request"), "购买申请": ("directpurchase.detail", "request"),
+    "出差申请": ("travel.detail", "request"), "价格审批": ("price.approvals", "approval"),
 }
 
 
-def _stuck_target(items):
-    """哪一类卡得最多就去哪一类的列表（并列按 _STUCK_TARGET 的顺序）。"""
-    counts = {kind: sum(1 for item in items if item["type"] == kind) for kind in _STUCK_TARGET}
-    kind = max(_STUCK_TARGET, key=lambda name: counts[name]) if items else "购买申请"
-    key, params, label = _STUCK_TARGET[kind]
-    return target(key, **params), label
+def _stuck_record_target(item):
+    spec = _STUCK_RECORD.get(item["type"])
+    return target(spec[0], **{spec[1]: item["name"]}) if spec else None
+
+
+@provider("drill.approval.stuck", "drill", visible=_board_all, title="审批卡点")
+def drill_approval_stuck(ctx):
+    items = sorted(_stuck(ctx), key=lambda item: -item["waited"])
+    rows = [drill_row([item["type"], item["name"], item["step"] or "—", f"{item['waited']} 天"], _stuck_record_target(item),
+                      tone="bad" if item["waited"] > 7 else "warn") for item in items]
+    return drill("drill.approval.stuck", "审批卡点", [("类型",), ("单号",), ("卡在",), ("已等", "r")], rows,
+                 summary=f"共 {len(items)} 张超过 {STUCK_DAYS} 天没处理",
+                 note="待审批 / 待办理的单据里，从最近一次签批（没有就从提交）算起超过 3 天的；含报销、付款、采购申请、购买申请、出差申请、采购付款、价格审批；不含请假、加班、调休。")
 
 
 @provider("approval.stuck", "kpi", visible=_board_all, title="审批卡点")
 def approval_stuck(ctx):
     items = _stuck(ctx)
-    to, _label = _stuck_target(items)
     sub = (f"超过 {STUCK_DAYS} 天没处理 · 最久 {max(item['waited'] for item in items)} 天"
            if items else f"没有超过 {STUCK_DAYS} 天的审批")
-    return kpi("approval.stuck", "审批卡点", len(items), "张", sub, "hot" if items else "ok", to=to,
+    return kpi("approval.stuck", "审批卡点", len(items), "张", sub, "hot" if items else "ok",
+               to=drill_to("approval.stuck", ctx) if items else None,
                hint=f"待审批 / 待办理的单据里，从最近一次签批（没有就从提交）算起超过 {STUCK_DAYS} 天（不含）的。"
                     "含报销、付款、采购申请、购买申请、出差申请、采购付款、价格审批；不含请假、加班、调休。")
 
@@ -929,13 +1033,12 @@ def alert_stuck(ctx):
     if not items:
         return None
     oldest = max(items, key=lambda item: item["waited"])
-    to, label = _stuck_target(items)
     kinds = {}
     for item in items:
         kinds[item["type"]] = kinds.get(item["type"], 0) + 1
     where = f"最久卡在「{oldest['step']}」，已 {oldest['waited']} 天" if oldest["step"] else f"最久已 {oldest['waited']} 天"
     breakdown = "、".join(f"{kind} {count}" for kind, count in sorted(kinds.items(), key=lambda pair: -pair[1]))
-    return alert("alert.stuck", "warn", f"{len(items)} 张审批超过 {STUCK_DAYS} 天没处理", f"{where}（{breakdown}）", label, to)
+    return alert("alert.stuck", "warn", f"{len(items)} 张审批超过 {STUCK_DAYS} 天没处理", f"{where}（{breakdown}）", "审批卡点", drill_to("approval.stuck", ctx))
 
 
 # ================================================================ 发票
@@ -951,8 +1054,21 @@ def invoice_review(ctx):
         parts.append(f"识别失败 {failed}")
     total = confirm + dup + failed
     return kpi("invoice.review", "发票待处理", total, "张", " · ".join(parts) if total else "没有待处理的发票",
-               "hot" if data["stale"] or dup else "", to=target("invoice.folder", tab="todo"),
-               hint=f"发票夹（全部发票）里状态为待确认、疑似重复、识别失败的张数；「超过 {INVOICE_STALE_DAYS} 天」按发票最后修改时间算。")
+               "hot" if data["stale"] or dup else "", to=drill_to("invoice.review", ctx) if total else None,
+               hint=f"发票夹（全部发票）里状态为待确认、疑似重复、识别失败的张数；「超过 {INVOICE_STALE_DAYS} 天」按发票最后修改时间算。"
+                    "点进去按状态分开列，每一行再进发票夹。")
+
+
+@provider("drill.invoice.review", "drill", visible=_can_invoice, title="发票待处理")
+def drill_invoice_review(ctx):
+    data = _invoices(ctx)
+    counts = data["counts"]
+    spec = (("待确认", "allinv", f"其中超过 {INVOICE_STALE_DAYS} 天没确认的 {data['stale']} 张" if data["stale"] else "OCR 识别完，等人确认"),
+            ("疑似重复", "dup", "和已有发票可能重复，要人工看"), ("识别失败", "allinv", "OCR 没识别出来，要手工补"))
+    rows = [drill_row([name, counts.get(name, 0), note], target("invoice.folder", tab=tab), tone="hot" if name == "疑似重复" and counts.get(name, 0) else "")
+            for name, tab, note in spec if counts.get(name, 0)]
+    total = sum(counts.get(name, 0) for name, _tab, _note in spec)
+    return drill("drill.invoice.review", "发票待处理", [("状态",), ("张数", "r"), ("说明",)], rows, summary=f"共 {total} 张")
 
 
 @provider("alert.invoice", "alert", visible=_can_invoice, title="发票待处理")
@@ -966,7 +1082,7 @@ def alert_invoice(ctx):
         parts.append(f"{stale} 张发票待确认超过 {INVOICE_STALE_DAYS} 天")
     if dup:
         parts.append(f"{dup} 张发票疑似重复")
-    return alert("alert.invoice", "warn", "，".join(parts), "", "发票夹", target("invoice.folder", tab="todo" if stale else "dup"))
+    return alert("alert.invoice", "warn", "，".join(parts), "", "发票明细", drill_to("invoice.review", ctx))
 
 
 @provider("block.invoice_status", "block", visible=_can_invoice, title="发票状态")

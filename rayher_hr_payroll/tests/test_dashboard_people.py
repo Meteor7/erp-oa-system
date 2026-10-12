@@ -260,18 +260,23 @@ def test_headcount_cards(monkeypatch):
     assert (active["value"], active["sub"], active["target"]) == ("6", "研发 2 · 其他 4", {"key": "personnel.list", "params": {"status": "active"}})
     assert "离职日当天仍算在职" in active["hint"] and "工时填报" in active["hint"]
     joined = run(ctx, "hr.joined_left")
-    assert (joined["value"], joined["sub"]) == ("1 / 2", "试用期中 2 人")
+    assert (joined["label"], joined["value"], joined["sub"]) == ("本月入职", "1", "试用期中 2 人 · 本月离职 1 人")
     assert joined["target"]["key"] == "personnel.joined"
     left = run(ctx, "hr.left_month")
-    assert (left["value"], left["sub"]) == ("2", "已离职 1 · 待离职 1")
+    # 数字 = 点进去员工页「已离职 + 本月离职」能看到的人数（已经离职的）；离职日还没到的在副标题里单独说
+    assert (left["value"], left["sub"]) == ("1", "另有 1 人离职日在本月、还没到")
+    assert left["target"] == {"key": "personnel.left_month", "params": {}}
     away = run(ctx, "hr.away_today")
     assert (away["value"], away["sub"], away["target"]["key"]) == ("3", "事假 2 · 调休 1", "attendance.today")
 
 
-def test_joined_card_does_not_point_at_this_month_filter_for_another_month(monkeypatch):
+def test_joined_and_left_cards_do_not_point_at_this_month_filter_for_another_month(monkeypatch):
+    """员工页只会按“当前月”筛，看别的月份时跳过去数字对不上，所以不给跳转。"""
     install(monkeypatch)
-    card = run(make_ctx(period="2026-09"), "hr.joined_left")
-    assert card["value"] == "0 / 0" and card["target"] == {"key": "personnel.list", "params": {}}
+    ctx = make_ctx(period="2026-09")
+    joined, left = run(ctx, "hr.joined_left"), run(ctx, "hr.left_month")
+    assert joined["value"] == "0" and joined["target"] is None
+    assert left["value"] == "0" and left["target"] is None
 
 
 def test_expiry_file_and_rd_gap_cards(monkeypatch):
@@ -443,7 +448,7 @@ def test_empty_company_shows_zeros_and_empty_states_without_errors(monkeypatch):
     got = run_all(make_ctx())
     assert [got[key]["value"] for key in ("hr.active", "hr.joined_left", "hr.left_month", "hr.away_today", "hr.expiring",
                                           "hr.file_pending", "hr.rd_gap", "hr.payroll", "hr.social_pending")] == \
-        ["0", "0 / 0", "0", "0", "0", "0", "0", "0 / 0", "0"]
+        ["0", "0", "0", "0", "0", "0", "0", "0 / 0", "0"]
     assert (got["hr.pay_total"]["value"], got["hr.pay_total"]["unit"]) == ("0", "元")
     assert got["hr.pay_si"]["value"] == "0" and got["hr.dorm_rate"]["value"] == "0" and got["hr.dorm_lease"]["value"] == "0"
     assert all(got[key] is None for key in ALERTS)              # 没触发的提醒不出现

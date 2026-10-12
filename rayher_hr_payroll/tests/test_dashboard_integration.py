@@ -35,8 +35,39 @@ def test_every_layout_key_has_a_provider_of_the_right_kind():
 
 def test_no_provider_is_left_out_of_every_layout():
     used = layout.all_block_keys()
-    orphans = sorted(set(core.REGISTRY) - used)
+    orphans = sorted(key for key, provider in core.REGISTRY.items() if provider.kind != "drill" and key not in used)
     assert not orphans, f"providers that no layout uses: {orphans}"
+
+
+def _drill_items_used_by_providers():
+    root = os.path.dirname(os.path.abspath(core.__file__))
+    used = set()
+    for path in glob.glob(os.path.join(root, "*.py")):
+        used.update(re.findall(r"""drill_to\(\s*["']([A-Za-z0-9_.]+)["']""", open(path, encoding="utf-8").read()))
+    return used
+
+
+def test_every_drill_list_is_opened_by_some_card_and_every_card_link_has_its_list():
+    """点合计类数字进去的明细清单：卡片指向的清单一定存在，存在的清单一定有卡片指向（不留死代码）。"""
+    lists = {key[len(core.DRILL_PREFIX):] for key, provider in core.REGISTRY.items() if provider.kind == "drill"}
+    used = _drill_items_used_by_providers()
+    assert not used - lists, f"cards point at lists that do not exist: {sorted(used - lists)}"
+    assert not lists - used, f"lists no card points at: {sorted(lists - used)}"
+    assert all(key.startswith(core.DRILL_PREFIX) for key, provider in core.REGISTRY.items() if provider.kind == "drill")
+
+
+def test_the_drill_target_is_declared_with_the_item_and_period_parameters():
+    spec = core.load_targets()["drill"]
+    assert spec["path"] == "/dashboard/detail" and spec["params"] == ["item", "period"]
+    assert core.target("drill", item="approval.stuck", period="2026-10") == {"key": "drill", "params": {"item": "approval.stuck", "period": "2026-10"}}
+
+
+def test_a_drill_list_that_the_user_may_not_see_is_not_returned():
+    ctx = core.Ctx(user="nobody@example.com", roles=frozenset({"Employee"}), positions=frozenset(), period="2026-10", today="2026-10-09")
+    for key in ("cost.total", "approval.stuck", "pay.in_approval", "att.leave", "proc.po_overdue", "proc.urgent", "invoice.review"):
+        assert core.get_detail_for(ctx, key) is None, key
+    assert core.get_detail_for(ctx, "no.such.list") is None
+    assert core.get_detail_for(ctx, "") is None
 
 
 def test_every_literal_target_used_in_a_provider_exists():

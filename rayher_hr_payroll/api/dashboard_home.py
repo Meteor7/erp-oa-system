@@ -37,3 +37,17 @@ def get_home(period=None):
         frappe.throw(frappe._("请先登录"), frappe.PermissionError)
     core.load_providers()
     return core.get_home_for(_make_ctx(period), None)
+
+
+@frappe.whitelist(methods=["GET"])
+def get_detail(item=None, period=None):
+    """点指标卡 / 提醒进去的明细清单：用和指标卡同一份数据逐条列出来，条数 / 合计和卡片上的数字一致。
+    没有这个清单或没有权限时 available 为 False（页面显示“看不到”）。"""
+    if not frappe.session.user or frappe.session.user == "Guest":
+        frappe.throw(frappe._("请先登录"), frappe.PermissionError)
+    core.load_providers()
+    ctx = _make_ctx(period)
+    detail = core.get_detail_for(ctx, str(item or "")[:80])
+    if detail is None:
+        return {"available": False}
+    return {"available": True, "period": ctx.period, **detail}

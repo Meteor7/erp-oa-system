@@ -32,15 +32,24 @@ _PEOPLE_TAB = tab(
 
 _LEADER_OVERVIEW = tab(
     "overview", "总览",
-    kpis=["cost.total", "pay.unpaid", "approval.stuck", "hr.active", "ts.rate", "alloc.status", "hr.expiring", "proc.po_transit"],
-    alerts=["alert.pay_waiting", "alert.stuck", "alert.ts_open", "alert.inspect_stale", "alert.alloc_preview", "alert.rd_gap"],
+    kpis=["cost.total", "pay.unpaid", "approval.stuck", "proc.urgent", "hr.active", "ts.rate", "alloc.status", "hr.expiring"],
+    alerts=["alert.urgent", "alert.pay_waiting", "alert.stuck", "alert.ts_open", "alert.inspect_stale", "alert.alloc_preview", "alert.rd_gap"],
     blocks=["block.cost_mix", "block.pay_wait_dist"],
     todos=True,
+)
+# 老板的“采购”页：加急的采购排在最前面，其次是价格审批、在途 PO、逾期、本周到货、付款到期、缺料影响的项目。
+_LEADER_PROC_TAB = tab(
+    "proc", "采购",
+    kpis=["proc.urgent", "proc.price_pending", "proc.po_transit", "proc.po_overdue", "proc.week_arrive", "proc.pay_planned_passed",
+          "proc.month_amount", "proc.risk_projects"],
+    alerts=["alert.urgent", "alert.po_overdue", "alert.pay_planned_passed", "alert.inspect_stale", "alert.risk_projects"],
+    blocks=["block.urgent_requests", "block.week_cols", "block.risk_projects", "block.pay_next30", "block.proc_month_trend", "block.proc_suppliers"],
 )
 _LEADER_TABS = [
     _LEADER_OVERVIEW,
     tab("cost", "经营", kpis=["cost.total", "cost.rd", "cost.po", "cost.expense"],
         blocks=["block.cost_trend", "block.cost_projects", "block.pay_wait_dist", "block.proc_chain", "block.labor_cost"]),
+    _LEADER_PROC_TAB,
     _PEOPLE_TAB,
     tab("rd", "研发", kpis=["ts.rate", "ts.rd_count", "cost.rd_pending", "hr.rd_gap"],
         blocks=["block.ts_by_dept", "block.alloc_mix"]),
@@ -92,9 +101,9 @@ LAYOUTS = {
         "note": "比价、PO、到货、供应商和付款提交。",
         "tabs": [
             tab("overview", "总览",
-                kpis=["proc.to_compare", "proc.price_pending", "proc.po_transit", "proc.po_overdue", "proc.ready_to_pay", "proc.pay_planned_passed", "proc.month_amount", "proc.uncoded"],
-                alerts=["alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_quote", "alert.uncoded"],
-                blocks=["block.week_cols", "block.proc_chain", "block.arrival_inspect"], todos=True),
+                kpis=["proc.urgent", "proc.to_compare", "proc.price_pending", "proc.po_transit", "proc.po_overdue", "proc.ready_to_pay", "proc.pay_planned_passed", "proc.month_amount"],
+                alerts=["alert.urgent", "alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_quote", "alert.uncoded"],
+                blocks=["block.urgent_requests", "block.week_cols", "block.proc_chain", "block.arrival_inspect"], todos=True),
             tab("analysis", "采购分析", kpis=["proc.month_amount", "proc.suppliers_count", "proc.to_inspect", "proc.month_inspected"],
                 blocks=["block.proc_month_trend", "block.proc_suppliers", "block.proc_projects", "block.inspect_aging"]),
         ],
@@ -103,8 +112,8 @@ LAYOUTS = {
         "note": "提 PR、盯物料到货、给物料编码。（这里不显示金额）",
         "tabs": [tab("overview", "总览",
                      kpis=["proc.await_pr", "proc.material_overdue", "proc.week_arrive", "proc.uncoded", "proc.po_transit", "proc.risk_projects", "me.approvals", "proc.price_pending"],
-                     alerts=["alert.material_overdue", "alert.uncoded", "alert.risk_projects"],
-                     blocks=["block.week_cols", "block.overdue_aging", "block.material_stage", "block.risk_projects"], todos=True)],
+                     alerts=["alert.urgent", "alert.material_overdue", "alert.uncoded", "alert.risk_projects"],
+                     blocks=["block.urgent_requests", "block.week_cols", "block.overdue_aging", "block.material_stage", "block.risk_projects"], todos=True)],
     },
     "production_asset_owner": {
         "note": "登记到货和验收，看本周要到什么货。",

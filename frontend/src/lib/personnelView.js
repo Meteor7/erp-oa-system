@@ -463,8 +463,9 @@ export function supervisorLabel(row, nameById) {
 //   group=<分组名>          部门分组，如 研发（见 departmentGroupMap）
 //   archive=待完善|待确认|已归档
 //   joined=month            本月入职
+//   left=month              本月离职（离职日在本月，和 status=left 一起用）
 //   dept=<部门>             部门展示名
-export const PERSONNEL_QUERY_KEYS = ["status", "reminder", "rd", "group", "archive", "joined", "dept"];
+export const PERSONNEL_QUERY_KEYS = ["status", "reminder", "rd", "group", "archive", "joined", "left", "dept"];
 
 function queryValue(query, key) {
   const value = query?.[key];
@@ -483,6 +484,7 @@ export function parsePersonnelQuery(query) {
     group: queryValue(query, "group"),
     archive: ARCHIVE_STATUSES.includes(archive) ? archive : "",
     joined: queryValue(query, "joined") === "month" ? "month" : "",
+    left: queryValue(query, "left") === "month" ? "month" : "",
     dept: displayDepartment(queryValue(query, "dept")),
   };
 }
@@ -496,18 +498,20 @@ export function personnelQueryOf(filters = {}) {
   if (filters.group) query.group = filters.group;
   if (filters.archive) query.archive = filters.archive;
   if (filters.joined === "month") query.joined = "month";
+  if (filters.left === "month") query.left = "month";
   if (filters.dept) query.dept = filters.dept;
   return query;
 }
 
 // filterEmployees 不认识的三个筛选：部门分组、本月入职、60 天内到期。
 // 分组口径与 departmentGroups 一致（有部门但不在分组表里的算「其他」）；到期口径与 kpiCounts.expiring 一致。
-export function filterByUrlExtras(items, { group = "", joined = "", reminder = "" } = {}, today) {
-  if (!group && !joined && !reminder) return items || [];
+export function filterByUrlExtras(items, { group = "", joined = "", left = "", reminder = "" } = {}, today) {
+  if (!group && !joined && !left && !reminder) return items || [];
   const month = String(today || "").slice(0, 7);
   return (items || []).filter((item) => {
     if (group && (item.department ? item.group || OTHER_GROUP : "") !== group) return false;
     if (joined === "month" && !(month && String(item.row?.date_of_joining || "").startsWith(month))) return false;
+    if (left === "month" && !(month && String(item.row?.relieving_date || "").startsWith(month))) return false;
     if (reminder === "expiring" && !item.reminders.some((entry) => entry.key === "probation" || entry.key === "contract")) return false;
     return true;
   });

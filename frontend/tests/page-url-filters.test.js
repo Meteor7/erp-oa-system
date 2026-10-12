@@ -118,7 +118,7 @@ test("accommodation master: ?lease=expiring and ?leaver=1 are bound; the leaver 
 // ---------- 与后端目标表对齐 ----------
 // 每个路径上，目标表里出现过的参数名（固定参数 + 可选参数）页面都必须会读。
 const READ_BY_PAGE = {
-  "/personnel": ["status", "reminder", "rd", "group", "archive", "joined", "dept"],
+  "/personnel": ["status", "reminder", "rd", "group", "archive", "joined", "left", "dept"],
   "/payroll": ["period", ...PAYROLL_QUERY_KEYS],
   "/social-insurance": ["period"],
   "/housing-fund": ["period"],

@@ -10,6 +10,7 @@ const attendancePage = () => import('./pages/AttendanceCenter.vue');
 const routes = [
   { path: '/', redirect: () => firstVisiblePath() },
   { path: '/dashboard', component: () => import('./pages/Dashboard.vue') },
+  { path: '/dashboard/detail', component: () => import('./pages/DashboardDetail.vue') },
   { path: '/personnel', component: () => import('./pages/Personnel.vue') },
   { path: '/social-insurance', component: () => import('./pages/SocialInsurance.vue') },
   { path: '/housing-fund', component: () => import('./pages/HousingFund.vue') },

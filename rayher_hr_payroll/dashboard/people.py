@@ -366,19 +366,23 @@ def hr_active(ctx):
 @provider("hr.joined_left", "kpi", visible=_hr_view, title="本月入职 / 离职")
 def hr_joined_left(ctx):
     facts = _facts(ctx)
-    to = target("personnel.joined") if _is_current_month(ctx) else target("personnel.list")
-    return kpi("hr.joined_left", "本月入职 / 离职", f"{facts['joined']} / {facts['left_month']}", "人",
-               f"试用期中 {facts['on_probation']} 人", to=to,
-               hint="入职 = 入职日在所选月份；离职 = 离职日在所选月份（含离职日还没到的）。试用期中 = 在职且试用期结束日不早于今天。")
+    # 点进去的员工页只会按“当前月”筛，所以看别的月份时不给跳转（数字对不上就不如不跳）。
+    to = target("personnel.joined") if _is_current_month(ctx) else None
+    return kpi("hr.joined_left", "本月入职", len(facts["new_joiners"]), "人",
+               f"试用期中 {facts['on_probation']} 人 · 本月离职 {facts['left_effective']} 人", to=to,
+               hint="入职 = 入职日在所选月份、现在还在职的人。试用期中 = 在职且试用期结束日不早于今天。"
+                    "点进去是员工页的「本月入职」，人数和这里一致。")
 
 
 @provider("hr.left_month", "kpi", visible=_hr_view, title="本月离职")
 def hr_left_month(ctx):
     facts = _facts(ctx)
-    return kpi("hr.left_month", "本月离职", facts["left_month"], "人",
-               f"已离职 {facts['left_effective']} · 待离职 {facts['left_pending']}",
-               to=target("personnel.list", status="left"),
-               hint="离职日在所选月份的人；离职日还没到的算「待离职」，仍在职。")
+    to = target("personnel.left_month") if _is_current_month(ctx) else None
+    return kpi("hr.left_month", "本月离职", facts["left_effective"], "人",
+               f"另有 {facts['left_pending']} 人离职日在本月、还没到" if facts["left_pending"] else "离职日在本月、已经离职的人",
+               to=to,
+               hint="离职日在所选月份、且已经离职的人（离职日当天仍算在职）；离职日还没到的叫「待离职」，不算在这里，仍在在职名单里。"
+                    "点进去是员工页的「已离职 + 本月离职」，人数和这里一致。")
 
 
 @provider("hr.away_today", "kpi", visible=_hr_view, title="今天不在岗")

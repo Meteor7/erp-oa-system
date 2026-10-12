@@ -29,10 +29,10 @@ const items = decorateEmployees(rows, { today: TODAY, groupOf: departmentGroupMa
 const names = (list) => list.map((item) => item.row.employee_name);
 
 test("parsePersonnelQuery reads every supported key and defaults the rest", () => {
-  assert.deepEqual(parsePersonnelQuery({}), { status: "active", reminder: "", rd: "", group: "", archive: "", joined: "", dept: "" });
+  assert.deepEqual(parsePersonnelQuery({}), { status: "active", reminder: "", rd: "", group: "", archive: "", joined: "", left: "", dept: "" });
   assert.deepEqual(
-    parsePersonnelQuery({ status: "left", reminder: "expiring", rd: "none", group: "研发", archive: "待完善", joined: "month", dept: "研发一部 - RAY" }),
-    { status: "left", reminder: "expiring", rd: NO_RD_TYPE, group: "研发", archive: "待完善", joined: "month", dept: "研发一部" },
+    parsePersonnelQuery({ status: "left", reminder: "expiring", rd: "none", group: "研发", archive: "待完善", joined: "month", left: "month", dept: "研发一部 - RAY" }),
+    { status: "left", reminder: "expiring", rd: NO_RD_TYPE, group: "研发", archive: "待完善", joined: "month", left: "month", dept: "研发一部" },
     "dept goes through displayDepartment so the dashboard may pass either spelling",
   );
   assert.equal(parsePersonnelQuery({ rd: "全时研发" }).rd, "全时研发");
@@ -40,8 +40,8 @@ test("parsePersonnelQuery reads every supported key and defaults the rest", () =
 });
 
 test("parsePersonnelQuery drops values the page does not know", () => {
-  const state = parsePersonnelQuery({ status: "all", reminder: "alert", rd: "天文学家", archive: "乱写", joined: "year" });
-  assert.deepEqual(state, { status: "active", reminder: "", rd: "", group: "", archive: "", joined: "", dept: "" });
+  const state = parsePersonnelQuery({ status: "all", reminder: "alert", rd: "天文学家", archive: "乱写", joined: "year", left: "year" });
+  assert.deepEqual(state, { status: "active", reminder: "", rd: "", group: "", archive: "", joined: "", left: "", dept: "" });
 });
 
 test("personnelQueryOf writes only non-default values, so clearing every filter gives no params", () => {
@@ -49,16 +49,16 @@ test("personnelQueryOf writes only non-default values, so clearing every filter 
   assert.deepEqual(personnelQueryOf({ status: "active" }), {});
   assert.deepEqual(personnelQueryOf({ status: "left" }), { status: "left" });
   assert.deepEqual(
-    personnelQueryOf({ status: "active", reminder: "expiring", rd: NO_RD_TYPE, group: "研发", archive: "待确认", joined: "month", dept: "销售部" }),
-    { reminder: "expiring", rd: "none", group: "研发", archive: "待确认", joined: "month", dept: "销售部" },
+    personnelQueryOf({ status: "active", reminder: "expiring", rd: NO_RD_TYPE, group: "研发", archive: "待确认", joined: "month", left: "month", dept: "销售部" }),
+    { reminder: "expiring", rd: "none", group: "研发", archive: "待确认", joined: "month", left: "month", dept: "销售部" },
   );
-  for (const key of Object.keys(personnelQueryOf({ status: "left", reminder: "expiring", rd: "x", group: "g", archive: "a", joined: "month", dept: "d" }))) {
+  for (const key of Object.keys(personnelQueryOf({ status: "left", reminder: "expiring", rd: "x", group: "g", archive: "a", joined: "month", left: "month", dept: "d" }))) {
     assert.ok(PERSONNEL_QUERY_KEYS.includes(key), `${key} must be a key the page owns`);
   }
 });
 
 test("address -> state -> address is stable", () => {
-  const query = { reminder: "expiring", rd: "none", group: "研发", archive: "待完善", joined: "month", dept: "研发一部" };
+  const query = { reminder: "expiring", rd: "none", group: "研发", archive: "待完善", joined: "month", left: "month", dept: "研发一部" };
   assert.deepEqual(personnelQueryOf(parsePersonnelQuery(query)), query);
 });
 
@@ -81,6 +81,19 @@ test("group=研发 filters by department group; unknown departments are 其他; 
 
 test("joined=month keeps people who joined in the current month", () => {
   assert.deepEqual(names(filterByUrlExtras(items, { joined: "month" }, TODAY)), ["演示员工129"]);
+});
+
+test("left=month with status=left keeps exactly the people who already left and whose leaving day is in this month", () => {
+  const leavers = decorateEmployees([
+    { name: "L1", employee_name: "甲", status: "Active", department: "", date_of_joining: "2020-01-01", relieving_date: "2026-10-03" },
+    { name: "L2", employee_name: "乙", status: "Left", department: "", date_of_joining: "2020-01-01", relieving_date: "2026-09-20" },
+    { name: "L3", employee_name: "丙", status: "Active", department: "", date_of_joining: "2020-01-01", relieving_date: "2026-10-20" },
+    { name: "L4", employee_name: "丁", status: "Active", department: "", date_of_joining: "2020-01-01" },
+  ], { today: TODAY, groupOf: departmentGroupMap(deptMeta) });
+  const gone = filterEmployees(leavers, { status: "left" });
+  assert.deepEqual(names(filterByUrlExtras(gone, { left: "month" }, TODAY)), ["甲"]);      // 乙上个月走的，丙 10-20 才走（还在职）
+  assert.deepEqual(names(gone), ["甲", "乙"]);
+  assert.equal(filterByUrlExtras(gone, {}, TODAY), gone);
 });
 
 test("personnel.rd_gap target (active + no R&D type + group 研发) finds exactly the R&D-department gap", () => {
@@ -111,16 +124,17 @@ test("Personnel reads its filters from the address and writes changes back with 
   // 来源页是看板：写回只能是 replace（在 bindRouteFilters 里），页面自己不能 push
   assert.doesNotMatch(script, /router\.push/);
   // 每个会进地址的筛选都在 sources 里
-  assert.match(script, /sources:\[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,departmentFilter\]/);
+  assert.match(script, /sources:\[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,leftMonth,departmentFilter\]/);
   // 先理顺「部门不可用就清掉」，再写地址
   assert.ok(script.indexOf("departmentOptions.value.includes(departmentFilter.value)") < script.indexOf("bindRouteFilters("));
 });
 
 test("Personnel applies the extra filters to the list and the export, and shows removable tags", () => {
   assert.match(script, /filterByUrlExtras\(filterEmployees\(items\.value,/);
-  assert.match(script, /group:groupFilter\.value,joined:joinedMonth\.value\?"month":"",reminder:expiringOnly\.value\?"expiring":""/);
+  assert.match(script, /group:groupFilter\.value,joined:joinedMonth\.value\?"month":"",left:leftMonth\.value\?"month":"",reminder:expiringOnly\.value\?"expiring":""/);
   assert.match(template, /data-chip-expiring :aria-pressed="expiringOnly"/);
   assert.match(template, /data-chip-joined :aria-pressed="joinedMonth"/);
+  assert.match(template, /data-chip-left :aria-pressed="leftMonth"/);
   assert.match(template, /v-if="groupFilter"[^>]*data-chip-group/);
   assert.match(template, /@click="groupFilter=''"/);
   assert.match(template, /分组：\{\{groupFilter\}\}/);

@@ -7,7 +7,11 @@ import pytest
 
 from rayher_hr_payroll.dashboard import core, layout, money
 
-MONEY_KEYS = {key for key, item in core.REGISTRY.items() if item.fn.__module__ == money.__name__}
+MONEY_KEYS = {key for key, item in core.REGISTRY.items() if item.fn.__module__ == money.__name__ and item.kind != "drill"}
+DRILL_KEYS = {key for key, item in core.REGISTRY.items() if item.fn.__module__ == money.__name__ and item.kind == "drill"}
+# 明细清单 -> 它背后的卡片 / 块：看得到卡片的人才看得到清单，不多也不少
+DRILL_OF = {"drill.cost.total": "cost.total", "drill.cost.po": "cost.po", "drill.cost.expense": "cost.expense", "drill.cost.projects": "block.cost_projects",
+            "drill.pay.in_approval": "pay.in_approval", "drill.approval.stuck": "approval.stuck", "drill.invoice.review": "invoice.review"}
 
 
 def make_ctx(roles=("Employee",), positions=(), **kw):
@@ -129,6 +133,12 @@ def test_every_block_is_classified():
     assert len(MONEY_KEYS) == 36
 
 
+def test_every_detail_list_is_visible_to_exactly_the_people_who_see_its_card():
+    assert set(DRILL_OF) == DRILL_KEYS
+    for drill_key, card_key in DRILL_OF.items():
+        assert core.REGISTRY[drill_key].visible is core.REGISTRY[card_key].visible, drill_key
+
+
 @pytest.mark.parametrize("name, ctx_args, po_view, expected", [
     ("普通员工", dict(), False, ALWAYS),
     ("部门主管", dict(roles=("Employee", "Department Manager")), True, ALWAYS),
@@ -192,12 +202,65 @@ def test_cost_cards_show_amounts_and_change_against_last_month():
     memo = {"money.cost_overview": overview()}
     total = run("cost.total", ctx, **memo)
     assert (total["label"], total["value"], total["unit"], total["sub"], total["preview"]) == ("本月费用合计", "418.2", "万", "▲ 6.2% 较上月", True)
-    assert total["target"] == {"key": "cost.summary", "params": {"period": "2026-10"}}
+    # 合计 = 研发 + 采购 + 报销付款；研发费用汇总页只有研发那一部分，所以合计不直接跳过去，点进去是三部分的明细
+    assert total["target"] == {"key": "drill", "params": {"item": "cost.total", "period": "2026-10"}}
+    detail = core.get_detail_for(ctx, "cost.total")
+    assert [row["cells"][0] for row in detail["rows"]] == ["研发分摊", "采购", "报销付款", "合计"]
+    assert [row["cells"][2] for row in detail["rows"]] == ["¥ 286.4 万", "¥ 98.2 万", "¥ 33.6 万", "¥ 418.2 万"]
+    assert detail["summary"] == "合计 ¥ 418.2 万" and "（预览，还没定版）" in detail["rows"][0]["cells"][1]
+    assert [row["target"] and row["target"]["key"] for row in detail["rows"]] == ["cost.summary", "price.approvals", "board.payment", None]
     rd = run("cost.rd", ctx)
     assert (rd["value"], rd["sub"], rd["preview"]) == ("286.4", "占 68% · ▲ 5% 较上月", True)
     po, expense = run("cost.po", ctx), run("cost.expense", ctx)
     assert (po["value"], po["sub"], po["preview"]) == ("98.2", "▲ 12.4% 较上月", False)
+    assert po["target"]["params"] == {"item": "cost.po", "period": "2026-10"} and expense_target(ctx) == {"item": "cost.expense", "period": "2026-10"}
     assert (expense["value"], expense["sub"]) == ("33.6", "▼ 4.1% 较上月")
+
+
+def expense_target(ctx):
+    return run("cost.expense", ctx)["target"]["params"]
+
+
+def test_cost_blocks_open_the_list_that_adds_up_to_the_block():
+    ctx = make_ctx(**FINANCE)
+    ctx._memo["money.cost_overview"] = overview()
+    mix, trend, projects = run("block.cost_mix", ctx), run("block.cost_trend", ctx), run("block.cost_projects", ctx)
+    assert mix["target"]["params"]["item"] == "cost.total" and projects["target"]["params"]["item"] == "cost.projects"
+    assert trend["target"] is None      # 六个月的趋势没有一个对得上的页面，不给假跳转
+    detail = core.get_detail_for(ctx, "cost.projects")
+    assert detail["summary"] == "共 7 个项目，合计 ¥ 373.1 万" and detail["rows"][0]["cells"] == ["ACONCA 7961", "¥ 112.6 万"]
+
+
+def test_cost_po_and_expense_lists_sum_the_same_lines_the_overview_uses(monkeypatch):
+    frappe = pytest.importorskip("frappe")
+    ctx = make_ctx(**FINANCE)
+    ctx._memo["money.cost_overview"] = overview(totals={"rd": 0, "po": 300.0, "expense": 120.0, "total": 420.0})
+    asked = []
+
+    def fake_get_all(doctype, filters=None, **kwargs):
+        asked.append(doctype)
+        if doctype == "OA Purchase Order":
+            return [{"name": "PO-1", "supplier": " 甲 ", "status": "已生效", "creation": "2026-10-03 10:00:00"},
+                    {"name": "PO-2", "supplier": "", "status": "草稿", "creation": "2026-10-05 10:00:00"}]
+        if doctype == "OA Purchase Order Line":
+            return [{"parent": "PO-1", "amount": 100.0}, {"parent": "PO-1", "amount": 50.0}, {"parent": "PO-2", "amount": 150.0}]
+        if doctype == "OA Approval Request":
+            return [{"name": "R-1", "request_type": "报销单", "subject": "差旅", "employee_name": "演示员工129", "paid_on": "2026-10-02"},
+                    {"name": "R-2", "request_type": "付款单", "subject": "", "employee_name": "演示员工146", "paid_on": "2026-10-04"}]
+        return [{"parent": "R-1", "total_amount": 80.0, "amount": 70.0}, {"parent": "R-2", "total_amount": None, "amount": 40.0}]
+
+    monkeypatch.setattr(frappe, "get_all", fake_get_all, raising=False)
+    po = core.get_detail_for(ctx, "cost.po")
+    assert po["summary"] == "共 2 个 PO，合计 ¥ 300" and po["note"] == ""
+    assert [row["cells"][:2] for row in po["rows"]] == [["PO-1", "甲"], ["PO-2", "—"]]
+    assert po["rows"][0]["target"] == {"key": "price.po", "params": {"po": "PO-1"}}
+    expense = core.get_detail_for(ctx, "cost.expense")
+    assert expense["summary"] == "共 2 张，合计 ¥ 120"
+    assert [row["target"] for row in expense["rows"]] == [{"key": "claim.detail", "params": {"request": "R-1"}}, {"key": "payment.detail", "params": {"request": "R-2"}}]
+    # 本期已有研发分摊时，概览里的采购比逐个 PO 加起来少：清单要说明为什么
+    ctx2 = make_ctx(**FINANCE)
+    ctx2._memo["money.cost_overview"] = overview(totals={"rd": 1000.0, "po": 100.0, "expense": 120.0, "total": 1220.0})
+    assert "研发项目的采购包含在研发分摊里" in core.get_detail_for(ctx2, "cost.po")["note"]
 
 
 def test_cost_card_without_last_month_data_and_other_period_label():
@@ -354,9 +417,14 @@ def test_waiting_card_and_alert():
 
 
 def test_in_approval_split_by_current_step_position():
-    card = run("pay.in_approval", make_ctx(**FINANCE), **pay_memo())
+    ctx = make_ctx(**FINANCE)
+    card = run("pay.in_approval", ctx, **pay_memo())
     assert (card["value"], card["unit"], card["sub"], card["tone"]) == ("2", "张", "出纳 1 · 总经理 1", "")
-    assert card["target"]["key"] == "claim.review"
+    assert card["target"] == {"key": "drill", "params": {"item": "pay.in_approval", "period": "2026-10"}}
+    # 报销单、付款单、采购付款在三个页面里：点进去是合在一起的清单，条数 = 卡片上的数字，每行进自己的单据
+    detail = core.get_detail_for(ctx, "pay.in_approval")
+    assert detail["summary"] == "共 2 张，合计 ¥ 1.0 万" and len(detail["rows"]) == int(card["value"])
+    assert [row["target"] for row in detail["rows"]] == [{"key": "claim.detail", "params": {"request": "OA-1"}}, {"key": "procpay.approvals", "params": {"request": "OA-P2"}}]
     stuck_rows = claims(rows=[claim_row("S1", waited=4), claim_row("S2", kind="付款单", waited=1)])
     card = run("pay.in_approval", make_ctx(**FINANCE), **pay_memo(**{"money.claims": stuck_rows, "money.purchase": None, "money.step_buckets": {"S1": "财务主管"}}))
     assert card["sub"] == "财务主管 1 · 其他 1" and card["tone"] == "hot"
@@ -369,7 +437,7 @@ def test_in_approval_nothing_in_flight():
     memo = pay_memo(**{"money.claims": claims(), "money.purchase": purchase(), "money.step_buckets": {}})
     ctx = make_ctx(**FINANCE)
     card = run("pay.in_approval", ctx, **memo)
-    assert (card["value"], card["sub"]) == ("0", "没有在审批的付款") and card["target"]["key"] == "board.payment"
+    assert (card["value"], card["sub"]) == ("0", "没有在审批的付款") and card["target"] is None
     block = run("block.pay_steps", ctx)
     assert block["rows"] == [] and block["sub"] == "没有在审批的付款"
 
@@ -472,20 +540,33 @@ def test_stuck_card_and_alert():
     ctx = make_ctx(positions=("vice_manager",))
     card = run("approval.stuck", ctx, **{"money.stuck": STUCK})
     assert (card["value"], card["unit"], card["tone"], card["sub"]) == ("3", "张", "hot", "超过 3 天没处理 · 最久 9 天")
-    assert card["target"] == {"key": "claim.stuck", "params": {}}
+    assert card["target"] == {"key": "drill", "params": {"item": "approval.stuck", "period": "2026-10"}}
     assert "不含请假、加班、调休" in card["hint"]
     alert_ = run("alert.stuck", ctx)
     assert alert_["title"] == "3 张审批超过 3 天没处理"
     assert alert_["sub"] == "最久卡在「价格审批（副总终审）」，已 9 天（报销单 2、价格审批 1）"
-    assert alert_["go"] == "报销单" and alert_["target"]["key"] == "claim.stuck"
+    assert alert_["go"] == "审批卡点" and alert_["target"] == card["target"]
 
 
-def test_stuck_target_goes_to_the_kind_with_most_stuck_items():
-    cases = [("付款单", "payment.stuck", {}), ("采购付款", "procpay.approvals", {}), ("采购申请", "procurement.list", {"scope": "all"}),
-             ("购买申请", "board.request", {}), ("出差申请", "board.request", {}), ("价格审批", "price.approvals", {"view": "approvals"})]
+def test_stuck_list_has_one_row_per_stuck_item_and_each_row_opens_that_record():
+    """合计跨好几类单据，没有一个现成页面能列出“正好这些”，所以点进去是明细：条数 = 卡片上的数字，每行进自己的单据。"""
+    ctx = make_ctx(positions=("vice_manager",), roles=("Rayher Business Executive",))
+    ctx._memo["money.stuck"] = STUCK
+    card = run("approval.stuck", ctx)
+    detail = core.get_detail_for(ctx, "approval.stuck")
+    assert len(detail["rows"]) == int(card["value"]) == 3 and detail["summary"] == "共 3 张超过 3 天没处理"
+    assert [row["cells"] for row in detail["rows"]] == [["价格审批", "PA-1", "价格审批（副总终审）", "9 天"], ["报销单", "A", "财务主管：演示员工16", "5 天"], ["报销单", "B", "出纳审核", "4 天"]]
+    assert [row["target"] for row in detail["rows"]] == [
+        {"key": "price.approvals", "params": {"approval": "PA-1"}}, {"key": "claim.detail", "params": {"request": "A"}}, {"key": "claim.detail", "params": {"request": "B"}}]
+
+
+def test_every_kind_of_stuck_item_opens_its_own_detail_page():
+    cases = [("报销单", "claim.detail", {"request": "x"}), ("付款单", "payment.detail", {"request": "x"}), ("采购付款", "procpay.approvals", {"request": "x"}),
+             ("采购申请", "procurement.detail", {"request": "x"}), ("购买申请", "directpurchase.detail", {"request": "x"}),
+             ("出差申请", "travel.detail", {"request": "x"}), ("价格审批", "price.approvals", {"approval": "x"})]
     for kind, key, params in cases:
-        to, _label = money._stuck_target([{"type": kind, "name": "x", "waited": 4, "step": ""}])
-        assert to == {"key": key, "params": params}, kind
+        assert money._stuck_record_target({"type": kind, "name": "x", "waited": 4, "step": ""}) == {"key": key, "params": params}, kind
+    assert money._stuck_record_target({"type": "没见过的类型", "name": "x", "waited": 4, "step": ""}) is None
 
 
 def test_nothing_stuck():
@@ -581,19 +662,29 @@ def test_invoice_cards_alert_and_block():
     card = run("invoice.review", ctx, **{"money.invoices": INVOICES, "money.invoice_open": True})
     assert (card["value"], card["unit"], card["tone"]) == ("17", "张", "hot")
     assert card["sub"] == "待确认 14（超过 7 天 4） · 疑似重复 2 · 识别失败 1"
-    assert card["target"] == {"key": "invoice.folder", "params": {"tab": "todo"}}
+    assert card["target"] == {"key": "drill", "params": {"item": "invoice.review", "period": "2026-10"}}
     warn = run("alert.invoice", ctx)
-    assert warn["title"] == "4 张发票待确认超过 7 天，2 张发票疑似重复" and warn["target"]["params"] == {"tab": "todo"}
+    assert warn["title"] == "4 张发票待确认超过 7 天，2 张发票疑似重复" and warn["target"] == card["target"]
     block = run("block.invoice_status", ctx)
     assert [(row["label"], row["value"], row["tone"]) for row in block["rows"]] == [
         ("待确认", "14", "warn"), ("疑似重复", "2", "bad"), ("识别失败", "1", "bad"), ("可用", "63", ""), ("已使用", "10", "")]
     assert block["rows"][3]["pct"] == 100.0
 
 
-def test_invoice_duplicates_only_alert_points_at_the_duplicate_tab():
+def test_invoice_list_adds_up_to_the_card_and_each_row_opens_the_right_tab():
+    ctx = make_ctx(roles=("Accounts User",))
+    card = run("invoice.review", ctx, **{"money.invoices": INVOICES, "money.invoice_open": True})
+    detail = core.get_detail_for(ctx, "invoice.review")
+    assert detail["summary"] == f"共 {card['value']} 张"
+    assert [(row["cells"][0], row["cells"][1]) for row in detail["rows"]] == [("待确认", "14"), ("疑似重复", "2"), ("识别失败", "1")]
+    assert [row["target"]["params"] for row in detail["rows"]] == [{"tab": "allinv"}, {"tab": "dup"}, {"tab": "allinv"}]
+    assert "其中超过 7 天没确认的 4 张" in detail["rows"][0]["cells"][2]
+
+
+def test_invoice_duplicates_only_alert_points_at_the_list():
     data = {"counts": {"待确认": 3, "疑似重复": 1}, "stale": 0}
     warn = run("alert.invoice", make_ctx(roles=("Accounts User",)), **{"money.invoices": data, "money.invoice_open": True})
-    assert warn["title"] == "1 张发票疑似重复" and warn["target"]["params"] == {"tab": "dup"}
+    assert warn["title"] == "1 张发票疑似重复" and warn["target"]["key"] == "drill"
 
 
 def test_invoice_empty_state():

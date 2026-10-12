@@ -203,6 +203,21 @@
   .db-panel { transition: none; }
 }
 
+/* ------------------------------------------------------------ 看板明细（点合计类数字进来的清单） */
+.db .dd-sum { margin-top: 4px; font-size: 15px; font-weight: 600; color: var(--db-ink); }
+.db .dd-card { padding: 0; overflow: hidden; }
+.db .dd-wrap { overflow-x: auto; }
+.db .dd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.db .dd-table th { padding: 9px 14px; text-align: left; font-size: 12px; font-weight: 500; color: var(--db-ink3); background: var(--db-soft); border-bottom: 1px solid var(--db-line); white-space: nowrap; }
+.db .dd-table td { padding: 10px 14px; border-bottom: 1px solid var(--db-line); color: var(--db-ink); vertical-align: top; }
+.db .dd-table tr:last-child td { border-bottom: 0; }
+.db .dd-table .is-r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.db .dd-table .dd-go { width: 1%; white-space: nowrap; text-align: right; color: var(--db-brand-d); }
+.db .dd-table tr.is-link { cursor: pointer; }
+.db .dd-table tr.is-link:hover td { background: var(--db-brand-bg); }
+.db .dd-table tr.is-bad td:first-child { box-shadow: inset 3px 0 0 var(--db-red); }
+.db .dd-table tr.is-warn td:first-child, .db .dd-table tr.is-hot td:first-child { box-shadow: inset 3px 0 0 var(--db-brand); }
+
 /* ------------------------------------------------------------ 窄屏 */
 @media (max-width: 1000px) {
   .db-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

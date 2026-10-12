@@ -23,7 +23,22 @@ def summary(trip=2, rate=0.974):
     days = [{"date": f"2026-10-{12 + i:02d}", "label": f"10/{12 + i}", "day": 12 + i, "weekday": "一", "off_day": i in (5, 6, 12, 13),
              "off": (0 if i in (5, 6, 12, 13) else 3 + i % 3)} for i in range(14)]
     return {"stats": {"today": {"off": 4, "trip": trip, "in": 67, "rest_day": False}, "rate": rate, "days": days,
-                      "month": {"hours": 232, "per_capita": 3.2, "by_kind": {}}}, "departments": [], "pending": 9}
+                      "month": {"hours": 232, "per_capita": 3.2, "by_kind": {}}},
+            "departments": [{"department": "RD - X", "label": "研发软件部", "headcount": 30, "today_off": 2, "today_trip": 1},
+                            {"department": "SV - X", "label": "客服部", "headcount": 8, "today_off": 1, "today_trip": 1},
+                            {"department": "HR - X", "label": "人事部", "headcount": 3, "today_off": 1, "today_trip": 0}], "pending": 9}
+
+
+def waiting_rows(total=9, old=3):
+    return [{"name": f"OA-{i}", "request_type": "请假申请" if i % 2 else "加班申请", "employee_name": f"员工{i}", "department": "研发软件部 - RAY",
+             "from_date": "2026-10-13", "to_date": "2026-10-14", "duration_hours": 8, "current_step_label": "直属主管", "waited": 5 if i < old else 1}
+            for i in range(total)]
+
+
+def month_rows():
+    return [{"request_type": "请假申请", "department": "研发软件部 - RAY", "duration_hours": 16.0}, {"request_type": "请假申请", "department": "客服部 - RAY", "duration_hours": 4.0},
+            {"request_type": "请假申请", "department": "研发软件部 - RAY", "duration_hours": 8.0}, {"request_type": "调休申请", "department": "客服部 - RAY", "duration_hours": 8.0},
+            {"request_type": "加班申请", "department": "客服部 - RAY", "duration_hours": 12.0}]
 
 
 @pytest.fixture
@@ -40,7 +55,10 @@ def state(monkeypatch):
 
     monkeypatch.setattr(attendance, "_load_summary", load_summary)
     monkeypatch.setattr(attendance, "_load_waiting", lambda ctx: data["waiting"])
+    monkeypatch.setattr(attendance, "_load_waiting_rows", lambda ctx: data["waiting_rows"])
+    monkeypatch.setattr(attendance, "_load_month_rows", lambda ctx: data["month_rows"])
     monkeypatch.setattr(people, "_fetch_leave_stats", lambda ctx: data["stats"])
+    data["waiting_rows"], data["month_rows"] = waiting_rows(), month_rows()
     return data
 
 
@@ -68,7 +86,7 @@ def test_trip_pending_leave_overtime_and_rate_cards(state):
     pending = run("att.pending", ctx)
     assert (pending["value"], pending["sub"], pending["tone"]) == ("9", "其中 3 张超过 3 天", "hot")
     leave = run("att.leave", ctx)
-    assert (leave["label"], leave["value"], leave["unit"], leave["sub"]) == ("本月请假", "29", "天", "其中调休 6 天")
+    assert (leave["label"], leave["value"], leave["unit"], leave["sub"]) == ("本月请假", "29", "天", "另有调休 6 天")
     assert (run("att.overtime", ctx)["value"], run("att.overtime", ctx)["unit"]) == ("29.5", "天")
     rate = run("att.rate", ctx)
     assert (rate["value"], rate["unit"], rate["tone"], rate["sub"]) == ("97.4", "%", "ok", "未来 14 天 · 10 个工作日")
@@ -84,7 +102,45 @@ def test_trip_pending_leave_overtime_and_rate_cards(state):
 def test_the_pending_alert_says_how_many_waited_too_long(state):
     item = run("alert.att_pending", make_ctx())
     assert item["title"] == "3 张考勤申请等了超过 3 天" and item["sub"] == "共 9 张在审批中" and item["tone"] == "warn"
-    assert item["target"] == {"key": "attendance.all", "params": {}}
+    assert item["target"] == {"key": "drill", "params": {"item": "att.pending_old", "period": "2026-10"}}
+
+
+def test_every_card_opens_a_list_that_adds_up_to_the_number_on_the_card(state):
+    """点进去的清单和卡片是同一份数据：条数 / 天数对得上，每一行再进真实的页面。"""
+    ctx = make_ctx()
+
+    def open_list(key):
+        card = run(key, ctx)
+        assert card["target"]["key"] == "drill", key
+        detail = core.get_detail_for(ctx, card["target"]["params"]["item"])
+        assert detail is not None, key
+        return card, detail
+
+    card, detail = open_list("att.pending")
+    assert detail["summary"] == "共 9 张" and len(detail["rows"]) == int(card["value"]) == 9
+    assert detail["rows"][0]["target"] == {"key": "attendance.detail", "params": {"request": "OA-0"}} and detail["rows"][0]["tone"] == "bad"
+    old = core.get_detail_for(ctx, "att.pending_old")
+    assert len(old["rows"]) == 3 and old["summary"] == "共 3 张，都等了超过 3 天"
+    assert all(row["tone"] == "bad" for row in old["rows"])
+
+    card, detail = open_list("att.leave")
+    assert [row["cells"] for row in detail["rows"]] == [["研发软件部", "2 张", "3 天"], ["客服部", "1 张", "0.5 天"]]
+    assert detail["summary"] == "共 3 张，合计 3.5 天"
+    card, detail = open_list("att.overtime")
+    assert [row["cells"] for row in detail["rows"]] == [["客服部", "1 张", "1.5 天"]] and detail["summary"] == "共 1 张，合计 1.5 天"
+    card, detail = open_list("att.trip")
+    assert [row["cells"] for row in detail["rows"]] == [["客服部", "1 人", "8 人"], ["研发软件部", "1 人", "30 人"]]
+    assert detail["summary"] == f"共 {card['value']} 人"
+    assert all(row["target"] == {"key": "attendance.home", "params": {}} for row in detail["rows"])
+
+
+def test_a_card_with_nothing_behind_it_does_not_link_to_an_empty_list(state):
+    state["waiting"] = {"total": 0, "old": 0}
+    state["summary"] = summary(trip=0)
+    state["stats"] = {**state["stats"], "totals": {"leave_days": 0.0, "leave_count": 0, "overtime_days": 0.0, "comp_days": 0.0}}
+    ctx = make_ctx()
+    for key in ("att.pending", "att.trip", "att.leave", "att.overtime"):
+        assert run(key, ctx)["target"] is None, key
 
 
 def test_the_company_summary_is_fetched_once(state):

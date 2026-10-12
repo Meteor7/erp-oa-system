@@ -101,6 +101,27 @@ def list_row(label, sub="", value="", tone="", to=None):
     return {"label": label, "sub": sub, "value": str(value), "tone": tone, "target": _checked_target(to)}
 
 
+# ---------------------------------------------------------------- 明细（点指标卡 / 提醒进去看到的清单）
+# 合计类的数字（费用合计、审批卡点、付款审批中、考勤天数……）背后是好几张表，没有一个现成的页面能列出“正好是这些”。
+# 明细就是同一个数字的清单：用同一份数据算，逐条列出来，每一行再点进真实的单据。清单的条数 / 合计一定等于指标卡上的数字。
+DRILL_PREFIX = "drill."
+
+
+def drill_to(item, ctx):
+    return target("drill", item=item, period=ctx.period)
+
+
+def drill(key, title, columns, rows, summary="", note=""):
+    """columns：[(标题, 对齐)]，对齐 "" 或 "r"；rows：drill_row(...) 的列表；summary：清单合计那一句，和指标卡上的数字对得上。"""
+    return {"key": key, "title": title, "summary": summary, "note": note, "rows": list(rows),
+            "columns": [{"label": column[0], "align": column[1] if len(column) > 1 else ""} for column in columns]}
+
+
+def drill_row(cells, to=None, tone=""):
+    assert tone in TONES, tone
+    return {"cells": [str(cell) for cell in cells], "target": _checked_target(to), "tone": tone}
+
+
 def _block(kind, key, title, sub, rows, more, to, hint):
     return {"key": key, "type": kind, "title": title, "sub": sub, "rows": rows, "more": more,
             "target": _checked_target(to), "hint": hint, "error": None}
@@ -206,7 +227,7 @@ REGISTRY: dict = {}
 
 
 def provider(key, kind, visible=None, title=""):
-    assert kind in ("kpi", "alert", "block", "todos"), kind
+    assert kind in ("kpi", "alert", "block", "todos", "drill"), kind
 
     def register(fn):
         REGISTRY[key] = Provider(key, kind, fn, visible, title)
@@ -247,6 +268,16 @@ def _fill_buckets(ctx, spec, out, errors, buckets):
             item = _run(provider_, ctx, errors)
             if item is not None:
                 out[bucket].append(item)
+
+
+def get_detail_for(ctx, item):
+    """一个明细清单：没有这个清单、或者当前账号看不了背后的数据，都返回 None（页面显示“看不到”，不抛内部错误）。"""
+    provider_ = REGISTRY.get(DRILL_PREFIX + str(item or ""))
+    if provider_ is None or provider_.kind != "drill":
+        return None
+    if provider_.visible is not None and not provider_.visible(ctx):
+        return None
+    return provider_.fn(ctx)
 
 
 def build_tab(ctx, tab, include_todos=True):

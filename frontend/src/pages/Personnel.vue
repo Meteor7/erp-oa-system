@@ -72,6 +72,7 @@ const alertOnly=ref(false);
 // 下面三个只从地址 / 标签进来：60 天内到期、本月入职、部门分组（看板链接用，见 bindRouteFilters）
 const expiringOnly=ref(false);
 const joinedMonth=ref(false);
+const leftMonth=ref(false);
 const groupFilter=ref("");
 const sortMode=ref("default");
 const currentPage=ref(1);
@@ -102,11 +103,11 @@ const allDepartmentCount=computed(()=>statusFilter.value==="left"?statusCounts.v
 const filteredItems=computed(()=>sortEmployees(filterByUrlExtras(filterEmployees(items.value,{
   company:companyFilter.value,department:departmentFilter.value,status:statusFilter.value,
   rdType:rdFilter.value,archive:archiveFilter.value,alertOnly:alertOnly.value,keyword:keyword.value,
-}),{group:groupFilter.value,joined:joinedMonth.value?"month":"",reminder:expiringOnly.value?"expiring":""},today),sortMode.value));
+}),{group:groupFilter.value,joined:joinedMonth.value?"month":"",left:leftMonth.value?"month":"",reminder:expiringOnly.value?"expiring":""},today),sortMode.value));
 const pageData=computed(()=>pageSlice(filteredItems.value,currentPage.value,PAGE_SIZE));
 const pageCount=computed(()=>pageData.value.pageCount);
 const pagedItems=computed(()=>pageData.value.items);
-watch([companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode,expiringOnly,joinedMonth,groupFilter],()=>{currentPage.value=1});
+watch([companyFilter,departmentFilter,keyword,statusFilter,rdFilter,archiveFilter,alertOnly,sortMode,expiringOnly,joinedMonth,leftMonth,groupFilter],()=>{currentPage.value=1});
 watch([companyFilter,statusFilter],()=>{
   if(departmentFilter.value&&!departmentOptions.value.includes(departmentFilter.value))departmentFilter.value="";
 });
@@ -121,14 +122,14 @@ bindRouteFilters({route,router,specs:[{
   read:parsePersonnelQuery,
   snapshot:()=>({
     status:statusFilter.value,reminder:expiringOnly.value?"expiring":"",rd:rdFilter.value,group:groupFilter.value,
-    archive:archiveFilter.value,joined:joinedMonth.value?"month":"",dept:departmentFilter.value,
+    archive:archiveFilter.value,joined:joinedMonth.value?"month":"",left:leftMonth.value?"month":"",dept:departmentFilter.value,
   }),
   apply:state=>{
     statusFilter.value=state.status;expiringOnly.value=state.reminder==="expiring";rdFilter.value=state.rd;groupFilter.value=state.group;
-    archiveFilter.value=state.archive;joinedMonth.value=state.joined==="month";departmentFilter.value=state.dept;
+    archiveFilter.value=state.archive;joinedMonth.value=state.joined==="month";leftMonth.value=state.left==="month";departmentFilter.value=state.dept;
   },
   toQuery:personnelQueryOf,
-  sources:[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,departmentFilter],
+  sources:[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,leftMonth,departmentFilter],
 }]});
 
 const formDepartmentOptions=computed(()=>(depts.data||[]).filter(x=>x.company===form.company));
@@ -659,6 +660,7 @@ onBeforeUnmount(()=>{
 <button type="button" class="chip" :aria-pressed="alertOnly" @click="alertOnly=!alertOnly"><RdIcon name="bell"/> 只看有提醒</button>
 <button type="button" class="chip" data-chip-expiring :aria-pressed="expiringOnly" title="试用期或合同在 60 天内到期" @click="expiringOnly=!expiringOnly">60 天内到期</button>
 <button type="button" class="chip" data-chip-joined :aria-pressed="joinedMonth" @click="joinedMonth=!joinedMonth">本月入职</button>
+<button type="button" class="chip" data-chip-left :aria-pressed="leftMonth" title="离职日在本月、已经离职的人" @click="leftMonth=!leftMonth">本月离职</button>
 <button v-if="groupFilter" type="button" class="chip" data-chip-group aria-pressed="true" :aria-label="`清除部门分组筛选：${groupFilter}`" @click="groupFilter=''">分组：{{groupFilter}} ✕</button>
 </div>
 

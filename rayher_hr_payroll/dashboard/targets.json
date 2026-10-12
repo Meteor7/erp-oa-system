@@ -26,6 +26,8 @@
     "personnel.rd_gap": {"label": "员工信息管理", "path": "/personnel", "query": {"status": "active", "rd": "none", "group": "研发"}, "params": []},
     "personnel.file": {"label": "员工信息管理", "path": "/personnel", "query": {"status": "active", "archive": "待完善"}, "params": []},
     "personnel.joined": {"label": "员工信息管理", "path": "/personnel", "query": {"status": "active", "joined": "month"}, "params": []},
+    "personnel.left_month": {"label": "员工信息管理", "path": "/personnel", "query": {"status": "left", "left": "month"}, "params": []},
+    "drill": {"label": "看板明细", "path": "/dashboard/detail", "query": {}, "params": ["item", "period"]},
     "timesheet.board": {"label": "研发工时填报 · 填报进度", "path": "/entry", "query": {"tab": "board"}, "params": ["status", "dept", "period"]},
     "timesheet.mine": {"label": "研发工时填报", "path": "/entry", "query": {"tab": "sheet"}, "params": ["period"]},
     "attendance.home": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "home"}, "params": []},
