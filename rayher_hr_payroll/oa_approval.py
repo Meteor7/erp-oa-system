@@ -251,7 +251,8 @@ def build_leave_route(
         _append_unique_approval(steps, SUPERVISOR_LABEL_PREFIX + supervisor, supervisor_user, applicant_user=applicant_user)
     hr = snapshots["hr_manager"]
     _append_unique_approval(steps, "人事经理", _role_user(hr, "人事经理"), applicant_user=applicant_user)
-    if not short:
+    # 人事经理自己请短假时，前面两步都是他自己或被跳过，路线会变空：这时照常走到副总 / 总经理（和长假一样）。
+    if not short or not steps:
         final_key = "general_manager" if classify_department(department) == "finance" else "vice_manager"
         final = snapshots[final_key]
         _append_unique_approval(
