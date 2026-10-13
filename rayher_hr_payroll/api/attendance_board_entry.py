@@ -21,6 +21,7 @@ from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 from rayher_hr_payroll.team_scope import team_members
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar
+from rayher_hr_payroll import site_time
 
 ROW_TYPES = (*att.ATTENDANCE_TYPES, REQUEST_TRAVEL)
 # 统计里算已批准的状态：已完成 / 已通过，加上出差在前台办理（待办理）。其他类型没有办理节点，不会有“待办理”。
@@ -154,7 +155,7 @@ def _named_away(away, members):
 def today_away(today=None, employees=None):
     """今天不在岗（请假 / 调休）和出差中的人（口径见 attendance_board.today_away），一人一条，带姓名、部门和单号：
     看板“今天不在岗”、考勤中心“今天不在岗”列表用。employees 给了就只算这些人里在职的。"""
-    today = today or date.today()
+    today = today or site_time.today()
     filters = {"status": "Active"}
     if employees is not None:
         filters["name"] = ["in", list(employees) or ["__none__"]]
@@ -182,7 +183,7 @@ def _company_summary(today):
 
 def today_trips(today=None):
     """今天出差的人（和公司汇总里的“出差中”同一口径），一人一条：单号、地点、日期。看板“出差中”点进去用。"""
-    today = today or date.today()
+    today = today or site_time.today()
     window = _window(today)
     employees = frappe.get_all("Employee", filters={"status": "Active"}, fields=["name", "employee_name", "department"], limit_page_length=0)
     rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], APPROVED)
@@ -194,7 +195,7 @@ def get_attendance_board():
     """考勤中心首页的图表数据，按调用者的身份只返回他能看的范围：level 是 employee / manager / company。"""
     scope = resolve_scope()
     _require_open()
-    today = date.today()
+    today = site_time.today()
     if scope["level"] == EMPLOYEE:
         return {"level": EMPLOYEE, "personal": _personal(scope, today)}
     if scope["level"] == MANAGER:
@@ -213,11 +214,11 @@ def get_department_attendance(department=""):
     if scope["level"] == MANAGER:
         if department and department != scope["department"]:
             frappe.throw(frappe._("部门主管只能查看自己团队的出勤。"), frappe.PermissionError)
-        detail = _team_detail(scope, date.today())
+        detail = _team_detail(scope, site_time.today())
         return {"level": scope["level"], "detail": detail}
     if not department:
         frappe.throw(frappe._("请选择要查看的部门。"))
-    detail = _department_detail(department, date.today())
+    detail = _department_detail(department, site_time.today())
     if not detail["headcount"]:
         frappe.throw(frappe._("找不到这个部门，或部门里没有在职员工。"), frappe.DoesNotExistError)
     return {"level": scope["level"], "detail": detail}

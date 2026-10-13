@@ -21,6 +21,7 @@ from rayher_hr_payroll.oa_approval import ApprovalRouteError
 from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar, resolve_monthly_work_limit
+from rayher_hr_payroll import site_time
 
 REVIEW_LIMIT = 50
 REVIEWED_LIMIT = 30
@@ -241,7 +242,7 @@ def list_attendance_away_today():
         frappe.throw(frappe._("只有人事或管理员可以查看全部申请。"), frappe.PermissionError)
     from rayher_hr_payroll.api import attendance_board_entry
 
-    away = attendance_board_entry.today_away(date.today())
+    away = attendance_board_entry.today_away(site_time.today())
     rows = _load_summaries([item["request"] for item in away["off"] if item.get("request")])
     return {"items": rows, "names": _names(_people(rows)), "trip": len(away["trip"])}
 
@@ -372,7 +373,7 @@ def list_attendance_review():
         for member in members:
             department_of[member.get("name")] = department
     for department, members in departments.items():
-        mates_cache[department] = _absence_rows([m.get("name") for m in members], date.today() - timedelta(days=1), date.today() + timedelta(days=400))
+        mates_cache[department] = _absence_rows([m.get("name") for m in members], site_time.today() - timedelta(days=1), site_time.today() + timedelta(days=400))
     enriched = []
     for row in items:
         employee = row.get("employee")
@@ -410,9 +411,9 @@ def list_attendance_review():
     if scope["level"] == EMPLOYEE:
         team = []
     elif scope["level"] == MANAGER:
-        team = _team({"我的团队": team_members(scope["employee"], include_self=True)}, date.today())
+        team = _team({"我的团队": team_members(scope["employee"], include_self=True)}, site_time.today())
     else:
-        team = _team(departments, date.today())
+        team = _team(departments, site_time.today())
     return {"items": enriched, "team": team}
 
 

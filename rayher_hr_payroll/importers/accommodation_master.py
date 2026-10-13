@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import frappe
+from rayher_hr_payroll import site_time
 
 SPECIAL_PURPOSES = {"空", "客房", "午休室"}
 SUMMARY_LABELS = {"合计", "小计"}
@@ -98,7 +99,7 @@ def _upsert_room(values):
 
 
 def _move_out_date(old_start, new_start):
-    move_out = new_start - timedelta(days=1) if new_start else date.today()
+    move_out = new_start - timedelta(days=1) if new_start else site_time.today()
     old_start = _date_value(old_start)
     return max(move_out, old_start) if old_start else move_out
 

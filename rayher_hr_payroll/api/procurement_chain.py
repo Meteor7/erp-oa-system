@@ -18,6 +18,7 @@ from rayher_hr_payroll.oa_document_types import REQUEST_PROCUREMENT, REQUEST_PRO
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access
 from rayher_hr_payroll.oa_mutation_guard import authorized_oa_action
 from rayher_hr_payroll.procurement_mutation_guard import procurement_action
+from rayher_hr_payroll import site_time
 
 PO_PAYMENT_PUSH_SOURCE = "PO付款下推"
 PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "Rayher Business Executive"}
@@ -472,7 +473,7 @@ def _require_cny(currency):
 
 def _new_material_serial():
     suffix = frappe.model.naming.make_autoname("MAT-.#####").split("-")[-1]
-    return f"MAT-{date.today().year}-{suffix}"
+    return f"MAT-{site_time.today().year}-{suffix}"
 
 
 def _source_line(request_name, line_name, source=None):

@@ -12,6 +12,7 @@ import json
 from datetime import date, datetime
 
 import frappe
+from rayher_hr_payroll import site_time
 
 REQUEST_DOCTYPE = "OA Approval Request"
 NUDGE_TYPES = ("采购申请", "购买申请")
@@ -117,7 +118,7 @@ def nudge_request(name):
         frappe.throw(frappe._("找不到这张申请，或你没有权限查看。"), frappe.PermissionError)
     user = frappe.session.user
     employee = frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, "name") or ""
-    today = date.today()
+    today = site_time.today()
     problem = nudge_problem(doc, user, employee, today)
     if problem:
         frappe.throw(frappe._(problem))

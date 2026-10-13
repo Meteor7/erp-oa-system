@@ -97,7 +97,7 @@ def api(monkeypatch):
     monkeypatch.setattr(f, "db", SimpleNamespace(get_value=lambda *a, **k: "E1", exists=lambda doctype, name: name in state["users"],
                                                   commit=lambda: state["events"].append("commit"), sql=sql), raising=False)
     monkeypatch.setattr(f, "utils", SimpleNamespace(get_fullname=lambda user: "何志凌"), raising=False)
-    monkeypatch.setattr(nudge, "date", SimpleNamespace(today=lambda: TODAY, fromisoformat=date.fromisoformat), raising=False)
+    monkeypatch.setattr(nudge.site_time, "today", lambda: TODAY)   # “今天”按站点时区（site_time），测试里固定
     return logs, state
 
 

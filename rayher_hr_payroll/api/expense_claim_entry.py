@@ -20,6 +20,7 @@ from rayher_hr_payroll import invoice_folder
 from rayher_hr_payroll.api import oa_entry
 from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import require_request_type_access
+from rayher_hr_payroll import site_time
 
 invoice_service = oa_entry.invoice_service
 
@@ -563,7 +564,7 @@ def validate_submit(doc):
             expected_invoice_date=doc.expected_invoice_date,
             no_invoice_reason=doc.no_invoice_reason,
             difference_note=getattr(doc, "invoice_difference_note", None),
-            today=date.today(),
+            today=site_time.today(),
         )
         doc.invoice_followup_status = state
         if state == rules.FOLLOWUP_RECEIVED:
@@ -649,7 +650,7 @@ def capabilities(doc):
         ),
         "can_withdraw_claim_payment": bool(paid and finance),
         "invoice_due_state": (
-            invoice_folder.due_state(doc.expected_invoice_date, date.today())
+            invoice_folder.due_state(doc.expected_invoice_date, site_time.today())
             # 补票期限从付款后才开始算，审批中的付款单不显示到期提示。
             if doc.request_type == REQUEST_PAYMENT and paid and followup == rules.FOLLOWUP_PENDING
             else ""

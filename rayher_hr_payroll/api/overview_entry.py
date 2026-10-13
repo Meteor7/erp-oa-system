@@ -11,6 +11,7 @@ import frappe
 from rayher_hr_payroll import annual_leave, attendance_requests
 from rayher_hr_payroll.api._guards import RD_FINANCE_ROLES
 from rayher_hr_payroll.position_access import position_users
+from rayher_hr_payroll import site_time
 
 NON_PROJECT = "__none__"
 NON_PROJECT_LABEL = "非项目"
@@ -62,7 +63,7 @@ def parse_scope(scope, period):
     """Normalise (scope, period) into ("month"|"year", year, month or None)."""
     scope = "year" if str(scope or "").strip() == "year" else "month"
     text = str(period or "").strip()
-    today = date.today()
+    today = site_time.today()
     if scope == "year":
         return scope, int(text[:4]) if text[:4].isdigit() else today.year, None
     if len(text) >= 7 and text[:4].isdigit() and text[5:7].isdigit():
@@ -473,7 +474,7 @@ def leave_stats(rows):
 
 def _away_today(department=None, employees=None):
     """People on approved leave or comp-time today, by leave type."""
-    today = date.today()
+    today = site_time.today()
     filters = {"request_type": ["in", [attendance_requests.REQUEST_LEAVE, attendance_requests.REQUEST_COMP_TIME]],
                "workflow_status": ["in", list(attendance_requests.COMPLETED)],
                "from_date": ["<=", today], "to_date": [">=", today]}

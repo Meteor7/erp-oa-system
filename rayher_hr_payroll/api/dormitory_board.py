@@ -11,6 +11,7 @@ import frappe
 
 from rayher_hr_payroll.api._guards import parse_period, require_rd_access
 from rayher_hr_payroll.hr_read_access import require_hr_read
+from rayher_hr_payroll import site_time
 
 HR_ROLES = ("System Manager", "HR User", "HR Manager")
 EXPENSE_ACCOUNT_CATEGORIES = ("研发费用", "管理费用", "销售费用", "生产成本")
@@ -137,7 +138,7 @@ def _cost(rows):
 
 def build_board(rooms, occupancies, left_employees, deductions, period=None, today=None):
     """纯函数：由房间、当前入住、离职员工、费用记录算出看板数据（便于测试）。"""
-    today = _date(today) or date.today()
+    today = _date(today) or site_time.today()
     current = today.strftime("%Y-%m")
     registered = sorted({_get(row, "period") for row in deductions if _get(row, "period")})
     # 默认看最近一个已登记、且不晚于本月的月份（提前登记的未来月份不作为默认）。

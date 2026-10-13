@@ -21,6 +21,7 @@ from rayher_hr_payroll.attendance_requests import (
     window_hours,
 )
 from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
+from rayher_hr_payroll import site_time
 
 KIND_BY_TYPE = {REQUEST_LEAVE: "leave", REQUEST_OVERTIME: "overtime", REQUEST_COMP_TIME: "comp"}
 HOURS_PER_DAY = Decimal("8")
@@ -30,7 +31,7 @@ WEEKDAYS = "一二三四五六日"
 
 def period_bounds(period, today=None):
     """"2026-10" -> (2026, 10, 该月第一天, 该月最后一天)；空或写错时用今天所在的月。"""
-    today = today or date.today()
+    today = today or site_time.today()
     text = str(period or "").strip()
     year, month = today.year, today.month
     if len(text) >= 7 and text[:4].isdigit() and text[5:7].isdigit() and 1 <= int(text[5:7]) <= 12:

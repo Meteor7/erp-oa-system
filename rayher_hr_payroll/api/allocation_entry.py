@@ -6,6 +6,7 @@ from rayher_hr_payroll.api._guards import (
     lock_period_import, period_has_submitted_allocation, require_rd_access, parse_period, ensure_not_locked,
     RD_FINANCE_ROLES,
 )
+from rayher_hr_payroll import site_time
 
 # 预览 + 定版：没有定版（已提交）分摊单的月份，页面显示按当前数据现算的只读预览；
 # 只有财务主管 / System Manager / Administrator 能定版、撤销定版。
@@ -997,7 +998,7 @@ def _cancel_comment_text(reason):
     try:
         now = frappe.utils.now_datetime()
     except Exception:
-        now = datetime.now()
+        now = site_time.now()
     return "撤销定版：%s（%s，%s）" % (reason, name, now.strftime("%Y-%m-%d %H:%M:%S"))
 
 

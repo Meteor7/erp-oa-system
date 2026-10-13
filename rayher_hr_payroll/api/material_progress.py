@@ -9,6 +9,7 @@ from frappe.utils import get_datetime, getdate, now_datetime
 
 from rayher_hr_payroll.oa_approval import REQUEST_PROCUREMENT
 from rayher_hr_payroll.oa_role_resolver import resolve_role
+from rayher_hr_payroll import site_time
 
 BOARD_ROUTE = "/planck-semicon/approval/material-progress"
 EDITABLE_FIELDS = {
@@ -29,7 +30,7 @@ EDITABLE_FIELDS = {
 
 def _new_material_serial():
     suffix = frappe.model.naming.make_autoname("MAT-.#####").split("-")[-1]
-    return f"MAT-{date.today().year}-{suffix}"
+    return f"MAT-{site_time.today().year}-{suffix}"
 
 def _clean(value):
     return str(value or "").strip()

@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from rayher_hr_payroll.department_structure import department_expense_category
+from rayher_hr_payroll import site_time
 
 
 PROJECT_PROCUREMENT = "项目采购"
@@ -291,7 +292,7 @@ def derive_prepayment_overdue(doc, *, today=None):
     if not expected:
         return False
     expected_date = _date(expected, "预计到货日期")
-    return expected_date < (today or date.today())
+    return expected_date < (today or site_time.today())
 
 def plan_contract_delivery(expected_delivery_date, contract_delivery_date, procurement_scope, reason=None):
     expected = _date(expected_delivery_date, "意向交期")

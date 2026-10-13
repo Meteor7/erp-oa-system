@@ -70,6 +70,7 @@ from rayher_hr_payroll.oa_organization import (
 )
 
 from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_TRAVEL  # noqa: E402
+from rayher_hr_payroll import site_time
 
 REQUEST_TYPES = [REQUEST_OVERTIME, REQUEST_COMP_TIME, REQUEST_LEAVE, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT, REQUEST_TRAVEL, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT]
 ASSET_CATEGORIES = [ADMIN_ASSET, IT_ASSET, PRODUCTION_ASSET, OTHER_ASSET]
@@ -2282,7 +2283,7 @@ def _submit_draft(doc):
         for line in list(getattr(doc, "business_lines", []) or []):
             if not _clean(getattr(line, "material_serial", None)):
                 suffix = frappe.model.naming.make_autoname("MAT-.#####").split("-")[-1]
-                line.material_serial = f"MAT-{date.today().year}-{suffix}"
+                line.material_serial = f"MAT-{site_time.today().year}-{suffix}"
         try:
             validate_procurement_submission(doc)
         except ProcurementWorkflowError as exc:
