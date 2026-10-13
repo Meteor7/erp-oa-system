@@ -164,3 +164,29 @@ def test_general_and_vice_manager_can_read_payroll_but_not_change_it(monkeypatch
     frappe.get_all = lambda *args, **kwargs: []
     module.confirm_payroll("2026-10")
     assert guards.calls == [module.ROLES]
+
+
+def test_a_new_draft_is_numbered_after_its_employee(monkeypatch):
+    """新草稿的编号带员工号（Sal Slip/HR-EMP-1/…），不是 Sal Slip/None/…。"""
+    module, frappe, _ = _load(monkeypatch)
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_social_record", lambda *args: {"employee_total": 100})
+    monkeypatch.setattr(module, "_monthly_record", lambda *args: {"employee_amount": 50})
+    monkeypatch.setattr(module, "_working_days", lambda *args: (22.0, 22.0, "hrms"))
+    monkeypatch.setattr(module, "_accommodation", lambda *args: 0)
+    monkeypatch.setattr(module, "_slip", lambda *args: None)
+    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - Rayher"})
+
+    class NewSlip:
+        default_series = "Sal Slip/None/.#####"
+        name = "NEW"
+        def update(self, values): self.__dict__.update(values)
+        def set(self, table, rows): setattr(self, table, list(rows))
+        def append(self, table, row): getattr(self, table).append(row)
+        def insert(self, ignore_permissions=False): self.inserted_series = self.default_series
+
+    slip = NewSlip()
+    frappe.new_doc = lambda doctype: slip
+    module.save_payroll_draft("HR-EMP-1", "2026-10", base_salary=8000)
+    assert slip.inserted_series == "Sal Slip/HR-EMP-1/.#####"
+

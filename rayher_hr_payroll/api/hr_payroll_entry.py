@@ -432,6 +432,8 @@ def save_payroll_draft(employee, period, payment_days=None, base_salary=0, salar
     if existing:
         doc.save(ignore_permissions=True)
     else:
+        # HRMS 新建对象时就按当时的员工号定了编号格式（那时还没有员工号，会成 Sal Slip/None/…），填完员工后重设。
+        doc.default_series = "Sal Slip/%s/.#####" % employee
         doc.insert(ignore_permissions=True)
     return {"name": doc.name, "employee": employee, "working_days_source": working_days_source, **amounts}
 
