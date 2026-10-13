@@ -1,4 +1,4 @@
-"""请假 / 加班 / 调休页面接口（模块 4）。
+"""请假 / 加班 / 调休 / 出差页面接口（模块 4）。
 
 页面的数据都在这里取：员工看到自己的额度、本月考勤和日历；审批人看到待审批的申请、批之前的影响，
 以及本部门未来两周谁不在。提交、审批、驳回、撤回沿用 api/oa_entry.py 的接口，这里只读。
@@ -13,11 +13,12 @@ from datetime import date, timedelta
 
 import frappe
 
-from rayher_hr_payroll import annual_leave, attendance_center as center, attendance_requests as att
+from rayher_hr_payroll import annual_leave, attendance_board as board, attendance_center as center, attendance_requests as att
 from rayher_hr_payroll.api import oa_entry
 from rayher_hr_payroll.attendance_scope import EMPLOYEE, MANAGER, resolve_scope
 from rayher_hr_payroll.team_scope import team_members
 from rayher_hr_payroll.oa_approval import ApprovalRouteError
+from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar, resolve_monthly_work_limit
 
@@ -27,6 +28,9 @@ ALL_LIMIT = 100
 MAX_TEAM_DEPARTMENTS = 3
 # 人事和老板可以看到所有人的请假、加班、调休（只读）；其他人只看自己的和轮到自己审批的。
 ALL_VIEW_ROLES = {"System Manager", "HR Manager", "HR User", "Rayher Business Executive"}
+# 考勤中心里的申请类型：请假、加班、调休，加上出差（出差是"人在不在岗"的申请，和它们同一个入口、同一套可见范围；
+# 单据类型和审批路线没变，报销、付款仍然按单号关联它）。额度、日历这些请假专用的计算仍然只认 att.ATTENDANCE_TYPES。
+LIST_TYPES = (*att.ATTENDANCE_TYPES, REQUEST_TRAVEL)
 
 
 def _user():
@@ -37,8 +41,8 @@ def _user():
 
 
 def _types():
-    """当前账号能用的申请类型（加班、调休和请假共用一个开关，但各自单独判断）。"""
-    return [item for item in (att.REQUEST_LEAVE, att.REQUEST_OVERTIME, att.REQUEST_COMP_TIME) if can_access_request_type(item)]
+    """当前账号能用的申请类型（加班、调休和请假共用一个开关，出差是单独的开关，各自单独判断）。"""
+    return [item for item in LIST_TYPES if can_access_request_type(item)]
 
 
 def _require_types():
@@ -160,7 +164,7 @@ def get_attendance_home(request_type=None, period=None):
 def get_attendance_route(request_type):
     """新建申请时的审批路线：审批人给姓名，不再给邮箱。"""
     _user()
-    if request_type not in att.ATTENDANCE_TYPES:
+    if request_type not in LIST_TYPES:
         frappe.throw(frappe._("不支持的申请类型。"))
     preview = oa_entry.preview_route(request_type)
     steps = preview.get("steps") or []
@@ -183,7 +187,7 @@ def _balances(employee, cache):
 
 @frappe.whitelist()
 def get_attendance_request(name):
-    """一张申请的详情：申请本身（沿用列表接口的权限和字段）、审批人姓名、通过后的影响。"""
+    """一张申请的详情：申请本身（沿用列表接口的权限和字段）、审批人姓名、通过后的影响；出差申请另带 mine（是不是我自己的）。"""
     _user()
     _require_types()
     rows = oa_entry.list_requests(view="all", name=name, limit=1)
@@ -192,22 +196,25 @@ def get_attendance_request(name):
         # 人事和老板可以只读查看任何一张已提交的申请（草稿只有本人看得到）。
         found = _load_summaries(_attendance_names(None, 1, name=name))
         row = found[0] if found else None
-    if not row or row.get("request_type") not in att.ATTENDANCE_TYPES:
+    if not row or row.get("request_type") not in LIST_TYPES:
         frappe.throw(frappe._("找不到这张申请，或你没有权限查看。"), frappe.DoesNotExistError)
     balances = _balances(row.get("employee"), {}) if row.get("employee") else {"annual": None, "comp": None}
     users = [user for step in row.get("steps") or [] for user in step.get("approvers") or []]
     users += [step.get("action_by") for step in row.get("steps") or []]
     users += [entry.get("user") for entry in row.get("copied_to") or [] if isinstance(entry, dict)]
+    # 是不是我自己的出差申请（决定要不要显示"发起报销 / 发起付款"）：和"我的"列表同一个判断。
+    mine = bool(oa_entry.list_requests(view="mine", name=name, limit=1)) if row.get("request_type") == REQUEST_TRAVEL else False
     return {
         "request": row,
         "names": _names(users),
         "impact": center.impact_text(row, annual=balances["annual"], comp=balances["comp"]),
+        "mine": mine,
     }
 
 
 def _attendance_names(request_types, limit, name=None):
-    """已提交的（不含草稿）请假 / 加班 / 调休单号，最近改过的在前。只给有"看全部"权限的人用。"""
-    types = tuple(request_types or att.ATTENDANCE_TYPES)
+    """已提交的（不含草稿）请假 / 加班 / 调休 / 出差单号，最近改过的在前。只给有"看全部"权限的人用。"""
+    types = tuple(request_types or LIST_TYPES)
     sql = ("SELECT name FROM `tabOA Approval Request` WHERE request_type IN %(types)s AND workflow_status <> '草稿'"
            + (" AND name = %(name)s" if name else "") + " ORDER BY modified DESC, name DESC LIMIT %(limit)s")
     rows = frappe.db.sql(sql, {"types": types, "limit": limit, "name": name}, as_dict=True)
@@ -237,7 +244,7 @@ def _people(rows):
 
 @frappe.whitelist()
 def list_attendance_all(request_type=None, limit=ALL_LIMIT):
-    """全部请假 / 加班 / 调休（只读；人事和老板才能看）：已提交的，最近有动静的在前。"""
+    """全部请假 / 加班 / 调休 / 出差（只读；人事和老板才能看）：已提交的，最近有动静的在前。"""
     _user()
     types = _require_types()
     if not can_view_all():
@@ -297,7 +304,7 @@ def _team(departments, today):
 
 @frappe.whitelist()
 def list_attendance_review():
-    """待我审批：三类申请合在一起，每条带上批之前要看到的影响，另附相关部门未来两周谁不在。"""
+    """待我审批：请假、加班、调休、出差合在一起，每条带上批之前要看到的影响，另附相关部门未来两周谁不在。"""
     user = _user()
     types = _require_types()
     items = []
@@ -306,7 +313,7 @@ def list_attendance_review():
             items += oa_entry.list_requests(view="pending", request_type=request_type, limit=REVIEW_LIMIT)
         except frappe.PermissionError:
             continue
-    items = [row for row in items if row.get("request_type") in att.ATTENDANCE_TYPES]
+    items = [row for row in items if row.get("request_type") in LIST_TYPES]
     items.sort(key=lambda row: str(row.get("name") or ""))
     cache, mates_cache = {}, {}
     applicants = {row.get("employee") for row in items if row.get("employee")}
@@ -326,7 +333,8 @@ def list_attendance_review():
             year_count = _leave_count_in_year(employee, row)
         teammates = 0
         if row.get("request_type") != att.REQUEST_OVERTIME:
-            days = {day for day, hours in att.expand_days(row) if hours > 0}
+            days = {day for day, _hours in board.days_of(row)} if row.get("request_type") == REQUEST_TRAVEL \
+                else {day for day, hours in att.expand_days(row) if hours > 0}
             department = department_of.get(employee)
             people = set()
             for other in mates_cache.get(department, []):
@@ -374,7 +382,7 @@ def _leave_count_in_year(employee, row):
 
 @frappe.whitelist()
 def list_attendance_reviewed(limit=REVIEWED_LIMIT):
-    """我审批过的请假、加班、调休（我处理过的步骤，最近的在前）。"""
+    """我审批过的请假、加班、调休、出差（我处理过的步骤，最近的在前）。"""
     user = _user()
     _require_types()
     try:
@@ -383,11 +391,12 @@ def list_attendance_reviewed(limit=REVIEWED_LIMIT):
         frappe.throw(frappe._("查询数量格式无效。"))
     rows = frappe.db.sql(
         "SELECT p.name, p.request_type, p.leave_type, p.employee_name, p.department, p.from_date, p.to_date, "
-        "p.duration_hours, p.workflow_status, p.subject, p.attendance_days, p.creation, s.label AS step_label, "
+        "p.duration_hours, p.workflow_status, p.subject, p.attendance_days, p.creation, p.reason, p.project, "
+        "p.travel_destination, p.travel_start_date, p.travel_end_date, p.travel_days, s.label AS step_label, "
         "s.status AS my_status, s.acted_on, s.note FROM `tabOA Approval Step` s JOIN `tabOA Approval Request` p ON p.name = s.parent "
         "WHERE LOWER(s.action_by) = %(user)s AND p.request_type IN %(types)s "
         "ORDER BY s.acted_on DESC LIMIT %(limit)s",
-        {"user": user, "types": tuple(att.ATTENDANCE_TYPES), "limit": limit}, as_dict=True,
+        {"user": user, "types": tuple(LIST_TYPES), "limit": limit}, as_dict=True,
     )
     return {"items": [
         dict(row, department=department_label(row.get("department")), attendance_days=_days_of(row.get("attendance_days")))

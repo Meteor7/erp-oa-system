@@ -273,3 +273,28 @@ def test_the_overlap_list_checks_the_same_access_as_the_detail_page(api, monkeyp
     raw = getattr(entry.get_request_overlap, "__wrapped__", entry.get_request_overlap)
     with pytest.raises(PermissionError):
         raw("OA-1")
+
+
+def test_the_pending_counts_include_trips_like_the_attendance_centre_queue(api):
+    entry, _scope, state = api
+    entry._pending()
+    types = state.sql[-1][1]["types"]
+    assert "出差申请" in types and set(att.ATTENDANCE_TYPES) <= set(types)
+
+
+def test_today_trips_lists_the_people_the_company_summary_counts_as_on_a_trip(api, monkeypatch):
+    """看板“出差中”的数字和点进去的名单是同一批人（一人一条，带单号和地点）。"""
+    entry, _scope, _state = api
+    rows = [
+        {"name": "OA-T1", "employee": "E2", "request_type": "出差申请", "workflow_status": "已完成", "leave_type": "", "attendance_days": None,
+         "travel_start_date": TODAY.isoformat(), "travel_end_date": IN_TWO_DAYS, "travel_destination": "上海"},
+        {"name": "OA-T2", "employee": "E3", "request_type": "出差申请", "workflow_status": "待审批", "leave_type": "", "attendance_days": None,
+         "travel_start_date": TODAY.isoformat(), "travel_end_date": IN_TWO_DAYS, "travel_destination": "北京"},          # 审批中：不算
+    ]
+    window = {"start": TODAY, "end": TODAY, "month_first": TODAY, "month_last": TODAY, "work_dates": {TODAY}}
+    monkeypatch.setattr(entry, "_window", lambda today, back=None: window)
+    monkeypatch.setattr(entry, "_rows", lambda employees, start, end, statuses=None: rows)
+    trips = entry.today_trips(TODAY)
+    assert [(item["employee_name"], item["destination"], item["name"]) for item in trips] == [("杨员工", "上海", "OA-T1")]
+    summary = entry._company_summary(TODAY)
+    assert sum(int(item["today_trip"]) for item in summary["departments"]) == len(trips) == summary["stats"]["today"]["trip"]

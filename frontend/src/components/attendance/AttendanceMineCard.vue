@@ -1,7 +1,7 @@
 <script setup>
 // 我的申请 · 进行中：卡在哪一步、已等多久；草稿可以继续填写，审批中的可以撤回。审批人放在右栏，只有申请的人放在主栏。
 import { computed } from 'vue';
-import { kindOf, mineSummary, numText, requestTitle, statusTag, stepTracker, submittedText, totalOf, waitText } from '../../lib/attendanceView.js';
+import { kindOf, mineSummary, requestTitle, sizeText, statusTag, stepTracker, submittedText, waitText } from '../../lib/attendanceView.js';
 
 const props = defineProps({
   mine: { type: Object, required: true },
@@ -30,7 +30,7 @@ const rows = computed(() => info.value.activeRows.slice(0, 3));
         <div v-if="row.workflow_status !== '草稿'" class="at-steps">
           <span v-for="(step, index) in stepTracker(row, mine.names)" :key="index" :class="['at-st', step.cls]"><i>{{ step.mark }}</i>{{ step.text }}</span>
         </div>
-        <div class="muted">{{ numText(totalOf(row)) }} 小时 · {{ submittedText(row) }}<template v-if="waitText(row, now) && row.workflow_status !== '草稿'"> · 已等 {{ waitText(row, now) }}</template></div>
+        <div class="muted">{{ sizeText(row) }} · {{ submittedText(row) }}<template v-if="waitText(row, now) && row.workflow_status !== '草稿'"> · 已等 {{ waitText(row, now) }}</template></div>
       </div>
       <div class="at-acts">
         <button v-if="row.workflow_status === '草稿'" type="button" class="btn sm pri" @click.stop="emit('continue', row)">继续填写</button>

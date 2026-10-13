@@ -3,8 +3,9 @@
 // 同意、驳回按钮在行内；驳回要写原因（必填），可以选退回给谁，写在这一行下面，不用跳页面。
 import { computed, ref } from 'vue';
 import {
-  canQuickApprove, effectLine, kindOf, numText, personShort, rangeText, rowDays, totalOf, waitMinutes, waitText, workedSpan,
+  canQuickApprove, effectLine, kindOf, personShort, rangeText, rowDays, sizeText, waitText, workedSpan,
 } from '../../lib/attendanceView.js';
+import { isSlow } from '../../lib/attendanceFlow.js';
 import { rowKind } from '../../lib/attendanceCharts.js';
 
 const props = defineProps({
@@ -40,8 +41,7 @@ const tagText = (row) => kindOf(row).leaveType || kindOf(row).label;
 function waitTag(row) {
   const text = waitText(row, props.now);
   if (!text || text === '刚刚') return null;
-  const minutes = waitMinutes(row, props.now);
-  return { text: `等 ${text}`, tone: minutes !== null && minutes > 3 * 1440 ? 'bad' : 'warn' };
+  return { text: `等 ${text}`, tone: isSlow(row, props.now) ? 'bad' : 'warn' };
 }
 
 function toggle(row) {
@@ -90,7 +90,7 @@ async function confirmReject(row) {
           <div class="l1">
             <b>{{ row.employee_name }}</b><span class="ac-note">{{ row.department }}</span>
             <span :class="['ac-tag', rowKind(row)]">{{ tagText(row) }}</span>
-            <span class="ac-note">{{ rangeOf(row) }} · {{ numText(totalOf(row)) }} 小时</span>
+            <span class="ac-note">{{ rangeOf(row) }} · {{ sizeText(row) }}</span>
           </div>
           <div class="l2">{{ row.reason || effectLine(row) }}</div>
         </div>

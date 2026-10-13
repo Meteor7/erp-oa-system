@@ -17,10 +17,11 @@ const row = (overrides = {}) => ({
 
 test("the two groups have their own home path and every child page stays reachable", () => {
   assert.deepEqual(GROUP_HOME_PATHS, { request: "/approval/requests", payment: "/approval/payments" });
-  assert.deepEqual(GROUP_HOME_CHILDREN["/approval/requests"], ["/approval/procurement", "/approval/procurement/price-approvals", "/approval/direct-purchase", "/approval/travel"]);
+  assert.deepEqual(GROUP_HOME_CHILDREN["/approval/requests"], ["/approval/procurement", "/approval/procurement/price-approvals", "/approval/direct-purchase"]);
   assert.deepEqual(GROUP_HOME_CHILDREN["/approval/payments"], ["/approval/procurement-payment", "/approval/reimbursement", "/approval/invoice-folder", "/approval/claim", "/approval/payment"]);
   assert.deepEqual(BOARD_REDIRECTS, { "/approval/expense-request-board": "/approval/requests", "/approval/expense-payment-board": "/approval/payments" });
-  assert.deepEqual(GROUPS.request.types, ["采购申请", "购买申请", "出差申请"]);
+  // 出差申请在考勤中心里，不在这一组
+  assert.deepEqual(GROUPS.request.types, ["采购申请", "购买申请"]);
   assert.deepEqual(GROUPS.payment.types, ["采购付款", "报销单", "付款单"]);
 });
 
@@ -37,7 +38,7 @@ test("a group home opens for anyone who can open one of its pages", () => {
 
 test("to-do rows open the request itself, longest wait first, and carry where they came from", () => {
   const home = buildGroupHome("request", {
-    pending: { 购买申请: [row()], 出差申请: [row({ name: "OA-2", request_type: "出差申请", subject: "杭州联调", modified: "2026-10-09 09:00:00", amount: 0 })] },
+    pending: { 购买申请: [row()], 采购申请: [row({ name: "OA-2", request_type: "采购申请", subject: "杭州联调", modified: "2026-10-09 09:00:00", amount: 0 })] },
     here: "/approval/requests", now: NOW,
   });
   assert.deepEqual(home.todoAll.map((item) => item.key), ["oa:OA-1", "oa:OA-2"]);
@@ -54,13 +55,14 @@ test("to-do rows open the request itself, longest wait first, and carry where th
 });
 
 test("filter chips count each type and the list can be cut to one type", () => {
-  const pending = { 购买申请: [row(), row({ name: "OA-3" })], 出差申请: [row({ name: "OA-2", request_type: "出差申请" })] };
+  const pending = { 购买申请: [row(), row({ name: "OA-3" })], 采购申请: [row({ name: "OA-2", request_type: "采购申请" })] };
   const all = buildGroupHome("request", { pending, now: NOW });
-  assert.deepEqual(all.chips.map((chip) => chip.label), ["全部 3", "购买申请 2", "出差申请 1"]);
-  const cut = buildGroupHome("request", { pending, now: NOW, filter: "出差申请" });
+  assert.deepEqual(all.chips.map((chip) => chip.label), ["全部 3", "采购申请 1", "购买申请 2"]);
+  const cut = buildGroupHome("request", { pending, now: NOW, filter: "采购申请" });
   assert.equal(cut.todo.length, 1);
-  assert.equal(cut.chips[2].on, true);
-  assert.deepEqual(listLinkFor("出差申请"), { path: "/approval/travel", query: { view: "list", scope: "todo" } });
+  assert.equal(cut.chips[1].on, true);
+  assert.deepEqual(listLinkFor("采购申请"), { path: "/approval/procurement", query: { view: "list", scope: "todo" } });
+  assert.equal(listLinkFor("出差申请"), null, "trips are approved in the attendance centre now");
   assert.equal(listLinkFor("价格审批"), null, "chain items have no list of their own");
 });
 
@@ -113,9 +115,9 @@ test("indicator cards follow the group", () => {
 
 test("type tags have colours and the new-request buttons point at the original pages", () => {
   assert.equal(typeTone("采购申请"), "g-blue");
-  assert.equal(typeTone("出差申请"), "g-purple");
+  assert.equal(typeTone("出差申请"), "", "trips are not in this group any more");
   assert.equal(typeTone("没见过的类型"), "");
-  assert.deepEqual(GROUPS.request.actions.map((item) => item.to.path), ["/approval/procurement/new", "/approval/direct-purchase/new", "/approval/travel"]);
+  assert.deepEqual(GROUPS.request.actions.map((item) => item.to.path), ["/approval/procurement/new", "/approval/direct-purchase/new"]);
   assert.deepEqual(GROUPS.payment.actions.map((item) => item.to.path), ["/approval/payment", "/approval/claim", "/approval/invoice-folder"]);
   assert.equal(todoRow(row({ request_type: "付款单" }), { now: NOW }).to.path, "/approval/payment");
 });

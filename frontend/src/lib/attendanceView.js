@@ -1,5 +1,6 @@
-// 请假 / 加班 / 调休页面（考勤中心）的前端逻辑：一个页面四个视图（首页 / 列表 / 详情 / 新建），
-// 页面类型来自路径（/approval/leave | overtime | comp-time），其余全部来自查询参数。
+// 请假 / 加班 / 调休 / 出差页面（考勤中心）的前端逻辑：一个页面四个视图（首页 / 列表 / 详情 / 新建），
+// 页面类型来自路径（/approval/leave | overtime | comp-time | travel），其余全部来自查询参数。
+// 出差没有小时和额度：按出发、返回日期算天数，单据类型和审批路线不变（报销、付款仍然按单号关联它）。
 // 这里只放不依赖界面的计算：查询参数解析、跳转目标、筛选和计数、每天的时段与小时、汇总和影响、审批进度。
 // 服务端仍是权威校验（额度、日期冲突、每天上限），这里只做即时提示。
 import { callApi } from './expenseClaims.js';
@@ -18,9 +19,12 @@ export const TYPES = Object.freeze({
   请假申请: Object.freeze({ key: 'leave', label: '请假', path: '/approval/leave', title: '新建请假申请', submit: '提交请假申请', rule: '事假 / 病假 / 年假等；事假通过后从当月研发工时上限里扣' }),
   加班申请: Object.freeze({ key: 'overtime', label: '加班', path: '/approval/overtime', title: '新建加班申请', submit: '提交加班申请', rule: '按小时填；提交后按 1:1 增加调休额度，驳回或撤回后冲回' }),
   调休申请: Object.freeze({ key: 'comp', label: '调休', path: '/approval/comp-time', title: '新建调休申请', submit: '提交调休申请', rule: '用加班攒下的额度抵扣；提交时先占用，通过后正式扣减' }),
+  出差申请: Object.freeze({ key: 'trip', label: '出差', path: '/approval/travel', title: '新建出差申请', submit: '提交出差申请', rule: '只批该不该去，不设金额；出差途中的打车、住宿等费用，报销时直接关联它' }),
 });
-export const TYPE_ORDER = Object.freeze(['请假申请', '加班申请', '调休申请']);
-export const TYPE_LABELS = Object.freeze(['请假', '加班', '调休']);
+export const TYPE_ORDER = Object.freeze(['请假申请', '加班申请', '调休申请', '出差申请']);
+export const TYPE_LABELS = Object.freeze(['请假', '加班', '调休', '出差']);
+export const REQUEST_TRIP = '出差申请';
+export const isTrip = (row) => row?.request_type === REQUEST_TRIP;
 export const FILTER_ALL = 'all';
 // 「考勤中心」首页和「全部类型」的列表放在这个路径上；路由里没有它时（router.js 还没加）退回请假的路径，靠 ?view=home 区分。
 export const ATTENDANCE_HOME_PATH = '/approval/attendance';
@@ -38,6 +42,7 @@ export function typeForPath(path) {
   const text = String(path || '');
   if (text.startsWith('/approval/overtime')) return '加班申请';
   if (text.startsWith('/approval/comp-time')) return '调休申请';
+  if (text.startsWith('/approval/travel')) return REQUEST_TRIP;
   if (text.startsWith(ATTENDANCE_HOME_PATH)) return '';
   return '请假申请';
 }
@@ -136,7 +141,7 @@ export function parseLocation({ path = '', params = {}, query = {} } = {}) {
     // 列表和首页的类型筛选：?type= 优先，没有就跟路径（侧栏进来的 /approval/overtime 就是加班）。
     filter: filterOf(typeQuery, pathLabel || FILTER_ALL),
     // 新建页要新建的类型；没有（也不是在继续某张草稿）就让用户先选。
-    newType: TYPE_LABELS.includes(typeQuery) ? typeQuery : (draft ? pathLabel : ''),
+    newType: TYPE_LABELS.includes(typeQuery) ? typeQuery : (draft || (queryView === 'new' && pathType === REQUEST_TRIP) ? pathLabel : ''),
     reject: one(query.reject) === '1',
     origin: originOf(query),
     pathType,
@@ -441,8 +446,23 @@ export function rangeText(from, to) {
     : `${dayLabel(from)}–${dayLabel(to)}`;
 }
 
+// 出差的每一天：出发到返回的每个日历日（周末也算，出差不看工作日）；没有小时数，这里统一记 8 只是为了和请假一样画日期条。
+function tripRowDays(row) {
+  const start = parseDate(row?.travel_start_date);
+  const end = parseDate(row?.travel_end_date || row?.travel_start_date);
+  if (!start || !end || end < start) return [];
+  const days = [];
+  const cursor = new Date(start);
+  for (let count = 0; cursor <= end && count < 366; count += 1) {
+    days.push({ work_date: isoDate(cursor), hours: HOURS_PER_DAY });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
 // 一张申请的逐日明细（只留有时长的天，按日期排）；只有起止日期的旧申请按期间内的周一到周五 8 小时算。
 export function rowDays(row) {
+  if (isTrip(row)) return tripRowDays(row);
   const days = Array.isArray(row?.attendance_days) ? row.attendance_days : [];
   const worked = days.filter((day) => Number(day.hours) > 0).sort((left, right) => String(left.work_date).localeCompare(String(right.work_date)));
   if (worked.length || days.length) return worked;
@@ -456,6 +476,16 @@ export function rowDays(row) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return legacy;
+}
+
+// 出差的天数：单据上有就用单据的，没有按出发、返回日期算。
+export function tripDayCount(row) {
+  return Number(row?.travel_days) || tripRowDays(row).length;
+}
+
+// 一张申请的大小：请假、加班、调休说小时，出差说天数。
+export function sizeText(row) {
+  return isTrip(row) ? `${tripDayCount(row)} 天` : `${numText(totalOf(row))} 小时`;
 }
 
 export function totalOf(row) {
@@ -492,7 +522,8 @@ export function personShort(name) {
 export function kindOf(row) {
   const label = rowLabel(row) || '请假';
   const leaveType = label === '请假' ? row?.leave_type || '' : '';
-  return { label, tone: { 请假: 'leave', 加班: 'ot', 调休: 'comp' }[label], text: leaveType ? `${label} · ${leaveType}` : label, leaveType };
+  const place = label === '出差' ? row?.travel_destination || '' : '';
+  return { label, tone: { 请假: 'leave', 加班: 'ot', 调休: 'comp', 出差: 'trip' }[label], text: leaveType || place ? `${label} · ${leaveType || place}` : label, leaveType };
 }
 
 // "请假 · 事假 · 10月30日" / "加班 · 10月18日"：我的申请卡片上的标题。
@@ -548,6 +579,7 @@ export function hoursInText(text) {
 
 // 首页和列表上一行字："通过后：…"。impact 是后端 list_attendance_review 给的那句话。
 export function effectLine(row) {
+  if (isTrip(row)) return '通过后：不扣年假和工时上限，出差途中的费用报销时关联它';
   const hours = numText(totalOf(row));
   const impact = hoursInText(row?.impact);
   const label = rowLabel(row);
@@ -571,6 +603,9 @@ export function hoursByMonth(days) {
 // 详情页"通过后的影响"：[{kind: balance | cap, label, value, note}]。事假另有每月工时上限一行；
 // 该员工当月已填工时、新上限是多少后端没有给，页面不猜，只说"超过新上限时需要他先调整"。
 export function effectRows(request, impact = '') {
+  if (isTrip(request)) {
+    return [{ kind: 'balance', label: '出差', value: '不扣额度', note: '出差期间不算请假，不扣年假和工时上限；通过后，出差途中的打车、住宿等费用直接关联这张出差申请去报销' }];
+  }
   const hours = totalOf(request);
   const label = rowLabel(request);
   if (label === '加班') {
@@ -847,6 +882,8 @@ export const api = {
   detail: (name) => callApi('attendance_entry.get_attendance_request', { name }, { method: 'GET' }),
   options: (requestType, from, to) => callApi('oa_entry.get_attendance_options', { request_type: requestType, from_date: from || '', to_date: to || '' }, { method: 'GET' }),
   create: (params) => callApi('oa_entry.create_request', params),
+  saveTravel: (params) => callApi('travel_entry.save_travel_draft', params),
+  projects: () => callApi('expense_claim_entry.list_claim_projects', { request_type: REQUEST_TRIP }, { method: 'GET' }),
   updateDraft: (params) => callApi('oa_entry.update_leave_draft', params),
   submitDraft: (name) => callApi('oa_entry.submit_request', { name }),
   act: (params) => callApi('oa_entry.action_request', params),

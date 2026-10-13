@@ -17,7 +17,7 @@ const props = defineProps({
   draftName: { type: String, default: '' },
   home: { type: Object, default: null },
   route: { type: Object, default: null },
-  types: { type: Array, default: () => ['请假申请', '加班申请', '调休申请'] },
+  types: { type: Array, default: () => ['请假申请', '加班申请', '调休申请', '出差申请'] },
 });
 const emit = defineEmits(['switch-type', 'draft-type', 'draft-saved', 'submitted', 'cancel']);
 
@@ -28,7 +28,7 @@ const MODES = [
   { key: 'custom', label: '自定义小时', title: '自定义小时，每次 0.5，最多 8 小时' },
   { key: 'none', label: '不请', title: '这天不请' },
 ];
-const TYPE_KIND = { 请假申请: 'personal', 加班申请: 'ot', 调休申请: 'comp' };
+const TYPE_KIND = { 请假申请: 'personal', 加班申请: 'ot', 调休申请: 'comp', 出差申请: 'trip' };
 
 const today = isoDate(new Date());
 const form = reactive({ leaveType: '事假', from: '', to: '', days: [], subject: '', reason: '' });
@@ -74,7 +74,7 @@ const hasDates = computed(() => Boolean(form.from && form.to));
 
 // 类型卡片和假别上的提示：还剩多少额度。
 const typeNote = (type) => ({
-  请假申请: '事假 / 病假 / 年假等', 加班申请: '加班换调休额度',
+  请假申请: '事假 / 病假 / 年假等', 加班申请: '加班换调休额度', 出差申请: '出差，报销、付款可以直接关联',
   调休申请: props.home?.comp ? `用加班额度，剩 ${numText(props.home.comp.available_hours)} 小时` : '用加班额度',
 }[type]);
 function leaveNote(item) {

@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { STUCK_AFTER_DAYS, calendarDaysSince, isWaitingTooLong } from "../src/lib/waiting.js";
 import { waitedDays as claimWaited } from "../src/lib/claimView.js";
 import { waitedDays as paymentWaited } from "../src/lib/paymentView.js";
-import { waitedDays as travelWaited } from "../src/lib/travelView.js";
+import { isSlow } from "../src/lib/attendanceFlow.js";
 import { waitedDays as procurementWaited } from "../src/lib/procurementView.js";
 import { todoRow, buildGroupHome } from "../src/lib/approvalGroup.js";
 
 const at = (text) => Date.parse(text.replace(" ", "T"));
 // 四个页面的单据起点字段写法一样：steps[].acted_on / submitted_on / creation。
-const VIEWS = { claim: claimWaited, payment: paymentWaited, travel: travelWaited, procurement: procurementWaited };
+const VIEWS = { claim: claimWaited, payment: paymentWaited, procurement: procurementWaited };
 const since = (stamp) => ({ steps: [{ acted_on: stamp }] });
 
 test("waiting days are calendar days: 10-09 23:30 to 10-12 00:30 is 3 days, not 2", () => {
@@ -59,10 +59,20 @@ for (const [name, waitedDays] of Object.entries(VIEWS)) {
   });
 }
 
-test("the four pages count the same document the same way", () => {
+test("the pages count the same document the same way", () => {
   const now = at("2026-10-12 00:30:00");
   const doc = { steps: [{ acted_on: "2026-10-09 23:30:00" }, { acted_on: null }], submitted_on: "2026-10-01 09:00:00" };
-  assert.deepEqual(Object.values(VIEWS).map((fn) => fn(doc, now)), [3, 3, 3, 3]);
+  assert.deepEqual(Object.values(VIEWS).map((fn) => fn(doc, now)), [3, 3, 3]);
+});
+
+test("the attendance centre flags a request after more than 3 calendar days, like every other page (leave, overtime, comp time and trips)", () => {
+  const row = (stamp, extra = {}) => ({ name: "OA-1", steps: [{ acted_on: stamp }], ...extra });
+  for (const type of ["请假申请", "加班申请", "调休申请", "出差申请"]) {
+    assert.equal(isSlow(row("2026-10-09 12:00:00", { request_type: type }), at("2026-10-12 12:00:00")), false, `${type}: exactly 3 days`);
+    assert.equal(isSlow(row("2026-10-09 23:30:00", { request_type: type }), at("2026-10-12 00:30:00")), false, `${type}: 10-09 23:30 to 10-12 00:30 is 3 days`);
+    assert.equal(isSlow(row("2026-10-08 23:30:00", { request_type: type }), at("2026-10-12 00:30:00")), true, `${type}: 4 days`);
+  }
+  assert.equal(isSlow({ request_type: "请假申请" }, at("2026-10-12 12:00:00")), false, "no start time is never slow");
 });
 
 test("the approval-centre home flags a request only after more than 3 days", () => {
@@ -101,15 +111,17 @@ test("no page counts waiting days by 24-hour periods or compares them with a lit
 
 test("every page that defines or shows waiting days takes the rule from waiting.js", () => {
   const text = (file) => sources.find(([name]) => name === file)[1];
-  for (const file of ["lib/claimView.js", "lib/paymentView.js", "lib/travelView.js", "lib/procurementView.js"]) {
+  for (const file of ["lib/claimView.js", "lib/paymentView.js", "lib/procurementView.js"]) {
     assert.match(text(file), /import \{ calendarDaysSince \} from '\.\/waiting\.js'/, file);
     assert.match(text(file), /return calendarDaysSince\(since, now\)/, file);
   }
   for (const file of [
-    "components/claim/ClaimWorkbench.vue", "components/travel/TravelWorkbench.vue", "components/procurement/PipelineBar.vue",
+    "components/claim/ClaimWorkbench.vue", "components/procurement/PipelineBar.vue",
     "components/procurement/ProcHome.vue", "components/procurement/ProcList.vue", "components/procurement/PurchaseHome.vue",
-    "pages/PaymentBoard.vue", "lib/approvalGroup.js",
+    "pages/PaymentBoard.vue", "lib/approvalGroup.js", "lib/attendanceFlow.js",
   ]) assert.match(text(file), /isWaitingTooLong\(/, file);
+  assert.match(text("components/attendance/AttendanceQueue.vue"), /isSlow\(row, props\.now\)/);
+  assert.doesNotMatch(text("components/attendance/AttendanceQueue.vue"), /3 \* 1440/);
   assert.match(text("components/claim/ClaimWorkbench.vue"), /等超过 \{\{ STUCK_AFTER_DAYS \}\} 天/);
   // 催办的“至少等 3 天才能催”是另一条规则，不跟着改
   assert.match(text("lib/procurementView.js"), />= NUDGE_AFTER_DAYS/);

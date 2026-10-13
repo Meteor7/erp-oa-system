@@ -78,7 +78,8 @@ test("router registers each page without replacing the existing leave implementa
   assert.match(source, /PaymentCenter\.vue/);
   // (the page is now a thin wrapper around components/payment/PaymentWorkbench.vue)
   assert.match(source, /ApprovalDashboard\.vue/);
-  assert.match(source, /TravelRequest\.vue/);
+  // 出差申请并进了考勤中心：地址 /approval/travel 还在，指向考勤中心页面
+  assert.match(source, /path: '\/approval\/travel', component: attendancePage/);
   assert.match(source, /InvoiceFolder\.vue/);
   assert.match(source, /ClaimCenter\.vue/);
   assert.match(source, /PaymentRequestCenter\.vue/);

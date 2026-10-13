@@ -1,5 +1,6 @@
 """看板人事页的“考勤”一段：只有汇总，没有人名。"""
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,12 @@ def month_rows():
             {"request_type": "加班申请", "department": "客服部 - RAY", "duration_hours": 12.0}]
 
 
+def trips():
+    """今天出差的人（口径同 summary 里的 today.trip = 2）。"""
+    return [{"employee": "E1", "employee_name": "演示员工117", "department": "研发软件部 - RAY", "name": "OA-T1", "destination": "上海", "start": "2026-10-12", "end": "2026-10-13"},
+            {"employee": "E2", "employee_name": "演示员工172", "department": "客服部 - RAY", "name": "OA-T2", "destination": "杭州", "start": "2026-10-12", "end": "2026-10-12"}]
+
+
 @pytest.fixture
 def state(monkeypatch):
     data = {"summary": summary(), "waiting": {"total": 9, "old": 3}, "stats": {
@@ -57,8 +64,9 @@ def state(monkeypatch):
     monkeypatch.setattr(attendance, "_load_waiting", lambda ctx: data["waiting"])
     monkeypatch.setattr(attendance, "_load_waiting_rows", lambda ctx: data["waiting_rows"])
     monkeypatch.setattr(attendance, "_load_month_rows", lambda ctx: data["month_rows"])
+    monkeypatch.setattr(attendance, "_load_today_trips", lambda ctx: data["trips"])
     monkeypatch.setattr(people, "_fetch_leave_stats", lambda ctx: data["stats"])
-    data["waiting_rows"], data["month_rows"] = waiting_rows(), month_rows()
+    data["waiting_rows"], data["month_rows"], data["trips"] = waiting_rows(), month_rows(), trips()
     return data
 
 
@@ -128,10 +136,37 @@ def test_every_card_opens_a_list_that_adds_up_to_the_number_on_the_card(state):
     assert detail["summary"] == "共 3 张，合计 3.5 天"
     card, detail = open_list("att.overtime")
     assert [row["cells"] for row in detail["rows"]] == [["客服部", "1 张", "1.5 天"]] and detail["summary"] == "共 1 张，合计 1.5 天"
+    # 出差：一人一行，每一行进那张出差申请（出差申请在考勤中心里）；条数和卡片上的人数一样。
     card, detail = open_list("att.trip")
-    assert [row["cells"] for row in detail["rows"]] == [["客服部", "1 人", "8 人"], ["研发软件部", "1 人", "30 人"]]
-    assert detail["summary"] == f"共 {card['value']} 人"
-    assert all(row["target"] == {"key": "attendance.home", "params": {}} for row in detail["rows"])
+    assert [row["cells"] for row in detail["rows"]] == [["演示员工117", "研发软件部", "上海", "10-12 ～ 10-13", "OA-T1"], ["演示员工172", "客服部", "杭州", "10-12", "OA-T2"]]
+    assert detail["summary"] == f"共 {card['value']} 人" and len(detail["rows"]) == int(card["value"]) == 2
+    assert [row["target"] for row in detail["rows"]] == [{"key": "attendance.detail", "params": {"request": "OA-T1"}}, {"key": "attendance.detail", "params": {"request": "OA-T2"}}]
+
+
+def test_the_waiting_numbers_cover_trip_requests_like_the_attendance_centre_list(monkeypatch):
+    """考勤待审批和考勤中心“待我审批 / 全部”是同一批：请假、加班、调休、出差；出差的日期取出发、返回日期。"""
+    import frappe
+
+    seen = []
+
+    def sql(query, args=None, as_dict=False):
+        seen.append((query, args))
+        return [{"total": 0, "old": 0}]
+
+    monkeypatch.setattr(frappe, "db", SimpleNamespace(sql=sql), raising=False)
+    ctx = make_ctx()
+    attendance._load_waiting(ctx)
+    attendance._load_waiting_rows(ctx)
+    assert len(seen) == 2 and all("出差申请" in args["types"] and "请假申请" in args["types"] for _query, args in seen)
+    assert "COALESCE(from_date, travel_start_date) AS from_date" in seen[1][0] and "COALESCE(to_date, travel_end_date) AS to_date" in seen[1][0]
+
+
+def test_a_trip_waiting_row_shows_its_travel_dates_and_opens_the_request(state):
+    state["waiting_rows"] = [{"name": "OA-T9", "request_type": "出差申请", "employee_name": "演示员工159", "department": "客服部 - RAY", "from_date": "2026-10-26",
+                              "to_date": "2026-10-28", "duration_hours": 0, "current_step_label": "副总经理", "waited": 4}]
+    detail = core.get_detail_for(make_ctx(), "att.pending")
+    assert detail["rows"][0]["cells"][:4] == ["出差申请", "演示员工159", "客服部", "10-26 ～ 10-28"]
+    assert detail["rows"][0]["target"] == {"key": "attendance.detail", "params": {"request": "OA-T9"}} and detail["rows"][0]["tone"] == "bad"
 
 
 def test_a_card_with_nothing_behind_it_does_not_link_to_an_empty_list(state):

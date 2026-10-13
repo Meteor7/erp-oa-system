@@ -93,3 +93,44 @@ def test_the_reviewed_list_carries_day_details_as_a_list():
     assert module._days_of('[{"work_date": "2026-10-13", "hours": 3}]') == [{"work_date": "2026-10-13", "hours": 3}]
     assert module._days_of([{"work_date": "2026-10-13", "hours": 5}, "x"]) == [{"work_date": "2026-10-13", "hours": 5}]
     assert module._days_of("not json") == [] and module._days_of(None) == [] and module._days_of('{"a": 1}') == []
+
+
+def test_the_attendance_centre_lists_cover_trips_but_the_leave_engine_does_not():
+    """出差在考勤中心里和请假、加班、调休同一个入口；额度、日历这些请假专用的计算仍然只认原来三种。"""
+    module = importlib.import_module("rayher_hr_payroll.api.attendance_entry")
+    assert module.LIST_TYPES == (*att.ATTENDANCE_TYPES, "出差申请")
+    assert "出差申请" not in att.ATTENDANCE_TYPES
+
+
+def test_a_user_gets_the_trip_type_only_when_the_travel_feature_is_open(monkeypatch):
+    module = importlib.import_module("rayher_hr_payroll.api.attendance_entry")
+    open_types = {"请假申请", "加班申请", "调休申请", "出差申请"}
+    monkeypatch.setattr(module, "can_access_request_type", lambda item: item in open_types)
+    assert module._types() == ["请假申请", "加班申请", "调休申请", "出差申请"]
+    open_types.remove("出差申请")
+    assert module._types() == ["请假申请", "加班申请", "调休申请"]
+
+
+def test_hr_opens_any_submitted_trip_read_only_but_a_plain_employee_cannot(entry, monkeypatch):
+    module, _raw, state = entry
+    detail = getattr(module.get_attendance_request, "__wrapped__", module.get_attendance_request)
+    monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])             # 出差申请的“全部”只给系统管理员、高管：人事走下面的只读通道
+    monkeypatch.setattr(module, "_balances", lambda employee, cache: {"annual": None, "comp": None})
+    state.summaries = {"OA-2": {"name": "OA-2", "request_type": "出差申请", "employee": "E1", "employee_name": "演示员工117", "steps": [],
+                                "travel_start_date": "2026-10-12", "travel_end_date": "2026-10-13", "travel_destination": "上海"}}
+    state.roles = ["HR User"]
+    result = detail("OA-2")
+    assert result["request"]["travel_destination"] == "上海" and "关联报销" in result["impact"]
+    assert result["mine"] is False                                                           # 人事只读，不是自己的：不显示“发起报销”
+    monkeypatch.setattr(module.oa_entry, "list_requests", lambda view="mine", **kwargs: [{"name": "OA-2"}] if view == "mine" else [])
+    assert detail("OA-2")["mine"] is True
+    assert "workflow_status <> '草稿'" in state.sql[0][0]                                  # 草稿只有本人看得到
+    state.roles = ["Employee"]
+    with pytest.raises(Exception, match="找不到这张申请"):
+        detail("OA-2")
+
+
+def test_the_default_list_of_submitted_requests_includes_trips(entry):
+    module, _raw, state = entry
+    module._attendance_names(None, 5)
+    assert state.sql[0][1]["types"] == module.LIST_TYPES and "出差申请" in state.sql[0][1]["types"]

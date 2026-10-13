@@ -109,3 +109,12 @@ def test_team_absence_lists_names_and_dates_only_and_flags_crowded_days():
     assert days["2026-10-17"]["off_day"] is True and days["2026-10-19"]["off_day"] is False
     assert "10/21" in info["note"] and "演示员工14" in info["note"] and "演示员工151" in info["note"]
     assert not any(key in json.dumps(info, ensure_ascii=False) for key in ("病假", "年假", "事假", "调休"))
+
+
+def test_a_trip_has_no_balance_to_show_only_the_hints_that_matter_to_the_approver():
+    trip = {"name": "OA-T", "request_type": "出差申请", "workflow_status": "待审批", "travel_start_date": "2026-10-20", "travel_end_date": "2026-10-22"}
+    alone = center.review_hints(trip, annual={"available_hours": 40}, comp={"available_hours": 8}, teammates_off=0)
+    assert [(item["tone"], item["text"]) for item in alone] == [("info", "出差不扣年假和工时上限"), ("ok", "同期部门无人请假")]
+    busy = center.review_hints(trip, teammates_off=2)
+    assert busy[1] == {"tone": "warn", "text": "同期 2 人请假或调休"}
+    assert center.impact_text(trip, annual={"available_hours": 40}) == "出差期间不算请假，不扣年假和工时上限；通过后可以关联报销、付款"

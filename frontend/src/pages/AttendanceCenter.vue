@@ -1,6 +1,6 @@
 <script setup>
-// 请假 · 加班 · 调休（考勤中心）：同一个页面四个视图，用路径和查询参数区分（2026-10-08 按确认的原型改版）。
-//   路径决定类型：/approval/leave | overtime | comp-time（侧栏高亮跟着走）；
+// 请假 · 加班 · 调休 · 出差（考勤中心）：同一个页面四个视图，用路径和查询参数区分（2026-10-08 按确认的原型改版）。
+//   路径决定类型：/approval/leave | overtime | comp-time | travel（侧栏高亮跟着走；出差申请 2026-10-13 并进考勤中心，地址不变）；
 //   ?view=home 首页；?view=list&scope=todo|mine|done|all&type=请假|加班|调休|all 列表；
 //   ?request=单号（或 /approval/<类型>/<单号>）详情；?view=new&type=…[&draft=单号] 新建（缺类型先让用户选）。
 //   来源用 from=list&fscope=&ftype= / from=home 带着走，详情和新建页的"返回"、取消回到原处。
@@ -16,6 +16,7 @@ import AttendanceDetail from '../components/attendance/AttendanceDetail.vue';
 import AttendanceForm from '../components/attendance/AttendanceForm.vue';
 import AttendanceHome from '../components/attendance/AttendanceHome.vue';
 import AttendanceList from '../components/attendance/AttendanceList.vue';
+import AttendanceTripForm from '../components/attendance/AttendanceTripForm.vue';
 import {
   ATTENDANCE_HOME_PATH, FALLBACK_HOME_PATH, STALE_STEP, TYPES, TYPE_ORDER, api, backLabel, backLocation, contextFilter,
   createLatest, defaultScope, detailLocation, homeLocation, labelOfType, listLocation, newLocation, newTitle,
@@ -357,7 +358,8 @@ const listSets = computed(() => ({
 const listNames = computed(() => ({ ...mine.names, ...everyone.names }));
 const pickCards = computed(() => availableTypes.value.map((type) => ({ type, label: TYPES[type].label, rule: TYPES[type].rule })));
 const subtitle = computed(() => {
-  if (!page.value.newType) return '三种申请的规则不一样，先选好再填，避免填错。';
+  if (!page.value.newType) return '四种申请的规则不一样，先选好再填，避免填错。';
+  if (page.value.newType === '出差') return '出差只批该不该去，不设金额；先选去哪、哪几天，途中的费用报销时直接关联它。';
   if (page.value.newType === '加班') return '先确认类型，再选日期和加班小时数；提交后按 1:1 增加调休额度。';
   return '先确认类型，再选日期；每一天选“全天 / 上午 / 下午 / 自定义小时 / 不请”。';
 });
@@ -404,7 +406,7 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
 
       <section v-else-if="!page.newType" class="ac-panel af-sec" aria-label="选择申请类型">
         <b>你要新建哪一种？</b>
-        <div class="ac-note">三种申请的规则不一样，先选好再填，避免填错。</div>
+        <div class="ac-note">四种申请的规则不一样，先选好再填，避免填错。</div>
         <div class="af-types">
           <button v-for="card in pickCards" :key="card.type" type="button" class="af-tc" @click="switchType(card.label)">
             <b>新建{{ card.label }}</b><span class="ac-note">{{ card.rule }}</span>
@@ -412,6 +414,10 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
         </div>
         <div class="af-two"><button type="button" class="ac-btn" @click="goBack">取消</button></div>
       </section>
+
+      <AttendanceTripForm
+        v-else-if="newTypeRequest === '出差申请'" ref="formRef" :draft-name="page.draft" :route="approval" :types="availableTypes"
+        @switch-type="switchType" @draft-type="onDraftType" @draft-saved="onDraftSaved" @submitted="onSubmitted" @cancel="goBack" />
 
       <AttendanceForm
         v-else ref="formRef" :request-type="newTypeRequest" :draft-name="page.draft" :home="home" :route="approval" :types="availableTypes"

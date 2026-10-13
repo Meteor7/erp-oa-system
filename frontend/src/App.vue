@@ -10,18 +10,18 @@ const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo-m
 const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
   { label: '审批中心', items: [
-    // 分组名本身是考勤中心首页的入口（view=home），三个子项照旧。
-    { to: '/approval/attendance?view=home', step: '01', label: '请假/加班/调休', children: [
+    // 分组名本身是考勤中心首页的入口（view=home），四个子项照旧；出差申请也在这里（报销、付款仍然按单号关联它）。
+    { to: '/approval/attendance?view=home', step: '01', label: '请假/加班/调休/出差', children: [
       { to: '/approval/leave', label: '请假审批' },
       { to: '/approval/overtime', label: '加班审批' },
       { to: '/approval/comp-time', label: '调休审批' },
+      { to: '/approval/travel', label: '出差申请' },
     ] },
     // 分组名本身是这一组的首页（我要处理的、我提交的、快捷新建，下面是看板统计），子项照旧。
     { to: '/approval/requests', step: '02', label: '采购/购买申请', children: [
       { to: '/approval/procurement', label: '采购申请' },
       { to: '/approval/procurement/price-approvals', label: '价格审批' },
       { to: '/approval/direct-purchase', label: '购买申请' },
-      { to: '/approval/travel', label: '出差申请' },
     ] },
     { to: '/approval/payments', step: '03', label: '付款申请', children: [
       { to: '/approval/procurement-payment', label: '采购付款' },
@@ -71,7 +71,6 @@ const WIDE_PAGE_PATHS = new Set([
   '/approval/procurement-payment',
   '/approval/reimbursement',
   '/approval/corporate-payment',
-  '/approval/travel',
   '/approval/invoice-folder',
   '/approval/claim',
   '/approval/payment',

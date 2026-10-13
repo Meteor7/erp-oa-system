@@ -54,7 +54,7 @@ def _rows(employees, start, end, statuses=None):
         return []
     return frappe.db.sql(
         "SELECT name, employee, request_type, leave_type, workflow_status, from_date, to_date, attendance_days, "
-        "travel_start_date, travel_end_date FROM `tabOA Approval Request` "
+        "travel_start_date, travel_end_date, travel_destination FROM `tabOA Approval Request` "
         "WHERE employee IN %(employees)s AND request_type IN %(types)s AND workflow_status IN %(statuses)s "
         "AND ((request_type <> %(travel)s AND from_date <= %(end)s AND to_date >= %(start)s) "
         "OR (request_type = %(travel)s AND travel_start_date <= %(end)s AND travel_end_date >= %(start)s))",
@@ -72,7 +72,7 @@ def _members(department):
 
 
 def _pending(employees=None):
-    """待审批的请假、加班、调休张数：{部门: 张数}（只有数字）。employees 给了就只算这些人。"""
+    """待审批的请假、加班、调休、出差张数：{部门: 张数}（只有数字）。employees 给了就只算这些人。"""
     if employees is not None and not employees:
         return {}
     sql = (
@@ -81,7 +81,7 @@ def _pending(employees=None):
         "AND r.request_type IN %(types)s AND r.workflow_status IN %(statuses)s"
         + (" AND r.employee IN %(employees)s" if employees is not None else "") + " GROUP BY e.department"
     )
-    args = {"types": tuple(att.ATTENDANCE_TYPES), "statuses": PENDING}
+    args = {"types": tuple(ROW_TYPES), "statuses": PENDING}
     if employees is not None:
         args["employees"] = tuple(sorted(employees))
     return {(row.get("department") or ""): int(row.get("n") or 0) for row in frappe.db.sql(sql, args, as_dict=True)}
@@ -138,6 +138,15 @@ def _company_summary(today):
         employees, rows, _pending(), first=today, work_dates=window["work_dates"],
         month_first=window["month_first"], month_last=window["month_last"],
     )
+
+
+def today_trips(today=None):
+    """今天出差的人（和公司汇总里的“出差中”同一口径），一人一条：单号、地点、日期。看板“出差中”点进去用。"""
+    today = today or date.today()
+    window = _window(today)
+    employees = frappe.get_all("Employee", filters={"status": "Active"}, fields=["name", "employee_name", "department"], limit_page_length=0)
+    rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], att.COMPLETED)
+    return board.today_trips(employees, rows, first=today, work_dates=window["work_dates"])
 
 
 @frappe.whitelist()

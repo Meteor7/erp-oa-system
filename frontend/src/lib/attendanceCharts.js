@@ -16,10 +16,11 @@ const AVATAR_KINDS = ['annual', 'personal', 'sick', 'comp', 'ot', 'trip'];
 
 export const kindLabel = (kind) => KINDS[kind] || '';
 
-// 一张申请的颜色类别（待办列表里的头像和标签）：年假 / 事假 / 病假，调休，加班，其余的假归在其他假。
+// 一张申请的颜色类别（待办列表里的头像和标签）：年假 / 事假 / 病假，调休，加班，出差，其余的假归在其他假。
 export function rowKind(row) {
   if (row?.request_type === '调休申请') return 'comp';
   if (row?.request_type === '加班申请') return 'ot';
+  if (row?.request_type === '出差申请') return 'trip';
   return { 年假: 'annual', 事假: 'personal', 病假: 'sick' }[row?.leave_type] || 'other';
 }
 

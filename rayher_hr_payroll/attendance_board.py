@@ -135,6 +135,38 @@ def build_stats(employee_ids, rows, *, first, work_dates, month_first, month_las
     }
 
 
+def today_trips(employees, rows, *, first, work_dates):
+    """build_stats 里“今天出差”的那些人，一人一条：已批准的出差、今天在出差期间且是工作日；今天已在请假 / 调休的人不算。
+
+    和 build_stats 的 today.trip 同一个口径（人数一定相等），多给每个人的单号、地点和日期，让看板的数字能点进具体的出差申请。
+    """
+    known = {value(employee, "name"): employee for employee in employees}
+    gone, trips = set(), {}
+    for row in rows:
+        employee = value(row, "employee")
+        if value(row, "workflow_status") not in COMPLETED or employee not in known:
+            continue
+        kind = kind_of(row)
+        if not kind or first not in {day for day, _hours in days_of(row, work_dates)}:
+            continue
+        if kind in ABSENCE_KINDS:
+            gone.add(employee)
+        elif kind == "trip":
+            trips.setdefault(employee, []).append(row)
+    result = []
+    for employee, items in trips.items():
+        if employee in gone:
+            continue
+        row = sorted(items, key=lambda item: (str(value(item, "travel_start_date") or ""), str(value(item, "name") or "")))[0]
+        person = known[employee]
+        result.append({
+            "employee": employee, "employee_name": value(person, "employee_name") or employee, "department": value(person, "department") or "",
+            "name": value(row, "name"), "destination": value(row, "travel_destination") or "",
+            "start": str(value(row, "travel_start_date") or ""), "end": str(value(row, "travel_end_date") or value(row, "travel_start_date") or ""),
+        })
+    return sorted(result, key=lambda item: (item["department"], item["employee_name"], item["name"]))
+
+
 def _better(candidate, current):
     if current is None:
         return True

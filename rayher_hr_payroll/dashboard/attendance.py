@@ -1,6 +1,7 @@
 """看板：公司考勤（人事 / 副总 / 总经理，放在“人事”页签的“考勤”一段里）。
 
-只有人数、小时和比例，没有人名；要看是谁，点进考勤中心：先看各部门汇总，点进某个部门才看到那个部门的日历和人名。
+请假的数字只有人数、小时和比例，没有人名；要看是谁，点进考勤中心：先看各部门汇总，点进某个部门才看到那个部门的日历和人名。
+出差不一样：“出差中”点进去一人一行，直接进出差申请（出差申请现在在考勤中心里，人事、副总、总经理都能看到）。
 数字复用考勤中心的公司汇总（`attendance_board_entry._company_summary`），和考勤中心首页对得上；
 本月请假 / 加班 / 部门排行复用 `overview_entry` 的统计（按所选期间）。
 """
@@ -10,11 +11,14 @@ from datetime import date, timedelta
 
 from rayher_hr_payroll import attendance_requests as att
 from rayher_hr_payroll.dashboard import people
+from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
 from rayher_hr_payroll.dashboard.core import (
     alert, bar_row, bars, col_row, cols, drill, drill_row, drill_to, kpi, provider, target,
 )
 
 STUCK_DAYS = 3
+# 考勤中心里的申请：请假、加班、调休，加上出差（和考勤中心的“待我审批”“全部”同一批）。
+CENTER_TYPES = (*att.ATTENDANCE_TYPES, REQUEST_TRAVEL)
 MAX_ROWS = 8
 HOURS_PER_DAY = 8
 HINT = "只有人数、小时和比例，没有人名；点进考勤中心，先看各部门汇总，点进某个部门才看到那个部门的日历和人名。"
@@ -27,28 +31,36 @@ def _load_summary(ctx):
     return attendance_board_entry._company_summary(date.fromisoformat(ctx.today))
 
 
+def _load_today_trips(ctx):
+    """今天出差的人，一人一条（口径同公司汇总里的“出差中”）。"""
+    from rayher_hr_payroll.api import attendance_board_entry
+
+    return attendance_board_entry.today_trips(date.fromisoformat(ctx.today))
+
+
 def _load_waiting(ctx):
-    """还在审批的请假 / 加班 / 调休：{total, old}；old = 最近一次处理（没有就提交）起已经超过 3 天的张数。"""
+    """还在审批的请假 / 加班 / 调休 / 出差：{total, old}；old = 最近一次处理（没有就提交）起已经超过 3 天的张数。"""
     import frappe
 
     rows = frappe.db.sql(
         "SELECT COUNT(*) AS total, SUM(CASE WHEN DATEDIFF(%(today)s, DATE(modified)) > %(days)s THEN 1 ELSE 0 END) AS old "
         "FROM `tabOA Approval Request` WHERE request_type IN %(types)s AND workflow_status IN %(statuses)s",
-        {"today": ctx.today, "days": STUCK_DAYS, "types": tuple(att.ATTENDANCE_TYPES), "statuses": ("待审批", "待办理")}, as_dict=True,
+        {"today": ctx.today, "days": STUCK_DAYS, "types": tuple(CENTER_TYPES), "statuses": ("待审批", "待办理")}, as_dict=True,
     )
     row = rows[0] if rows else {}
     return {"total": int(row.get("total") or 0), "old": int(row.get("old") or 0)}
 
 
 def _load_waiting_rows(ctx):
-    """还在审批的请假 / 加班 / 调休，一演示员工128行（明细用；条数口径同 _load_waiting）。"""
+    """还在审批的请假 / 加班 / 调休 / 出差，一演示员工128行（明细用；条数口径同 _load_waiting）。出差的起止日期取出发、返回日期。"""
     import frappe
 
     return frappe.db.sql(
-        "SELECT name, request_type, employee_name, department, from_date, to_date, duration_hours, current_step_label, "
+        "SELECT name, request_type, employee_name, department, COALESCE(from_date, travel_start_date) AS from_date, "
+        "COALESCE(to_date, travel_end_date) AS to_date, duration_hours, current_step_label, "
         "DATEDIFF(%(today)s, DATE(modified)) AS waited FROM `tabOA Approval Request` "
         "WHERE request_type IN %(types)s AND workflow_status IN %(statuses)s ORDER BY waited DESC, name",
-        {"today": ctx.today, "types": tuple(att.ATTENDANCE_TYPES), "statuses": ("待审批", "待办理")}, as_dict=True)
+        {"today": ctx.today, "types": tuple(CENTER_TYPES), "statuses": ("待审批", "待办理")}, as_dict=True)
 
 
 def _load_month_rows(ctx):
@@ -87,7 +99,7 @@ def _visible(ctx):
 def att_trip(ctx):
     today = _summary(ctx)["stats"]["today"]
     return kpi("att.trip", "出差中", today["trip"], "人", "不算请假，不进出勤率", to=drill_to("att.trip", ctx) if today["trip"] else None,
-               hint="今天在已批准的出差申请期间的人数（已在请假的不重复算）。点进去按部门看。" + HINT)
+               hint="今天在已批准的出差申请期间的人数（已在请假的不重复算；周末和节假日不算）。点进去一人一行，每一行进出差申请。")
 
 
 @provider("att.pending", "kpi", visible=_visible, title="考勤待审批")
@@ -95,7 +107,7 @@ def att_pending(ctx):
     waiting = _waiting(ctx)
     return kpi("att.pending", "考勤待审批", waiting["total"], "张", f"其中 {waiting['old']} 张超过 {STUCK_DAYS} 天" if waiting["old"] else "没有等得久的",
                "hot" if waiting["old"] else "", to=drill_to("att.pending", ctx) if waiting["total"] else None,
-               hint=f"请假、加班、调休里还在审批的申请张数（所有审批人手上的，不只是你的）；“超过 {STUCK_DAYS} 天”从最近一次处理（没有就从提交）算起。"
+               hint=f"请假、加班、调休、出差里还在审批的申请张数（所有审批人手上的，不只是你的）；“超过 {STUCK_DAYS} 天”从最近一次处理（没有就从提交）算起。"
                     "点进去一演示员工128行，每一行进申请详情。")
 
 
@@ -196,14 +208,19 @@ def drill_att_overtime(ctx):
                              "已批准的加班，跨月申请只算落在这个月里的天数；" + HINT)
 
 
+def _trip_date(row):
+    start, end = str(row.get("start") or "")[5:10], str(row.get("end") or "")[5:10]
+    return f"{start} ～ {end}" if end and end != start else start
+
+
 @provider("drill.att.trip", "drill", visible=_visible, title="出差中")
 def drill_att_trip(ctx):
-    departments = [item for item in _summary(ctx).get("departments") or [] if int(item.get("today_trip") or 0) > 0]
-    departments.sort(key=lambda item: (-int(item["today_trip"]), item["label"]))
-    rows = [drill_row([item["label"], f"{int(item['today_trip'])} 人", f"{int(item['headcount'])} 人"], target("attendance.home")) for item in departments]
-    total = sum(int(item["today_trip"]) for item in departments)
-    return drill("drill.att.trip", "今天出差的人 · 按部门", [("部门",), ("出差", "r"), ("部门人数", "r")], rows, summary=f"共 {total} 人",
-                 note="今天在已批准的出差申请期间的人（已在请假的不重复算）。" + HINT)
+    """今天出差的人，一人一行，点进去就是那张出差申请；条数和指标卡“出差中”一样。"""
+    trips = _load_today_trips(ctx)
+    rows = [drill_row([item["employee_name"], people._dept_label(item["department"]) or "—", item["destination"] or "—", _trip_date(item), item["name"]],
+                      target("attendance.detail", request=item["name"])) for item in trips]
+    return drill("drill.att.trip", "今天出差的人", [("出差人",), ("部门",), ("出差地点",), ("日期",), ("单号",)], rows, summary=f"共 {len(trips)} 人",
+                 note="今天在已批准的出差申请期间的人（已在请假的不重复算；周末和节假日不算）。每一行进出差申请详情。")
 
 
 # ---------------------------------------------------------------- 图表块

@@ -9,6 +9,7 @@ import {
 import { TIME_FILTERS, applyFilters, filtersActive, isSlow, lengthText, pickSelected, statusInfo, whenText } from '../../lib/attendanceFlow.js';
 import { rowKind } from '../../lib/attendanceCharts.js';
 import { todayText } from '../../lib/dashboardLanding.js';
+import { STUCK_AFTER_DAYS } from '../../lib/waiting.js';
 import AttendanceDetail from './AttendanceDetail.vue';
 
 const props = defineProps({
@@ -24,7 +25,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['home', 'scope', 'filter', 'new', 'open', 'approve-many', 'today-off', 'changed', 'navigate']);
 
-const TYPE_DOT = { 请假: 'k-personal', 加班: 'k-ot', 调休: 'k-comp' };
+const TYPE_DOT = { 请假: 'k-personal', 加班: 'k-ot', 调休: 'k-comp', 出差: 'k-trip' };
 const picked = ref([]);
 const time = ref('all');
 const slow = ref(false);
@@ -40,7 +41,7 @@ const title = computed(() => listTitle(filter.value));
 const tabs = computed(() => scopeTabs({ sets: props.sets, filter: 'all', isApprover: props.isApprover, canViewAll: props.canViewAll, allLoaded: props.loaded.all }));
 const base = computed(() => props.sets[scope.value] || []);
 const counts = computed(() => typeCounts(base.value));
-const typeItems = computed(() => [['all', '全部'], ['请假', '请假'], ['加班', '加班'], ['调休', '调休']].map(([key, label]) => ({ key, label, count: counts.value[key] ?? 0, on: filter.value === key })));
+const typeItems = computed(() => [['all', '全部'], ['请假', '请假'], ['加班', '加班'], ['调休', '调休'], ['出差', '出差']].map(([key, label]) => ({ key, label, count: counts.value[key] ?? 0, on: filter.value === key })));
 const ready = computed(() => ({ todo: props.loaded.review, mine: props.loaded.mine, done: props.loaded.reviewed, all: props.loaded.all })[scope.value] ?? false);
 const today = computed(() => todayText(new Date(props.now)));
 const state = computed(() => ({ type: filter.value, time: time.value, slow: slow.value, query: query.value }));
@@ -100,7 +101,7 @@ function move(delta) {
 const scopeLabel = computed(() => SCOPES.find((item) => item.key === scope.value)?.label || '');
 const subtitle = computed(() => {
   if (todayOnly.value) return '只读：今天正在休假或调休的人（已批准的申请，从最近 100 张里筛出）。';
-  return scope.value === 'all' ? '只读：所有人已提交的请假、加班、调休（最近 100 张）。' : '点一行，右边直接看清楚并处理；批量处理勾选后统一同意。';
+  return scope.value === 'all' ? '只读：所有人已提交的请假、加班、调休、出差（最近 100 张）。' : '点一行，右边直接看清楚并处理；批量处理勾选后统一同意。';
 });
 const emptyText = computed(() => (todayOnly.value ? '今天没有人在休假或调休' : active.value ? '没有符合筛选的申请' : '这个范围里没有申请'));
 </script>
@@ -133,7 +134,7 @@ const emptyText = computed(() => (todayOnly.value ? '今天没有人在休假或
               <button v-for="[key, label] in TIME_FILTERS" :key="key" type="button" role="menuitemradio" :aria-checked="time === key" @click="setTime(key)">{{ label }}<span v-if="time === key">✓</span></button>
             </div>
           </div>
-          <button v-if="scope === 'todo'" type="button" class="af-fbtn" :aria-pressed="slow" @click="slow = !slow">等了超过 3 天<b>{{ slowCount }}</b></button>
+          <button v-if="scope === 'todo'" type="button" class="af-fbtn" :aria-pressed="slow" @click="slow = !slow">等了超过 {{ STUCK_AFTER_DAYS }} 天<b>{{ slowCount }}</b></button>
           <label class="af-sbox"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg><input v-model="query" type="search" placeholder="搜申请人、单号、事由" aria-label="搜索" /></label>
           <button v-if="active" type="button" class="ac-link" @click="clearFilters">清除筛选</button>
         </div>

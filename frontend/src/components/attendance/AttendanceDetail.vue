@@ -5,10 +5,13 @@
 //   panel：列表右边的窄栏，点列表里的一行就在这里看清楚并处理（同意一步完成，驳回在下面写原因），"完整页面"进 page。
 // 数据、审批、撤回、修改草稿的逻辑两种摆法共用。
 import { computed, nextTick, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import {
-  STALE_STEP, api, backLabel, createLatest, departmentLabel, effectRows, kindOf, labelOfType, newLocation, numText, rangeText,
-  rejectionOf, requestTitle, rowDays, stamp, statusTag, stepRole, stepStates, totalOf, weekLabel, workedSpan, dayChip,
+  STALE_STEP, api, backLabel, createLatest, departmentLabel, effectRows, isTrip, kindOf, labelOfType, newLocation, numText, rangeText,
+  rejectionOf, requestTitle, rowDays, sizeText, stamp, statusTag, stepRole, stepStates, totalOf, weekLabel, workedSpan, dayChip,
 } from '../../lib/attendanceView.js';
+import { hereAsFrom } from '../../lib/navContext.js';
+import { pushTarget } from '../../lib/travelView.js';
 import { lengthText } from '../../lib/attendanceFlow.js';
 import { rowKind } from '../../lib/attendanceCharts.js';
 import AttendanceDayStrip from './AttendanceDayStrip.vue';
@@ -38,6 +41,7 @@ const target = ref('applicant');
 const noteBox = ref(null);
 const latest = createLatest();
 const overlapLatest = createLatest();
+const route = useRoute();
 
 const panel = computed(() => props.variant === 'panel');
 const request = computed(() => data.value?.request || null);
@@ -49,7 +53,14 @@ const kind = computed(() => (request.value ? kindOf(request.value) : null));
 const colour = computed(() => (request.value ? rowKind(request.value) : 'other'));
 const returned = computed(() => (request.value ? rejectionOf(request.value) : null));
 const overtime = computed(() => request.value?.request_type === '加班申请');
+const trip = computed(() => isTrip(request.value));
 const hours = computed(() => numText(totalOf(request.value || {})));
+// 出差说天数，其余说小时；日期那一块的标题也跟着类型走。
+const sizeNumber = computed(() => (trip.value ? sizeText(request.value).replace(' 天', '') : hours.value));
+const sizeUnit = computed(() => (trip.value ? '天' : '小时'));
+const dateTitle = computed(() => (overtime.value ? '加班日期' : trip.value ? '出差日期' : '请假日期'));
+// 已通过、是我自己的出差申请：出差途中的费用在报销 / 付款里直接关联它。
+const canPush = computed(() => trip.value && Boolean(data.value?.mine) && ['已完成', '已通过'].includes(request.value?.workflow_status));
 const span = computed(() => workedSpan(days.value, request.value?.from_date, request.value?.to_date));
 const effect = computed(() => (request.value ? effectRows(request.value, data.value?.impact) : []));
 const isDraft = computed(() => request.value?.workflow_status === '草稿');
@@ -153,12 +164,12 @@ async function startReject() {
 }
 
 async function withdraw() {
-  if (!window.confirm('撤回后这张申请会退回草稿，占用的额度会释放。确定撤回吗？')) return;
+  if (!window.confirm(trip.value ? '撤回后这张申请会退回草稿。确定撤回吗？' : '撤回后这张申请会退回草稿，占用的额度会释放。确定撤回吗？')) return;
   busy.value = true;
   error.value = '';
   try {
     await api.withdraw(props.name);
-    message.value = '已撤回，额度已释放';
+    message.value = trip.value ? '已撤回' : '已撤回，额度已释放';
     await load();
     emit('changed');
   } catch (failure) {
@@ -166,6 +177,11 @@ async function withdraw() {
   } finally {
     busy.value = false;
   }
+}
+
+// 下推报销 / 付款：目标页先弹出"确定要创建草稿吗"，确认后才生成；from 让它取消时回到这里。
+function push(kind) {
+  emit('navigate', { path: pushTarget(kind), query: { source: props.name, from: hereAsFrom(route.path, route.query) } });
 }
 
 // 草稿 / 被退回：回到新建页继续填，类型用这张申请自己的。
@@ -197,13 +213,15 @@ onMounted(async () => {
         </div>
         <div class="af-facts">
           <div><span class="k">时间</span><span class="v">{{ rangeText(span.from, span.to) }}</span></div>
-          <div><span class="k">合计</span><span class="v">{{ hours }}<small> 小时</small></span></div>
+          <div><span class="k">合计</span><span class="v">{{ sizeNumber }}<small> {{ sizeUnit }}</small></span></div>
+          <div v-if="trip"><span class="k">地点</span><span class="v small">{{ request.travel_destination || '—' }}</span></div>
           <div><span class="k">提交</span><span class="v small">{{ stamp(request.submitted_on || request.creation).slice(5) }}</span></div>
         </div>
       </section>
       <section class="af-ps">
-        <div class="af-sec2">{{ overtime ? '加班日期' : '请假日期' }} <span>{{ lengthText(request) }}</span></div>
+        <div class="af-sec2">{{ dateTitle }} <span>{{ lengthText(request) }}</span></div>
         <AttendanceDayStrip :row="request" />
+        <div v-if="trip" class="ac-note">所属项目：{{ request.project || '非项目' }}</div>
         <div class="af-reason">{{ request.reason || '（没有写事由）' }}</div>
         <div v-if="request.attachments?.length" class="ac-note"><a v-for="file in request.attachments" :key="file.name" :href="file.file_url" target="_blank" rel="noopener" class="ac-link">{{ file.file_name }}</a></div>
       </section>
@@ -239,6 +257,7 @@ onMounted(async () => {
       <section v-else-if="request.can_withdraw && !isDraft" class="af-ps af-actions"><div class="btns"><span class="ac-note grow">还在审批中，可以撤回。</span><button type="button" class="ac-btn" :disabled="busy" @click="withdraw">撤回申请</button></div></section>
       <section v-else-if="isDraft && returned" class="af-ps af-actions"><div class="af-banner">被退回：{{ who(returned.actor) }}：{{ returned.note || '请修改后重新提交' }}</div><div class="btns"><button type="button" class="ac-btn pri" @click="edit">修改后重新提交</button></div></section>
       <section v-else-if="isDraft" class="af-ps af-actions"><div class="btns"><span class="ac-note grow">这是一张草稿，还没提交。</span><button type="button" class="ac-btn pri" @click="edit">继续填写</button></div></section>
+      <section v-else-if="canPush" class="af-ps af-actions"><div class="af-sec2">出差途中的费用 <span>打车、住宿等，报销时直接关联这张出差申请</span></div><div class="btns"><button type="button" class="ac-btn" @click="push('claim')">发起报销</button><button type="button" class="ac-btn" @click="push('payment')">发起付款</button></div></section>
       <section v-else-if="['已完成', '已通过'].includes(request.workflow_status)" class="af-ps af-actions"><div class="ac-note">已批准的申请暂不能撤回，需要取消请联系人事。</div></section>
     </template>
   </div>
@@ -259,7 +278,7 @@ onMounted(async () => {
       <div class="af-hero">
         <span :class="['ac-av', 'big', colour]">{{ (request.employee_name || '').slice(-2) }}</span>
         <div class="grow">
-          <h1>{{ requestTitle(request) }} · {{ hours }} 小时</h1>
+          <h1>{{ requestTitle(request) }} · {{ sizeNumber }} {{ sizeUnit }}</h1>
           <div class="ac-note">{{ request.employee_name }} · {{ departmentLabel(request.department) }} · {{ request.name }}<template v-if="request.submitted_on || request.creation"> · {{ stamp(request.submitted_on || request.creation) }} 提交</template></div>
         </div>
         <span :class="['ac-tag', 'af-status', tone]">{{ statusLine }}</span>
@@ -283,7 +302,11 @@ onMounted(async () => {
         <span>这张申请还在审批中，你可以撤回。</span>
         <button type="button" class="ac-btn ac-right" :disabled="busy" @click="withdraw">撤回申请</button>
       </section>
-      <section v-else-if="['已完成', '已通过'].includes(request.workflow_status)" class="ac-panel af-strip2 ac-note">已批准的请假、加班、调休暂不能撤回，需要取消请联系人事。</section>
+      <section v-else-if="canPush" class="ac-panel af-strip2">
+        <span>出差途中的打车、住宿等费用，报销时直接关联这张出差申请。</span>
+        <span class="ac-right"><button type="button" class="ac-btn pri" @click="push('claim')">发起报销</button> <button type="button" class="ac-btn" @click="push('payment')">发起付款</button></span>
+      </section>
+      <section v-else-if="['已完成', '已通过'].includes(request.workflow_status)" class="ac-panel af-strip2 ac-note">已批准的申请暂不能撤回，需要取消请联系人事。</section>
 
       <section v-if="isDraft && returned" class="af-banner bad af-row">
         被退回：{{ who(returned.actor) }}<template v-if="returned.time"> · {{ stamp(returned.time) }}</template>：{{ returned.note || '请修改后重新提交' }}
@@ -298,17 +321,18 @@ onMounted(async () => {
         <div class="af-col">
           <section class="ac-panel af-ps-wrap" aria-label="申请信息">
             <div class="af-ps">
-              <div class="af-sec2">{{ overtime ? '加班日期' : '请假日期' }} <span>{{ lengthText(request) }}</span></div>
+              <div class="af-sec2">{{ dateTitle }} <span>{{ lengthText(request) }}</span></div>
               <AttendanceDayStrip :row="request" />
               <div class="af-facts">
                 <div><span class="k">申请人</span><span class="v small">{{ request.employee_name }} · {{ departmentLabel(request.department) }}</span></div>
                 <div><span class="k">类型</span><span class="v small">{{ kind.text }}</span></div>
-                <div><span class="k">合计</span><span class="v">{{ hours }}<small> 小时</small></span></div>
+                <div><span class="k">合计</span><span class="v">{{ sizeNumber }}<small> {{ sizeUnit }}</small></span></div>
+                <div v-if="trip"><span class="k">所属项目</span><span class="v small">{{ request.project || '非项目' }}</span></div>
               </div>
               <div class="af-reason">{{ request.reason || '（没有写事由）' }}</div>
               <div v-if="request.attachments?.length" class="ac-note">附件：<a v-for="file in request.attachments" :key="file.name" :href="file.file_url" target="_blank" rel="noopener" class="ac-link">{{ file.file_name }}</a></div>
             </div>
-            <div class="af-ps">
+            <div v-if="!trip" class="af-ps">
               <details>
                 <summary>逐日明细（{{ days.length }} 天）<span class="ac-note"> {{ dayHint }}</span></summary>
                 <div class="af-tblwrap">

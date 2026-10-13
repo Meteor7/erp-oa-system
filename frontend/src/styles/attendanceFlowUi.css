@@ -31,6 +31,7 @@
 .xp.at .acx .af-strip .c.annual i { background: var(--ac-t-annual); } .xp.at .acx .af-strip .c.personal i { background: var(--ac-t-personal); }
 .xp.at .acx .af-strip .c.sick i { background: var(--ac-t-sick); } .xp.at .acx .af-strip .c.comp i { background: var(--ac-t-comp); }
 .xp.at .acx .af-strip .c.ot i { background: var(--ac-t-ot); } .xp.at .acx .af-strip .c.other i { background: var(--ac-t-other); }
+.xp.at .acx .af-strip .c.trip i { background: var(--ac-t-trip); }
 
 /* 审批进度时间轴 */
 .xp.at .acx .af-tl { display: grid; }
@@ -130,7 +131,7 @@
 .xp.at .acx .af-fh .n { width: 22px; height: 22px; border-radius: 50%; background: var(--ac-soft); color: var(--ac-ink2); display: grid; place-items: center; font-size: 12px; font-weight: 650; flex: none; }
 .xp.at .acx .af-sec.done .af-fh .n { background: var(--ac-ok-soft); color: var(--ac-ok); }
 .xp.at .acx .af-multi { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; color: var(--ac-ink2); }
-.xp.at .acx .af-types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.xp.at .acx .af-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .xp.at .acx .af-tc { text-align: left; border: 1px solid var(--ac-line2); background: var(--ac-panel); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; }
 .xp.at .acx .af-tc b { font-size: 14px; display: flex; gap: 8px; align-items: center; } .xp.at .acx .af-tc b i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .xp.at .acx .af-tc[aria-pressed="true"] { border-color: var(--ac-accent); background: var(--ac-accent-soft); }

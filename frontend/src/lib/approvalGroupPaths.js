@@ -2,7 +2,7 @@
 export const GROUP_HOME_PATHS = Object.freeze({ request: '/approval/requests', payment: '/approval/payments' });
 
 export const GROUP_HOME_CHILDREN = Object.freeze({
-  '/approval/requests': ['/approval/procurement', '/approval/procurement/price-approvals', '/approval/direct-purchase', '/approval/travel'],
+  '/approval/requests': ['/approval/procurement', '/approval/procurement/price-approvals', '/approval/direct-purchase'],
   '/approval/payments': ['/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment'],
 });
 

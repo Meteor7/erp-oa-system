@@ -274,7 +274,7 @@ test("review fixes 2026-09-23 stay wired into the pages", () => {
   assert.match(folder, /alive = false/);
   const app = read("../src/App.vue");
   assert.match(app, /inMenu\(child\.to\)/);
-  assert.doesNotMatch(read("../src/pages/TravelRequest.vue"), /list_approval_center_projects/);
+  assert.doesNotMatch(read("../src/components/attendance/AttendanceTripForm.vue"), /list_approval_center_projects/);
 });
 
 test("invoice folder: retries stop after three failures and stuck recognitions can be retried (2026-09-28)", () => {

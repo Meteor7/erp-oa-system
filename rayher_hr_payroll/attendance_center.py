@@ -20,6 +20,7 @@ from rayher_hr_payroll.attendance_requests import (
     value,
     window_hours,
 )
+from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
 
 KIND_BY_TYPE = {REQUEST_LEAVE: "leave", REQUEST_OVERTIME: "overtime", REQUEST_COMP_TIME: "comp"}
 HOURS_PER_DAY = Decimal("8")
@@ -114,6 +115,11 @@ def review_hints(row, *, annual=None, comp=None, year_leave_count=0, teammates_o
     余额取的是现在的可用额度：申请在审批中就已经占用（年假、调休）或计入（加班）了，
     所以"审批前"的数 = 现在可用 + 这张申请的小时数，"审批后" = 现在可用。
     """
+    if value(row, "request_type") == REQUEST_TRAVEL:
+        # 出差没有额度和小时数：只提醒不扣年假和工时上限，以及同期部门有几个人请假或调休。
+        return [{"tone": "info", "text": "出差不扣年假和工时上限"},
+                {"tone": "warn", "text": f"同期 {teammates_off} 人请假或调休"} if teammates_off
+                else {"tone": "ok", "text": "同期部门无人请假"}]
     kind = KIND_BY_TYPE.get(value(row, "request_type"), "leave")
     leave_type = value(row, "leave_type")
     hours = sum((hour for _day, hour in expand_days(row)), ZERO)
@@ -143,6 +149,8 @@ def review_hints(row, *, annual=None, comp=None, year_leave_count=0, teammates_o
 
 def impact_text(row, *, annual=None, comp=None):
     """详情页"通过后的影响"那一格：一句话。"""
+    if value(row, "request_type") == REQUEST_TRAVEL:
+        return "出差期间不算请假，不扣年假和工时上限；通过后可以关联报销、付款"
     kind = KIND_BY_TYPE.get(value(row, "request_type"), "leave")
     leave_type = value(row, "leave_type")
     hours = sum((hour for _day, hour in expand_days(row)), ZERO)

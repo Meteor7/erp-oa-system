@@ -141,8 +141,8 @@ const calendarNote = computed(() => (detail.value ? `${detail.value.label} · ${
     <div class="ph">
       <div>
         <div class="crumb">审批中心</div>
-        <h3>请假 · 加班 · 调休</h3>
-        <div class="muted">看额度、批申请、跟进度都在这里；新建申请在单独的页面里填。</div>
+        <h3>请假 · 加班 · 调休 · 出差</h3>
+        <div class="muted">看额度、批申请、跟进度都在这里；新建申请在单独的页面里填。出差申请也在这里，报销、付款直接关联它。</div>
       </div>
       <div v-if="hasEmployee" class="head-actions">
         <button v-for="(type, index) in availableTypes" :key="type" type="button" :class="['btn', { pri: index === 0 }]" @click="emit('new', TYPES[type].label)">＋ 新建{{ TYPES[type].label }}</button>

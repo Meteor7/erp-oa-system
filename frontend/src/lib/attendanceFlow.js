@@ -1,11 +1,11 @@
 // 请假 / 加班 / 调休的列表、详情和新建页用到的纯函数：筛选、行上的文字、新建页月历选日期。
 // 规则（每天 8 小时、上午 3、下午 5、自定义每次 0.5）和服务端校验仍在 attendanceView.js 和后端，这里只管展示和筛选。
 import {
-  actedText, canQuickApprove, dayChip, filterRows, isoDate, modeOfHours, nodeText, numText, parseDate, reviewedResult, rowDays, shortDate, statusTag,
-  totalOf, waitMinutes, waitText, weekLabel, workedSpan,
+  actedText, canQuickApprove, dayChip, filterRows, isTrip, isoDate, modeOfHours, nodeText, numText, parseDate, reviewedResult, rowDays, shortDate, sizeText,
+  statusTag, totalOf, waitText, waitingSince, weekLabel, workedSpan,
 } from './attendanceView.js';
+import { calendarDaysSince, isWaitingTooLong } from './waiting.js';
 
-export const SLOW_DAYS = 3;
 export const TIME_FILTERS = Object.freeze([['all', '全部时间'], ['week', '未来 7 天'], ['month', '本月']]);
 
 export function addDays(iso, count) {
@@ -35,15 +35,16 @@ export function timeMatch(row, key, today) {
   return dates.some((date) => date.slice(0, 7) === String(today).slice(0, 7));
 }
 
+// 等太久：和数据看板、各审批页同一条规则（按日历日算，严格大于 3 天，见 waiting.js）。
 export function isSlow(row, now = Date.now()) {
-  const minutes = waitMinutes(row, now);
-  return minutes !== null && minutes > SLOW_DAYS * 1440;
+  const since = waitingSince(row);
+  return since !== null && isWaitingTooLong(calendarDaysSince(since, now));
 }
 
 export function searchMatch(row, query) {
   const text = String(query || '').trim().toLowerCase();
   if (!text) return true;
-  return [row?.employee_name, row?.name, row?.subject, row?.reason, row?.department].join(' ').toLowerCase().includes(text);
+  return [row?.employee_name, row?.name, row?.subject, row?.reason, row?.department, row?.travel_destination, row?.project].join(' ').toLowerCase().includes(text);
 }
 
 // 列表上的筛选：类型、时间、只看等了超过 3 天的、搜索。
@@ -67,11 +68,12 @@ export function whenText(row) {
   if (!from) return '';
   if (from !== to) return `${dayText(from)} – ${dayText(to)}`;
   const chip = days.length === 1 ? dayChip(days[0], row?.request_type === '加班申请') : null;
-  return chip && ['full', 'am', 'pm'].includes(chip.mode) && row?.request_type !== '加班申请' ? `${dayText(from)} · ${chip.label}` : dayText(from);
+  return chip && ['full', 'am', 'pm'].includes(chip.mode) && row?.request_type !== '加班申请' && !isTrip(row) ? `${dayText(from)} · ${chip.label}` : dayText(from);
 }
 
-// "2 天 · 16 小时" / "3 小时"
+// "2 天 · 16 小时" / "3 小时" / 出差 "3 天"
 export function lengthText(row) {
+  if (isTrip(row)) return sizeText(row);
   const hours = numText(totalOf(row));
   const count = rowDays(row).length;
   return count > 1 ? `${count} 天 · ${hours} 小时` : `${hours} 小时`;
@@ -162,8 +164,8 @@ export function stripCells(row, { before = 2, max = 10 } = {}) {
     return {
       date, label: shortDate(date).replace('-', '/'), week: weekLabel(date).slice(1), hit: Boolean(day),
       off: [0, 6].includes(parseDate(date).getDay()),
-      text: day ? (overtime || mode === 'custom' ? `${numText(day.hours)}h` : { full: '全天', am: '上午', pm: '下午' }[mode] || `${numText(day.hours)}h`) : '',
-      title: `${dayText(date)}${day ? ` ${numText(day.hours)} 小时` : ''}`,
+      text: day ? (isTrip(row) ? '出差' : overtime || mode === 'custom' ? `${numText(day.hours)}h` : { full: '全天', am: '上午', pm: '下午' }[mode] || `${numText(day.hours)}h`) : '',
+      title: `${dayText(date)}${day ? (isTrip(row) ? ' 出差' : ` ${numText(day.hours)} 小时`) : ''}`,
     };
   });
 }

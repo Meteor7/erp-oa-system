@@ -15,12 +15,14 @@
 .xp .at-tag.leave, .xp .at-tag.info { background: var(--at-blue-bg); color: var(--at-blue); }
 .xp .at-tag.ot, .xp .at-tag.warn { background: var(--at-orange-bg); color: var(--at-orange); }
 .xp .at-tag.comp, .xp .at-tag.ok { background: var(--at-green-bg); color: var(--at-green); }
+.xp .at-tag.trip { background: var(--at-purple-bg); color: var(--at-purple); }
 .xp .at-tag.bad { background: var(--at-red-bg); color: var(--at-red); }
 .xp .at-av { width: 34px; height: 34px; flex: none; border-radius: 50%; background: #E8EBF1; color: #4B5563; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
 .xp .at-av.kind { border-radius: 10px; font-weight: 700; }
 .xp .at-av.kind.leave { background: var(--at-blue-bg); color: var(--at-blue); }
 .xp .at-av.kind.ot { background: var(--at-orange-bg); color: var(--at-orange); }
 .xp .at-av.kind.comp { background: var(--at-green-bg); color: var(--at-green); }
+.xp .at-av.kind.trip { background: var(--at-purple-bg); color: var(--at-purple); }
 .xp .at-av.big { width: 52px; height: 52px; border-radius: 14px; font-size: 14px; }
 .xp .at-dchips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
 .xp td .at-dchips { margin: 0; }

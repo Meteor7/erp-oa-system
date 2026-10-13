@@ -30,6 +30,9 @@ const routes = [
   { path: '/approval/comp-time', component: attendancePage },
   { path: '/approval/comp-time/:name', component: attendancePage },
   { path: '/approval/leave/:name', name: 'leave-detail', component: attendancePage },
+  // 出差申请也在考勤中心里（和请假、加班、调休同一个入口）；地址还是原来的 /approval/travel，通知、看板、报销里的链接都照旧能开。
+  { path: '/approval/travel', component: attendancePage },
+  { path: '/approval/travel/:name', component: attendancePage },
   { path: '/approval/procurement', component: () => import('./pages/PreRequestCenter.vue') },
   { path: '/approval/procurement/new', name: 'procurement-new', component: () => import('./pages/PreRequestCenter.vue') },
   { path: '/approval/procurement/price-approvals', name: 'procurement-price-approvals', component: () => import('./pages/PriceApprovalWorkbench.vue') },
@@ -39,7 +42,6 @@ const routes = [
   { path: '/approval/procurement/:name/contract', name: 'procurement-contract', redirect: (to) => ({ name: 'procurement-price-approvals', query: { ...to.query, request: to.params.name, tab: 'po' } }) },
   { path: '/approval/direct-purchase', component: () => import('./pages/PreRequestCenter.vue') },
   { path: '/approval/direct-purchase/new', name: 'direct-purchase-new', component: () => import('./pages/PreRequestCenter.vue') },
-  { path: '/approval/travel', component: () => import('./pages/TravelRequest.vue') },
   { path: '/approval/request-dashboard', component: () => import('./pages/ApprovalDashboard.vue') },
   { path: '/approval/procurement-payment', component: () => import('./pages/PaymentCenter.vue') },
   { path: '/approval/reimbursement', component: approvalPage },

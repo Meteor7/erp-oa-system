@@ -8,9 +8,6 @@ import {
 import { allowLeave, isFormDirty } from "../src/lib/leaveConfirm.js";
 import { BUCKET_KEYS, bucketLabel, filterByBucket, normalizeBucket } from "../src/lib/claimView.js";
 import {
-  filterTravelByBucket, normalizeTravelBucket, travelBucketLabel, travelScopeInfo, travelStats,
-} from "../src/lib/travelView.js";
-import {
   PURCHASE_STATUS_FILTERS, filterPurchaseStatus, filterRows, normalizePurchaseStatus, normalizeStage, purchaseStatusLabel,
   stageFilterLabel, stageGroups, stageMatches,
 } from "../src/lib/procurementView.js";
@@ -117,13 +114,6 @@ test("an unauthorized scope falls back to the default WITH a visible notice (P2-
   assert.equal(resolveScope(["all", "mine"], { allowed: ["mine"], fallback: "mine" }).notice.startsWith("你没有查看全部"), true);
 });
 
-test("travel scope info explains why scope=all became 我的", () => {
-  assert.equal(travelScopeInfo("all", false).scope, "mine");
-  assert.equal(travelScopeInfo("all", false).notice, "你没有查看全部出差申请的权限，已显示你的出差申请。");
-  assert.deepEqual(travelScopeInfo("all", true), { scope: "all", notice: "", requested: "all" });
-  assert.equal(travelScopeInfo(undefined, false).notice, "");
-});
-
 test("KPI targets with scope=all are withheld from people who cannot open them", () => {
   const travel = { path: "/approval/travel", query: { view: "list", scope: "all" } };
   const claim = { path: "/approval/claim", query: { view: "list", scope: "all", bucket: "paid" } };
@@ -157,21 +147,6 @@ test("claim list buckets: a card that links to ?bucket= filters the list to the 
   assert.equal(normalizeBucket(["draft", "x"]), "draft");
   assert.equal(bucketLabel("topay"), "待付款");
   assert.equal(bucketLabel("nope"), "");
-});
-
-test("travel list buckets and the home cards that link to them", () => {
-  const docs = [
-    { name: "T1", workflow_status: "草稿" },
-    { name: "T2", workflow_status: "待审批" },
-    { name: "T3", workflow_status: "已完成" },
-  ];
-  assert.deepEqual(filterTravelByBucket(docs, "approved").map((d) => d.name), ["T3"]);
-  assert.deepEqual(filterTravelByBucket(docs, "draft").map((d) => d.name), ["T1"]);
-  assert.equal(normalizeTravelBucket("zzz"), "");
-  assert.equal(travelBucketLabel("approved"), "已通过");
-  const cards = travelStats([], docs);
-  assert.deepEqual(cards.map((c) => c.query.bucket), [undefined, "draft", "review", "approved"]);
-  assert.ok(cards.slice(1).every((c) => c.query.scope === "mine" && c.query.view === "list"));
 });
 
 test("procurement stage groups: the exec / back cards count merged stages and the list filters the same way", () => {

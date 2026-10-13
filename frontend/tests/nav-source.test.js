@@ -10,7 +10,6 @@ const exists = (path) => existsSync(new URL(path, import.meta.url));
 const router = read("../src/router.js");
 const app = read("../src/App.vue");
 const claim = read("../src/components/claim/ClaimWorkbench.vue");
-const travel = read("../src/components/travel/TravelWorkbench.vue");
 const purchaseHome = read("../src/components/procurement/PurchaseHome.vue");
 const procHome = read("../src/components/procurement/ProcHome.vue");
 const procList = read("../src/components/procurement/ProcList.vue");
@@ -58,10 +57,14 @@ test("app shell: notice banner, 404 is not a 403, notification links go through 
 });
 
 test("sidebar: group header links to the attendance home, children highlight by path prefix, any group auto-expands (P3-13)", () => {
-  assert.match(app, /\{ to: '\/approval\/attendance\?view=home', step: '01', label: '请假\/加班\/调休', children: \[/);
+  assert.match(app, /\{ to: '\/approval\/attendance\?view=home', step: '01', label: '请假\/加班\/调休\/出差', children: \[/);
   assert.ok(app.includes("{ to: '/approval/leave', label: '请假审批' }"));
   assert.ok(app.includes("{ to: '/approval/overtime', label: '加班审批' }"));
   assert.ok(app.includes("{ to: '/approval/comp-time', label: '调休审批' }"));
+  // 出差申请并进考勤中心：侧栏在考勤分组里，不再在采购 / 购买申请分组里
+  assert.ok(app.includes("{ to: '/approval/travel', label: '出差申请' }"));
+  const requests = app.slice(app.indexOf("label: '采购/购买申请'"), app.indexOf("label: '付款申请'"));
+  assert.doesNotMatch(requests, /\/approval\/travel/);
   assert.match(app, /ownerOfPath\(route\.path, allNavTargets\)/);
   assert.match(app, /groupOwning\(path, groupedItems\)/);
   assert.match(app, /isNavActive\(child\.to\)/);
@@ -131,23 +134,6 @@ test("claim: pushing from an application asks before it creates a draft (P3-14)"
   assert.match(claim, /@click="cancelSource">取消</);
   assert.match(claim, /v-if="!pendingSource" class="new-grid"/);
   assert.doesNotMatch(claim, /window\.confirm/);
-});
-
-// ---------------------------------------------------------------- travel
-
-test("travel: scope notice, status buckets, return to origin, leave confirm, honest heading (P2, P3-15)", () => {
-  assert.match(travel, /travelScopeInfo\(route\.query\.scope, canAll\)/);
-  assert.match(travel, /data-testid="scope-notice"/);
-  assert.match(travel, /normalizeTravelBucket\(route\.query\.bucket\)/);
-  assert.match(travel, /data-testid="bucket-filter"/);
-  assert.match(travel, /go\(detailQuery\(row\.name, listFilters\)\)/);
-  assert.match(travel, /@click="backToList">列表</);
-  assert.doesNotMatch(travel, /scope: focusOwn \? 'mine' : 'todo' \}\)">列表/, "guessing the list is only the fallback now");
-  assert.match(travel, /useLeaveConfirm\(/);
-  assert.match(travel, /@click="goBack">取消</);
-  assert.doesNotMatch(travel, /resetForm\(\); go\(\{\}\)/);
-  assert.doesNotMatch(travel, /<b>全部出差申请<\/b>/, "that table only shows my first 8");
-  assert.match(travel, /我的出差申请/);
 });
 
 // ---------------------------------------------------------------- procurement

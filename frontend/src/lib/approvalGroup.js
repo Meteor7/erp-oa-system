@@ -15,13 +15,12 @@ export const GROUPS = Object.freeze({
     key: 'request',
     path: GROUP_HOME_PATHS.request,
     title: '采购 / 购买申请',
-    sub: '采购、购买、出差申请都在这里：我要处理的和我提交的先看，下面是申请的整体情况。',
-    types: ['采购申请', '购买申请', '出差申请'],
+    sub: '采购、购买申请都在这里：我要处理的和我提交的先看，下面是申请的整体情况。出差申请在考勤中心。',
+    types: ['采购申请', '购买申请'],
     board: { path: '/approval/expense-request-board', legacy: '/approval/request-dashboard', title: '申请情况', note: '原来的「申请看板」，数字按你能看到的范围统计' },
     actions: [
       { label: '＋ 新建采购申请', to: { path: '/approval/procurement/new' }, primary: true },
       { label: '＋ 新建购买申请', to: { path: '/approval/direct-purchase/new' } },
-      { label: '＋ 新建出差申请', to: { path: '/approval/travel', query: { view: 'new' } } },
     ],
   },
   payment: {
@@ -39,7 +38,7 @@ export const GROUPS = Object.freeze({
   },
 });
 
-const TONES = { 采购申请: 'g-blue', 购买申请: 'g-green', 出差申请: 'g-purple', 请购单: 'g-orange', 价格审批: 'g-orange', PO: 'g-orange', 电子用印: 'g-orange', 采购付款: 'g-teal', 报销单: 'g-teal', 付款单: 'g-teal' };
+const TONES = { 采购申请: 'g-blue', 购买申请: 'g-green', 请购单: 'g-orange', 价格审批: 'g-orange', PO: 'g-orange', 电子用印: 'g-orange', 采购付款: 'g-teal', 报销单: 'g-teal', 付款单: 'g-teal' };
 export const typeTone = (type) => TONES[String(type || '').trim()] || '';
 
 export const isActive = (row) => ACTIVE.has(String(row?.workflow_status || ''));
@@ -143,6 +142,6 @@ export function buildGroupHome(groupKey, { pending = {}, mine = {}, work = {}, h
 
 // 筛到某一类时，"全部 →"去那一类自己的待办列表；链路事项（请购单、价格审批、PO）没有单独的列表，不给。
 export function listLinkFor(type) {
-  const path = { 采购申请: '/approval/procurement', 购买申请: '/approval/direct-purchase', 出差申请: '/approval/travel', 报销单: '/approval/claim', 付款单: '/approval/payment' }[type];
+  const path = { 采购申请: '/approval/procurement', 购买申请: '/approval/direct-purchase', 报销单: '/approval/claim', 付款单: '/approval/payment' }[type];
   return path ? { path, query: { view: 'list', scope: 'todo' } } : null;
 }

@@ -148,3 +148,27 @@ def test_the_company_summary_has_numbers_per_department_and_no_names():
     for name in ("甲某某", "乙某某", "丙某某"):
         assert name not in text
     assert set(software) == {"department", "label", "headcount", "today_off", "today_trip", "trend", "month_hours", "per_capita", "rate", "pending"}
+
+
+def test_today_trips_is_the_same_group_as_the_trip_number_in_the_stats():
+    """看板“出差中”的人数和点进去的名单是同一批人：已批准、今天在出差期间且是工作日，今天已请假 / 调休的人不重复算。"""
+    employees = [{"name": name, "employee_name": f"员工{name}", "department": "RD - X"} for name in "ABCDE"]
+    rows = [
+        trip("A", "2026-10-14", "2026-10-16"),
+        trip("B", "2026-10-15", "2026-10-15"),
+        row("B", att.REQUEST_LEAVE, "已完成", [("2026-10-15", 8)], "年假"),            # B 今天已经请假：不算出差
+        trip("C", "2026-10-16", "2026-10-20"),                                       # 明天才出发
+        trip("D", "2026-10-10", "2026-10-20", status="待审批"),                       # 审批中不算
+        {**trip("E", "2026-10-13", "2026-10-15"), "travel_destination": "上海"},
+        {**trip("E", "2026-10-15", "2026-10-30"), "name": "T-E2", "travel_destination": "北京"},   # 同一个人两张：只出现一次
+        trip("Z", "2026-10-15", "2026-10-15"),                                       # 不在员工名单里
+    ]
+    result = board.today_trips(employees, rows, first=TODAY, work_dates=WORK)
+    assert [item["employee"] for item in result] == ["A", "E"]
+    assert [item["name"] for item in result] == ["T-A", "T-E"] and result[1]["destination"] == "上海"
+    assert result[0]["start"] == "2026-10-14" and result[0]["end"] == "2026-10-16" and result[0]["employee_name"] == "员工A"
+    assert len(result) == stats([e["name"] for e in employees], rows)["today"]["trip"]
+    # 周末今天不是工作日：没有人在出差（和人数口径一致）
+    saturday = date(2026, 10, 17)
+    assert board.today_trips(employees, rows, first=saturday, work_dates=WORK) == []
+    assert stats([e["name"] for e in employees], rows, first=saturday)["today"]["trip"] == 0

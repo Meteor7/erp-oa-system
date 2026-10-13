@@ -123,9 +123,9 @@ const rowOf = (request_type, extra = {}) => ({ name: `OA-${Math.random()}`, requ
 test("type chips, counts and scope tabs", () => {
   const rows = [rowOf("请假申请"), rowOf("加班申请"), rowOf("加班申请"), rowOf("调休申请")];
   const counts = typeCounts(rows);
-  assert.deepEqual(counts, { all: 4, 请假: 1, 加班: 2, 调休: 1 });
-  assert.deepEqual(typeChips(counts, "加班", true).map((chip) => [chip.label, chip.on]), [["全部 4", false], ["请假 1", false], ["加班 2", true], ["调休 1", false]]);
-  assert.deepEqual(typeChips({}, "all").map((chip) => chip.label), ["全部", "请假", "加班", "调休"]);
+  assert.deepEqual(counts, { all: 4, 请假: 1, 加班: 2, 调休: 1, 出差: 0 });
+  assert.deepEqual(typeChips(counts, "加班", true).map((chip) => [chip.label, chip.on]), [["全部 4", false], ["请假 1", false], ["加班 2", true], ["调休 1", false], ["出差 0", false]]);
+  assert.deepEqual(typeChips({}, "all").map((chip) => chip.label), ["全部", "请假", "加班", "调休", "出差"]);
   assert.equal(filterRows(rows, "加班").length, 2);
   assert.equal(filterRows(rows, "all").length, 4);
   const sets = { todo: rows, mine: [rows[0]], done: [], all: rows };
