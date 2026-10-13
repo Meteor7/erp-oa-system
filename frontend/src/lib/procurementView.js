@@ -158,11 +158,18 @@ export function stageIndex(row) {
 }
 
 // ---------------------------------------------------------------- 时间
+// 按日历日期算（今天减起点那天），和后端的催办、看板同一个口径：10 月 9 日 23:30 起算，10 月 12 日 00:30 就是 3 天。
+// 原来按满 24 小时算，会少算一天：前端还显示 2 天、把“催一下”藏着，后端已经按 3 天放行。
+const startOfDay = (time) => {
+  const day = new Date(time);
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+};
+
 export function waitedDays(row = {}, now = Date.now()) {
   const stamps = (row.steps || []).map((step) => step.acted_on).filter(Boolean).map(String).sort();
   const since = stamps[stamps.length - 1] || row.submitted_on || row.modified || row.creation;
   const time = Date.parse(String(since || '').replace(' ', 'T'));
-  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 86400000)) : null;
+  return Number.isFinite(time) ? Math.max(0, Math.round((startOfDay(now) - startOfDay(time)) / 86400000)) : null;
 }
 
 // 只有还在审批中的单据才算"等待"。

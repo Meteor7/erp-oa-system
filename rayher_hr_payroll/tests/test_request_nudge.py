@@ -68,14 +68,24 @@ def test_who_can_nudge_and_when(kw, who, expected):
 
 @pytest.fixture
 def api(monkeypatch):
-    logs, state = [], {"doc": make_doc(), "perm": True, "nudged_today": False, "users": {"pmc@tests-x.example.invalid", "vice@tests-x.example.invalid"}}
+    logs, state = [], {"doc": make_doc(), "perm": True, "nudged_today": False, "users": {"pmc@tests-x.example.invalid", "vice@tests-x.example.invalid"}, "events": []}
 
     def throw(message, exc=None):
         raise (exc or ValueError)(str(message))
 
     class Log(dict):
         def insert(self, ignore_permissions=False):
+            state["events"].append("insert")
             logs.append(dict(self))
+
+    def sql(query, values=()):
+        """锁定读：锁申请那一行；查“今天催过没有”看的是已经提交的最新数据（这里用 state / 已发出的通知模拟）。"""
+        if "from `tabOA Approval Request`" in query and "for update" in query:
+            state["events"].append("lock")
+            return [("OA-1",)]
+        assert "from `tabNotification Log`" in query and query.rstrip().endswith("for update")
+        state["events"].append("check")
+        return [("NL",)] if state["nudged_today"] or logs else []
 
     f = nudge.frappe
     monkeypatch.setattr(f, "_", lambda text, *a, **k: text, raising=False)
@@ -84,8 +94,8 @@ def api(monkeypatch):
     monkeypatch.setattr(f, "get_doc", lambda *args: state["doc"] if len(args) == 2 else Log(args[0]), raising=False)
     monkeypatch.setattr(f, "has_permission", lambda doctype, ptype, doc=None: state["perm"], raising=False)
     monkeypatch.setattr(f, "session", SimpleNamespace(user="applicant@tests-x.example.invalid"), raising=False)
-    monkeypatch.setattr(f, "db", SimpleNamespace(get_value=lambda *a, **k: "E1", exists=lambda doctype, name: name in state["users"], commit=lambda: None), raising=False)
-    monkeypatch.setattr(f, "get_all", lambda doctype, **k: [{"name": "NL"}] if state["nudged_today"] else [], raising=False)
+    monkeypatch.setattr(f, "db", SimpleNamespace(get_value=lambda *a, **k: "E1", exists=lambda doctype, name: name in state["users"],
+                                                  commit=lambda: state["events"].append("commit"), sql=sql), raising=False)
     monkeypatch.setattr(f, "utils", SimpleNamespace(get_fullname=lambda user: "何志凌"), raising=False)
     monkeypatch.setattr(nudge, "date", SimpleNamespace(today=lambda: TODAY, fromisoformat=date.fromisoformat), raising=False)
     return logs, state
@@ -105,6 +115,30 @@ def test_a_request_can_be_nudged_only_once_a_day(api):
     state["nudged_today"] = True
     with pytest.raises(Exception, match="今天已经催过了"):
         call("OA-1")
+
+
+def test_the_request_row_is_locked_before_the_once_a_day_check_and_released_by_the_commit(api):
+    """同时催两次：先锁住这张申请，再查“今天催过没有”，再发通知，最后提交（锁到提交才放）；后到的一次看到前一次已发的通知，被挡住。"""
+    logs, state = api
+    call("OA-1")
+    assert state["events"] == ["lock", "check", "insert", "commit"]
+    with pytest.raises(Exception, match="今天已经催过了"):
+        call("OA-1")
+    assert len(logs) == 1 and state["events"][4:] == ["lock", "check"]          # 第二次拿到锁、查到已催过，什么都没发
+
+
+def test_nobody_can_lock_a_request_they_may_not_nudge(api):
+    """没权限、不是申请人 / 项目负责人、还没到 3 天：这些情况都不会去锁申请那一行。"""
+    _logs, state = api
+    state["perm"] = False
+    with pytest.raises(PermissionError):
+        call("OA-1")
+    state["perm"] = True
+    nudge.frappe.session = SimpleNamespace(user="stranger@tests-x.example.invalid")
+    nudge.frappe.db.get_value = lambda *a, **k: "E9"
+    with pytest.raises(Exception, match="只有申请人或项目负责人"):
+        call("OA-1")
+    assert state["events"] == []
 
 
 def test_no_permission_no_nudge_and_nothing_is_sent(api):

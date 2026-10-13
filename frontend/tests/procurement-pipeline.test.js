@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { NUDGE_AFTER_DAYS, PIPE_LABELS, PURCHASE_PIPE_LABELS, arrivalOf, canNudge, pipeline } from '../src/lib/procurementView.js';
+import { NUDGE_AFTER_DAYS, PIPE_LABELS, PURCHASE_PIPE_LABELS, arrivalOf, canNudge, pipeline, waitedDays } from '../src/lib/procurementView.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const NOW = Date.parse('2026-10-12T10:00:00');
@@ -42,6 +42,16 @@ test('arrival progress is received over ordered quantity and never exceeds one h
   assert.equal(arrivalOf({ ordered_quantity: 0, received_quantity: 0 }), null);
   assert.equal(arrivalOf({}), null);
   assert.equal(arrivalOf(null), null);
+});
+
+test('waiting days count calendar days like the server does, so the button and the endpoint agree around midnight', () => {
+  const since = (stamp) => ({ steps: [{ acted_on: stamp }] });
+  // 10 月 9 日 23:30 签的，10 月 12 日 00:30：满 24 小时只有 2 天 1 小时，但日历上已经是第 3 天（后端就是这么算的）
+  assert.equal(waitedDays(since('2026-10-09 23:30:00'), Date.parse('2026-10-12T00:30:00')), 3);
+  assert.equal(waitedDays(since('2026-10-09 00:30:00'), Date.parse('2026-10-12T23:30:00')), 3);
+  assert.equal(waitedDays(since('2026-10-12 08:00:00'), Date.parse('2026-10-12T23:59:00')), 0);
+  assert.equal(waitedDays(since('2026-10-13 08:00:00'), Date.parse('2026-10-12T10:00:00')), 0, 'never negative');
+  assert.equal(canNudge(procurement({ owner: 'a@tests-x.example.invalid', steps: [{ acted_on: '2026-10-09 23:30:00' }] }), { user: 'a@tests-x.example.invalid', now: Date.parse('2026-10-12T00:30:00') }), true);
 });
 
 test('the nudge button is for the applicant or the project owner after three days of waiting, never for approvers or others', () => {

@@ -93,11 +93,17 @@ def nudge_problem(doc, user, employee, today):
     return ""
 
 
+def _lock_request(name):
+    """同一张申请的催办一个接一个办：先锁住这张申请那一行，后到的请求等前一个提交完才往下走。
+    没有这一步，两个人（或同一个人点两次）同时催，都会在对方发出通知之前查到“今天没催过”，各发一条。"""
+    frappe.db.sql("select name from `tabOA Approval Request` where name = %s for update", (name,))
+
+
 def _already_today(name, today):
-    return bool(frappe.get_all(
-        "Notification Log",
-        filters={"document_type": REQUEST_DOCTYPE, "document_name": name, "subject": ["like", f"%[{TOKEN_PREFIX}{today.isoformat()}]"]},
-        limit_page_length=1,
+    """今天催过没有。锁定读（for update）：看到的是已经提交的最新数据，不受这次事务开始时的快照影响。"""
+    return bool(frappe.db.sql(
+        "select name from `tabNotification Log` where document_type = %s and document_name = %s and subject like %s limit 1 for update",
+        (REQUEST_DOCTYPE, name, f"%[{TOKEN_PREFIX}{today.isoformat()}]"),
     ))
 
 
@@ -115,6 +121,7 @@ def nudge_request(name):
     problem = nudge_problem(doc, user, employee, today)
     if problem:
         frappe.throw(frappe._(problem))
+    _lock_request(name)                      # 权限和规则都过了才锁（没权限的人锁不了别人的申请）；锁到下面 commit
     if _already_today(name, today):
         frappe.throw(frappe._("今天已经催过了，明天再催。"))
     sender = frappe.utils.get_fullname(user) if hasattr(frappe.utils, "get_fullname") else user
