@@ -51,10 +51,11 @@ def trips():
 @pytest.fixture
 def state(monkeypatch):
     data = {"summary": summary(), "waiting": {"total": 9, "old": 3}, "stats": {
-        "totals": {"leave_days": 29.0, "leave_count": 20, "overtime_days": 29.5, "comp_days": 6.0},
-        "by_type": [{"label": "年假", "days": 12.0}, {"label": "事假", "days": 8.0}],
-        "by_department": [{"label": "研发软件部", "leave": 16.0, "overtime": 5.0}, {"label": "客服部", "leave": 0.0, "overtime": 2.0},
-                          {"label": "研发算法部", "leave": 9.0, "overtime": 1.0}]}, "calls": {"summary": 0}}
+        "totals": {"leave_days": 25.0, "leave_count": 5, "overtime_days": 8.0, "comp_days": 6.0},
+        "by_type": [{"label": "年假", "days": 12.0}, {"label": "事假", "days": 13.0}],
+        "by_department": [{"label": "研发软件部", "leave": 16.0, "overtime": 5.0, "leave_count": 3, "overtime_count": 2},
+                          {"label": "客服部", "leave": 0.0, "overtime": 2.0, "leave_count": 0, "overtime_count": 1},
+                          {"label": "研发算法部", "leave": 9.0, "overtime": 1.0, "leave_count": 2, "overtime_count": 1}]}, "calls": {"summary": 0}}
 
     def load_summary(ctx):
         data["calls"]["summary"] += 1
@@ -63,7 +64,6 @@ def state(monkeypatch):
     monkeypatch.setattr(attendance, "_load_summary", load_summary)
     monkeypatch.setattr(attendance, "_load_waiting", lambda ctx: data["waiting"])
     monkeypatch.setattr(attendance, "_load_waiting_rows", lambda ctx: data["waiting_rows"])
-    monkeypatch.setattr(attendance, "_load_month_rows", lambda ctx: data["month_rows"])
     monkeypatch.setattr(attendance, "_load_today_trips", lambda ctx: data["trips"])
     monkeypatch.setattr(people, "_fetch_leave_stats", lambda ctx: data["stats"])
     data["waiting_rows"], data["month_rows"], data["trips"] = waiting_rows(), month_rows(), trips()
@@ -94,8 +94,8 @@ def test_trip_pending_leave_overtime_and_rate_cards(state):
     pending = run("att.pending", ctx)
     assert (pending["value"], pending["sub"], pending["tone"]) == ("9", "其中 3 张超过 3 天", "hot")
     leave = run("att.leave", ctx)
-    assert (leave["label"], leave["value"], leave["unit"], leave["sub"]) == ("本月请假", "29", "天", "另有调休 6 天")
-    assert (run("att.overtime", ctx)["value"], run("att.overtime", ctx)["unit"]) == ("29.5", "天")
+    assert (leave["label"], leave["value"], leave["unit"], leave["sub"]) == ("本月请假", "25", "天", "另有调休 6 天")
+    assert (run("att.overtime", ctx)["value"], run("att.overtime", ctx)["unit"]) == ("8", "天")
     rate = run("att.rate", ctx)
     assert (rate["value"], rate["unit"], rate["tone"], rate["sub"]) == ("97.4", "%", "ok", "未来 14 天 · 10 个工作日")
     assert run("att.rate", make_ctx())["tone"] == "ok" and run("att.rate", make_ctx(), ) is not None
@@ -132,10 +132,12 @@ def test_every_card_opens_a_list_that_adds_up_to_the_number_on_the_card(state):
     assert all(row["tone"] == "bad" for row in old["rows"])
 
     card, detail = open_list("att.leave")
-    assert [row["cells"] for row in detail["rows"]] == [["研发软件部", "2 张", "3 天"], ["客服部", "1 张", "0.5 天"]]
-    assert detail["summary"] == "共 3 张，合计 3.5 天"
+    # 2026-10-13：部门清单和卡片同一份数（people._leave_stats），部门按员工档案，合计等于卡片
+    assert [row["cells"] for row in detail["rows"]] == [["研发软件部", "3 张", "16 天"], ["研发算法部", "2 张", "9 天"]]
+    assert detail["summary"] == "共 5 张，合计 25 天" and card["value"] == "25"
     card, detail = open_list("att.overtime")
-    assert [row["cells"] for row in detail["rows"]] == [["客服部", "1 张", "1.5 天"]] and detail["summary"] == "共 1 张，合计 1.5 天"
+    assert [row["cells"] for row in detail["rows"]] == [["研发软件部", "2 张", "5 天"], ["客服部", "1 张", "2 天"], ["研发算法部", "1 张", "1 天"]]
+    assert detail["summary"] == "共 4 张，合计 8 天" and card["value"] == "8"
     # 出差：一人一行，每一行进那张出差申请（出差申请在考勤中心里）；条数和卡片上的人数一样。
     card, detail = open_list("att.trip")
     assert [row["cells"] for row in detail["rows"]] == [["演示员工117", "研发软件部", "上海", "10-12 ～ 10-13", "OA-T1"], ["演示员工172", "客服部", "杭州", "10-12", "OA-T2"]]
@@ -151,14 +153,15 @@ def test_the_waiting_numbers_cover_trip_requests_like_the_attendance_centre_list
 
     def sql(query, args=None, as_dict=False):
         seen.append((query, args))
-        return [{"total": 0, "old": 0}]
+        return []
 
     monkeypatch.setattr(frappe, "db", SimpleNamespace(sql=sql), raising=False)
     ctx = make_ctx()
-    attendance._load_waiting(ctx)
-    attendance._load_waiting_rows(ctx)
+    assert attendance._load_waiting(ctx) == {"total": 0, "old": 0}
+    attendance._load_waiting_rows(make_ctx())
+    # 张数和明细是同一个查询（2026-10-13）
     assert len(seen) == 2 and all("出差申请" in args["types"] and "请假申请" in args["types"] for _query, args in seen)
-    assert "COALESCE(from_date, travel_start_date) AS from_date" in seen[1][0] and "COALESCE(to_date, travel_end_date) AS to_date" in seen[1][0]
+    assert "COALESCE(r.from_date, r.travel_start_date) AS from_date" in seen[1][0] and "COALESCE(r.to_date, r.travel_end_date) AS to_date" in seen[1][0]
 
 
 def test_a_trip_waiting_row_shows_its_travel_dates_and_opens_the_request(state):
@@ -188,7 +191,7 @@ def test_the_company_summary_is_fetched_once(state):
 def test_departments_bars_rank_by_leave_days_and_hide_departments_without_leave(state):
     block = run("block.att_depts", make_ctx())
     assert [(r["label"], r["value"], r["pct"]) for r in block["rows"]] == [("研发软件部", "16 天", 100.0), ("研发算法部", "9 天", 56.2)]
-    assert "没有人名" in block["sub"] and block["target"]["key"] == "attendance.home"
+    assert "没有人名" in block["sub"] and block["target"] == {"key": "drill", "params": {"item": "att.leave", "period": "2026-10"}}
     state["stats"] = {**state["stats"], "by_department": []}
     assert run("block.att_depts", make_ctx()) is None
 

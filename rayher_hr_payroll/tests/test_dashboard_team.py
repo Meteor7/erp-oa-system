@@ -32,8 +32,13 @@ def days(count=14, off=None):
 
 
 def detail(members, headcount=None, rest_day=False):
+    # today_away：考勤中心团队明细里“今天不在岗 / 出差中”的人（口径见 attendance_board.today_away），这里按第 0 天已批准的格子造
+    def first(kinds):
+        return [{"employee": m["id"], "employee_name": m["name"], "kind": m["cells"][0]["kind"], "request": f"OA-{m['id']}"}
+                for m in members if not rest_day and m["cells"][0] and m["cells"][0]["kind"] in kinds and not m["cells"][0]["pending"]]
+    away = {"off": first(("annual", "personal", "sick", "comp", "other")), "trip": first(("trip",))}
     return {"headcount": headcount or len(members), "label": "我的团队", "stats": {"days": days(), "today": {"rest_day": rest_day},
-            "month": {"hours": 64, "per_capita": 4.3, "by_kind": {}}}, "members": members}
+            "month": {"hours": 64, "per_capita": 4.3, "by_kind": {}}}, "members": members, "today_away": away}
 
 
 def member(name, **cells):
@@ -97,8 +102,8 @@ def test_headcount_counts_research_staff_and_new_joiners(state):
 
 def test_away_today_names_who_and_why_and_counts_trips_apart(state):
     kpi = run("team.away", make_ctx())
-    assert (kpi["value"], kpi["sub"]) == ("1", "杨员工（年假） · 出差 1")
-    assert kpi["target"] == {"key": "attendance.home", "params": {}}
+    assert (kpi["value"], kpi["sub"]) == ("1", "杨员工（年假） · 另有出差 1")
+    assert kpi["target"] == {"key": "drill", "params": {"item": "team.away", "period": "2026-10"}}
     state["detail"] = detail([member("张主管"), member("杨员工")])
     assert run("team.away", make_ctx())["sub"] == "全员在岗"
     state["detail"] = detail([member("张主管")], rest_day=True)
@@ -131,7 +136,9 @@ def test_leave_and_overtime_follow_the_selected_month_and_compare_with_the_last_
     }
     ctx = make_ctx()
     leave = run("team.leave", ctx)
-    assert (leave["label"], leave["value"], leave["unit"], leave["sub"]) == ("本月请假", "32", "小时", "人均 8 小时")
+    # 2026-10-13：本月请假按天、只算请假（24 小时 = 3 天），调休单独说
+    assert (leave["label"], leave["value"], leave["unit"], leave["sub"]) == ("本月请假", "3", "天", "人均 0.75 天 · 另有调休 1 天")
+    assert leave["target"] == {"key": "drill", "params": {"item": "team.leave", "period": "2026-10"}}
     overtime = run("team.overtime", ctx)
     assert (overtime["value"], overtime["sub"]) == ("46", "▲ 12% 较上月")
     assert run("team.leave", make_ctx(period="2026-09", today="2026-10-12"))["label"] == "9 月请假"
@@ -161,7 +168,7 @@ def test_the_calendar_block_has_names_cells_and_the_present_count(state):
     assert block["people"][0]["cells"][0] is None
     assert [day["label"] for day in block["days"]][:2] == ["10/12", "10/13"] and len(block["days"]) == 14
     totals = block["totals"]
-    assert totals[0] == {"off": 2, "present": 2}                              # 杨员工年假 + 演示员工120出差
+    assert totals[0] == {"off": 1, "present": 3}                              # 杨员工年假；演示员工120出差不算不在岗（2026-10-13）
     assert totals[1] == {"off": 0, "present": 4}                              # 调休还在审批：不算不在岗
     assert totals[3] == {"off": 3, "present": 1}
     assert totals[5] == {"off": 0, "present": None}                           # 周末没有在岗人数
@@ -173,9 +180,9 @@ def test_leave_types_stack_uses_the_attendance_center_colours(state):
                                   {"request_type": "请假申请", "leave_type": "事假", "duration_hours": 16},
                                   {"request_type": "调休申请", "duration_hours": 20}, {"request_type": "加班申请", "duration_hours": 99}]}
     block = run("block.team_leave_types", make_ctx())
-    assert [(r["label"], r["value"], r["color"]) for r in block["rows"]] == [
-        ("年假", "24 小时", "#78c3a2"), ("调休", "20 小时", "#b8a6ee"), ("事假", "16 小时", "#8db4ee")]
-    assert [r["pct"] for r in block["rows"]] == [40.0, 33.3, 26.7]
+    # 2026-10-13：按天、只有请假；调休不是请假，写在副标题里
+    assert [(r["label"], r["value"], r["color"]) for r in block["rows"]] == [("年假", "3 天", "#78c3a2"), ("事假", "2 天", "#8db4ee")]
+    assert [r["pct"] for r in block["rows"]] == [60.0, 40.0] and block["sub"] == "天 · 另有调休 2.5 天"
     state["rows"] = {}
     assert run("block.team_leave_types", make_ctx()) is None
 

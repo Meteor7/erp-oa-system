@@ -6,6 +6,7 @@ import frappe
 from rayher_hr_payroll.social_import_mutation_guard import social_import_action
 
 from rayher_hr_payroll.api._guards import require_rd_access
+from rayher_hr_payroll.hr_read_access import require_hr_read
 from rayher_hr_payroll.social_insurance_import import (
     can_activate_rows,
     canonical_period,
@@ -147,7 +148,7 @@ def _display_batch(row):
 
 @frappe.whitelist()
 def get_company_options():
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     return [
         {"value": name, "label": label}
         for name, label in SUPPORTED_COMPANIES.items()
@@ -157,7 +158,7 @@ def get_company_options():
 
 @frappe.whitelist()
 def get_employee_options(company=None):
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     company = _company(company, allow_all=True)
     filters = {"status": "Active"}
     filters["company"] = company if company else ["in", list(SUPPORTED_COMPANIES)]
@@ -170,7 +171,7 @@ def get_employee_options(company=None):
 
 @frappe.whitelist()
 def get_social_workbench(period, company=None, batch=None):
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     period = canonical_period(period)
     company = _company(company, allow_all=True)
     batches = frappe.get_all(

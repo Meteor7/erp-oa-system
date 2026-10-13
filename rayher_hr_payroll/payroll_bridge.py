@@ -64,16 +64,27 @@ def period_company_contributions(ym):
 
 
 def period_pay_totals(ym):
-    """Aggregate {gross, deductions} from submitted Salary Slips in the period."""
+    """本月工资合计：金额只算已确认（已提交）的工资条，和研发分摊读的是同一批（period_salaries）。
+
+    另外给出人数：confirmed = 有已确认工资条的人；draft = 只有草稿、还没确认的人，draft_gross 是这些草稿的应发合计。
+    看板上“工资 / 应发合计 / 人力成本”都用这一个函数（决定 2026-10-13：草稿只显示成进度，不算进金额）。
+    """
     start, end = month_bounds(ym)
     rows = frappe.get_all(
         "Salary Slip",
-        filters={"docstatus": 1, "start_date": ["between", [start, end]]},
-        fields=["gross_pay", "total_deduction"],
+        filters={"docstatus": ["<", 2], "start_date": ["between", [start, end]]},
+        fields=["employee", "docstatus", "gross_pay", "total_deduction"],
+        limit_page_length=0,
     )
+    confirmed = [r for r in rows if int(r.get("docstatus") or 0) == 1]
+    confirmed_people = {r.get("employee") for r in confirmed}
+    drafts = [r for r in rows if int(r.get("docstatus") or 0) == 0 and r.get("employee") not in confirmed_people]
     return {
-        "gross": float(sum((r["gross_pay"] or 0) for r in rows)),
-        "deductions": float(sum((r["total_deduction"] or 0) for r in rows)),
+        "gross": float(sum((r.get("gross_pay") or 0) for r in confirmed)),
+        "deductions": float(sum((r.get("total_deduction") or 0) for r in confirmed)),
+        "confirmed": len(confirmed_people),
+        "draft": len({r.get("employee") for r in drafts}),
+        "draft_gross": float(sum((r.get("gross_pay") or 0) for r in drafts)),
     }
 
 

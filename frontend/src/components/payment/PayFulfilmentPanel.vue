@@ -126,7 +126,7 @@ async function submit() {
           <tr v-for="line in group.lines" :key="line.name">
             <td>
               <b>{{ line.item_name }}</b>
-              <div class="muted">{{ [line.material_serial, line.material_code, line.specification].filter(Boolean).join(' · ') }} · {{ money(line.unit_price, group.currency) }} / {{ line.unit }}</div>
+              <div class="muted">{{ [line.material_serial, line.material_code, line.specification].filter(Boolean).join(' · ') }}<template v-if="!group.amounts_hidden"> · {{ money(line.unit_price, group.currency) }} / {{ line.unit }}</template></div>
               <div v-if="line.source_request || line.source_pr" class="muted">来源 {{ [line.source_request, line.source_pr].filter(Boolean).join(' / ') }}</div>
             </td>
             <td class="r num">{{ quantity(line.quantity) }} {{ line.unit }}</td>

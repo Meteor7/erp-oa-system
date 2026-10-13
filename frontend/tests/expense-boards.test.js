@@ -269,9 +269,10 @@ test("board charts: donut merges the tail into 其他 and aging buckets count th
   assert.equal(donutSegments([]).total, 0);
   const queue = [{ waited_days: 0, amount: 10 }, { waited_days: 2, amount: 20 }, { waited_days: 4, amount: 30 }, { waited_days: 9, amount: 40 }, { waited_days: 9, amount: 1 }];
   const aging = agingColumns(queue);
-  assert.deepEqual(aging.map((column) => column.value), [1, 1, 1, 2]);
-  assert.equal(aging[3].sub, "¥ 41.00");
-  assert.deepEqual(agingTiles(queue).map((tile) => [tile.label, tile.count, tile.width]), [["不到 1 天", 1, "50.0%"], ["1–3 天", 1, "50.0%"], ["3–7 天", 1, "50.0%"], ["超过 7 天", 2, "100.0%"]]);
+  // 2026-10-13：和数据看板同一套三段（今天 / 1–3 天 / 超过 3 天）
+  assert.deepEqual(aging.map((column) => column.value), [1, 1, 3]);
+  assert.equal(aging[2].sub, "¥ 71.00");
+  assert.deepEqual(agingTiles(queue).map((tile) => [tile.label, tile.count, tile.width]), [["今天", 1, "33.3%"], ["1–3 天", 1, "33.3%"], ["超过 3 天", 3, "100.0%"]]);
   assert.equal(agingTiles([])[0].amount, "¥ 0.00");
   assert.deepEqual(flowBars([{ key: "submitted", count: 4 }, { key: "approved", count: 3 }]).map((row) => row.width), ["100.0%", "75.0%"]);
   assert.deepEqual(budgetBars([{ approved_amount: 1000, paid_amount: 250, reserved_amount: 100 }]).map((row) => [row.paidWidth, row.reservedWidth]), [["25.0%", "10.0%"]]);

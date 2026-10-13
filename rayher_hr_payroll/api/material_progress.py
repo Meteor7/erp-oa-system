@@ -41,10 +41,13 @@ LIVE_PO_STATUSES = ("已生效", "供应商制作中", "到货验收中", "付�
 
 
 def contract_line_overdue(line, po_status, today):
-    """某个 PO 行：PO 合同已生效、填了合同交期且已过今天、还没收齐。没填合同交期的不算逾期。"""
+    """某个 PO 行：PO 合同已生效、填了合同交期且已过今天、还没收齐。没填合同交期的不算逾期。
+    还没收齐 = 到货数量不够，或者被判了退货（退货中的货要退回去，同 procurement_chain._line_received；2026-10-13 和看板对齐）。
+    SQL 版本在 material_progress_query.overdue_line_sql，两边要一起改。"""
     due = str(getattr(line, "contract_delivery_date", None) or "")
-    return (po_status in LIVE_PO_STATUSES and bool(due) and due < str(today)
-            and float(getattr(line, "received_quantity", 0) or 0) < float(getattr(line, "quantity", 0) or 0))
+    short = float(getattr(line, "received_quantity", 0) or 0) < float(getattr(line, "quantity", 0) or 0)
+    returning = _clean(getattr(line, "inspection_status", None)) == "退货中"
+    return po_status in LIVE_PO_STATUSES and bool(due) and due < str(today) and (short or returning)
 
 
 def can_access_board(user=None):
@@ -480,7 +483,7 @@ def _batch_chain_context(boards):
 
 
 @frappe.whitelist()
-def list_material_progress(search="", requester="", status="", limit=50, offset=0, source_request=""):
+def list_material_progress(search="", requester="", status="", limit=50, offset=0, source_request="", overdue=0, uncoded=0, project=""):
     _board_user()
     from rayher_hr_payroll.material_progress_query import FROM_SQL, conditions, stage_sql
     try:
@@ -488,7 +491,10 @@ def list_material_progress(search="", requester="", status="", limit=50, offset=
         offset = max(0, int(offset or 0))
     except (TypeError, ValueError):
         frappe.throw("分页参数格式无效。")
-    where, params = conditions(search, requester, status, source_request)
+    # 看板点进来的筛选（?overdue=1 / ?uncoded=1 / ?project=）：在服务端筛，条数和看板上的数字是同一句 SQL。
+    flags = {"overdue": str(overdue or "") in {"1", "true", "True"}, "uncoded": str(uncoded or "") in {"1", "true", "True"},
+             "project": _clean(project), "today": str(frappe.utils.today())}
+    where, params = conditions(search, requester, status, source_request, **flags)
     count = frappe.db.sql(f"SELECT COUNT(*) {FROM_SQL} WHERE {where}", params)[0][0]
     params.update(limit=limit, offset=offset)
     names = frappe.db.sql(f"SELECT b.name {FROM_SQL} WHERE {where} ORDER BY b.modified DESC,b.name DESC LIMIT %(limit)s OFFSET %(offset)s", params, as_dict=True)
@@ -498,7 +504,7 @@ def list_material_progress(search="", requester="", status="", limit=50, offset=
         metrics, sources, steps_by_source, po_statuses = _batch_chain_context(boards)
         for board in boards:
             result.append(_serialize(board, source=sources[board.source_request], metrics=metrics[(board.source_request, board.source_line)], approval_steps=steps_by_source.get(board.source_request, []), po_statuses=po_statuses))
-    base_where, base_params = conditions(search, requester, "", source_request)
+    base_where, base_params = conditions(search, requester, "", source_request, **flags)
     counts = frappe.db.sql(f"SELECT {stage_sql()} AS stage,COUNT(*) AS total {FROM_SQL} WHERE {base_where} GROUP BY stage", base_params, as_dict=True)
     people_where, people_params = conditions(source_request=source_request)
     people = frappe.db.sql(f"SELECT DISTINCT b.requester {FROM_SQL} WHERE {people_where} AND COALESCE(b.requester,'')!='' ORDER BY b.requester", people_params, as_dict=True)

@@ -66,7 +66,7 @@ const stackSegments = computed(() => props.block.rows.filter((row) => row.width 
       </div>
       <ul class="db-lg db-cal-lg">
         <li v-for="item in block.calendar.legend" :key="item.kind"><em :class="`k-${item.kind}`"></em>{{ item.label }}</li>
-        <li v-if="block.calendar.totals.length" class="db-mut">下方数字 = 当天在岗人数（共 {{ block.calendar.headcount }} 人）；<b class="is-low-t">红</b> 缺 4 人以上或占 40%，<b class="is-mid-t">橙</b> 缺 3 人以上</li>
+        <li v-if="block.calendar.totals.length" class="db-mut">下方数字 = 当天在岗人数（共 {{ block.calendar.headcount }} 人，出差不算缺人）；请假、调休的人至少 3 个且占 20% 以上标<b class="is-mid-t">橙</b>，占 40% 以上标<b class="is-low-t">红</b></li>
       </ul>
     </div>
 

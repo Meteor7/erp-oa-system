@@ -27,7 +27,10 @@ const router = useRouter();
 const ownPath = route.path;
 const search = ref('');
 const requester = ref('');
-const status = ref('');
+// 看板点进来可以带 ?status=（阶段，和上面的阶段条同名）、?uncoded=1（只看未编码）、?project=（只看某个项目）
+const status = ref(String(route.query.status || ''));
+const uncodedOnly = ref(String(route.query.uncoded || '') === '1');
+const projectOnly = ref(String(route.query.project || ''));
 const message = ref('');
 const error = ref('');
 const selectedOrder = ref('');
@@ -49,10 +52,11 @@ const sourceRequest = computed(() => String(route.query.request || ''));
 let deepLinkOpened = '';
 let autoSelected = '';
 
+const boardFilters = () => ({ uncoded: uncodedOnly.value ? 1 : 0, project: projectOnly.value });
 const loader = createResource({
   url: 'rayher_hr_payroll.api.material_progress.list_material_progress',
   method: 'GET',
-  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: pageSize, offset: page.value * pageSize, source_request: sourceRequest.value }),
+  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: pageSize, offset: page.value * pageSize, source_request: sourceRequest.value, ...boardFilters() }),
   auto: true,
 });
 const updater = createResource({ url: 'rayher_hr_payroll.api.material_progress.update_material_progress' });
@@ -60,11 +64,13 @@ const canceller = createResource({ url: 'rayher_hr_payroll.api.material_progress
 const prCreator = createResource({ url: 'rayher_hr_payroll.api.procurement_chain.create_pr', method: 'POST' });
 
 // 看板的「物料逾期未到」点进来（?overdue=1）：只看合同交期已过且未收齐的物料。
-// 接口是服务端分页（每页 50），逾期没有服务端筛选，所以这个模式下把各页取全（每次 200 条，最多 10 次）再在前端筛，不分页。
+// 逾期在服务端筛（overdue=1，按服务器的今天算，和看板同一句 SQL，2026-10-13）；这个模式下把各页取全（每次 200 条，最多 10 次）不分页，
+// 前端再用接口给的 contract_overdue 过一遍（不会再按浏览器的日期另算）。
 const SWEEP_SIZE = 200;
 const SWEEP_PAGES = 10;
 const overdueOnly = ref(String(route.query.overdue || '') === '1');
 const overdueFound = ref([]);
+const overdueTotal = ref(0);
 const sweeping = ref(false);
 const sweepCut = ref(false);
 const sweepOffset = ref(0);
@@ -72,7 +78,7 @@ let sweepSeq = 0;
 const sweeper = createResource({
   url: 'rayher_hr_payroll.api.material_progress.list_material_progress',
   method: 'GET',
-  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: SWEEP_SIZE, offset: sweepOffset.value, source_request: sourceRequest.value }),
+  makeParams: () => ({ search: search.value, requester: requester.value, status: status.value, limit: SWEEP_SIZE, offset: sweepOffset.value, source_request: sourceRequest.value, overdue: 1, ...boardFilters() }),
 });
 async function sweepOverdue() {
   const seq = (sweepSeq += 1);
@@ -86,6 +92,7 @@ async function sweepOverdue() {
       await sweeper.reload();
       if (seq !== sweepSeq) return;
       const items = sweeper.data?.items || [];
+      overdueTotal.value = Number(sweeper.data?.total || 0);
       found.push(...overdueRows(items, todayText()));
       if (!sweeper.data?.has_more || !items.length) break;
       offset += items.length;
@@ -108,6 +115,15 @@ function setOverdue(on) {
   else delete next.overdue;
   router.replace({ path: route.path, query: next });
   if (on) sweepOverdue();
+}
+// 去掉看板带来的「未编码 / 项目」筛选
+function clearBoardFilter(key) {
+  if (key === 'uncoded') uncodedOnly.value = false;
+  if (key === 'project') projectOnly.value = '';
+  const next = { ...route.query };
+  delete next[key];
+  router.replace({ path: route.path, query: next });
+  query();
 }
 
 const rows = computed(() => (overdueOnly.value ? overdueFound.value : loader.data?.items || []));
@@ -163,6 +179,15 @@ watch(() => route.query.overdue, (value) => {
     overdueOnly.value = on;
     if (on) sweepOverdue();
   }
+});
+watch(() => [route.query.uncoded, route.query.project, route.query.status], ([uncoded, project, stage]) => {
+  if (route.path !== ownPath) return;
+  const next = { uncoded: String(uncoded || '') === '1', project: String(project || ''), status: String(stage || '') };
+  if (next.uncoded === uncodedOnly.value && next.project === projectOnly.value && next.status === status.value) return;
+  uncodedOnly.value = next.uncoded;
+  projectOnly.value = next.project;
+  status.value = next.status;
+  query();
 });
 watch(rows, () => {
   const line = String(route.query.source_line || '');
@@ -476,8 +501,16 @@ async function cancelRow(reason) {
     </div>
 
     <div v-if="overdueOnly" class="mp-source">
-      <span>只看 <b>合同交期已过、还没收齐</b> 的物料：{{ sweeping ? '正在统计…' : `${overdueFound.length} 项` }}<template v-if="sweepCut">（物料太多，只检查了最近 {{ SWEEP_SIZE * SWEEP_PAGES }} 项）</template></span>
+      <span>只看 <b>合同交期已过、还没收齐</b> 的物料：{{ sweeping ? '正在统计…' : `${Math.max(overdueTotal, overdueFound.length)} 项` }}<template v-if="sweepCut">（物料太多，只列了前 {{ SWEEP_SIZE * SWEEP_PAGES }} 项）</template></span>
       <button type="button" class="link" @click="setOverdue(false)">查看全部物料</button>
+    </div>
+    <div v-if="uncodedOnly" class="mp-source" data-testid="uncoded-filter">
+      <span>只看 <b>还没有物料编码</b> 的物料（状态正常、源申请没被拒绝或撤回）：{{ listLoading ? '正在统计…' : `${overdueOnly ? Math.max(overdueTotal, overdueFound.length) : total} 项` }}</span>
+      <button type="button" class="link" @click="clearBoardFilter('uncoded')">去掉这个筛选</button>
+    </div>
+    <div v-if="projectOnly" class="mp-source" data-testid="project-filter">
+      <span>只看项目 <b>{{ projectOnly }}</b> 的物料</span>
+      <button type="button" class="link" @click="clearBoardFilter('project')">去掉这个筛选</button>
     </div>
 
     <div class="mp-stages" role="tablist" aria-label="物料阶段">

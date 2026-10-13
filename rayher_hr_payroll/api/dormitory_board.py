@@ -10,6 +10,7 @@ from datetime import date
 import frappe
 
 from rayher_hr_payroll.api._guards import parse_period, require_rd_access
+from rayher_hr_payroll.hr_read_access import require_hr_read
 
 HR_ROLES = ("System Manager", "HR User", "HR Manager")
 EXPENSE_ACCOUNT_CATEGORIES = ("研发费用", "管理费用", "销售费用", "生产成本")
@@ -242,7 +243,7 @@ def build_board(rooms, occupancies, left_employees, deductions, period=None, tod
 
 @frappe.whitelist()
 def get_dormitory_board(period=None):
-    require_rd_access(HR_ROLES)
+    require_hr_read(HR_ROLES, require_rd_access)
     rooms = frappe.get_all(
         "Accommodation Room", filters={"is_active": 1},
         fields=["name", "room_no", "room_type", "monthly_rent", "lease_end_date", "room_purpose"],

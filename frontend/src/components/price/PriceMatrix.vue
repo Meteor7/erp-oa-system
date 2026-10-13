@@ -2,7 +2,7 @@
 // 供应商比价矩阵 + 商务条件对比。矩阵只读；采购在草稿状态下通过"编辑此供应商"打开右侧抽屉修改。
 import { computed } from 'vue';
 import {
-  MIN_SUPPLIER_SLOTS, buildMatrix, latestDelivery, money, quantity, shortDate, supplierQuoteLabel, supplierTotalNote,
+  MIN_SUPPLIER_SLOTS, amountText, buildMatrix, latestDelivery, quantity, shortDate, supplierQuoteLabel, supplierTotalNote,
 } from '../../lib/priceView.js';
 
 const props = defineProps({
@@ -19,8 +19,11 @@ const lines = computed(() => props.approval.lines || []);
 const placeholders = computed(() => (props.canEdit ? Math.max(0, MIN_SUPPLIER_SLOTS - matrix.value.suppliers.length) : 0));
 const hasSuppliers = computed(() => matrix.value.suppliers.length > 0);
 
+// PMC 看不到金额（服务端去掉了，amounts_hidden）：显示“—”
+const cash = (value) => amountText(value, props.approval.amounts_hidden);
+
 function planText(row) {
-  return `${row.installment_name || `第${row.installment_no || ''}期`} · ${row.payment_stage} ${Number(row.percentage || 0)}% · ${money(row.amount)} · ${row.trigger_condition || '—'} · 发票${row.invoice_requirement || '—'}`;
+  return `${row.installment_name || `第${row.installment_no || ''}期`} · ${row.payment_stage} ${Number(row.percentage || 0)}% · ${cash(row.amount)} · ${row.trigger_condition || '—'} · 发票${row.invoice_requirement || '—'}`;
 }
 </script>
 
@@ -63,8 +66,8 @@ function planText(row) {
             </td>
             <td v-for="cell in row.cells" :key="cell.supplier" :class="{ chosen: cell.chosen }">
               <template v-if="cell.quoted">
-                <div class="pa-price num">{{ money(cell.total) }}</div>
-                <div class="muted">单价 {{ money(cell.unit) }} · 货期 {{ shortDate(cell.delivery) }}<template v-if="cell.best"> · <b class="pa-best">本项最低</b></template></div>
+                <div class="pa-price num">{{ cash(cell.total) }}</div>
+                <div class="muted">单价 {{ cash(cell.unit) }} · 货期 {{ shortDate(cell.delivery) }}<template v-if="cell.best"> · <b class="pa-best">本项最低</b></template></div>
               </template>
               <template v-else>
                 <div class="pa-none">未报价</div>
@@ -81,7 +84,7 @@ function planText(row) {
           <tr>
             <th class="pa-mat-col">报价合计</th>
             <th v-for="item in matrix.suppliers" :key="item.supplier" :class="['pa-total', { chosen: item.isSelected }]">
-              <div class="num">{{ money(item.total) }}</div>
+              <div class="num">{{ cash(item.total) }}</div>
               <div :class="['pa-total-note', item.complete ? 'ok' : 'warn']">{{ supplierTotalNote(item) }}</div>
             </th>
             <th v-for="n in placeholders" :key="`empty-total-${n}`" class="pa-empty-cell"></th>

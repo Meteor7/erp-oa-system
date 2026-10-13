@@ -131,21 +131,33 @@ export function editableByOwner(invoice, readOnlyView = false) {
 const LISTED = ['识别中', '待确认', '可用', '已使用', '疑似重复', '识别失败'];
 export const TAB_STATUSES = Object.freeze({
   list: LISTED, allinv: LISTED, mine: LISTED, todo: WAITING, ok: ['可用'], used: ['已使用'], dup: ['疑似重复'],
+  confirm: ['待确认'], failed: ['识别失败'],
 });
 
 export function tabStatuses(tab) {
   return TAB_STATUSES[tab] || TAB_STATUSES.list;
 }
 
-export function folderTabsFromCounts(counts = {}, finance = false, mineCounts = null) {
+// 财务的单状态筛选（2026-10-13）：数据看板「发票待处理」点进来时 ?tab=confirm（全部发票里的待确认）/ failed（识别失败），
+// 列表只有这一种状态，张数和看板上一样。平时不显示，只有这样进来时页签条上临时多这一个（只读，同“全部发票”）。
+export const FINANCE_FILTER_TABS = Object.freeze({ confirm: '全部发票 · 待确认', failed: '全部发票 · 识别失败' });
+
+export function financeFilterTab(tab, finance = false) {
+  const key = String((Array.isArray(tab) ? tab[0] : tab) || '').trim();
+  return finance && FINANCE_FILTER_TABS[key] ? key : '';
+}
+
+export function folderTabsFromCounts(counts = {}, finance = false, mineCounts = null, active = '') {
   const count = (tab, source = counts) => tabStatuses(tab).reduce((total, status) => total + Number((source || {})[status] || 0), 0);
   if (finance) {
     // 修复（2026-09-28）：财务也有自己的发票要报销，加“我的发票”页签（数量按本人发票算）。
-    return [
+    const tabs = [
       { key: 'dup', label: '疑似重复待处理', count: count('dup') },
       { key: 'allinv', label: '全部发票', count: count('allinv') },
       { key: 'mine', label: '我的发票', count: count('mine', mineCounts || counts) },
     ];
+    const filter = financeFilterTab(active, true);
+    return filter ? [...tabs, { key: filter, label: FINANCE_FILTER_TABS[filter], count: count(filter) }] : tabs;
   }
   const keys = [['list', '全部'], ['todo', '待确认'], ['ok', '可用'], ['used', '已使用'], ['dup', '疑似重复']];
   return keys.map(([key, label]) => ({ key, label, count: count(key) }));

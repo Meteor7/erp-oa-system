@@ -53,11 +53,14 @@ def _require_types():
 
 
 def can_view_all():
-    """能不能看所有人的请假 / 加班 / 调休（页面上的"全部"栏目）。"""
+    """能不能看所有人的请假 / 加班 / 调休 / 出差（页面上的"全部"栏目，只读）。
+    人事和老板的角色，加上总经理、副总经理岗位（决定 2026-10-13：看板上他们看得到公司考勤的数字，点进去也要能看到）。"""
+    from rayher_hr_payroll.hr_read_access import is_hr_leader
+
     user = str(frappe.session.user or "").strip()
     if not user or user.lower() == "guest":
         return False
-    return user == "Administrator" or bool(set(frappe.get_roles(user) or []) & ALL_VIEW_ROLES)
+    return user == "Administrator" or bool(set(frappe.get_roles(user) or []) & ALL_VIEW_ROLES) or is_hr_leader(user)
 
 
 def _days_of(raw):
@@ -193,8 +196,9 @@ def get_attendance_request(name):
     _require_types()
     rows = oa_entry.list_requests(view="all", name=name, limit=1)
     row = rows[0] if rows else None
-    if not row and can_view_all():
-        # 人事和老板可以只读查看任何一张已提交的申请（草稿只有本人看得到）。
+    if not row and (can_view_all() or _in_my_team(name)):
+        # 人事和老板可以只读查看任何一张已提交的申请（草稿只有本人看得到）；部门主管可以只读查看自己团队
+        # （汇报关系向下）的人的申请——看板“团队本月请假 / 今天不在岗”点进去的每一行就是这些单据。
         found = _load_summaries(_attendance_names(None, 1, name=name))
         row = found[0] if found else None
     if not row or row.get("request_type") not in LIST_TYPES:
@@ -213,6 +217,33 @@ def get_attendance_request(name):
         "mine": mine,
         "linked": _linked_documents(row.get("name")) if is_trip else [],
     }
+
+
+def _in_my_team(name):
+    """这张申请的申请人在不在我的团队里（我是部门主管时）。查不出来就当不在（只会少给看，不会多给看）。"""
+    try:
+        scope = resolve_scope()
+        if scope["level"] != MANAGER:
+            return False
+        employee = frappe.db.get_value("OA Approval Request", name, "employee")
+        return bool(employee) and employee in {member.get("name") for member in team_members(scope["employee"], include_self=True)}
+    except Exception:
+        return False
+
+
+@frappe.whitelist()
+def list_attendance_away_today():
+    """今天不在岗（请假 / 调休）的人，一人一张单（口径同看板“今天不在岗”：attendance_board_entry.today_away）。
+    只读；人事、老板、总经理、副总经理才能看（和“全部”同一个权限）。出差中的人另算，只给人数。"""
+    _user()
+    _require_types()
+    if not can_view_all():
+        frappe.throw(frappe._("只有人事或管理员可以查看全部申请。"), frappe.PermissionError)
+    from rayher_hr_payroll.api import attendance_board_entry
+
+    away = attendance_board_entry.today_away(date.today())
+    rows = _load_summaries([item["request"] for item in away["off"] if item.get("request")])
+    return {"items": rows, "names": _names(_people(rows)), "trip": len(away["trip"])}
 
 
 def _linked_documents(trip):

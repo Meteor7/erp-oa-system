@@ -5,6 +5,7 @@
 """
 import frappe
 from rayher_hr_payroll.api._guards import require_hr_sensitive_access, require_rd_access
+from rayher_hr_payroll.hr_read_access import require_hr_read
 from rayher_hr_payroll.api.housing_fund_import_entry import _save_monthly_record
 from rayher_hr_payroll.api.social_insurance_import_entry import SUPPORTED_COMPANIES, _company
 from rayher_hr_payroll.hr_contributions import (
@@ -63,7 +64,7 @@ def _social_prev_bases(prev):
 @frappe.whitelist()
 def get_base_table(kind, period, company=None):
     """全员的本月基数：本月已有的月度记录优先，其次档案默认基数；金额按后台算法复算。"""
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     kind, period, company = _kind(kind), canonical_period(period), _company(company, allow_all=True)
     prev = _previous_period(period)
@@ -155,7 +156,7 @@ def save_employee_household(employee, household):
 @frappe.whitelist()
 def get_payroll_readiness(period):
     """薪酬计算要求每个在职员工本月都有社保和公积金记录；这里告诉 HR 还差谁。"""
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     period = canonical_period(period)
     employees = _employees(None)

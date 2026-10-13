@@ -459,6 +459,7 @@ export function supervisorLabel(row, nameById) {
 // 看板链接 /personnel?status=active&reminder=expiring 这类地址与页面筛选之间的转换（纯函数，页面负责绑定）。
 //   status=active|left      在职 / 已离职（缺省 active）
 //   reminder=expiring       60 天内到期的试用期 / 合同（= reminders 里的 probation / contract，不是宽泛的「有提醒」）
+//   reminder=probation|contract  只看试用期 / 只看合同到期（看板的“试用期到期”“合同到期”提醒，决定 2026-10-13）
 //   rd=none|<研发类型>      none 表示没设研发类型
 //   group=<分组名>          部门分组，如 研发（见 departmentGroupMap）
 //   archive=待完善|待确认|已归档
@@ -466,6 +467,8 @@ export function supervisorLabel(row, nameById) {
 //   left=month              本月离职（离职日在本月，和 status=left 一起用）
 //   dept=<部门>             部门展示名
 export const PERSONNEL_QUERY_KEYS = ["status", "reminder", "rd", "group", "archive", "joined", "left", "dept"];
+// reminder 认的值：60 天内到期（两样都算）、只看试用期、只看合同。
+export const REMINDER_KINDS = ["expiring", "probation", "contract"];
 
 function queryValue(query, key) {
   const value = query?.[key];
@@ -479,7 +482,7 @@ export function parsePersonnelQuery(query) {
   const archive = queryValue(query, "archive");
   return {
     status: queryValue(query, "status") === "left" ? "left" : "active",
-    reminder: queryValue(query, "reminder") === "expiring" ? "expiring" : "",
+    reminder: REMINDER_KINDS.includes(queryValue(query, "reminder")) ? queryValue(query, "reminder") : "",
     rd: rd === "none" ? NO_RD_TYPE : RD_TYPES.includes(rd) ? rd : "",
     group: queryValue(query, "group"),
     archive: ARCHIVE_STATUSES.includes(archive) ? archive : "",
@@ -493,7 +496,7 @@ export function parsePersonnelQuery(query) {
 export function personnelQueryOf(filters = {}) {
   const query = {};
   if (filters.status === "left") query.status = "left";
-  if (filters.reminder === "expiring") query.reminder = "expiring";
+  if (REMINDER_KINDS.includes(filters.reminder)) query.reminder = filters.reminder;
   if (filters.rd) query.rd = filters.rd === NO_RD_TYPE ? "none" : filters.rd;
   if (filters.group) query.group = filters.group;
   if (filters.archive) query.archive = filters.archive;
@@ -513,6 +516,7 @@ export function filterByUrlExtras(items, { group = "", joined = "", left = "", r
     if (joined === "month" && !(month && String(item.row?.date_of_joining || "").startsWith(month))) return false;
     if (left === "month" && !(month && String(item.row?.relieving_date || "").startsWith(month))) return false;
     if (reminder === "expiring" && !item.reminders.some((entry) => entry.key === "probation" || entry.key === "contract")) return false;
+    if ((reminder === "probation" || reminder === "contract") && !item.reminders.some((entry) => entry.key === reminder)) return false;
     return true;
   });
 }

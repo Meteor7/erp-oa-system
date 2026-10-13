@@ -1,5 +1,6 @@
 import frappe
 from rayher_hr_payroll.api._guards import require_hr_sensitive_access, require_rd_access, parse_period
+from rayher_hr_payroll.hr_read_access import require_hr_read
 from rayher_hr_payroll.hr_contributions import housing_fund_amounts, social_insurance_amounts
 
 ROLES = ("System Manager", "HR User", "HR Manager")
@@ -25,13 +26,13 @@ def employee_options():
 
 @frappe.whitelist()
 def get_employee_options():
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     return employee_options()
 
 @frappe.whitelist()
 def list_social_insurance(period):
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     return frappe.get_all("Employee Social Insurance", filters={"period": _period(period)}, fields=["name","period","employee","employee_name","contribution_base",*SOCIAL_RATES,"employee_pension","company_pension","employee_medical","company_medical","employee_unemployment","company_unemployment","company_injury","company_maternity","employee_total","company_total","status","remark"], order_by="employee_name")
 
@@ -53,7 +54,7 @@ def save_social_insurance(period, employee, contribution_base=0, status="Draft",
 
 @frappe.whitelist()
 def list_housing_fund(period):
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     return frappe.get_all("Employee Housing Fund", filters={"period": _period(period)}, fields=["name","period","employee","employee_name","contribution_base","employee_rate","company_rate","employee_amount","company_amount","status","remark"], order_by="employee_name")
 

@@ -37,7 +37,9 @@ const mine = reactive({ items: [], names: {} });
 const review = reactive({ items: [], team: [] });
 const reviewed = ref([]);
 const everyone = reactive({ items: [], names: {} });
-const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false, board: false });
+// 看板「今天不在岗」点进来的那批人（服务端按今天查，一人一张）。
+const awayNow = reactive({ items: [], names: {} });
+const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false, board: false, today: false });
 const board = ref(null);
 // 人事 / 领导在首页点进的部门（服务端的部门名）和它的明细。
 const drillDept = ref('');
@@ -52,7 +54,7 @@ const now = ref(Date.now());
 let timer = null;
 let alive = true;
 let keepBanner = false;
-const latest = { home: createLatest(), mine: createLatest(), review: createLatest(), reviewed: createLatest(), all: createLatest(), board: createLatest(), drill: createLatest(), route: createLatest() };
+const latest = { home: createLatest(), mine: createLatest(), review: createLatest(), reviewed: createLatest(), all: createLatest(), today: createLatest(), board: createLatest(), drill: createLatest(), route: createLatest() };
 
 const availableTypes = computed(() => home.value?.types || TYPE_ORDER);
 const hasEmployee = computed(() => Boolean(home.value?.employee));
@@ -87,6 +89,7 @@ const loadReview = () => guarded('review', () => api.review(), (data) => { revie
 const loadReviewed = () => guarded('reviewed', () => api.reviewed(), (data) => { reviewed.value = data?.items || []; });
 const loadBoard = () => guarded('board', () => api.board(), (data) => { board.value = data || null; });
 const loadEveryone = () => guarded('all', () => api.all(), (data) => { everyone.items = data?.items || []; everyone.names = data?.names || {}; });
+const loadToday = () => guarded('today', () => api.today(), (data) => { awayNow.items = data?.items || []; awayNow.names = data?.names || {}; });
 
 async function loadDrill() {
   const department = drillDept.value;
@@ -127,6 +130,7 @@ function refreshLists() {
   const jobs = [loadHome(), loadMine(), loadReview(), loadReviewed(), loadBoard()];
   if (drillDept.value) jobs.push(loadDrill());
   if (page.value.scope === 'all' && canViewAll.value) jobs.push(loadEveryone());
+  if (page.value.today && canViewAll.value) jobs.push(loadToday());
   return Promise.allSettled(jobs);
 }
 
@@ -318,6 +322,9 @@ watch(() => [view.value, page.value.scope, page.value.filter, loaded.review, loa
 watch(() => [view.value, page.value.scope, canViewAll.value], () => {
   if (view.value === 'list' && page.value.scope === 'all' && canViewAll.value) loadEveryone();
 }, { immediate: true });
+watch(() => [view.value, page.value.today, canViewAll.value], () => {
+  if (view.value === 'list' && page.value.today && canViewAll.value) loadToday();
+}, { immediate: true });
 
 // 提示条只属于产生它的那一页：换了页面（或换了一张申请）就收起来；刚提交成功的那条要带到详情页上。
 watch(() => `${view.value}|${page.value.request}|${page.value.newType}`, () => {
@@ -358,9 +365,9 @@ onBeforeUnmount(() => {
 });
 
 const listSets = computed(() => ({
-  todo: review.items, mine: mine.items, done: reviewed.value, all: everyone.items,
+  todo: review.items, mine: mine.items, done: reviewed.value, all: everyone.items, today: awayNow.items,
 }));
-const listNames = computed(() => ({ ...mine.names, ...everyone.names }));
+const listNames = computed(() => ({ ...mine.names, ...everyone.names, ...awayNow.names }));
 const pickCards = computed(() => availableTypes.value.map((type) => ({ type, label: TYPES[type].label, rule: TYPES[type].rule })));
 const subtitle = computed(() => {
   if (!page.value.newType) return '四种申请的规则不一样，先选好再填，避免填错。';

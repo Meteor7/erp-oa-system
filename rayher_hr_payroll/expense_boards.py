@@ -322,7 +322,8 @@ def payment_board(rows, lines=(), *, today, reminders=None, months=TREND_MONTHS)
             str(_get(line, "expense_account_level_1") or "").strip(),
             str(_get(line, "expense_account_level_2") or "").strip(),
         ) if part) or "未填写"
-        accounts[label] = accounts.get(label, ZERO) + money(_get(line, "total_amount"))
+        # 价税合计，没有就取金额：和首页费用概览、数据看板的「已付」同一个算法（2026-10-13 统一）
+        accounts[label] = accounts.get(label, ZERO) + money(_get(line, "total_amount") or _get(line, "amount"))
 
     payees_this_year = [
         row for row in paid

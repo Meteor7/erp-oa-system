@@ -84,6 +84,13 @@ const annualItem = computed(() => ({
   sub: kpi.value.annual ? `已用 ${kpi.value.annual.used} 小时` : '暂无年假信息', go: ['mine', '请假'],
 }));
 const todoItem = computed(() => ({ key: 'todo', label: '待我审批', value: todoRows.value.length, unit: '张', sub: todoSub.value, hot: true, go: ['todo', 'all'] }));
+// 本月请假（决定 2026-10-13）：按天，只算请假；调休不是请假，单独写在副标题里。和数据看板的“本月请假”同一个算法。
+function monthItem(data, label) {
+  const month = data.month || {};
+  const comp = Number(month.comp_days || 0);
+  const perCapita = `人均 ${numText(month.per_capita_days ?? 0)} 天`;
+  return { key: 'month', label, value: numText(month.leave_days ?? 0), unit: '天', sub: comp ? `${perCapita} · 另有调休 ${numText(comp)} 天` : perCapita };
+}
 const items = computed(() => {
   const data = stats.value;
   if (view.value === 'employee') {
@@ -104,21 +111,21 @@ const items = computed(() => {
     return [
       ...(props.hasEmployee ? [annualItem.value] : []),
       { key: 'today', label: '团队今日请假', value: data.today.off, unit: `/ ${data.headcount} 人`, sub: data.today.rest_day ? '今天是休息日' : `出差 ${data.today.trip} 人` },
-      { key: 'month', label: '团队本月请假', value: data.month.hours, unit: '小时', sub: `人均 ${data.month.per_capita} 小时` },
+      monthItem(data, '团队本月请假'),
       todoItem.value,
     ];
   }
   if (view.value === 'dept') {
     return [
       { key: 'in', label: '今日在岗', value: data.today.in, unit: `/ ${data.headcount}`, sub: data.today.rest_day ? '今天是休息日' : `请假 ${data.today.off} · 出差 ${data.today.trip}` },
-      { key: 'month', label: '本月请假', value: data.month.hours, unit: '小时', sub: `人均 ${data.month.per_capita} 小时` },
+      monthItem(data, '本月请假'),
       { key: 'rate', label: '出勤率', value: ratePercent(data.rate), unit: '%', sub: '未来 14 天工作日' },
       { key: 'pending', label: '待审批', value: detail.value.pending, unit: '张', sub: deptRows.value.length ? `其中轮到我 ${deptRows.value.length} 张，在右边可以直接处理` : '没有轮到我的', hot: Boolean(detail.value.pending) },
     ];
   }
   return [
     { key: 'today', label: '今日请假', value: data.today.off, unit: `/ ${data.headcount} 人`, sub: data.today.rest_day ? '今天是休息日' : `出差 ${data.today.trip} 人` },
-    { key: 'month', label: '本月请假', value: data.month.hours, unit: '小时', sub: `折合 ${Math.round(data.month.hours / 8)} 人天` },
+    monthItem(data, '本月请假'),
     { key: 'rate', label: '出勤率', value: ratePercent(data.rate), unit: '%', sub: '未来 14 天工作日' },
     todoItem.value,
   ];

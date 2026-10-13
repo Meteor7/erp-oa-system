@@ -105,7 +105,8 @@ def test_the_cards_open_lists_that_add_up_and_mix_both_kinds_of_request(state):
     everything = core.get_detail_for(ctx, "prj.requests")
     assert len(everything["rows"]) == 6 and everything["summary"] == "共 6 张"
     by_project = core.get_detail_for(ctx, "prj.projects")
-    assert [row["cells"] for row in by_project["rows"]] == [["RD02 · ACONCA 7961", "Open", "1", "2", "1"], ["RD03 · EFEM-8", "Open", "0", "1", "1"]]
+    # 2026-10-13：前三列是采购申请（一行点进采购申请列表，按项目筛），购买申请单独一列
+    assert [row["cells"] for row in by_project["rows"]] == [["RD02 · ACONCA 7961", "Open", "1", "1", "0", "2"], ["RD03 · EFEM-8", "Open", "0", "1", "1", "0"]]
     assert by_project["summary"] == "共 2 个项目" and len(by_project["rows"]) == int(run("prj.count", ctx)["value"])
     assert run("block.prj_stage", ctx)["target"]["params"]["item"] == "prj.requests" and run("block.prj_by_project", ctx)["target"]["params"]["item"] == "prj.projects"
 

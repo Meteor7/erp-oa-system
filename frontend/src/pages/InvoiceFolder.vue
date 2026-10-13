@@ -10,7 +10,7 @@ import InvoicePreviewDrawer from '../components/invoice/InvoicePreviewDrawer.vue
 import { callApi, isFinanceUser, money, pillClass } from '../lib/expenseClaims.js';
 import {
   canEditAttachments, confirmBlockers, duplicateText, editableByOwner, folderStatusBar, folderTabsFromCounts, isRequiredField, missingFields,
-  retryState, tabStatuses, usedByText,
+  financeFilterTab, retryState, tabStatuses, usedByText,
 } from '../lib/invoiceFolderView.js';
 import {
   confirmInvoice, createInvoiceBatch, deleteInvoiceSupplementalAttachment, excludeInvoice, fetchInvoiceSupplementalAttachmentPreview,
@@ -26,6 +26,8 @@ const router = useRouter();
 const view = computed(() => (route.query.view === 'list' ? 'list' : 'home'));
 // 页签来自地址（看板点进来 ?view=list&tab=todo|dup|ok|used|allinv|mine）；财务和员工的页签不同，不属于自己这套的会退到最接近的一个。
 const tab = ref(normalizeFolderTab(route.query.tab, finance));
+// 财务从数据看板点进来的单状态筛选（?tab=confirm|failed），normalizeFolderTab 不认识，这里接上。
+if (financeFilterTab(route.query.tab, finance)) tab.value = financeFilterTab(route.query.tab, finance);
 const invoices = ref([]);
 const selectedName = ref(String(route.query.invoice || ''));
 const ATTENTION = ['待确认', '识别中', '识别失败', '疑似重复'];
@@ -49,7 +51,7 @@ let alive = true;
 // 修复（2026-09-28）：财务也要报销、也要上传发票。财务有“我的发票”页签，在里面上传、核对、确认自己的发票；
 // 另外两个页签（疑似重复待处理、全部发票）是只读的财务视图。
 const ownView = computed(() => !finance || tab.value === 'mine');
-const tabs = computed(() => folderTabsFromCounts(countsAll.value || counts.value, finance, countsMine.value));
+const tabs = computed(() => folderTabsFromCounts(countsAll.value || counts.value, finance, countsMine.value, tab.value));
 const rows = computed(() => invoices.value);
 const selected = computed(() => rows.value.find((row) => row.name === selectedName.value) || rows.value[0] || null);
 const editable = computed(() => editableByOwner(selected.value, !ownView.value));
@@ -162,7 +164,7 @@ watch(tab, () => {
   if (view.value === 'list') load();
 });
 watch(() => [route.query.tab, route.query.invoice], ([nextTab, invoice]) => {
-  const wanted = nextTab ? normalizeFolderTab(nextTab, finance) : '';
+  const wanted = nextTab ? financeFilterTab(nextTab, finance) || normalizeFolderTab(nextTab, finance) : '';
   if (wanted && wanted !== tab.value) tab.value = wanted;
   else if (invoice) selectedName.value = String(invoice);
 });

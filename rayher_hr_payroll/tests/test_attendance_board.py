@@ -58,9 +58,11 @@ def test_a_trip_counts_its_work_days_and_a_broken_detail_counts_nothing():
 def test_stats_count_only_approved_requests_of_these_people():
     result = stats(["A", "B", "C", "D"], ROWS)
     assert result["headcount"] == 4
-    assert result["today"] == {"off": 1, "trip": 1, "in": 2, "rest_day": False}
+    assert result["today"] == {"off": 1, "trip": 1, "in": 2, "rest_day": False, "off_by_kind": {"annual": 1}}
     assert result["month"]["by_kind"] == {"annual": 16, "personal": 3, "sick": 0, "comp": 8, "other": 0}
-    assert result["month"]["hours"] == 27 and result["month"]["per_capita"] == 6.8
+    # 本月请假只算请假（决定 2026-10-13）：16 + 3 = 19 小时；调休 8 小时单独算
+    assert result["month"]["hours"] == 19 and result["month"]["per_capita"] == 4.8
+    assert result["month"]["comp_hours"] == 8 and result["month"]["leave_days"] == 2.38 and result["month"]["comp_days"] == 1
     # 14 天里 10 个工作日；请假和调休共 27 小时：1 - 27 / (4 × 8 × 10)
     assert result["rate"] == 0.9156
     days = result["days"]
@@ -74,14 +76,14 @@ def test_stats_count_only_approved_requests_of_these_people():
 
 def test_stats_on_a_rest_day_say_so_and_an_empty_group_is_fully_present():
     saturday = stats(["A"], [], first=date(2026, 10, 17))
-    assert saturday["today"] == {"off": 0, "trip": 0, "in": 1, "rest_day": True}
+    assert saturday["today"] == {"off": 0, "trip": 0, "in": 1, "rest_day": True, "off_by_kind": {}}
     empty = stats([], [])
     assert empty["headcount"] == 0 and empty["rate"] == 1.0 and empty["month"]["per_capita"] == 0 and empty["today"]["in"] == 0
 
 
 def test_a_person_on_a_trip_and_on_leave_the_same_day_counts_once():
     rows = [row("A", att.REQUEST_LEAVE, "已完成", [("2026-10-15", 8)], "年假"), trip("A", "2026-10-15", "2026-10-15")]
-    assert stats(["A"], rows)["today"] == {"off": 1, "trip": 0, "in": 0, "rest_day": False}
+    assert stats(["A"], rows)["today"] == {"off": 1, "trip": 0, "in": 0, "rest_day": False, "off_by_kind": {"annual": 1}}
 
 
 def test_calendar_cells_prefer_approved_over_pending_and_leave_over_overtime():
@@ -147,7 +149,8 @@ def test_the_company_summary_has_numbers_per_department_and_no_names():
     text = json.dumps(result, ensure_ascii=False)
     for name in ("甲某某", "乙某某", "丙某某"):
         assert name not in text
-    assert set(software) == {"department", "label", "headcount", "today_off", "today_trip", "trend", "month_hours", "per_capita", "rate", "pending"}
+    assert set(software) == {"department", "label", "headcount", "today_off", "today_trip", "trend", "month_hours", "per_capita", "rate", "pending",
+                            "month_leave_days", "month_comp_hours"}
 
 
 def test_today_trips_is_the_same_group_as_the_trip_number_in_the_stats():

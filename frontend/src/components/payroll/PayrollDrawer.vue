@@ -1,17 +1,23 @@
 <script setup>
 // 一个人的工资，按五步看和改：基本工资 → 应付工资 → 扣社保公积金 → 个税 → 其他扣款与实发。
 // 输入框直接改页面上这一行的数字（和原来一样），改完当场重算，点"保存草稿"才写入。
-import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { displayCompany, displayDepartment } from '../../lib/displayBrand.js';
-import { canSave, figures, isProrated, money, rowLocked, rowState } from '../../lib/payrollView.js';
+import { canSave, canWithdraw, figures, isProrated, money, rowLocked, rowState } from '../../lib/payrollView.js';
 
 const props = defineProps({
   row: { type: Object, required: true }, saving: { type: Boolean, default: false }, applying: { type: Boolean, default: false },
-  message: { type: String, default: '' }, error: { type: String, default: '' },
+  message: { type: String, default: '' }, error: { type: String, default: '' }, readOnly: { type: Boolean, default: false },
 });
-const emit = defineEmits(['close', 'save', 'adjust', 'go']);
+const emit = defineEmits(['close', 'save', 'adjust', 'withdraw', 'go']);
 const f = computed(() => figures(props.row));
-const locked = computed(() => rowLocked(props.row));
+// 只读（总经理、副总经理）或工资条已确认 / 别处生成：输入框都不能改。
+const locked = computed(() => props.readOnly || rowLocked(props.row));
+// 撤回确认要写原因；换一个人就清空。
+const withdrawing = ref(false);
+const reason = ref('');
+watch(() => props.row.employee, () => { withdrawing.value = false; reason.value = ''; });
+const showWithdraw = computed(() => !props.readOnly && canWithdraw(props.row));
 const state = computed(() => rowState(props.row));
 const hasSplit = computed(() => props.row.employee_pension != null);
 const onKey = (event) => { if (event.key === 'Escape') emit('close'); };
@@ -69,11 +75,19 @@ const canApply = computed(() => !locked.value && Number(props.row.salary_adjustm
     </div>
     <footer>
       <div>
-        <span class="pr-note">{{ locked ? '已提交或别处生成的工资条不能在这里修改。' : '改动会当场重新计算，点“保存草稿”才会写入。' }}</span>
+        <span class="pr-note">{{ readOnly ? '只读：可以查看，不能修改。' : locked ? (showWithdraw ? '工资条已确认，要改请先撤回确认。' : '别处生成的工资条不能在这里修改。') : '改动会当场重新计算，点“保存草稿”才会写入。' }}</span>
+        <div v-if="withdrawing" class="pr-line" style="margin-top:6px"><input v-model="reason" maxlength="500" placeholder="撤回原因（必填），例如：个税填错了" aria-label="撤回原因" style="flex:1"></div>
         <div v-if="message" class="ok" role="status">{{ message }}</div>
         <div v-if="error" class="err" role="alert">{{ error }}</div>
       </div>
-      <span style="display:flex;gap:8px">
+      <span v-if="showWithdraw" style="display:flex;gap:8px">
+        <button v-if="!withdrawing" type="button" class="btn" @click="withdrawing = true">撤回确认</button>
+        <template v-else>
+          <button type="button" class="btn" @click="withdrawing = false">取消</button>
+          <button type="button" class="btn pri" :disabled="!reason.trim() || saving" @click="emit('withdraw', row, reason.trim())">{{ saving ? '撤回中…' : '确定撤回' }}</button>
+        </template>
+      </span>
+      <span v-else-if="!readOnly" style="display:flex;gap:8px">
         <button type="button" class="btn" :disabled="!canApply || applying" @click="emit('adjust', row)">{{ applying ? '应用中…' : '应用调薪' }}</button>
         <button type="button" class="btn pri" :disabled="!canSave(row) || saving" @click="emit('save', row)">{{ saving ? '保存中…' : '保存草稿' }}</button>
       </span>

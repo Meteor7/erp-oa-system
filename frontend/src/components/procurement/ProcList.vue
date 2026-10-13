@@ -21,8 +21,8 @@ const data = reactive({ mine: [], pending: [], all: [], loaded: false });
 const loading = ref(false);
 const loadError = ref('');
 const now = ctx.now;
-// 阶段、搜索词在地址里（stage、q）：首页指标卡点进来就是筛好的，点进详情再回来也还是同一份筛选。
-const filters = reactive({ text: String(route.query.q || ''), stage: normalizeStage(route.query.stage), project: '', urgent: false });
+// 阶段、搜索词、项目在地址里（stage、q、project）：首页指标卡 / 看板点进来就是筛好的，点进详情再回来也还是同一份筛选。
+const filters = reactive({ text: String(route.query.q || ''), stage: normalizeStage(route.query.stage), project: String(route.query.project || ''), urgent: false });
 const page = ref(0);
 
 const scope = computed(() => listScope(route.query, ctx.globalAccess ? 'todo' : 'mine'));
@@ -82,17 +82,19 @@ function syncUrl() {
   const next = { ...route.query };
   delete next.stage;
   delete next.q;
-  router.replace({ path: route.path, query: { ...next, ...cleanQuery({ stage: filters.stage, q: filters.text }) } });
+  delete next.project;
+  router.replace({ path: route.path, query: { ...next, ...cleanQuery({ stage: filters.stage, q: filters.text, project: filters.project }) } });
 }
-watch(() => [filters.stage, filters.text], syncUrl);
-watch(() => [route.query.stage, route.query.q], ([stage, text]) => {
+watch(() => [filters.stage, filters.text, filters.project], syncUrl);
+watch(() => [route.query.stage, route.query.q, route.query.project], ([stage, text, project]) => {
   filters.stage = normalizeStage(stage);
   if (String(text || '') !== filters.text) filters.text = String(text || '');
+  if (String(project || '') !== filters.project) filters.project = String(project || '');
 });
 
 // origin：这个列表自己是从哪个页面（首页、看板）点进来的，详情 / 表单往回走时一层层带回去。
 const originKeep = computed(() => (originOf(route.query) ? { from: originOf(route.query) } : {}));
-const listFilters = computed(() => cleanQuery({ scope: scope.value, stage: filters.stage, q: filters.text, origin: originOf(route.query) }));
+const listFilters = computed(() => cleanQuery({ scope: scope.value, stage: filters.stage, q: filters.text, project: filters.project, origin: originOf(route.query) }));
 
 // 从列表点进详情 / 表单：带上范围、阶段、搜索词，返回时原样恢复。
 function open(row) {
@@ -119,8 +121,9 @@ function open(row) {
       </div>
     </div>
 
-    <div v-if="filters.stage" class="nav-filters" data-testid="stage-filter">
-      <span class="nav-filter">阶段：{{ stageFilterLabel(filters.stage) }}<button type="button" aria-label="清除阶段筛选" @click="filters.stage = ''">×</button></span>
+    <div v-if="filters.stage || filters.project" class="nav-filters" data-testid="stage-filter">
+      <span v-if="filters.stage" class="nav-filter">阶段：{{ stageFilterLabel(filters.stage) }}<button type="button" aria-label="清除阶段筛选" @click="filters.stage = ''">×</button></span>
+      <span v-if="filters.project" class="nav-filter">项目：{{ filters.project === '__none__' ? '非项目' : ctx.projectName(filters.project) }}<button type="button" aria-label="清除项目筛选" @click="filters.project = ''">×</button></span>
     </div>
     <div class="filter-bar">
       <input v-model="filters.text" type="search" placeholder="搜索单号、主题、申请人、项目或物料名称" aria-label="搜索" />

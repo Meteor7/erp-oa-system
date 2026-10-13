@@ -1,11 +1,12 @@
 <script setup>
 // 一个付款期次：条件格（实时按整张 PO 判断）、阻塞原因、在等谁、提交付款审批。
-import { money } from '../../lib/paymentView.js';
+import { amountText } from '../../lib/paymentView.js';
 import PayGateGrid from './PayGateGrid.vue';
 
 defineProps({
   view: { type: Object, required: true },
   currency: { type: String, default: 'CNY' },
+  hidden: { type: Boolean, default: false },      // 生产主管 / PMC 不看金额
   busy: { type: Boolean, default: false },
 });
 defineEmits(['push', 'open']);
@@ -24,7 +25,7 @@ defineEmits(['push', 'open']);
       </div>
       <div class="amount-block">
         <span class="muted">本期金额</span>
-        <b>{{ money(view.amount, currency) }}</b>
+        <b>{{ amountText(view.amount, currency, hidden) }}</b>
       </div>
     </div>
 

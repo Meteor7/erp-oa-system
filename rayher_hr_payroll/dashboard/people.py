@@ -3,10 +3,11 @@
 数据口径尽量和现有页面一致，不另起一套：
 - 员工数字（在职、入职离职、到期提醒、档案、研发类型）和前端 `lib/personnelView.js` 同一口径：60 天窗口、
   第二次合同到期晚于第一次视为已续签、离职日当天仍算在职、研发组取 `DEPARTMENT_GROUP_BY_NAME`。
-- 工资条看 Salary Slip（草稿 + 已提交），应有工资条的人和薪酬计算页 `get_payroll_rows` 一样。
+- 工资条人数看 Salary Slip（每人一张，已确认优先），应有工资条的人和薪酬计算页 `get_payroll_rows` 一样；
+  金额只算已确认（已提交）的工资条，取 `payroll_bridge.period_pay_totals / period_salaries`，和经营页、研发分摊一个数（决定 2026-10-13）。
 - 社保公积金公司承担部分只算已确认的记录（`payroll_bridge.period_company_contributions`）。
-- 宿舍整块直接用 `dormitory_board.get_dormitory_board`，请假只借 `overview_entry` 里便宜的纯函数
-  （不碰它逐人算年假余额的那一段）。
+- 宿舍整块直接用 `dormitory_board.get_dormitory_board`；请假用 `overview_entry.month_leave`（口径见 attendance_board.leave_figures），
+  今天不在岗用 `attendance_board_entry.today_away`，都和考勤中心同一个函数。
 
 个人信息永远不进块：只给人数、进度、汇总金额；名单只给姓名 + 日期。
 权限：`visible` 看真实权限。员工表类的块 HR 角色或副总/总经理岗位可看（和 `overview_entry.hr_scope` 一致）；
@@ -158,7 +159,7 @@ def summarize_employees(rows, today, period):
     out = {
         "active": 0, "rd": 0, "other": 0, "rd_gap": 0, "joined": 0, "new_joiners": [],
         "left_month": 0, "left_effective": 0, "left_pending": 0, "on_probation": 0,
-        "file_pending": 0, "file_confirm": 0, "expiring": [], "dept_counts": Counter(),
+        "file_pending": 0, "file_blank": 0, "file_confirm": 0, "expiring": [], "dept_counts": Counter(),
     }
     for row in rows:
         joined = _d(row.get("date_of_joining"))
@@ -186,6 +187,8 @@ def summarize_employees(rows, today, period):
         archive = archive_status_of(row)
         if archive == "待完善":
             out["file_pending"] += 1
+            if row.get("archive_status") not in ARCHIVE_STATUSES:
+                out["file_blank"] += 1
         elif archive == "待确认":
             out["file_confirm"] += 1
         items = expiry_items(row, today)
@@ -210,25 +213,27 @@ def _dedupe_slips(slips):
 
 
 def summarize_payroll(employees, slips, period):
-    """本月应有工资条的人 = 入职日不晚于月末、且没在月初之前离职（与 hr_payroll_entry._period_employee_filters 一致）。"""
+    """工资条的人数（金额不在这里算，见 _pay_totals / _salaries）。
+
+    本月应有工资条的人 = 入职日不晚于月末、且没在月初之前离职（与 hr_payroll_entry._period_employee_filters 一致）。
+    每人一张：已确认（docstatus = 1）优先，没有才看草稿。confirmed = 已确认的人，draft = 只有草稿的人，missing = 还没生成的人。
+    draft_gross = 草稿工资条的应发合计（只用来提示“还有多少没确认”，不进金额）。
+    """
     start, end = _month_bounds(period)
     expected = set()
-    dept_of = {}
     for row in employees:
-        dept_of[row.get("name")] = _dept_label(row.get("department"))
         joined, relieving = _d(row.get("date_of_joining")), _d(row.get("relieving_date"))
         if joined is not None and joined <= end and (relieving is None or relieving >= start):
             expected.add(row.get("name"))
     chosen = _dedupe_slips(slips)
     population = expected | set(chosen)      # 页面也会把有工资条但不在名单里的人补进来
-    submitted = sum(1 for slip in chosen.values() if int(slip.get("docstatus") or 0) == 1)
-    by_dept = Counter()
-    for employee, slip in chosen.items():
-        by_dept[_dept_label(slip.get("department")) or dept_of.get(employee) or NO_DEPARTMENT] += _num(slip.get("gross_pay"))
+    confirmed = {employee for employee, slip in chosen.items() if int(slip.get("docstatus") or 0) == 1}
+    drafts = {employee: slip for employee, slip in chosen.items() if employee not in confirmed}
     return {
         "population": population, "expected": len(population), "generated": len(chosen),
-        "submitted": submitted, "draft": len(chosen) - submitted, "missing": len(population) - len(chosen),
-        "gross": sum(_num(slip.get("gross_pay")) for slip in chosen.values()), "by_dept": by_dept,
+        "confirmed": len(confirmed), "submitted": len(confirmed), "confirmed_people": confirmed,
+        "draft": len(drafts), "draft_people": set(drafts), "missing": len(population) - len(chosen),
+        "draft_gross": sum(_num(slip.get("gross_pay")) for slip in drafts.values()),
     }
 
 
@@ -250,6 +255,20 @@ def _fetch_slips(period):
         "Salary Slip", filters={"start_date": start, "end_date": end, "docstatus": ["<", 2]},
         fields=["employee", "docstatus", "gross_pay", "department"], limit_page_length=0,
     )
+
+
+def _fetch_pay_totals(period):
+    """已确认工资的合计：和研发分摊、经营页的人工成本同一个函数（payroll_bridge.period_pay_totals），一个数。"""
+    from rayher_hr_payroll import payroll_bridge
+
+    return payroll_bridge.period_pay_totals(period) or {}
+
+
+def _fetch_salaries(period):
+    """{员工: 已确认工资条的应发}（payroll_bridge.period_salaries，合计等于 period_pay_totals 的 gross）。"""
+    from rayher_hr_payroll import payroll_bridge
+
+    return payroll_bridge.period_salaries(period) or {}
 
 
 def _fetch_contribution_detail(ctx):
@@ -284,16 +303,29 @@ def _fetch_dorm(ctx):
 
 
 def _fetch_away(ctx):
-    from rayher_hr_payroll.api import overview_entry
+    """今天不在岗：和考勤中心同一个函数（attendance_board_entry.today_away），一人一条；出差中另算，不算不在岗。"""
+    from rayher_hr_payroll import attendance_board
+    from rayher_hr_payroll.api import attendance_board_entry
 
-    return overview_entry._away_today(None)
+    away = attendance_board_entry.today_away(date.fromisoformat(ctx.today))
+    counts = Counter(attendance_board.KIND_LABELS[item["kind"]] for item in away["off"])
+    return {"count": len(away["off"]), "trip": len(away["trip"]),
+            "by_type": [{"label": label, "count": count} for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]}
 
 
 def _fetch_leave_stats(ctx):
+    """所选月份的请假 / 调休 / 加班（口径见 attendance_board.leave_figures）：本月请假、请假类型、各部门请假共用这一份。"""
     from rayher_hr_payroll.api import overview_entry
 
-    rows = overview_entry._attendance_rows([(int(ctx.period[:4]), int(ctx.period[5:7]))], None)
-    return overview_entry.leave_stats(rows)
+    stats = overview_entry.month_leave([(int(ctx.period[:4]), int(ctx.period[5:7]))])
+    merged = {}
+    for row in stats["by_department"]:
+        label = _dept_label(row["department"]) or NO_DEPARTMENT
+        entry = merged.setdefault(label, {"label": label, "leave": 0.0, "comp": 0.0, "overtime": 0.0, "leave_count": 0, "overtime_count": 0})
+        for key in ("leave", "comp", "overtime", "leave_count", "overtime_count"):
+            entry[key] += row.get(key) or 0
+    stats["by_department"] = sorted(merged.values(), key=lambda row: (-row["leave"], -row["overtime"], row["label"]))
+    return stats
 
 
 # ---------------------------------------------------------------- 同一请求内共用
@@ -312,6 +344,26 @@ def _slips(ctx, period):
 
 def _payroll(ctx):
     return ctx.memo("people.payroll", lambda: summarize_payroll(_employees(ctx), _slips(ctx, ctx.period), ctx.period))
+
+
+def _pay_totals(ctx, period):
+    return ctx.memo(f"people.pay_totals:{period}", lambda: _fetch_pay_totals(period))
+
+
+def _salaries(ctx):
+    return ctx.memo("people.salaries", lambda: _fetch_salaries(ctx.period))
+
+
+def _confirmed_by_dept(ctx):
+    """已确认的应发按部门：{部门: [已确认人数, 应发]}。部门按员工档案，档案里没有的用工资条上的部门。"""
+    dept_of = {row.get("name"): _dept_label(row.get("department")) for row in _employees(ctx)}
+    slip_dept = {slip.get("employee"): _dept_label(slip.get("department")) for slip in _slips(ctx, ctx.period)}
+    grouped = {}
+    for employee, gross in _salaries(ctx).items():
+        entry = grouped.setdefault(dept_of.get(employee) or slip_dept.get(employee) or NO_DEPARTMENT, [0, 0.0])
+        entry[0] += 1
+        entry[1] += _num(gross)
+    return grouped
 
 
 def _contribution_detail(ctx):
@@ -394,9 +446,13 @@ def hr_left_month(ctx):
 def hr_away_today(ctx):
     away = _away(ctx)
     parts = [f"{item['label']} {item['count']}" for item in (away.get("by_type") or [])[:3]]
-    return kpi("hr.away_today", "今天不在岗", int(away.get("count") or 0), "人", " · ".join(parts),
-               to=target("attendance.today"),
-               hint="今天在已批准的请假或调休里的人数（按人去重）。")
+    if away.get("trip"):
+        parts.append(f"另有出差 {away['trip']}")
+    count = int(away.get("count") or 0)
+    return kpi("hr.away_today", "今天不在岗", count, "人", " · ".join(parts),
+               to=target("attendance.today") if count else None,
+               hint="今天（工作日）有已批准的请假或调休的在职员工，一人只算一次（一个人有几张单只算一人）；出差不算不在岗，单独看“出差中”。"
+                    "点进去是考勤中心的“今天不在岗”，一人一行，人数和这里一样。")
 
 
 @provider("hr.expiring", "kpi", visible=_hr_view, title="60 天内到期")
@@ -414,10 +470,14 @@ def hr_expiring(ctx):
 @provider("hr.file_pending", "kpi", visible=_hr_view, title="档案待完善")
 def hr_file_pending(ctx):
     facts = _facts(ctx)
-    return kpi("hr.file_pending", "档案待完善", facts["file_pending"], "人",
-               f"待确认 {facts['file_confirm']} · 研发类型未设置 {facts['rd_gap']}",
+    blank, marked = facts["file_blank"], facts["file_pending"] - facts["file_blank"]
+    parts = [f"{blank} 人还没填档案状态"] if blank else []
+    if marked:
+        parts.append(f"{marked} 人标了待完善")
+    return kpi("hr.file_pending", "档案待完善", facts["file_pending"], "人", " · ".join(parts) or "档案都已完善或在确认中",
                "warn" if facts["file_pending"] else "", to=target("personnel.file"),
-               hint="在职员工里档案状态是「待完善」的人数；没填档案状态的也算待完善。")
+               hint="在职员工里档案状态是「待完善」的人数；没填档案状态的也算待完善（员工信息页同样把它们显示为待完善）。"
+                    "已提交、等人事确认的「待确认」不算在这里。点进去是员工信息页筛「待完善」，人数和这里一样。")
 
 
 @provider("hr.rd_gap", "kpi", visible=_hr_view, title="研发类型未设置")
@@ -444,6 +504,24 @@ def _expiry_people(ctx, kind, within):
     return out
 
 
+def optional_target(key, fallback, **params):
+    """targets.json 里已经有这个目标就用它；还没有（新目标还没合进来）就用 fallback，不报错。"""
+    from rayher_hr_payroll.dashboard.core import load_targets
+
+    return target(key, **params) if key in load_targets() else fallback
+
+
+# 试用期 / 合同到期分开看（决定 2026-10-13）：员工信息页 ?reminder=probation|contract 只列这一种；
+# targets.json 还没有这两个目标时，点进去是同一份名单的明细。
+_EXPIRY_TARGETS = {"试用期": "personnel.probation", "合同": "personnel.contract"}
+
+
+def _expiry_target(ctx, kind):
+    if kind == "试用期":
+        return optional_target(_EXPIRY_TARGETS[kind], drill_to("hr.probation", ctx))
+    return optional_target(_EXPIRY_TARGETS[kind], drill_to("hr.contract", ctx))
+
+
 @provider("alert.probation", "alert", visible=_hr_view)
 def alert_probation(ctx):
     people = _expiry_people(ctx, "试用期", PROBATION_ALERT_DAYS)
@@ -454,9 +532,9 @@ def alert_probation(ctx):
     if len(people) == 1:
         left = f"，只剩 {first['gap']} 天" if first["gap"] else "（今天）"
         return alert("alert.probation", tone, f"{first['name']} 试用期 {_md(first['date'])} 到期{left}", "需要转正评估",
-                     "员工信息", target("personnel.expiring"))
+                     "员工信息", _expiry_target(ctx, "试用期"))
     return alert("alert.probation", tone, _names_title(people, f"试用期 {PROBATION_ALERT_DAYS} 天内到期"),
-                 f"最早 {_md(first['date'])} · 需要转正评估", "员工信息", target("personnel.expiring"))
+                 f"最早 {_md(first['date'])} · 需要转正评估", "员工信息", _expiry_target(ctx, "试用期"))
 
 
 @provider("alert.contract", "alert", visible=_hr_view)
@@ -467,7 +545,26 @@ def alert_contract(ctx):
     first = people[0]
     return alert("alert.contract", "bad" if first["gap"] <= URGENT_DAYS else "warn",
                  _names_title(people, f"合同 {EXPIRY_DAYS} 天内到期"), f"最早 {_md(first['date'])}",
-                 "员工信息", target("personnel.expiring"))
+                 "员工信息", _expiry_target(ctx, "合同"))
+
+
+def _expiry_drill(ctx, key, kind, within):
+    people = _expiry_people(ctx, kind, within)
+    page = optional_target(_EXPIRY_TARGETS[kind], target("personnel.expiring"))
+    rows = [drill_row([person["name"], _md(person["date"]), f"{person['gap']} 天" if person["gap"] else "今天"], page,
+                      tone="bad" if person["gap"] <= URGENT_DAYS else "") for person in people]
+    return drill(key, f"{kind} {within} 天内到期", [("姓名",), ("到期日",), ("还剩", "r")], rows, summary=f"共 {len(people)} 人",
+                 note=f"在职员工里{kind} {within} 天内到期的人，按剩余天数从近到远；红色 = {URGENT_DAYS} 天内。每一行进员工信息页。")
+
+
+@provider("drill.hr.probation", "drill", visible=_hr_view, title="试用期到期")
+def drill_probation(ctx):
+    return _expiry_drill(ctx, "drill.hr.probation", "试用期", PROBATION_ALERT_DAYS)
+
+
+@provider("drill.hr.contract", "drill", visible=_hr_view, title="合同到期")
+def drill_contract(ctx):
+    return _expiry_drill(ctx, "drill.hr.contract", "合同", EXPIRY_DAYS)
 
 
 @provider("alert.rd_gap", "alert", visible=_hr_view)
@@ -484,36 +581,54 @@ def alert_payroll_draft(ctx):
     draft = _payroll(ctx)["draft"]
     if not draft:
         return None
-    return alert("alert.payroll_draft", "warn", f"{draft} 人工资条仍是草稿", "复核后提交", "薪酬计算",
+    return alert("alert.payroll_draft", "warn", f"{draft} 人工资条还没确认", "草稿工资条确认后才计入应发合计和人工成本", "去确认",
                  target("payroll", period=ctx.period, status="draft"))
 
 
 # ================================================================ 薪酬与社保：指标卡
+# 金额只算已确认的工资条（决定 2026-10-13：薪酬计算页加了“确认本月工资”，确认 = 提交工资条）；草稿只当进度显示。
+# 已确认的金额从 payroll_bridge 取，和经营页人工成本、研发分摊是同一个数。
 @provider("hr.payroll", "kpi", visible=_hr, title="工资条")
 def hr_payroll(ctx):
     payroll = _payroll(ctx)
-    draft = payroll["draft"]
-    return kpi("hr.payroll", "工资条", f"{payroll['generated']} / {payroll['expected']}", "人",
-               f"待复核 {draft}" if draft else "", "hot" if draft else "",
-               to=target("payroll", period=ctx.period),
-               hint="已生成 / 本月应有工资条的人（入职日不晚于月末、且没在月初之前离职，与薪酬计算页一致）。待复核 = 草稿工资条。")
+    draft, missing = payroll["draft"], payroll["missing"]
+    parts = [f"草稿 {draft}"] if draft else []
+    if missing:
+        parts.append(f"未生成 {missing}")
+    return kpi("hr.payroll", "工资条已确认", f"{payroll['confirmed']} / {payroll['expected']}", "人",
+               " · ".join(parts) or ("全部已确认" if payroll["expected"] else ""), "hot" if draft or missing else "",
+               to=target("payroll", period=ctx.period, status="draft" if draft else None),
+               hint="已确认 / 本月应有工资条的人（入职日不晚于月末、且没在月初之前离职，与薪酬计算页一致）。"
+                    "草稿 = 生成了还没确认的工资条；未生成 = 还没有工资条的人。只有已确认的工资条计入应发合计。")
+
+
+def _wan_text(amount):
+    value, unit = money_wan(amount)
+    return f"{value} {unit}" if unit == "万" else f"{value} 元"
 
 
 @provider("hr.pay_total", "kpi", visible=_hr, title="本月应发合计")
 def hr_pay_total(ctx):
     payroll = _payroll(ctx)
-    previous = sum(_num(slip.get("gross_pay")) for slip in _dedupe_slips(_slips(ctx, _shift_month(ctx.period, -1))).values())
-    value, unit = money_wan(payroll["gross"])
-    if not payroll["generated"]:
-        sub = "这个月还没有工资条"
+    totals = _pay_totals(ctx, ctx.period)
+    gross = _num(totals.get("gross"))
+    previous = _num(_pay_totals(ctx, _shift_month(ctx.period, -1)).get("gross"))
+    value, unit = money_wan(gross)
+    parts = []
+    if payroll["draft"]:
+        draft_gross = _num(totals.get("draft_gross", payroll["draft_gross"]))
+        parts.append(f"还有 {payroll['draft']} 人没确认（草稿 约 {_wan_text(draft_gross)}）")
+    if not gross:
+        parts.append("这个月还没有确认的工资条")
     elif not previous:
-        sub = "上月没有工资条"
+        parts.append("上月没有确认的工资条")
     else:
-        change = (payroll["gross"] - previous) / previous * 100
-        sub = "与上月持平" if round(change, 1) == 0 else f"{'▲' if change > 0 else '▼'} {abs(change):.1f}% 较上月"
-    return kpi("hr.pay_total", "本月应发合计", value, unit, sub, to=drill_to("hr.pay_total", ctx) if payroll["generated"] else None,
-               hint="所选月份已生成的工资条（含草稿）的应发合计，只给汇总，不含个人金额。薪酬计算页顶部的“应付工资合计”是按档案把全部在册的人都算一遍，"
-                    "所以工资条没生成齐时比这里大。点进去按部门看已生成的工资条。")
+        change = (gross - previous) / previous * 100
+        parts.append("与上月持平" if round(change, 1) == 0 else f"{'▲' if change > 0 else '▼'} {abs(change):.1f}% 较上月")
+    return kpi("hr.pay_total", "本月应发合计", value, unit, " · ".join(parts), "hot" if payroll["draft"] else "",
+               to=drill_to("hr.pay_total", ctx) if gross or payroll["draft"] else None,
+               hint="所选月份已确认的工资条的应发合计（草稿不算），和经营页的人工成本、研发分摊用的工资是同一个数；只给汇总，不含个人金额。"
+                    "点进去按部门看已确认的人数和应发，以及还没确认的草稿人数。")
 
 
 def _yuan(amount):
@@ -522,23 +637,21 @@ def _yuan(amount):
 
 @provider("drill.hr.pay_total", "drill", visible=_hr, title="本月应发合计")
 def drill_pay_total(ctx):
-    chosen = _dedupe_slips(_slips(ctx, ctx.period))
-    dept_of = {row.get("name"): _dept_label(row.get("department")) for row in _employees(ctx)}
-    grouped = {}
-    for employee, slip in chosen.items():
-        label = _dept_label(slip.get("department")) or dept_of.get(employee) or NO_DEPARTMENT
-        entry = grouped.setdefault(label, [0, 0, 0.0])
-        entry[0] += 1
-        entry[1] += 0 if int(slip.get("docstatus") or 0) == 1 else 1
-        entry[2] += _num(slip.get("gross_pay"))
+    confirmed = _confirmed_by_dept(ctx)
     payroll = _payroll(ctx)
-    rows = [drill_row([label, f"{count} 张", f"{drafts} 张", _yuan(gross)], target("payroll", period=ctx.period), tone="warn" if drafts else "")
-            for label, (count, drafts, gross) in sorted(grouped.items(), key=lambda item: (-item[1][2], item[0]))]
-    note = f"本月应有 {payroll['expected']} 人的工资条，已生成 {payroll['generated']} 张（草稿 {payroll['draft']} 张）"
-    if payroll["missing"]:
-        note += f"，还有 {payroll['missing']} 人没生成；薪酬计算页顶部的“应付工资合计”把这些人也算进去了，所以比这里大"
-    return drill("drill.hr.pay_total", f"{_month_label(ctx)}已生成工资条的应发合计 · 按部门", [("部门",), ("工资条", "r"), ("其中草稿", "r"), ("应发合计", "r")], rows,
-                 summary=f"共 {payroll['generated']} 张，应发合计 {_yuan(payroll['gross'])}", note=note + "。只给部门汇总，不含个人金额。")
+    dept_of = {row.get("name"): _dept_label(row.get("department")) for row in _employees(ctx)}
+    slip_dept = {slip.get("employee"): _dept_label(slip.get("department")) for slip in _slips(ctx, ctx.period)}
+    drafts = Counter(dept_of.get(employee) or slip_dept.get(employee) or NO_DEPARTMENT for employee in payroll["draft_people"])
+    labels = set(confirmed) | set(drafts)
+    ranked = sorted(labels, key=lambda label: (-confirmed.get(label, [0, 0.0])[1], label))
+    rows = [drill_row([label, f"{confirmed.get(label, [0, 0.0])[0]} 人", f"{drafts.get(label, 0)} 人", _yuan(confirmed.get(label, [0, 0.0])[1])],
+                      target("payroll", period=ctx.period, status="draft" if drafts.get(label) else None), tone="warn" if drafts.get(label) else "")
+            for label in ranked]
+    people = sum(entry[0] for entry in confirmed.values())
+    total = sum(entry[1] for entry in confirmed.values())
+    note = f"本月应有 {payroll['expected']} 人的工资条：已确认 {payroll['confirmed']} 人，草稿 {payroll['draft']} 人，未生成 {payroll['missing']} 人。草稿确认后才计入合计"
+    return drill("drill.hr.pay_total", f"{_month_label(ctx)}已确认工资的应发合计 · 按部门", [("部门",), ("已确认", "r"), ("草稿", "r"), ("已确认应发", "r")], rows,
+                 summary=f"已确认 {people} 人，应发合计 {_yuan(total)}", note=note + "。部门按员工档案；只给部门汇总，不含个人金额。")
 
 
 @provider("hr.pay_si", "kpi", visible=_hr_si, title="社保（公司承担）")
@@ -639,19 +752,22 @@ def drill_dorm_vacant(ctx):
 def hr_dorm_lease(ctx):
     alert_ = _dorm(ctx).get("lease_alert") or {}
     count, expired = int(alert_.get("count") or 0), int(alert_.get("expired_count") or 0)
-    parts = [f"最早 {alert_['earliest_date'][5:]}"] if alert_.get("earliest_date") else []
-    if expired:
-        parts.append(f"已过期 {expired} 间")
-    return kpi("hr.dorm_lease", f"租约 {LEASE_DAYS} 天内到期", count, "间", " · ".join(parts),
-               "hot" if count or expired else "", to=target("dorm.lease"),
-               hint="房间租约结束日在今天起 60 天内的间数；已经过期的另外标出。")
+    parts = [f"其中已过期 {expired} 间"] if expired else []
+    if alert_.get("earliest_date"):
+        parts.append(f"最早 {alert_['earliest_date'][5:]} 到期")
+    # 点进去的续租清单列的是“60 天内到期 + 已经过期”的在用房间，卡片上的数字也按这两样合计（决定 2026-10-13）。
+    return kpi("hr.dorm_lease", "租约到期 / 已过期", count + expired, "间", " · ".join(parts),
+               "hot" if count or expired else "", to=target("dorm.lease") if count or expired else None,
+               hint=f"在用房间里租约结束日在今天起 {LEASE_DAYS} 天内、或者已经过期的间数（已过期的在副标题里单独说）。"
+                    "点进去是房间台账的续租清单，间数和这里一样。")
 
 
 @provider("hr.dorm_leaver", "kpi", visible=_hr, title="已离职仍占房")
 def hr_dorm_leaver(ctx):
     count = len(_dorm(ctx).get("leavers_in_rooms") or [])
     return kpi("hr.dorm_leaver", "已离职仍占房", count, "人", "需要清退" if count else "", "bad" if count else "",
-               to=target("dorm.leaver"), hint="已离职员工的住宿登记还没取消，房间仍算被他占着。")
+               to=target("dorm.leaver") if count else None,
+               hint="在用房间里，已离职员工的住宿登记还没取消，房间仍算被他占着。点进去是房间台账里这些房间，人数和这里一样。")
 
 
 @provider("alert.dorm_lease", "alert", visible=_hr)
@@ -699,12 +815,18 @@ def block_dept_headcount(ctx):
 
 @provider("block.leave_types", "block", visible=_hr_view, title="请假类型")
 def block_leave_types(ctx):
-    types = (_leave_stats(ctx).get("by_type") or [])[:6]
-    top = types[0]["days"] if types else 0
-    rows = [bar_row(item["label"], f"{item['days']:g}", _pct(item["days"], top)) for item in types]
-    return bars("block.leave_types", "请假类型", rows, f"{_month_label(ctx)} · 天" if rows else f"{_month_label(ctx)}没有已批准的请假",
-                to=target("attendance.all"),
-                hint="所选月份已批准的请假和调休，按类型合计的天数（小时 ÷ 8）；跨月的申请只算落在这个月里的天。")
+    stats = _leave_stats(ctx)
+    types = [item for item in (stats.get("by_type") or []) if item.get("label") != "调休"]
+    items = _top_with_other([(item["label"], item["days"]) for item in types])
+    top = items[0][1] if items else 0
+    rows = [bar_row(label, f"{round(days, 2):g}", _pct(days, top)) for label, days in items]
+    comp = float((stats.get("totals") or {}).get("comp_days") or 0)
+    sub = f"{_month_label(ctx)} · 天" if rows else f"{_month_label(ctx)}没有已批准的请假"
+    if comp:
+        sub += f" · 另有调休 {round(comp, 2):g} 天"
+    return bars("block.leave_types", "请假类型", rows, sub, to=drill_to("att.leave", ctx) if rows else None,
+                hint="所选月份在职员工已批准的请假按假别合计的天数（小时 ÷ 8；跨月的申请只算落在这个月里的天），合计等于“本月请假”；"
+                     "调休不是请假，单独写在副标题里。「其他」= 第 6 名及以后的假别合计。点进去按部门看同一份数。")
 
 
 @provider("block.expiring_list", "block", visible=_hr_view, title="即将到期")
@@ -726,7 +848,7 @@ def block_pay_progress(ctx):
     payroll = _payroll(ctx)
     expected = payroll["expected"]
     rows = [
-        bar_row("工资条已提交", f"{payroll['submitted']} / {expected}", _pct(payroll["submitted"], expected), "ok"),
+        bar_row("工资条已确认", f"{payroll['confirmed']} / {expected}", _pct(payroll["confirmed"], expected), "ok"),
         bar_row("工资条草稿", payroll["draft"], _pct(payroll["draft"], expected), "warn" if payroll["draft"] else ""),
         bar_row("工资条未生成", payroll["missing"], _pct(payroll["missing"], expected), "bad" if payroll["missing"] else ""),
     ]
@@ -737,7 +859,7 @@ def block_pay_progress(ctx):
             rows.append(bar_row(label, f"{done} / {expected}", _pct(done, expected), "ok" if done >= expected else "warn"))
     return bars("block.pay_progress", "薪酬、社保、公积金办理进度", rows, f"{_month_label(ctx)} · 人" if expected else f"{_month_label(ctx)}没有需要出工资条的人",
                 to=target("payroll", period=ctx.period),
-                hint="分母 = 本月应有工资条的人。已提交 / 草稿 / 未生成是工资条的三种状态；社保已确认、公积金已核对按各自记录的状态算。")
+                hint="分母 = 本月应有工资条的人。已确认 / 草稿 / 未生成是工资条的三种状态（每人一张，已确认优先）；社保已确认、公积金已核对按各自记录的状态算。")
 
 
 @provider("block.si_hf_list", "block", visible=_hr_si, title="社保与公积金")
@@ -759,14 +881,15 @@ def block_si_hf_list(ctx):
                    hint="社保导入批次：上传后还没生效的批次，及其中待确认的行数。新入职：所选月份入职、社保或公积金还没有记录的人数。")
 
 
-@provider("block.pay_by_dept", "block", visible=_hr, title="部门人工成本")
+@provider("block.pay_by_dept", "block", visible=_hr, title="部门应发工资（已确认）")
 def block_pay_by_dept(ctx):
-    items = _top_with_other([(label, amount) for label, amount in _payroll(ctx)["by_dept"].items() if amount])
+    items = _top_with_other([(label, entry[1]) for label, entry in _confirmed_by_dept(ctx).items() if entry[1]])
     top = items[0][1] if items else 0
     rows = [bar_row(label, _wan(amount), _pct(amount, top)) for label, amount in items]
-    return bars("block.pay_by_dept", "部门人工成本", rows, "应发合计 · 万元（只看汇总）" if rows else f"{_month_label(ctx)}还没有工资条",
-                to=target("payroll", period=ctx.period),
-                hint="所选月份工资条的应发合计按部门汇总，含草稿；不显示个人。「其他」= 第 6 名及以后的部门合计。")
+    return bars("block.pay_by_dept", "部门应发工资（已确认）", rows, "应发合计 · 万元（只看汇总）" if rows else f"{_month_label(ctx)}还没有确认的工资条",
+                to=drill_to("hr.pay_total", ctx) if rows else target("payroll", period=ctx.period),
+                hint="所选月份已确认的工资条的应发合计按员工档案的部门汇总，草稿不算；不显示个人。合计等于“本月应发合计”。"
+                     "「其他」= 第 6 名及以后的部门合计。")
 
 
 # ================================================================ 宿舍：块
@@ -783,8 +906,10 @@ def block_dorm_summary(ctx):
                  "ok" if rate >= 90 else ("warn" if rate < 70 else ""), target("dorm.board")),
         list_row("空置房租", "每月", f"¥ {value} {unit}", "warn" if occupancy.get("vacant_rent") else "",
                  drill_to("hr.dorm_vacant", ctx) if occupancy.get("vacant_rent") else None),
-        list_row(f"租约 {LEASE_DAYS} 天内到期", f"最早 {lease['earliest_date'][5:]}" if lease.get("earliest_date") else "",
-                 f"{int(lease.get('count') or 0)} 间", "warn" if lease.get("count") or lease.get("expired_count") else "", target("dorm.lease")),
+        list_row("租约到期 / 已过期", f"其中已过期 {int(lease.get('expired_count') or 0)} 间" if lease.get("expired_count") else
+                 (f"最早 {lease['earliest_date'][5:]}" if lease.get("earliest_date") else ""),
+                 f"{int(lease.get('count') or 0) + int(lease.get('expired_count') or 0)} 间",
+                 "warn" if lease.get("count") or lease.get("expired_count") else "", target("dorm.lease")),
         list_row("已离职员工仍占房", "", f"{len(leavers)} 人", "bad" if leavers else "", target("dorm.leaver")),
     ]
     return listing("block.dorm_summary", "宿舍", rows, _month_label(ctx), to=target("dorm.board"),
@@ -806,8 +931,9 @@ def block_dorm_cost(ctx):
     colors = (BLUE, GREEN, AMBER)
     rows = [stack_row(label, "%s %s" % money_wan(amount), _pct(amount, total), colors[index % 3])
             for index, (label, amount) in enumerate(_component_rows(cost["components"]))]
-    return stack("block.dorm_cost", "本月宿舍费用", rows, f"{_month_label(ctx)} · ¥ {value} {unit}", to=target("dorm.board"),
-                 hint="所选月份已登记的宿舍费用，房租 / 水费 / 电费各自公司和个人承担之和。")
+    # 宿舍看板只看当前登记月份；所选月份的费用在“月度登记”里按月份看（和“谁来承担”一样）。
+    return stack("block.dorm_cost", "本月宿舍费用", rows, f"{_month_label(ctx)} · ¥ {value} {unit}", to=target("dorm.monthly", period=ctx.period),
+                 hint="所选月份已登记的宿舍费用，房租 / 水费 / 电费各自公司和个人承担之和。点进去是这个月的月度登记。")
 
 
 @provider("block.dorm_split", "block", visible=_hr, title="谁来承担")

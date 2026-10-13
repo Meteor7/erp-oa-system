@@ -4,6 +4,7 @@ import frappe
 from datetime import date
 
 from rayher_hr_payroll.api._guards import is_hr_sensitive_hidden, require_rd_access
+from rayher_hr_payroll.hr_read_access import require_hr_read
 from rayher_hr_payroll.department_structure import (
     CANONICAL_DEPARTMENTS,
     DEPARTMENT_GROUP_BY_NAME,
@@ -46,7 +47,7 @@ def _employment_status(relieving_date):
 
 @frappe.whitelist()
 def list_employees():
-    require_rd_access(RD_HR_WRITE)
+    require_hr_read(RD_HR_WRITE, require_rd_access)
     fields = list(EMPLOYEE_FIELDS)
     if is_hr_sensitive_hidden():
         fields = [field for field in fields if field not in {
@@ -68,7 +69,7 @@ def list_employees():
 
 @frappe.whitelist()
 def get_household_options():
-    require_rd_access(RD_HR_WRITE)
+    require_hr_read(RD_HR_WRITE, require_rd_access)
     return list(HOUSEHOLD_OPTIONS)
 
 
@@ -81,7 +82,7 @@ def _clean_household(value):
 
 @frappe.whitelist()
 def get_company_options():
-    require_rd_access(RD_HR_WRITE)
+    require_hr_read(RD_HR_WRITE, require_rd_access)
     companies = frappe.get_all("Company", fields=["name", "company_name"], order_by="company_name")
     supported = SUPPORTED_COMPANIES
     return [{**row, "display_name": supported[row["name"]]} for row in companies if row.get("name") in supported]
@@ -89,7 +90,7 @@ def get_company_options():
 
 @frappe.whitelist()
 def get_dept_options():
-    require_rd_access(RD_HR_WRITE)
+    require_hr_read(RD_HR_WRITE, require_rd_access)
     rows = frappe.db.sql(
         """
         SELECT d.name, d.department_name, d.company, COUNT(e.name) AS employee_count
@@ -120,13 +121,13 @@ def get_dept_options():
 
 @frappe.whitelist()
 def get_employment_type_options():
-    require_rd_access(RD_HR_WRITE)
+    require_hr_read(RD_HR_WRITE, require_rd_access)
     return frappe.get_all("Employment Type", pluck="name", order_by="name")
 
 
 @frappe.whitelist()
 def get_designation_options():
-    require_rd_access(RD_HR_WRITE)
+    require_hr_read(RD_HR_WRITE, require_rd_access)
     return frappe.get_all("Designation", pluck="name", order_by="name")
 
 

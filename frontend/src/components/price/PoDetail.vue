@@ -4,8 +4,8 @@
 import { computed, ref, watch } from 'vue';
 import {
   contractDraftFor, contractFields, contractMode, contractPayload, contractStepper, deliveryPayload,
-  inspectionTone, isPoDraft, maskAccount, missingDelivery, money, paymentLink, paymentPoLink, pillClass, planStatus, poCloseBlockers,
-  poMainAction, poProgress, poSources, poTone, poTrail, quantity, shortDate, splitList,
+  amountText, inspectionTone, isPoDraft, maskAccount, missingDelivery, paymentLink, paymentPoLink, pillClass, planStatus, poCloseBlockers,
+  poHeaderDiffers, poLineTotal, poMainAction, poProgress, poSources, poTone, poTrail, quantity, shortDate, splitList,
 } from '../../lib/priceView.js';
 
 const props = defineProps({
@@ -83,6 +83,8 @@ function runConfirmed() {
   if (key === 'seal') emit('seal');
   else if (key === 'close') emit('close');
 }
+// PMC、生产主管看不到金额（服务端去掉了，amounts_hidden）：显示“—”
+const cash = (value) => amountText(value, props.po.amounts_hidden);
 </script>
 
 <template>
@@ -95,7 +97,10 @@ function runConfirmed() {
           <div class="title-line"><h3 class="num">{{ po.name }}</h3><span :class="pillClass(poTone(po.status))">{{ po.status }}</span></div>
           <div class="muted">{{ subline }}</div>
         </div>
-        <div class="amount-block"><span class="muted">PO 总额</span><b>{{ money(po.total_amount) }}</b></div>
+        <div class="amount-block" title="物料行金额合计">
+          <span class="muted">PO 总额（行合计）</span><b>{{ cash(poLineTotal(po)) }}</b>
+          <span v-if="!po.amounts_hidden && poHeaderDiffers(po)" class="muted">表头 {{ cash(po.total_amount) }}</span>
+        </div>
         <div class="head-buttons">
           <button v-if="draftEditable" type="button" class="btn" :disabled="busy" @click="saveDelivery">保存合同交期</button>
           <button v-if="main.key" type="button" class="btn pri lg" :disabled="busy" @click="runMain">{{ main.text }}</button>
@@ -159,8 +164,8 @@ function runConfirmed() {
                   </td>
                   <td><b>{{ line.item_name }}</b><div class="muted">{{ line.specification || '—' }}</div></td>
                   <td class="r num">{{ quantity(line.quantity) }} {{ line.unit }}</td>
-                  <td class="r num">{{ money(line.unit_price) }}</td>
-                  <td class="r num strong">{{ money(line.amount) }}</td>
+                  <td class="r num">{{ cash(line.unit_price) }}</td>
+                  <td class="r num strong">{{ cash(line.amount) }}</td>
                   <td class="num">{{ shortDate(line.expected_delivery_date) }}</td>
                   <td>
                     <input v-if="draftEditable" v-model="deliveryDraft[line.name]" class="cell" type="date" :aria-label="`${line.item_name} 合同交期`" />
@@ -185,7 +190,7 @@ function runConfirmed() {
           <div class="pa-exec-stats">
             <div><span class="muted">到货</span><b>{{ progress.received }} / {{ progress.lineCount }} 项到齐</b></div>
             <div><span class="muted">验收通过</span><b>{{ progress.passed }} / {{ progress.lineCount }} 项</b></div>
-            <div><span class="muted">已付</span><b>{{ money(progress.paid) }} / {{ money(progress.total) }}</b></div>
+            <div><span class="muted">已付</span><b>{{ cash(progress.paid) }} / {{ cash(progress.total) }}</b></div>
           </div>
           <div class="pa-close-row">
             <template v-if="closed"><span class="pill p-jade">PO 已关闭</span></template>
@@ -210,7 +215,7 @@ function runConfirmed() {
             </div>
             <span class="muted">触发条件：{{ row.trigger_condition || '—' }}</span>
             <span class="muted">计划 {{ shortDate(row.planned_date) }} · 发票 {{ row.invoice_requirement || '—' }}</span>
-            <div class="split"><b class="num">{{ money(row.amount) }}</b><router-link v-if="row.payment_request" :to="paymentLink(row)" class="link">{{ row.payment_request }} →</router-link></div>
+            <div class="split"><b class="num">{{ cash(row.amount) }}</b><router-link v-if="row.payment_request" :to="paymentLink(row)" class="link">{{ row.payment_request }} →</router-link></div>
           </div>
           <div v-if="!plan.length" class="empty">暂无付款计划</div>
           <router-link :to="paymentPoLink(po)" class="pa-pay-link">付款条件、提交付款审批 → 采购付款（{{ po.name }}）</router-link>

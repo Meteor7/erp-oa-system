@@ -160,7 +160,8 @@ def test_my_claims_show_count_total_and_how_far_the_approval_got(data):
     ]
     kpi = run("me.claim", make_ctx())
     assert (kpi["value"], kpi["unit"], kpi["sub"]) == ("2", "张", "合计 ¥ 2,900 · 出纳办理中 · 草稿 1")
-    assert kpi["target"] == {"key": "claim.mine", "params": {}}
+    # 2026-10-13：报销页“我的”列出全部报销单，和在途张数对不上；点进去是同一份在途清单
+    assert kpi["target"] == {"key": "drill", "params": {"item": "me.claim", "period": "2026-10"}}
     assert "不预测到账日" in kpi["hint"]
     data["claims"] = [{"name": "C1", "amount": 123456, "approved_amount": 0, "workflow_status": "待审批", "current_step_label": ""}]
     assert run("me.claim", make_ctx())["sub"] == "合计 ¥ 12.3 万 · 审批中"

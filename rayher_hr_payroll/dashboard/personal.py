@@ -10,7 +10,7 @@ from __future__ import annotations
 import calendar
 
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, calendar as calendar_block, kpi, list_row, listing, provider, target, todo_item,
+    alert, bar_row, bars, calendar as calendar_block, drill, drill_row, drill_to, kpi, list_row, listing, provider, target, todo_item,
 )
 
 MAX_ROWS = 8
@@ -27,10 +27,11 @@ PAYMENT_ROUTE = "/approval/procurement-payment"
 # 「待我审批」按类别拆开时，只有一类就直接跳到那一类的待办列表（没有对应目标的类别不跳）
 _APPROVAL_TARGETS = {
     "leave": ("attendance.todo", {"type": "请假"}), "overtime": ("attendance.todo", {"type": "加班"}),
-    "comp_time": ("attendance.todo", {"type": "调休"}), "reimbursement": ("claim.todo", {}),
-    "payment": ("payment.todo", {}), "procurement_payment": ("procpay.approvals", {}),
+    "comp_time": ("attendance.todo", {"type": "调休"}), "travel": ("attendance.todo", {"type": "出差"}),
+    "reimbursement": ("claim.todo", {}), "payment": ("payment.todo", {}), "procurement_payment": ("procpay.approvals", {}),
 }
-_ATTENDANCE_KEYS = ("leave", "overtime", "comp_time")
+# 出差申请 2026-10-13 并进了考勤中心，待我审批的出差也在考勤中心的“待我审批”里。
+_ATTENDANCE_KEYS = ("leave", "overtime", "comp_time", "travel")
 _ATTENDANCE_LABELS = {"请假申请": "请假", "加班申请": "加班", "调休申请": "调休"}
 
 
@@ -216,8 +217,11 @@ def me_overtime_month(ctx):
         return None
     leave_days = float(month.get("leave_days") or 0)
     sub = f"请假 {_n(leave_days)} 天" + (f" · 调休 {_n(month['comp_hours'])} 小时" if month.get("comp_hours") else "")
-    return kpi("me.overtime_month", f"{_month_word(ctx)}加班", _n(month.get("overtime_hours")), "小时", sub, to=target("attendance.home"),
-               hint="本人已批准和审批中的加班小时数；请假按天、调休按小时，都含审批中的。")
+    # 考勤中心首页只看当月：看别的月份时不给跳转（数字对不上就不如不跳）。
+    current = ctx.period == ctx.today[:7]
+    return kpi("me.overtime_month", f"{_month_word(ctx)}加班", _n(month.get("overtime_hours")), "小时", sub,
+               to=target("attendance.home") if current else None,
+               hint="本人已批准和审批中的加班小时数；请假按天、调休按小时，都含审批中的。" + ("点进去是考勤中心首页（当月）。" if current else ""))
 
 
 @provider("alert.me_trip", "alert", visible=_has_employee)
@@ -292,7 +296,18 @@ def me_requests(ctx):
     if drafts:
         parts.append(f"草稿 {drafts}")
     return kpi("me.requests", "我的申请", len(items), "张", " · ".join(parts) or "没有进行中的申请", tone="hot" if returned else "",
-               hint="我提交的、还没办结的申请（审批中、被退回、草稿）；列表在下面的“我的申请”里。" + RETURNED_HINT)
+               to=drill_to("me.requests", ctx) if items else None,
+               hint="我提交的、还没办结的申请（审批中、被退回、草稿）；点进去一演示员工128行，每一行进那张单据。" + RETURNED_HINT)
+
+
+@provider("drill.me.requests", "drill", visible=_has_employee, title="我的申请")
+def drill_me_requests(ctx):
+    items = sorted(_requests(ctx), key=lambda row: not row.get("returned"))
+    rows = [drill_row([row.get("subject") or row.get("name"), row.get("request_type") or "", _request_row(row)["sub"].split(" · ", 1)[-1], row.get("name") or ""],
+                      _detail_target(row.get("route"), {"request": row.get("name")}), tone="bad" if row.get("returned") else "")
+            for row in items]
+    return drill("drill.me.requests", "我的申请", [("申请",), ("类型",), ("进度",), ("单号",)], rows, summary=f"共 {len(items)} 张",
+                 note="我提交的、还没办结的申请，被退回的排在前面（红色）。" + RETURNED_HINT)
 
 
 def _request_row(row):
@@ -332,8 +347,24 @@ def me_claim(ctx):
         sub = "没有在途的报销"
     if drafts:
         sub += f" · 草稿 {drafts}"
-    return kpi("me.claim", "我的报销", len(active), "张", sub, to=target("claim.mine"),
-               hint="我名下的报销单：审批中或等出纳付款的张数；金额取审批金额（没有就取申请金额）。不预测到账日，只显示审批到了哪一步。")
+    # 报销页“我的”列出我所有的报销单（含已付款的），和这里的“在途”张数对不上；点进去是同一份在途清单（决定 2026-10-13）。
+    return kpi("me.claim", "我的报销", len(active), "张", sub, to=drill_to("me.claim", ctx) if rows else target("claim.mine"),
+               hint="我名下的报销单：审批中或等出纳付款的张数；金额取审批金额（没有就取申请金额）。不预测到账日，只显示审批到了哪一步。"
+                    "点进去一演示员工128行（草稿浅色列在后面，不算在张数里），每一行进报销单。")
+
+
+@provider("drill.me.claim", "drill", visible=_has_employee, title="我的报销")
+def drill_me_claim(ctx):
+    rows = ctx.memo("me.claims", lambda: _load_my_claims(ctx.user, ctx.employee)) or []
+    active = [row for row in rows if row.get("workflow_status") != "草稿"]
+    drafts = [row for row in rows if row.get("workflow_status") == "草稿"]
+    out = [drill_row([row["name"], _progress_text(row.get("workflow_status"), row.get("current_step_label")),
+                      _yuan(row.get("approved_amount") or row.get("amount"))], target("claim.detail", request=row["name"]))
+           for row in active]
+    out += [drill_row([row["name"], "草稿", _yuan(row.get("amount"))], target("claim.detail", request=row["name"]), tone="info") for row in drafts]
+    total = sum(float(row.get("approved_amount") or row.get("amount") or 0) for row in active)
+    return drill("drill.me.claim", "我在途的报销单", [("单号",), ("进度",), ("金额", "r")], out, summary=f"在途 {len(active)} 张，合计 {_yuan(total)}",
+                 note="审批中或等出纳付款的报销单；草稿浅色列在后面，不算在张数里。已付款的在报销页“我的”里看。")
 
 
 # ---------------------------------------------------------------- 我的工时
@@ -343,15 +374,24 @@ def _my_timesheet(ctx):
         if not _load_is_rd(ctx.user, ctx.employee):
             return None
         data = _load_my_entries(ctx.period, ctx.employee)
-        return {"limit": float(data.get("max_day_limit") or 0), "used": float(data.get("total_days") or 0),
-                "entries": data.get("entries") or []}
+        limit, used = float(data.get("max_day_limit") or 0), float(data.get("total_days") or 0)
+        return {"limit": limit, "used": used, "entries": data.get("entries") or [],
+                "limit_hours": float(data["hour_limit"]) if data.get("hour_limit") is not None else limit * 8,
+                "used_hours": float(data["total_hours"]) if data.get("total_hours") is not None else used * 8}
     return ctx.memo("me.ts", build)
 
 
+def _fill_status(used_hours, limit_hours):
+    from rayher_hr_payroll.api.monthly_timesheet_entry import _fill_status as fill_status
+    return fill_status(used_hours, limit_hours)
+
+
 def _ts_state(data):
-    """(状态, 差几天)：和填报进度同一条规则——差不到 0.01 天（0.08 小时）算填满。"""
-    diff = round(data["limit"] - data["used"], 2)
-    return ("part" if diff >= 0.01 else "over" if diff <= -0.01 else "full"), diff
+    """(状态, 差几天)：和填报进度（monthly_timesheet_entry._fill_status）同一条规则——按小时比，填的小时等于可填小时才算填满；
+    一点没填也算“还差”。差几天 = 差的小时 ÷ 8。"""
+    status = _fill_status(data["used_hours"], data["limit_hours"])
+    diff = round((data["limit_hours"] - data["used_hours"]) / 8, 2)
+    return ("part" if status in ("part", "none") else status), diff
 
 
 @provider("me.timesheet", "kpi", visible=_has_employee, title="本月工时")
@@ -431,15 +471,47 @@ def _notification_counts(ctx):
 @provider("me.cc", "kpi", visible=_has_employee, title="抄送给我")
 def me_cc(ctx):
     count = _notification_counts(ctx).get("cc", 0)
-    return kpi("me.cc", "抄送给我", count, "条", "只是知会，不用审批" if count else "没有未读的抄送",
-               hint="别人抄送给我、我还没读的通知条数；在页面最下面的“通知”里查看。")
+    return kpi("me.cc", "抄送给我", count, "条", "只是知会，不用审批" if count else "没有未读的抄送", to=drill_to("me.cc", ctx) if count else None,
+               hint="别人抄送给我、我还没读的通知条数；点进去按单据列出来（同一张单据的几条合成一行），也可以在页面最下面的“通知”里查看。")
 
 
 @provider("me.unread", "kpi", title="未读通知")
 def me_unread(ctx):
     count = sum(_notification_counts(ctx).values())
-    return kpi("me.unread", "未读通知", count, "条", "", tone="hot" if count else "",
-               hint="我还没读的通知条数（含抄送、我的申请进展、业务进展、系统通知；不含“待你处理”，那些在待办里）。在页面最下面的“通知”里查看。")
+    return kpi("me.unread", "未读通知", count, "条", "", tone="hot" if count else "", to=drill_to("me.unread", ctx) if count else None,
+               hint="我还没读的通知条数（含抄送、我的申请进展、业务进展、系统通知；不含“待你处理”，那些在待办里）。"
+                    "点进去按单据列出来（同一张单据的几条合成一行），也可以在页面最下面的“通知”里查看。")
+
+
+def _load_notification_items(category):
+    """某一类未读通知（按单据合并），和通知区同一个接口。"""
+    from rayher_hr_payroll.api.overview_entry import get_my_notification_feed
+    return get_my_notification_feed(category=category, unread_only=1, limit=400)["items"]
+
+
+_NOTE_CATEGORIES = (("cc", "抄送"), ("mine", "我的申请"), ("biz", "业务进展"), ("sys", "系统与指派"))
+
+
+def _notification_drill(ctx, key, title, categories):
+    counts = _notification_counts(ctx)
+    rows = []
+    for category, label in categories:
+        for item in _load_notification_items(category):
+            rows.append(drill_row([label, item.get("event") or "通知", item.get("title") or item.get("document") or "", str(item.get("created") or "")[5:16]],
+                                  _detail_target(item.get("route"), item.get("query"))))
+    total = sum(counts.get(category, 0) for category, _label in categories)
+    return drill(key, title, [("类别",), ("事件",), ("单据",), ("时间",)], rows, summary=f"共 {total} 条未读，涉及 {len(rows)} 份单据",
+                 note="同一张单据的几条通知合成一行，所以行数可能比条数少。打开后在页面最下面的“通知”里标记已读。")
+
+
+@provider("drill.me.cc", "drill", visible=_has_employee, title="抄送给我")
+def drill_me_cc(ctx):
+    return _notification_drill(ctx, "drill.me.cc", "抄送给我、还没读的", _NOTE_CATEGORIES[:1])
+
+
+@provider("drill.me.unread", "drill", title="未读通知")
+def drill_me_unread(ctx):
+    return _notification_drill(ctx, "drill.me.unread", "未读通知", _NOTE_CATEGORIES)
 
 
 # ---------------------------------------------------------------- 要我处理

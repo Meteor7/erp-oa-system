@@ -16,7 +16,7 @@ test("a row is in exactly one state, in the order a slip is produced", () => {
   assert.deepEqual(rowState(row()), { key: "new", label: "未生成", tone: "p-gray" });
   assert.equal(rowState(row({ salary_slip: "SS-1", docstatus: 0, managed: true })).label, "草稿");
   assert.equal(rowState(row({ salary_slip: "SS-2", docstatus: 0, managed: false })).label, "外部草稿");
-  assert.equal(rowState(row({ salary_slip: "SS-3", docstatus: 1, managed: true })).label, "已提交");
+  assert.equal(rowState(row({ salary_slip: "SS-3", docstatus: 1, managed: true })).label, "已确认");
   assert.equal(rowState(row({ social_record_exists: false })).label, "缺社保记录");
   assert.equal(rowState(row({ housing_record_exists: false })).label, "缺公积金记录");
   assert.equal(rowState(row({ social_record_exists: false, housing_record_exists: false })).label, "缺社保公积金记录");

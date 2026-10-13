@@ -71,6 +71,8 @@ const archiveFilter=ref("");
 const alertOnly=ref(false);
 // 下面三个只从地址 / 标签进来：60 天内到期、本月入职、部门分组（看板链接用，见 bindRouteFilters）
 const expiringOnly=ref(false);
+// 看板的“试用期到期”“合同到期”提醒点进来只看那一种：probation | contract；空 = 两种都看。
+const reminderKind=ref("");
 const joinedMonth=ref(false);
 const leftMonth=ref(false);
 const groupFilter=ref("");
@@ -79,6 +81,8 @@ const currentPage=ref(1);
 const PAGE_SIZE=20;
 const today=todayIso();
 
+// 总经理、副总经理也能打开这个页面，但只能看（决定 2026-10-13；服务端的写接口仍然只认人事角色）：新增、编辑只给人事。
+const canEdit=typeof window!=="undefined"&&Array.isArray(window.roles)&&window.roles.some(r=>["System Manager","HR User","HR Manager"].includes(r));
 const canDelete=typeof window!=="undefined"&&Array.isArray(window.roles)&&window.roles.some(r=>["System Manager","HR Manager"].includes(r));
 const showHrSensitive=!isHrSensitiveHidden();
 const sensitiveHidden=!showHrSensitive;
@@ -100,10 +104,10 @@ const loaded=computed(()=>Array.isArray(rows.data));
 const groups=computed(()=>departmentGroups(items.value,depts.data||[],{company:companyFilter.value,status:statusFilter.value}));
 const departmentOptions=computed(()=>groups.value.flatMap(group=>group.departments.map(item=>item.name)));
 const allDepartmentCount=computed(()=>statusFilter.value==="left"?statusCounts.value.left:statusCounts.value.active);
-const filteredItems=computed(()=>sortEmployees(filterByUrlExtras(filterEmployees(items.value,{
+const filteredItems=computed(()=>sortEmployees(filterByUrlExtras(filterByUrlExtras(filterEmployees(items.value,{
   company:companyFilter.value,department:departmentFilter.value,status:statusFilter.value,
   rdType:rdFilter.value,archive:archiveFilter.value,alertOnly:alertOnly.value,keyword:keyword.value,
-}),{group:groupFilter.value,joined:joinedMonth.value?"month":"",left:leftMonth.value?"month":"",reminder:expiringOnly.value?"expiring":""},today),sortMode.value));
+}),{group:groupFilter.value,joined:joinedMonth.value?"month":"",left:leftMonth.value?"month":"",reminder:expiringOnly.value?"expiring":""},today),{reminder:expiringOnly.value?reminderKind.value:""},today),sortMode.value));
 const pageData=computed(()=>pageSlice(filteredItems.value,currentPage.value,PAGE_SIZE));
 const pageCount=computed(()=>pageData.value.pageCount);
 const pagedItems=computed(()=>pageData.value.items);
@@ -121,16 +125,18 @@ bindRouteFilters({route,router,specs:[{
   keys:PERSONNEL_QUERY_KEYS,
   read:parsePersonnelQuery,
   snapshot:()=>({
-    status:statusFilter.value,reminder:expiringOnly.value?"expiring":"",rd:rdFilter.value,group:groupFilter.value,
+    status:statusFilter.value,reminder:expiringOnly.value?(reminderKind.value||"expiring"):"",rd:rdFilter.value,group:groupFilter.value,
     archive:archiveFilter.value,joined:joinedMonth.value?"month":"",left:leftMonth.value?"month":"",dept:departmentFilter.value,
   }),
   apply:state=>{
-    statusFilter.value=state.status;expiringOnly.value=state.reminder==="expiring";rdFilter.value=state.rd;groupFilter.value=state.group;
+    statusFilter.value=state.status;expiringOnly.value=Boolean(state.reminder);reminderKind.value=state.reminder==="expiring"?"":state.reminder;rdFilter.value=state.rd;groupFilter.value=state.group;
     archiveFilter.value=state.archive;joinedMonth.value=state.joined==="month";leftMonth.value=state.left==="month";departmentFilter.value=state.dept;
   },
   toQuery:personnelQueryOf,
   sources:[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,leftMonth,departmentFilter],
 }]});
+// 点掉「60 天内到期」时，“只看试用期 / 只看合同”也一起去掉。
+watch(expiringOnly,on=>{if(!on)reminderKind.value=""});
 
 const formDepartmentOptions=computed(()=>(depts.data||[]).filter(x=>x.company===form.company));
 function clearDepartmentIfOutsideCompany(){
@@ -580,7 +586,7 @@ onBeforeUnmount(()=>{
 </template>
 </div>
 </div>
-<button type="button" class="btn pri" data-new-emp @click="newEmp"><RdIcon name="plus"/>新增员工</button>
+<button v-if="canEdit" type="button" class="btn pri" data-new-emp @click="newEmp"><RdIcon name="plus"/>新增员工</button>
 </template>
 
 <div class="kpis">
@@ -658,7 +664,7 @@ onBeforeUnmount(()=>{
 <button v-for="x in ARCH" :key="x" type="button" class="chip" :aria-pressed="archiveFilter===x" @click="archiveFilter=x">{{x}}</button>
 </div>
 <button type="button" class="chip" :aria-pressed="alertOnly" @click="alertOnly=!alertOnly"><RdIcon name="bell"/> 只看有提醒</button>
-<button type="button" class="chip" data-chip-expiring :aria-pressed="expiringOnly" title="试用期或合同在 60 天内到期" @click="expiringOnly=!expiringOnly">60 天内到期</button>
+<button type="button" class="chip" data-chip-expiring :aria-pressed="expiringOnly" title="试用期或合同在 60 天内到期" @click="expiringOnly=!expiringOnly">{{expiringOnly&&reminderKind==="probation"?"60 天内试用期到期":expiringOnly&&reminderKind==="contract"?"60 天内合同到期":"60 天内到期"}}</button>
 <button type="button" class="chip" data-chip-joined :aria-pressed="joinedMonth" @click="joinedMonth=!joinedMonth">本月入职</button>
 <button type="button" class="chip" data-chip-left :aria-pressed="leftMonth" title="离职日在本月、已经离职的人" @click="leftMonth=!leftMonth">本月离职</button>
 <button v-if="groupFilter" type="button" class="chip" data-chip-group aria-pressed="true" :aria-label="`清除部门分组筛选：${groupFilter}`" @click="groupFilter=''">分组：{{groupFilter}} ✕</button>
@@ -710,7 +716,7 @@ onBeforeUnmount(()=>{
 </template>
 </div>
 </div>
-<button v-if="!editing&&current" type="button" class="btn pri" @click="startEdit"><RdIcon name="edit"/>编辑</button>
+<button v-if="canEdit&&!editing&&current" type="button" class="btn pri" @click="startEdit"><RdIcon name="edit"/>编辑</button>
 <button type="button" class="btn quiet sm" aria-label="关闭" @click="requestClose"><RdIcon name="x"/></button>
 </header>
 

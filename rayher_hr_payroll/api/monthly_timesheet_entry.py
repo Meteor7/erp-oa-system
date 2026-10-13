@@ -159,12 +159,20 @@ def _employees_for_scope(scope: list[str] | None, period_start=None) -> list:
     return _eligible_employee_rows(period_start, name=["in", scope])
 
 
-def _monthly_summary_employee_filter(employee=None):
+def _monthly_summary_employee_filter(employee=None, period_start=None, employees=None):
+    """查询工时记录时的员工范围。
+
+    修复（2026-10-13）：原来不带月份算范围（只有在职的人），部门主管看这个月时，本月离职的下属明明在填报名单里，
+    他填的工时却查不出来，填报进度里显示成“一点没填”。现在按月份算范围（和名单同一个规则）；
+    employees 给了（填报进度的名单）就直接按名单查，调用方已经按身份定好了范围。
+    """
+    if employees is not None:
+        return "and ts.employee in %(employees)s", None, tuple(employees or ["__none__"])
     selected = str(employee or "").strip() or None
     if selected:
-        _require_monthly_employee(selected, "view")
+        _require_monthly_employee(selected, "view", period_start)
         return "and ts.employee = %(employee)s", selected, None
-    scope = _monthly_employee_scope("view")
+    scope = _monthly_employee_scope("view", period_start)
     if scope is None:
         return "", None, None
     return "and ts.employee in %(employees)s", None, tuple(scope or ["__none__"])
@@ -437,8 +445,13 @@ def _legacy_daily_exists(employee: str, year: int, month: int) -> bool:
     )
 
 
-def _query_monthly_entries(period: str, employee=None) -> list:
-    employee_filter, selected_employee, visible_employees = _monthly_summary_employee_filter(employee)
+def _period_start_of(period: str):
+    year, month = parse_period(period)
+    return _period_start(year, month)
+
+
+def _query_monthly_entries(period: str, employee=None, employees=None) -> list:
+    employee_filter, selected_employee, visible_employees = _monthly_summary_employee_filter(employee, _period_start_of(period), employees)
     return frappe.db.sql(
         f"""
         select ts.rd_monthly_entry_id as monthly_entry_id,
@@ -477,9 +490,9 @@ def _query_monthly_entries(period: str, employee=None) -> list:
 
 
 
-def _query_legacy_monthly_entries(period: str, employee=None) -> list:
+def _query_legacy_monthly_entries(period: str, employee=None, employees=None) -> list:
     daily = _daily_module()
-    employee_filter, selected_employee, visible_employees = _monthly_summary_employee_filter(employee)
+    employee_filter, selected_employee, visible_employees = _monthly_summary_employee_filter(employee, _period_start_of(period), employees)
     return frappe.db.sql(
         f"""
         select ts.employee,
@@ -872,8 +885,9 @@ def _fill_rows(year: int, month: int, scope) -> list[dict]:
         )
     }
     used = {}
+    # 已填的工时按名单里的人查（名单含本月离职的人），不再另算一次范围。
     for row in _merge_monthly_entry_rows(
-        _query_monthly_entries(period_text), _query_legacy_monthly_entries(period_text), period_text
+        _query_monthly_entries(period_text, employees=names), _query_legacy_monthly_entries(period_text, employees=names), period_text
     ):
         used[row["employee"]] = round(used.get(row["employee"], 0) + float(row["hours"]), 2)
     result = []

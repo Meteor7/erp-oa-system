@@ -77,13 +77,17 @@ export const STAGE_FILTERS = Object.freeze([
 ].map((key) => ({ key, label: STAGES[key].label })));
 
 // 首页指标卡"采购执行中""退回 / 已撤回"合并了好几个阶段；点进列表要按合并后的口径筛，不能再只是"全部"（2026-10 导航整改）。
+// live = 有进度的（需求审批 + 采购执行 + 已关闭，不含草稿 / 退回 / 撤回 / 取消）：看板「我负责的项目」一行点进来用，
+// 和后端 dashboard/projects.stage_of 不为空的那些一一对应（2026-10-13）。
 export const STAGE_GROUPS = Object.freeze({
   back: Object.freeze(['draft', 'withdrawn', 'rejected']),
   exec: Object.freeze(['await_pr', 'quote', 'price', 'po']),
+  live: Object.freeze(['demand', 'await_pr', 'quote', 'price', 'po', 'closed']),
 });
 export const STAGE_GROUP_FILTERS = Object.freeze([
   { key: 'exec', label: '采购执行中（提 PR / 比价 / 价格审批 / PO）' },
   { key: 'back', label: '草稿 / 退回 / 已撤回' },
+  { key: 'live', label: '有进度的（需求审批 / 采购执行 / 已关闭）' },
 ]);
 
 // 旧版（合同 / 到货 / 验收都在申请单上走）遗留数据的业务状态：这些单据只读展示，归入 PO 执行中。

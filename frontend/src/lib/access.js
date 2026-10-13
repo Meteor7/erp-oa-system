@@ -18,6 +18,10 @@ const BOARD = ['System Manager', 'Accounts User', 'Rayher Business Executive', '
 // 岗位也能看全公司看板（与服务端 expense_boards.SCOPE_ALL_POSITIONS 一致），比如没有看板角色的副总。
 const BOARD_POSITIONS = ['finance_manager', 'finance_auditor', 'vice_manager', 'general_manager'];
 const BOARD_PATHS = new Set(['/approval/expense-request-board', '/approval/expense-payment-board']);
+// 总经理、副总经理岗位只读打开看板数字背后的页面（决定 2026-10-13）：人事、薪酬、社保公积金、宿舍、研发费用汇总。
+// 服务端只放开读接口（hr_read_access.require_hr_read、allocation_entry._require_read_access），写接口仍只认原来的角色。
+const LEADER_POSITIONS = ['vice_manager', 'general_manager'];
+const LEADER_READ_PATHS = new Set(['/personnel', '/payroll', '/social-insurance', '/housing-fund', '/accommodation', '/accommodation/master', '/allocation-dashboard']);
 const ROUTE_ORDER = ['/dashboard', '/personnel', '/social-insurance', '/housing-fund', '/accommodation', '/accommodation/monthly', '/accommodation/master', '/payroll', '/projects', '/entry', '/approval/leave', '/approval/procurement', '/approval/direct-purchase', '/approval/travel', '/approval/request-dashboard', '/approval/procurement-payment', '/approval/reimbursement', '/approval/invoice-folder', '/approval/claim', '/approval/payment', '/approval/expense-request-board', '/approval/expense-payment-board', '/approval/corporate-payment', '/approval/payment-dashboard', '/approval/material-progress', '/approval/purchase', '/timesheet', '/expense', '/foreign-rd', '/foreign-rd-timesheet', '/allocation', '/allocation-dashboard'];
 
 // Temporary test-account restriction: add an account's login here to hide the sensitive HR pages
@@ -89,6 +93,11 @@ export function isHrSensitiveHidden() {
   return HR_SENSITIVE_HIDDEN_USERS.has(currentLogin());
 }
 
+// 人事页面能不能改（新增、编辑、导入、删除、确认）：只有人事角色；总经理、副总经理能打开，但只读。
+export function canEditHr() {
+  return myRoles().some((role) => HR.includes(role));
+}
+
 export function canSeeProcurementPrice() {
   return holdsPosition('pmc', 'procurement_manager', 'vice_manager')
     || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'].includes(role));
@@ -157,6 +166,7 @@ export function canSee(path) {
   if (!hasEnabledFeature(normalizedPath)) return false;
   if (normalizedPath === '/approval/material-progress') return canSeeMaterialProgress();
   if (BOARD_PATHS.has(normalizedPath) && holdsPosition(...BOARD_POSITIONS)) return true;
+  if (LEADER_READ_PATHS.has(normalizedPath) && holdsPosition(...LEADER_POSITIONS)) return true;
   const need = PAGE_ROLES[normalizedPath] || MANAGE;
   return myRoles().some((role) => need.includes(role));
 }

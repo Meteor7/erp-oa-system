@@ -98,7 +98,11 @@ const filteredRows = computed(() => (rows.data || []).filter((row) => {
   const matchesKeyword = !keyword || [row.room_no, row.room_type, row.employee_name, row.room_purpose]
     .some((value) => String(value || '').toLowerCase().includes(keyword));
   return matchesKeyword && (!filters.status || row.occupancy_status === filters.status) && (!filters.lease || leaseSoon(row)) && (!filters.leaver || row.employee_left);
-}));
+}).filter((row) => !(filters.lease || filters.leaver) || inUse(row)));
+// 续租清单、已离职仍占房只看在用的房间：停用的房间宿舍看板不算，看板上的间数 / 人数也不算它（2026-10-13）。
+function inUse(row) {
+  return Number(row.is_active ?? 1) === 1;
+}
 const roomStats = computed(() => {
   const all = rows.data || [];
   return [
@@ -269,7 +273,7 @@ async function save() {
         <template #actions><Button variant="solid" data-room-new @click="openNew">新增房间</Button></template>
         <p class="mb-4 text-sm text-gray-500">统一维护房间租赁、押金、附件及入住关系；每月租金是整套房间的总租金。退宿后记录进入下方历史，不会被新入住人覆盖。</p>
         <div v-if="filters.lease" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <span>续租清单：只显示 60 天内到期或已过期的租约（{{ filteredRows.length }} 间）。</span>
+          <span>续租清单：只显示在用房间里 60 天内到期或已过期的租约（{{ filteredRows.length }} 间）。</span>
           <button type="button" class="text-blue-600 hover:underline" @click="filters.lease = false">显示全部房间</button>
         </div>
         <div v-if="filters.leaver" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-leaver-filter>

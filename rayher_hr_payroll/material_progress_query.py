@@ -30,12 +30,45 @@ def stage_sql():
         ELSE '采购确认中' END"""
 
 
-def conditions(search="", requester="", status="", source_request=""):
+# 合同已生效、货还在路上或还没结清的 PO 状态（= material_progress.LIVE_PO_STATUSES，有测试盯着）。
+LIVE_PO_SQL = "('已生效','供应商制作中','到货验收中','付款中')"
+
+
+def overdue_line_sql(today_param="today"):
+    """某个 PO 行合同交期已过、还没收齐（同 material_progress.contract_line_overdue：退货中的货不算收到）。
+    接在 PO_FROM 后面用（pl = PO 行，po = PO）。"""
+    return (f"po.status IN {LIVE_PO_SQL} AND pl.contract_delivery_date IS NOT NULL "
+            f"AND pl.contract_delivery_date < %({today_param})s "
+            "AND (COALESCE(pl.received_quantity,0) < COALESCE(pl.quantity,0) OR COALESCE(pl.inspection_status,'')='退货中')")
+
+
+def overdue_sql(today_param="today"):
+    """物料逾期未到：物料没取消，至少一个合同已生效的 PO 行交期已过还没收齐。
+    看板的「物料逾期未到 / 缺料影响的项目 / 逾期了多久」和物料进度页的「交期已过未收齐」都用这一句（2026-10-13 对齐）。"""
+    return f"b.status!='已取消' AND EXISTS (SELECT 1 {PO_FROM} AND {overdue_line_sql(today_param)})"
+
+
+def overdue_due_sql(today_param="today"):
+    """逾期 PO 行里最早的合同交期（算“逾期了多少天”）。"""
+    return f"(SELECT MIN(pl.contract_delivery_date) {PO_FROM} AND {overdue_line_sql(today_param)})"
+
+
+# 未编码物料：状态正常、物料编号为空、源申请没被拒绝 / 撤回（看板「未编码物料」同一句）。
+UNCODED_SQL = "b.status='正常' AND TRIM(COALESCE(b.material_code,''))='' AND r.workflow_status NOT IN ('已拒绝','已撤回')"
+
+
+def conditions(search="", requester="", status="", source_request="", overdue=False, uncoded=False, project="", today=""):
     clauses, params = ["1=1"], {}
-    for field, value in (("requester", requester), ("source_request", source_request)):
+    for field, value in (("requester", requester), ("source_request", source_request), ("project", project)):
         if value:
             clauses.append(f"b.{field}=%({field})s")
             params[field] = str(value).strip()
+    # 看板点进来的筛选：逾期未到（按服务器的今天算）、未编码
+    if overdue:
+        clauses.append(overdue_sql())
+        params["today"] = str(today)
+    if uncoded:
+        clauses.append(UNCODED_SQL)
     if search:
         fields = ("source_request", "material_serial", "requester", "project", "material_code", "item_name", "specification", "brand", "pr_numbers", "po_numbers", "supplier", "current_handler", "remarks")
         clauses.append("(" + " OR ".join(f"COALESCE(b.{field},'') LIKE %(search)s" for field in fields) + ")")

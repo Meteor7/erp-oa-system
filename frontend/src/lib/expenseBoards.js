@@ -2,6 +2,7 @@
 import { money } from './expenseClaims.js';
 import { canSeeAllTravel } from './travelView.js';
 import { resolveKpiTarget } from './navContext.js';
+import { STUCK_AFTER_DAYS, isWaitingTooLong } from './waiting.js';
 
 const yuan = (value) => `¥ ${money(value)}`;
 
@@ -258,13 +259,13 @@ export function donutSegments(rows = [], max = 5) {
   return { total: Math.round(total * 100) / 100, segments, gradient };
 }
 
-// 出纳待付按等待天数分段。
+// 出纳待付按等待天数分段。和数据看板「待付款按等待时长」同一套三段（2026-10-13 统一）：
+// 今天（0 天）/ 1–3 天 / 超过 3 天（严格大于 3，正好 3 天算在 1–3 天里，见 waiting.js）。
 export function agingColumns(queue = []) {
   const buckets = [
-    { label: '不到 1 天', test: (days) => days < 1, color: '#C3CAD6' },
-    { label: '1–3 天', test: (days) => days >= 1 && days < 3, color: '#8C96A8' },
-    { label: '3–7 天', test: (days) => days >= 3 && days < 7, color: '#E3B26B' },
-    { label: '超过 7 天', test: (days) => days >= 7, color: '#D98C4A' },
+    { label: '今天', test: (days) => days <= 0, color: '#C3CAD6' },
+    { label: `1–${STUCK_AFTER_DAYS} 天`, test: (days) => days > 0 && !isWaitingTooLong(days), color: '#E3B26B' },
+    { label: `超过 ${STUCK_AFTER_DAYS} 天`, test: (days) => isWaitingTooLong(days), color: '#D98C4A' },
   ];
   return buckets.map((bucket) => {
     const rows = (queue || []).filter((row) => bucket.test(Number(row.waited_days || 0)));
@@ -273,7 +274,14 @@ export function agingColumns(queue = []) {
   });
 }
 
-// 出纳待付款面板顶部的四个小方块：各等待区间几张、多少钱，条按张数最多的那一段算宽度。
+// 出纳待付款面板里"待付款"和"待核验"分开：标题上的张数、金额只算待付款（和数据看板「出纳待付款」一致），
+// 已付款等核验发票的付款单单独列在后面。
+export function cashierSplit(queue = []) {
+  const rows = queue || [];
+  return { toPay: rows.filter((row) => row.status !== '待核验'), verifying: rows.filter((row) => row.status === '待核验') };
+}
+
+// 出纳待付款面板顶部的三个小方块：各等待区间几张、多少钱，条按张数最多的那一段算宽度。
 export function agingTiles(queue = []) {
   const columns = agingColumns(queue);
   const peak = Math.max(1, ...columns.map((column) => column.value));

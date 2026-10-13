@@ -12,7 +12,11 @@ DRILL_KEYS = {key for key, item in core.REGISTRY.items() if item.fn.__module__ =
 # 明细清单 -> 它背后的卡片 / 块：看得到卡片的人才看得到清单，不多也不少
 DRILL_OF = {"drill.cost.total": "cost.total", "drill.cost.po": "cost.po", "drill.cost.expense": "cost.expense", "drill.cost.projects": "block.cost_projects",
             "drill.pay.in_approval": "pay.in_approval", "drill.approval.stuck": "approval.stuck", "drill.invoice.review": "invoice.review",
-            "drill.pay.todo": "pay.todo", "drill.my.queue": "block.aging", "drill.cost.labor": "block.labor_cost"}
+            "drill.pay.todo": "pay.todo", "drill.my.queue": "block.aging", "drill.cost.labor": "block.labor_cost",
+            # 2026-10-13 数字和点进去对齐：新加的明细
+            "drill.cost.trend": "block.cost_trend", "drill.pay.unpaid": "pay.unpaid", "drill.pay.waiting": "pay.waiting",
+            "drill.pay.paid": "pay.paid_month", "drill.pay.category": "block.claim_category", "drill.pay.trend": "block.pay_trend",
+            "drill.me.processed": "me.processed"}
 
 
 def make_ctx(roles=("Employee",), positions=(), **kw):
@@ -147,9 +151,10 @@ def test_every_detail_list_is_visible_to_exactly_the_people_who_see_its_card():
     ("PMC", dict(roles=("Employee", "Purchase User"), positions=("pmc",)), True, ALWAYS),
     ("采购经理", dict(roles=("Employee", "Purchase Manager"), positions=("procurement_manager",)), True, ALWAYS),
     ("人事经理", dict(roles=("HR Manager", "HR User")), False, ALWAYS | LABOR),
-    ("副总：能看费用和付款，看不到分摊明细和发票", dict(positions=("vice_manager",)), True,
-     ALWAYS | COST | BOARD | SUPPLIER | LABOR),
-    ("总经理没有 PO 查看权时不给采购付款块", dict(positions=("general_manager",)), False, ALWAYS | COST | BOARD | LABOR),
+    # 2026-10-13：副总、总经理只读分摊数据（allocation_entry._require_read_access），分摊块也给
+    ("副总：能看费用、付款和分摊（只读），看不到发票", dict(positions=("vice_manager",)), True,
+     ALWAYS | COST | ALLOC | BOARD | SUPPLIER | LABOR),
+    ("总经理没有 PO 查看权时不给采购付款块", dict(positions=("general_manager",)), False, ALWAYS | COST | ALLOC | BOARD | LABOR),
     ("出纳（只有岗位）：付款看板范围，没有费用概览", dict(positions=("finance_auditor",)), True, ALWAYS | BOARD | SUPPLIER),
     ("财务主管 + Accounts User：除人力成本外全有", FINANCE, True, ALWAYS | COST | ALLOC | BOARD | SUPPLIER | INVOICE),
     ("总账会计 (Accounts User)", dict(roles=("Accounts User",), positions=("finance_accountant",)), False,
@@ -209,7 +214,9 @@ def test_cost_cards_show_amounts_and_change_against_last_month():
     assert [row["cells"][0] for row in detail["rows"]] == ["研发分摊", "采购", "报销付款", "合计"]
     assert [row["cells"][2] for row in detail["rows"]] == ["¥ 286.4 万", "¥ 98.2 万", "¥ 33.6 万", "¥ 418.2 万"]
     assert detail["summary"] == "合计 ¥ 418.2 万" and "（预览，还没定版）" in detail["rows"][0]["cells"][1]
-    assert [row["target"] and row["target"]["key"] for row in detail["rows"]] == ["cost.summary", "price.approvals", "board.payment", None]
+    # 采购、报销付款点进去是同期间同口径的明细（原来去 PO 列表 / 付款看板，期间和口径都不一样）
+    assert [row["target"] and row["target"]["key"] for row in detail["rows"]] == ["cost.summary", "drill", "drill", None]
+    assert [row["target"]["params"]["item"] for row in detail["rows"][1:3]] == ["cost.po", "cost.expense"]
     rd = run("cost.rd", ctx)
     assert (rd["value"], rd["sub"], rd["preview"]) == ("286.4", "占 68% · ▲ 5% 较上月", True)
     po, expense = run("cost.po", ctx), run("cost.expense", ctx)
@@ -227,7 +234,7 @@ def test_cost_blocks_open_the_list_that_adds_up_to_the_block():
     ctx._memo["money.cost_overview"] = overview()
     mix, trend, projects = run("block.cost_mix", ctx), run("block.cost_trend", ctx), run("block.cost_projects", ctx)
     assert mix["target"]["params"]["item"] == "cost.total" and projects["target"]["params"]["item"] == "cost.projects"
-    assert trend["target"] is None      # 六个月的趋势没有一个对得上的页面，不给假跳转
+    assert trend["target"]["params"]["item"] == "cost.trend"      # 六个月的趋势点进去是每月一行的明细
     detail = core.get_detail_for(ctx, "cost.projects")
     assert detail["summary"] == "共 7 个项目，合计 ¥ 373.1 万" and detail["rows"][0]["cells"] == ["ACONCA 7961", "¥ 112.6 万"]
 
@@ -236,6 +243,7 @@ def test_cost_po_and_expense_lists_sum_the_same_lines_the_overview_uses(monkeypa
     frappe = pytest.importorskip("frappe")
     ctx = make_ctx(**FINANCE)
     ctx._memo["money.cost_overview"] = overview(totals={"rd": 0, "po": 300.0, "expense": 120.0, "total": 420.0})
+    ctx._memo["money.rd_dup_projects"] = frozenset()     # 没有要去重的研发项目（去重见 test_dash_align_money.py）
     asked = []
 
     def fake_get_all(doctype, filters=None, **kwargs):
@@ -258,10 +266,7 @@ def test_cost_po_and_expense_lists_sum_the_same_lines_the_overview_uses(monkeypa
     expense = core.get_detail_for(ctx, "cost.expense")
     assert expense["summary"] == "共 2 张，合计 ¥ 120"
     assert [row["target"] for row in expense["rows"]] == [{"key": "claim.detail", "params": {"request": "R-1"}}, {"key": "payment.detail", "params": {"request": "R-2"}}]
-    # 本期已有研发分摊时，概览里的采购比逐个 PO 加起来少：清单要说明为什么
-    ctx2 = make_ctx(**FINANCE)
-    ctx2._memo["money.cost_overview"] = overview(totals={"rd": 1000.0, "po": 100.0, "expense": 120.0, "total": 1220.0})
-    assert "研发项目的采购包含在研发分摊里" in core.get_detail_for(ctx2, "cost.po")["note"]
+    # 本期已有研发分摊时，研发项目的行不计入合计（合计 = 卡片），单独列在最后并说明（2026-10-13，见 test_dash_align_money.py）
 
 
 def test_cost_card_without_last_month_data_and_other_period_label():
@@ -300,14 +305,16 @@ def test_cost_projects_top_five_and_the_rest_merged():
     assert block["rows"][0]["pct"] == 100.0 and block["rows"][-1]["value"] == "30.0"
 
 
-def test_rd_pending_reads_the_overview_so_leaders_get_it_too():
+def test_rd_pending_reads_the_allocation_so_leaders_get_it_too():
+    # 2026-10-13：和 alloc.status 同一个状态函数（分摊数据，副总、总经理只读），点进去：财务去分摊页，领导去研发费用汇总
     leader = make_ctx(positions=("vice_manager",))
-    preview = run("cost.rd_pending", leader, **{"money.cost_overview": overview()})
-    assert (preview["value"], preview["tone"], preview["preview"], preview["target"]) == ("286.4", "warn", True, None)
-    final = run("cost.rd_pending", make_ctx(**FINANCE), **{"money.cost_overview": overview(preview=False)})
+    preview = run("cost.rd_pending", leader, **{"money.allocation": allocation()})
+    assert (preview["value"], preview["tone"], preview["preview"]) == ("286.4", "warn", True)
+    assert preview["target"] == {"key": "cost.summary", "params": {"period": "2026-10"}}
+    final = run("cost.rd_pending", make_ctx(**FINANCE), **{"money.allocation": allocation(preview=False, finalized=True)})
     assert (final["sub"], final["tone"], final["preview"]) == ("已定版", "ok", False)
     assert final["target"]["key"] == "allocation"
-    none = run("cost.rd_pending", make_ctx(**FINANCE), **{"money.cost_overview": overview(preview=False, totals={"rd": 0, "po": 0, "expense": 0, "total": 0})})
+    none = run("cost.rd_pending", make_ctx(**FINANCE), **{"money.allocation": allocation(preview=False, has_data=False, capitalized=0, expensed=0, unknown=0)})
     assert none["sub"] == "本期还没有研发分摊数据"
 
 
@@ -332,14 +339,14 @@ def test_alloc_status_for_finance_and_for_leaders():
     assert (final["value"], final["tone"], final["preview"]) == ("已定版", "ok", False)
     empty = run("alloc.status", make_ctx(**FINANCE), **{"money.allocation": allocation(has_data=False)})
     assert empty["value"] == "—"
-    # 副总、总经理不能调 get_allocation：只用费用概览里的预览标记，没有未判定金额，也不可点进分摊页
+    # 2026-10-13：副总、总经理只读分摊数据，和财务同一个状态，点进研发费用汇总（只读）
     leader = make_ctx(positions=("general_manager",))
-    seen = run("alloc.status", leader, **{"money.cost_overview": overview()})
-    assert (seen["value"], seen["sub"], seen["target"]) == ("预览", "10 月 ¥ 286.4 万，未定版", None)
-    assert "money.allocation" not in leader._memo
-    done = run("alloc.status", make_ctx(positions=("vice_manager",)), **{"money.cost_overview": overview(preview=False)})
+    seen = run("alloc.status", leader, **{"money.allocation": allocation()})
+    assert (seen["value"], seen["sub"]) == ("预览", "10 月 ¥ 286.4 万，未定版，未判定 ¥ 13.3 万")
+    assert seen["target"] == {"key": "cost.summary", "params": {"period": "2026-10"}}
+    done = run("alloc.status", make_ctx(positions=("vice_manager",)), **{"money.allocation": allocation(preview=False, finalized=True, unknown=0.0)})
     assert done["value"] == "已定版"
-    none = run("alloc.status", make_ctx(positions=("vice_manager",)), **{"money.cost_overview": overview(preview=False, totals={"rd": 0, "po": 0, "expense": 0, "total": 0})})
+    none = run("alloc.status", make_ctx(positions=("vice_manager",)), **{"money.allocation": allocation(has_data=False, preview=False)})
     assert none["value"] == "—"
 
 
@@ -371,7 +378,8 @@ def test_unpaid_counts_claims_and_purchase_payments_together():
     card = run("pay.unpaid", make_ctx(**FINANCE), **pay_memo())
     assert (card["value"], card["unit"], card["tone"]) == ("8,000", "元", "bad")
     assert card["sub"] == "共 3 笔 · 加急 1 笔 · 等待超过 3 天 2 笔"
-    assert card["target"] == {"key": "board.payment", "params": {}}
+    # 付款看板没有采购付款：点进去是合在一起的清单（2026-10-13）
+    assert card["target"] == {"key": "drill", "params": {"item": "pay.unpaid", "period": "2026-10"}}
     assert "采购付款期次「待实际付款」" in card["hint"] and "不含采购付款" not in card["hint"]
 
 
@@ -385,7 +393,7 @@ def test_unpaid_with_only_purchase_goes_to_the_purchase_payment_page():
     only = claims()
     card = run("pay.unpaid", make_ctx(**FINANCE), **pay_memo(**{"money.claims": only}))
     assert card["value"] == "5,000" and card["tone"] == "bad"
-    assert card["target"] == {"key": "procpay.work", "params": {"status": "待实际付款"}}
+    assert card["target"]["params"]["item"] == "pay.unpaid"
 
 
 def test_unpaid_empty_state():
@@ -414,7 +422,7 @@ def test_waiting_card_and_alert():
     assert alert_["sub"] == "最久已等 5 天，其中 1 笔在等出纳付款"
     purchase_only = run("alert.pay_waiting", make_ctx(**FINANCE), **pay_memo(**{"money.claims": claims()}))
     assert purchase_only["sub"] == "最久已等 4 天，都在等总经理确认付款"
-    assert purchase_only["target"] == {"key": "procpay.work", "params": {"status": "待实际付款"}}
+    assert purchase_only["target"] == {"key": "drill", "params": {"item": "pay.waiting", "period": "2026-10"}}
 
 
 def test_in_approval_split_by_current_step_position():
@@ -443,13 +451,28 @@ def test_in_approval_nothing_in_flight():
     assert block["rows"] == [] and block["sub"] == "没有在审批的付款"
 
 
+def paid_memo(period="2026-10", docs=(), purchase=(), lines=()):
+    """`_paid` / `_paid_purchase` 的备忘（2026-10-13：已付只有这一个算法）。"""
+    first, last = money._month_bounds(period)
+    return {f"money.paid:{first}:{last}": {"docs": list(docs), "lines": list(lines)},
+            f"money.paid_po:{first}:{last}": None if purchase is None else list(purchase)}
+
+
+def paid_doc(name, kind="报销单", amount=0.0, paid_on="2026-10-03"):
+    return {"name": name, "kind": kind, "subject": "", "employee_name": "", "paid_on": paid_on, "amount": amount}
+
+
+PAID_DOCS = [paid_doc("OA-8", amount=1000.0), paid_doc("OA-9", "付款单", 2000.0, "2026-10-04")]
+PAID_PO = [paid_doc("OA-P9", "采购付款", 3000.0), paid_doc("OA-P8", "采购付款", 2000.0)]
+
+
 def test_paid_this_month():
-    card = run("pay.paid_month", make_ctx(**FINANCE), **pay_memo())
+    card = run("pay.paid_month", make_ctx(**FINANCE), **pay_memo(**paid_memo(docs=PAID_DOCS, purchase=PAID_PO)))
     assert (card["label"], card["value"], card["unit"]) == ("本月已付", "8,000", "元")
     assert card["sub"] == "4 笔 · 报销 ¥ 1,000 · 付款 ¥ 2,000 · 采购付款 ¥ 5,000"
-    no_po = run("pay.paid_month", make_ctx(positions=("finance_auditor",)), **pay_memo(**{"money.purchase": None}))
+    no_po = run("pay.paid_month", make_ctx(positions=("finance_auditor",)), **pay_memo(**paid_memo(docs=PAID_DOCS, purchase=None)))
     assert no_po["value"] == "3,000" and "采购付款" not in no_po["sub"]
-    other = run("pay.paid_month", make_ctx(period="2026-09", **FINANCE), **pay_memo())
+    other = run("pay.paid_month", make_ctx(period="2026-09", **FINANCE), **pay_memo(**paid_memo("2026-09")))
     assert other["label"] == "9 月已付"
 
 
@@ -490,7 +513,9 @@ def test_payment_stage_uses_the_systems_own_stage_names():
 
 
 def test_claim_category_top_five():
-    block = run("block.claim_category", make_ctx(**FINANCE), **pay_memo())
+    lines = [{"parent": f"R{index}", "project": "", "amount": amount, "account": label}
+             for index, (label, amount) in enumerate([("差旅费 / 机票", 142000.0), ("招待费", 68000.0), ("办公费", 51000.0), ("其他", 20000.0)])]
+    block = run("block.claim_category", make_ctx(**FINANCE), **pay_memo(**paid_memo(lines=lines)))
     assert [row["label"] for row in block["rows"]] == ["差旅费 / 机票", "招待费", "办公费", "其他"]
     assert block["rows"][0]["value"] == "14.2" and block["sub"] == "本月已付 · 万元"
 
@@ -716,7 +741,8 @@ def test_invoice_list_adds_up_to_the_card_and_each_row_opens_the_right_tab():
     detail = core.get_detail_for(ctx, "invoice.review")
     assert detail["summary"] == f"共 {card['value']} 张"
     assert [(row["cells"][0], row["cells"][1]) for row in detail["rows"]] == [("待确认", "14"), ("疑似重复", "2"), ("识别失败", "1")]
-    assert [row["target"]["params"] for row in detail["rows"]] == [{"tab": "allinv"}, {"tab": "dup"}, {"tab": "allinv"}]
+    # 2026-10-13：待确认、识别失败各进发票夹自己的单状态页签（原来都进“全部发票”）
+    assert [row["target"]["params"] for row in detail["rows"]] == [{"tab": "confirm"}, {"tab": "dup"}, {"tab": "failed"}]
     assert "其中超过 7 天没确认的 4 张" in detail["rows"][0]["cells"][2]
 
 
@@ -767,7 +793,7 @@ def test_labor_cost_when_nothing_is_ready_yet():
     data = {"gross": 0.0, "social": 0.0, "fund": 0.0, "has_contributions": False, "dorm_company": 0.0, "dorm_registered": False}
     block = run("block.labor_cost", make_ctx(roles=("HR Manager",)), **{"money.labor": data})
     assert [(row["value"], row["tone"]) for row in block["rows"]] == [("—", "warn")] * 3
-    assert [row["sub"] for row in block["rows"]] == ["本期还没有已提交的工资条", "本期还没有已确认的记录", "本期宿舍费用还没登记"]
+    assert [row["sub"] for row in block["rows"]] == ["本期还没有已确认的工资条", "本期还没有已确认的记录", "本期宿舍费用还没登记"]
 
 
 # ---------------------------------------------------------------- 小函数
@@ -784,7 +810,7 @@ def test_small_helpers():
 
 def test_pay_trend_covers_six_months_in_wan_and_marks_the_selected_month():
     totals = {"2026-07": 1500000.0, "2026-08": 0.0, "2026-09": 2124000.0, "2026-10": 1000000.0}
-    block = run("block.pay_trend", make_ctx(**FINANCE), **{"money.paid_by_month": totals})
+    block = run("block.pay_trend", make_ctx(**FINANCE), **{"money.paid_by_month": totals, "money.po_pay_view": True})
     assert block["type"] == "cols" and [r["label"] for r in block["rows"]] == ["5月", "6月", "7月", "8月", "9月", "10月"]
     assert [r["value"] for r in block["rows"]] == ["0", "0", "150", "0", "212.4", "100"]
     assert block["rows"][-1]["last"] is True and block["rows"][4]["pct"] == 100.0
@@ -796,18 +822,28 @@ def test_pay_trend_is_only_for_those_who_see_the_payment_board():
 
 
 def test_paid_by_month_sums_all_three_payment_kinds_by_the_actual_paid_date(monkeypatch):
+    """2026-10-13：和「本月已付」同一个算法——报销、付款按费用明细价税合计，采购付款按单据金额且要有 PO 查看权。"""
     import frappe
 
-    seen = {}
+    seen = []
 
-    def get_all(doctype, **kwargs):
-        seen.update(kwargs)
-        return [{"amount": 100, "paid_on": "2026-10-03"}, {"amount": 50, "paid_on": "2026-10-20"}, {"amount": 70, "paid_on": "2026-08-31"},
-                {"amount": 9, "paid_on": None}]
+    def get_all(doctype, filters=None, **kwargs):
+        seen.append((doctype, filters))
+        if doctype == "OA Approval Expense Line":
+            return [{"parent": "R1", "total_amount": 100, "amount": 90}, {"parent": "R2", "total_amount": None, "amount": 50},
+                    {"parent": "R3", "total_amount": 70}]
+        if filters["request_type"] == "采购付款":
+            return [{"name": "P1", "amount": 9, "paid_on": "2026-10-05"}]
+        return [{"name": "R1", "request_type": "报销单", "paid_on": "2026-10-03"}, {"name": "R2", "request_type": "付款单", "paid_on": "2026-10-20"},
+                {"name": "R3", "request_type": "费用付款申请", "paid_on": "2026-08-31"}]
 
     monkeypatch.setattr(frappe, "get_all", get_all, raising=False)
-    totals = money._paid_by_month(make_ctx(**FINANCE))
-    assert totals == {"2026-10": 150.0, "2026-08": 70.0}
-    assert seen["filters"]["workflow_status"] == "已付款"
-    assert seen["filters"]["paid_on"] == ["between", ["2026-05-01", "2026-10-31"]]
-    assert set(seen["filters"]["request_type"][1]) >= {"报销单", "付款单", "采购付款"}
+    ctx = make_ctx(**FINANCE)
+    ctx._memo["money.po_pay_view"] = True
+    assert money._paid_by_month(ctx) == {"2026-10": 159.0, "2026-08": 70.0}
+    claim_filters = seen[0][1]
+    assert claim_filters["workflow_status"] == "已付款" and claim_filters["paid_on"] == ["between", ["2026-05-01", "2026-10-31"]]
+    assert set(claim_filters["request_type"][1]) == {"报销单", "付款单", "费用付款申请"}
+    no_po = make_ctx(**FINANCE)
+    no_po._memo["money.po_pay_view"] = False
+    assert money._paid_by_month(no_po) == {"2026-10": 150.0, "2026-08": 70.0}

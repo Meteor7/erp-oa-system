@@ -3,6 +3,7 @@ from datetime import date
 import frappe
 
 from rayher_hr_payroll.api._guards import require_rd_access
+from rayher_hr_payroll.hr_read_access import require_hr_read
 
 HR_ROLES = ("System Manager", "HR User", "HR Manager")
 ROOM_FIELDS = [
@@ -37,7 +38,7 @@ def room_status(room_purpose, occupancy):
 
 @frappe.whitelist()
 def list_rooms():
-    require_rd_access(HR_ROLES)
+    require_hr_read(HR_ROLES, require_rd_access)
     rooms = frappe.get_all(
         "Accommodation Room", fields=ROOM_FIELDS, order_by="room_no"
     )
@@ -76,7 +77,7 @@ def list_rooms():
 
 @frappe.whitelist()
 def list_checkout_history():
-    require_rd_access(HR_ROLES)
+    require_hr_read(HR_ROLES, require_rd_access)
     return frappe.get_all(
         "Accommodation Occupancy",
         filters={"end_date": ["is", "set"]},

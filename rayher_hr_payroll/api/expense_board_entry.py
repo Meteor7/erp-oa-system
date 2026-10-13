@@ -193,7 +193,7 @@ def payment_board():
     lines = frappe.get_all(
         "OA Approval Expense Line",
         filters={"parent": ["in", paid], "parenttype": "OA Approval Request"},
-        fields=["parent", "expense_account_level_1", "expense_account_level_2", "total_amount"],
+        fields=["parent", "expense_account_level_1", "expense_account_level_2", "total_amount", "amount"],
         limit_page_length=0,
     ) if paid else []
     pending_invoices = [row["name"] for row in rows if row.get("invoice_followup_status") == "待收票"]

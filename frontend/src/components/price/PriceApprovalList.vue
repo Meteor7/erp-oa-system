@@ -1,7 +1,8 @@
 <script setup>
-// 价格审批单列表：按状态筛选、搜索，点一行进入详情。
-import { computed, ref } from 'vue';
-import { APPROVAL_FILTERS, approvalTone, filterApprovals, money, pillClass, splitList } from '../../lib/priceView.js';
+// 价格审批单列表：按状态筛选、搜索，点一行进入详情。看板点进来带 ?status=pending（待审批）就是筛好的。
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { APPROVAL_FILTERS, amountText, approvalTone, filterApprovals, pillClass, splitList } from '../../lib/priceView.js';
 
 const props = defineProps({
   approvals: { type: Array, default: () => [] },
@@ -9,7 +10,10 @@ const props = defineProps({
 });
 const emit = defineEmits(['open']);
 
-const filter = ref('all');
+const route = useRoute();
+const presetFilter = (query) => (APPROVAL_FILTERS.some((item) => item.key === query.status) ? String(query.status) : 'all');
+const filter = ref(presetFilter(route.query));
+watch(() => route.query.status, () => { filter.value = presetFilter(route.query); });
 const search = ref('');
 const rows = computed(() => filterApprovals(props.approvals, filter.value, search.value));
 
@@ -21,7 +25,7 @@ function sourceText(item) {
   return requests.length ? requests.join('、') : '—';
 }
 function totalText(item) {
-  return (item.lines || []).some((line) => line.selected_supplier) ? money(item.total_amount) : '—';
+  return (item.lines || []).some((line) => line.selected_supplier) ? amountText(item.total_amount, item.amounts_hidden) : '—';
 }
 </script>
 

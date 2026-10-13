@@ -7,6 +7,7 @@ import hashlib
 
 import frappe
 from rayher_hr_payroll.api._guards import require_hr_sensitive_access, require_rd_access
+from rayher_hr_payroll.hr_read_access import require_hr_read
 from rayher_hr_payroll.api.social_insurance_import_entry import SUPPORTED_COMPANIES, _company, _decode_content
 from rayher_hr_payroll.hr_contributions import housing_fund_amounts
 from rayher_hr_payroll.housing_fund_import import (
@@ -157,7 +158,7 @@ def _display_batch(row):
 
 @frappe.whitelist()
 def get_fund_workbench(period, company=None, batch=None):
-    require_rd_access(ROLES)
+    require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     period = canonical_period(period)
     company = _company(company, allow_all=True)

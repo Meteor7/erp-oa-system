@@ -84,7 +84,7 @@ def test_only_spa_managed_draft_can_be_updated(monkeypatch):
     assert module._assert_writable_slip(SimpleNamespace(docstatus=0, hr_spa_managed=1, name="SAL-1")) is None
     with pytest.raises(PayrollRuleError, match="其他来源"):
         module._assert_writable_slip(SimpleNamespace(docstatus=0, hr_spa_managed=0, name="SAL-X"))
-    with pytest.raises(PayrollRuleError, match="已提交"):
+    with pytest.raises(PayrollRuleError, match="已确认，不能修改；要改请先撤回确认"):
         module._assert_writable_slip(SimpleNamespace(docstatus=1, hr_spa_managed=1, name="SAL-SUB"))
 
 

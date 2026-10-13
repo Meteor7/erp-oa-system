@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
 import { useRoute } from 'vue-router';
 import {
-  REFUND_NOTICE, STATUS_FILTERS, STATUS_TONE, buildPoGroups, filterGroups, groupHeader, installmentView, money,
+  REFUND_NOTICE, STATUS_FILTERS, STATUS_TONE, amountText, buildPoGroups, filterGroups, groupHeader, installmentView,
   sortGroups, statusCounts,
 } from '../../lib/paymentView.js';
 import { PROCUREMENT_API, errorText } from './paymentApi.js';
@@ -101,7 +101,7 @@ async function pushPayment(view) {
         <button v-for="group in filtered" :key="group.po" type="button" class="pay-po" :class="{ on: active && active.po === group.po }" @click="pick(group)">
           <span class="split"><b>{{ group.po }}</b><span class="pill" :class="`p-${groupHeader(group).tone}`">{{ group.po_status || '—' }}</span></span>
           <span class="pay-po-sup">{{ group.supplier }}</span>
-          <span class="muted">到货 {{ groupHeader(group).recvText }} · 验收 {{ groupHeader(group).inspText }} · 已付 {{ money(group.paid, group.currency) }}</span>
+          <span class="muted">到货 {{ groupHeader(group).recvText }} · 验收 {{ groupHeader(group).inspText }}<template v-if="!group.amounts_hidden"> · 已付 {{ amountText(group.paid, group.currency) }}</template></span>
           <span class="pay-po-chips">
             <span v-for="(ev, index) in group.evaluated" :key="ev.item.payment_plan_row || index" class="pill pay-mini" :class="`p-${STATUS_TONE[ev.ev.status] || 'gray'}`">{{ ev.item.installment_name }} {{ ev.ev.status }}</span>
           </span>
@@ -119,7 +119,7 @@ async function pushPayment(view) {
             {{ header.supplier }}<template v-if="header.source"> · 来源 {{ header.source }}</template>
             <template v-if="active.source_price_approvals"> · 价格审批 {{ active.source_price_approvals }}</template>
             <template v-if="active.contract_status"> · 合同 {{ active.contract_status }}</template>
-            · PO 总额 {{ money(header.total, header.currency) }} · 已付 {{ money(header.paid, header.currency) }}
+            <template v-if="!active.amounts_hidden">· PO 总额 {{ amountText(header.total, header.currency) }} · 已付 {{ amountText(header.paid, header.currency) }}</template>
           </div>
         </section>
 
@@ -127,7 +127,7 @@ async function pushPayment(view) {
 
         <section class="panel">
           <div class="pt"><span>付款期次 <span class="muted">条件按整张 PO 判断（全部到货 / 全部验收通过），和本期比例无关；暂不支持分批到货</span></span></div>
-          <PayInstallmentCard v-for="view in installments" :key="view.key" :view="view" :currency="active.currency" :busy="pushingKey === view.key" @push="pushPayment" @open="(name) => emit('open-request', name)" />
+          <PayInstallmentCard v-for="view in installments" :key="view.key" :view="view" :currency="active.currency" :hidden="active.amounts_hidden" :busy="pushingKey === view.key" @push="pushPayment" @open="(name) => emit('open-request', name)" />
           <p class="muted pay-foot">审批过程中如果又登记了新的到货、或验收结果变成换货 / 退货，这期会出现“条件已回退”提醒；到最后“总经理确认付款”时系统会拦下，不会错付。{{ REFUND_NOTICE }}。</p>
         </section>
       </div>

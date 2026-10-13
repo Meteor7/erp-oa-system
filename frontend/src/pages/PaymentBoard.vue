@@ -10,7 +10,7 @@ import DonutChart from '../components/expense-ui/DonutChart.vue';
 import HBars from '../components/expense-ui/HBars.vue';
 import StackedBars from '../components/expense-ui/StackedBars.vue';
 import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
-import { agingTiles, boardAccess, boardRoute, boardTab, bottomColumns, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
+import { agingTiles, boardAccess, cashierSplit, boardRoute, boardTab, bottomColumns, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 import { hereAsFrom, withFrom } from '../lib/navContext.js';
 import { isWaitingTooLong } from '../lib/waiting.js';
@@ -29,7 +29,11 @@ const access = boardAccess();
 const kpis = computed(() => paymentKpis(data.value, access));
 // 打开的单据 / 列表上"返回"回到这个看板（含当前页签）。
 const here = computed(() => hereAsFrom(route.path, route.query));
-const queue = computed(() => data.value.cashier_queue || []);
+// 出纳待付款：标题、方块只算待付款（和数据看板「出纳待付款」一样）；已付款等核验发票的付款单单独标出来，列在表的最后。
+const split = computed(() => cashierSplit(data.value.cashier_queue || []));
+const queue = computed(() => split.value.toPay);
+const verifying = computed(() => split.value.verifying);
+const tableRows = computed(() => [...queue.value, ...verifying.value]);
 const tiles = computed(() => agingTiles(queue.value));
 const summary = computed(() => data.value.summary || {});
 const urgent = computed(() => queue.value.filter((row) => row.urgency === '加急').length);
@@ -104,7 +108,7 @@ onMounted(load);
 
       <div id="bd-cashier" class="panel">
         <div class="pt">
-          <span>出纳待付款 <span class="muted">{{ queue.length }} 张 · ¥ {{ money(summary.to_pay_amount) }}<template v-if="urgent"> · 其中加急 {{ urgent }} 张</template> · 加急优先，其次按等待时间</span></span>
+          <span>出纳待付款 <span class="muted">{{ queue.length }} 张 · ¥ {{ money(summary.to_pay_amount) }}<template v-if="urgent"> · 其中加急 {{ urgent }} 张</template><template v-if="verifying.length"> · 另有已付款待核验发票 {{ verifying.length }} 张，列在最后</template> · 加急优先，其次按等待时间</span></span>
           <span class="links"><router-link class="link" :to="{ path: '/approval/claim', query: { view: 'list', scope: 'todo', from: here } }">报销待办 →</router-link><router-link class="link" :to="{ path: '/approval/payment', query: { view: 'list', scope: 'todo', from: here } }">付款待办 →</router-link></span>
         </div>
         <div v-if="queue.length" class="bd-tiles">
@@ -118,7 +122,7 @@ onMounted(load);
           <table>
             <thead><tr><th>单据</th><th>类型</th><th>申请人</th><th>部门</th><th class="r">金额</th><th class="r">等待</th><th>状态</th></tr></thead>
             <tbody>
-              <tr v-for="row in queue" :key="row.name" class="row-sel" @click="open(row)">
+              <tr v-for="row in tableRows" :key="row.name" class="row-sel" @click="open(row)">
                 <td class="num">{{ row.name }}<span v-if="row.urgency === '加急'" class="pill p-red" style="margin-left:4px">加急</span></td>
                 <td>{{ row.request_type === '报销单' ? '报销' : '付款' }}</td>
                 <td>{{ row.employee_name }}</td>
@@ -127,7 +131,7 @@ onMounted(load);
                 <td :class="['r', { warn: isWaitingTooLong(row.waited_days) }]">{{ row.waited_days }} 天</td>
                 <td><span :class="pillClass(row.status)">{{ row.status }}</span></td>
               </tr>
-              <tr v-if="!queue.length"><td colspan="7" class="empty">出纳没有待付的单据</td></tr>
+              <tr v-if="!tableRows.length"><td colspan="7" class="empty">出纳没有待付的单据</td></tr>
             </tbody>
           </table>
         </div>

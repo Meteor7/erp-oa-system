@@ -82,6 +82,29 @@ def world(monkeypatch):
     reader("_load_stage_counts", "stages")
     reader("_load_chain_counts", "chain")
     reader("_load_urgent", "urgent")
+
+    # 2026-10-13：物料口径改成物料进度的行（同物料进度页的 SQL）。假数据按同一规则从 PO 行推出来：
+    # 有来源（申请, 行）的、合同已生效、交期已过、没收齐或退货中；一个（申请, 行）一项，交期取最早的。
+    def overdue_materials(today):
+        if data.get("overdue_materials") is not None:
+            return data["overdue_materials"]
+        out = {}
+        for row in data["lines"] or []:
+            due = str(row["due"] or "")
+            if not (row["source_request"] and row["source_line"]) or row["po_status"] not in proc.EFFECTIVE_PO or not due or due >= today:
+                continue
+            if float(row["received"] or 0) >= float(row["quantity"] or 0) and row["inspection"] != "退货中":
+                continue
+            key = f"{row['source_request']}:{row['source_line']}"
+            item = out.setdefault(key, {"name": key, "request": row["source_request"], "line": row["source_line"],
+                                        "project": row["project"], "item": row["item"], "due": due})
+            item["due"] = min(item["due"], due)
+        return list(out.values())
+
+    data.update(overdue_materials=None, heads={}, breakdown={"request": {}, "pr": {}, "po": {}, "payment": {}})
+    reader("_load_overdue_materials", "overdue_materials", overdue_materials)
+    reader("_load_request_heads", "heads", lambda names: {key: value for key, value in data["heads"].items() if key in names})
+    reader("_load_chain_breakdown", "breakdown")
     return data
 
 
@@ -385,14 +408,17 @@ def test_chain_and_material_kpis_with_data(world):
     compare = kpi_of("proc.to_compare", ctx)
     assert (compare["value"], compare["unit"], compare["sub"], compare["target"]["params"]) == ("3", "项", "来自 2 张 PR", {"view": "source"})
     pending = kpi_of("proc.price_pending", ctx)
-    assert (pending["value"], pending["sub"], pending["target"]["params"]) == ("2", "另有 1 张还在比价（草稿）", {"view": "approvals"})
+    # 2026-10-13：点进去是价格审批单列表筛「待审批」
+    assert (pending["value"], pending["sub"], pending["target"]["params"]) == ("2", "另有 1 张还在比价（草稿）", {"view": "approvals", "status": "pending"})
     await_pr = kpi_of("proc.await_pr", ctx)
     assert (await_pr["value"], await_pr["sub"], await_pr["tone"]) == ("2", "共 3 项物料", "hot")
-    assert await_pr["target"] == {"key": "procurement.list", "params": {"scope": "all", "stage": "await_pr"}}
+    # 2026-10-13：点进去是同一份数据的明细（原来去采购申请列表，那里的阶段规则不一样）
+    assert await_pr["target"] == {"key": "drill", "params": {"item": "proc.await_pr", "period": "2026-10"}}
     uncoded = kpi_of("proc.uncoded", ctx)
     assert (uncoded["value"], uncoded["tone"], uncoded["target"]["key"]) == ("4", "hot", "material.progress")
     material = kpi_of("proc.material_overdue", ctx)
-    assert (material["value"], material["sub"], material["tone"], material["target"]["key"]) == ("2", "最久逾期 9 天", "bad", "material.overdue")
+    # 物料口径 = 物料进度的行：没有来源的 PO 行（B3）不在物料进度看板上，不算（2026-10-13）
+    assert (material["value"], material["sub"], material["tone"], material["target"]["key"]) == ("1", "最久逾期 8 天", "bad", "material.overdue")
     risk = kpi_of("proc.risk_projects", ctx)
     assert (risk["value"], risk["unit"]) == ("1", "个")          # 只有 P1 一个项目（B3 没填项目）
 
@@ -410,12 +436,14 @@ def test_payment_kpis_with_data(world):
 
 def test_month_amount_and_suppliers(world):
     fill(world)
+    world["month_lines"].append({"po": "P0", "project": "", "amount": 200000})      # 2026-10-13：金额按物料行合计
     ctx = full_ctx()
     amount = kpi_of("proc.month_amount", ctx)
     assert (amount["value"], amount["unit"], amount["sub"]) == ("22.0", "万", "较上月 +10.0%")
     suppliers = kpi_of("proc.suppliers_count", ctx)
     assert (suppliers["value"], suppliers["unit"], suppliers["sub"]) == ("6", "家", "共 7 张 PO")
     world["month_pos"] = [{"po": "N1", "supplier": "甲", "amount": 5000, "month": "2026-10"}]
+    world["month_lines"] = [{"po": "N1", "project": "", "amount": 5000}]
     small = kpi_of("proc.month_amount", full_ctx())            # 同一个 ctx 里读过的数据会被记住，换数据要换 ctx
     assert (small["value"], small["unit"], small["sub"]) == ("5,000", "元", "上月没有采购")
 
@@ -465,13 +493,13 @@ def test_alerts_with_data(world):
     assert (stale["tone"], stale["title"], stale["sub"]) == ("bad", "1 个 PO 到货超过 7 天还没验收", "PO-A 已到货 19 天，可能耽误付款")
     assert stale["target"]["params"]["item"] == "proc.inspect_stale"
     material = run("alert.material_overdue", ctx)
-    assert (material["tone"], material["title"]) == ("bad", "2 项物料超过合同交期还没到")
+    assert (material["tone"], material["title"]) == ("bad", "1 项物料超过合同交期还没到")      # 没有来源的 B3 不算（2026-10-13）
     risk = run("alert.risk_projects", ctx)
     assert (risk["title"], risk["sub"]) == ("1 个项目有物料逾期未到", "P1 有 1 项物料逾期")
 
 
 def test_overdue_alert_is_only_a_warning_within_a_week(world):
-    world["lines"] = [line("PO-A", 10, 0, due="2026-10-05", name="A1")]       # 逾期 4 天
+    world["lines"] = [line("PO-A", 10, 0, due="2026-10-05", sr="R1", sl="1", name="A1")]       # 逾期 4 天
     assert run("alert.po_overdue", full_ctx())["tone"] == "warn"
     assert run("alert.material_overdue", full_ctx())["tone"] == "warn"
     world["lines"] = [line("PO-A", 10, 0, due="2026-10-02", name="A1")]       # 逾期 7 天：超过 7 天才标红
@@ -512,9 +540,9 @@ def test_supplier_and_project_blocks_top5_plus_other(world):
     fill(world)
     ctx = full_ctx()
     suppliers = run("block.proc_suppliers", ctx)
-    assert [(r["label"], r["value"]) for r in suppliers["rows"]] == [
-        ("甲", "15.0 万"), ("乙", "3.0 万"), ("丙", "2.0 万"), ("丁", "1.0 万"), ("戊", "8,000 元"), ("其他（1 项）", "2,000 元")]
-    assert suppliers["rows"][0]["pct"] == 100.0 and suppliers["rows"][1]["pct"] == 20.0
+    # 2026-10-13：金额 = 物料行金额合计（N1 15 万、N3 3 万、N4 4 万；其余 PO 没有物料行金额，不上榜）
+    assert [(r["label"], r["value"]) for r in suppliers["rows"]] == [("甲", "15.0 万"), ("丙", "4.0 万"), ("乙", "3.0 万")]
+    assert suppliers["rows"][0]["pct"] == 100.0 and suppliers["rows"][2]["pct"] == 20.0
     projects = run("block.proc_projects", ctx)
     assert [(r["label"], r["value"]) for r in projects["rows"]] == [("P1", "15.0 万"), ("非项目", "4.0 万"), ("P2", "3.0 万")]
     world["month_pos"] = [{"po": "N1", "supplier": "", "amount": 100, "month": "2026-10"}]
@@ -524,10 +552,11 @@ def test_supplier_and_project_blocks_top5_plus_other(world):
 def test_material_stage_mapping(world):
     fill(world)
     block = run("block.material_stage", make_ctx(positions=("pmc",)))
+    # 2026-10-13：阶段名和物料进度页的阶段条一样（点进去能对上）；还没提 PR 的单独在副标题里说
     assert [(r["label"], r["value"]) for r in block["rows"]] == [
-        ("待提 PR", "3"), ("询价比价", "6"), ("PO 已下", "5"), ("到货验收", "3"), ("已关闭", "6")]
-    assert [r["pct"] for r in block["rows"]] == [50.0, 100.0, 83.3, 50.0, 100.0]
-    assert block["rows"][4]["tone"] == "ok" and "到货验收中 + 付款中" in block["hint"]
+        ("OA审批中", "9"), ("采购确认中", "5"), ("PO处理中", "4"), ("供应商制作中", "5"), ("到货验收中", "2"), ("付款中", "1"), ("已关闭", "6")]
+    assert [r["pct"] for r in block["rows"]] == [100.0, 55.6, 44.4, 55.6, 22.2, 11.1, 66.7]
+    assert block["rows"][6]["tone"] == "ok" and "采购确认中有 3 项还没提 PR" in block["sub"]
 
 
 def test_risk_projects_list(world):
@@ -581,7 +610,8 @@ def test_all_targets_are_registered_and_params_checked(world):
                 if target:
                     seen.add(target["key"])
                     assert target["key"] in core.load_targets()
-    assert seen == {"drill", "price.approvals", "procpay.work", "procurement.list", "material.progress", "material.overdue",
+    # 待提 PR 不再去采购申请列表（2026-10-13，改成同一份数据的明细清单）
+    assert seen == {"drill", "price.approvals", "procpay.work", "material.progress", "material.overdue",
                     "procurement.detail", "directpurchase.detail"}
     assert proc._po_open(production, "PO-A") == {"key": "procpay.work", "params": {"po": "PO-A"}}
     assert proc._po_open(full_ctx(), "PO-A") == {"key": "price.po", "params": {"po": "PO-A"}}
@@ -647,7 +677,7 @@ def test_money_lists_add_up_to_the_cards(world):
     ctx = full_ctx()
     amount = detail_of(ctx, "proc.month_amount")
     assert len(amount["rows"]) == 7 and amount["summary"] == "共 7 个 PO，合计 22.0 万"
-    assert amount["rows"][0]["cells"] == ["N1", "甲", "已生效", "2026-10-01", "¥ 100,000.00"]
+    assert amount["rows"][0]["cells"] == ["N1", "甲", "已生效", "2026-10-01", "¥ 150,000.00"]       # 物料行金额合计（2026-10-13）
     suppliers = detail_of(ctx, "proc.suppliers")
     assert suppliers["summary"] == "共 6 家，7 张 PO" and int(kpi_of("proc.suppliers_count", ctx)["value"]) == 6
     assert suppliers["rows"][0]["cells"] == ["甲", "2 张", "¥ 150,000.00"]
@@ -705,8 +735,10 @@ def test_urgent_quiet_when_everything_is_moving(world):
 def test_urgent_is_seen_by_the_bosses_procurement_and_pmc_but_not_by_production_or_finance(world):
     fill(world)
     seen = lambda ctx: core.REGISTRY["proc.urgent"].visible(ctx)
-    for positions in (("general_manager",), ("vice_manager",), ("procurement_manager",), ("pmc",)):
-        assert seen(make_ctx(positions=positions)), positions
+    # 2026-10-13：还要能打开申请详情（详情按角色给读权限），所以带上这些岗位本来就有的角色
+    for positions, roles in ((("general_manager",), "Rayher Business Executive"), (("vice_manager",), "Rayher Business Executive"),
+                             (("procurement_manager",), "Purchase Manager"), (("pmc",), "Purchase User")):
+        assert seen(make_ctx(positions=positions, roles=("Employee", roles))), positions
     assert seen(make_ctx(roles=("Employee", "Rayher Business Executive")))
     assert not seen(make_ctx(positions=("production_asset_owner",)))
     assert not seen(make_ctx(positions=("finance_accountant",), roles=("Employee", "Accounts User")))
@@ -746,7 +778,8 @@ def test_load_urgent_keeps_unfinished_ones_and_names_where_each_one_is(monkeypat
             assert filters["urgency"] == "加急" and filters["request_type"] == ["in", ["采购申请", "购买申请"]]
             assert filters["workflow_status"] == ["not in", ["草稿", "已拒绝", "已撤回", "已取消"]]
             return rows
-        assert doctype == "OA Approval Step"
+        if doctype != "OA Approval Step":
+            return []                       # 采购链路单据（2026-10-13 起也算“动静”）：这里没有
         return steps
 
     monkeypatch.setattr(proc, "frappe", NS(get_all=get_all, get_doc=lambda doctype, name: NS(name=name)))
@@ -853,12 +886,12 @@ def test_load_price_state_counts_lines_without_any_quote(monkeypatch):
         "OA Price Approval": [{"name": "PA-1", "status": "待审批"}, {"name": "PA-2", "status": "待审批"}, {"name": "PA-3", "status": "草稿"}],
         "OA Price Approval Line": [{"name": "l1", "parent": "PA-1"}, {"name": "l2", "parent": "PA-1"}, {"name": "l3", "parent": "PA-2"}],
         "OA Price Approval Quote": [{"price_approval": "PA-1", "price_line": "l1"}, {"price_approval": "PA-2", "price_line": "l3"}]})
-    assert proc._load_price_state() == {"pending": 2, "draft": 1, "unquoted": {"PA-1": 1}}
+    assert proc._load_price_state() == {"pending": 2, "draft": 1, "unquoted": {"PA-1": 1}, "names": ["PA-1", "PA-2"]}
 
 
 def test_load_price_state_without_pending_approvals_skips_the_line_queries(monkeypatch):
     frappe = fake(monkeypatch, {"OA Price Approval": [{"name": "PA-3", "status": "草稿"}]})
-    assert proc._load_price_state() == {"pending": 0, "draft": 1, "unquoted": {}}
+    assert proc._load_price_state() == {"pending": 0, "draft": 1, "unquoted": {}, "names": []}
     assert [query[0] for query in frappe.queries] == ["OA Price Approval"]
 
 
@@ -883,14 +916,15 @@ def test_load_await_pr_follows_list_materials_for_pr(monkeypatch):
 
 
 def test_load_uncoded_ignores_blank_spaces_and_dead_requests(monkeypatch):
-    frappe = fake(monkeypatch, {
-        "OA Material Progress": [
-            {"name": "M1", "source_request": "R1", "material_code": ""}, {"name": "M2", "source_request": "R1", "material_code": "  "},
-            {"name": "M3", "source_request": "R1", "material_code": None}, {"name": "M4", "source_request": "R1", "material_code": "A-001"},
-            {"name": "M5", "source_request": "R-DEAD", "material_code": ""}],
-        "OA Approval Request": [{"name": "R-DEAD"}]})
-    assert [row["name"] for row in proc._load_uncoded()] == ["M1", "M2", "M3"]
-    assert frappe.queries[0][1] == {"status": "正常"}
+    # 2026-10-13：条件是物料进度页 ?uncoded=1 用的同一句 SQL（状态正常、编号去空格后为空、源申请没被拒绝 / 撤回）
+    from rayher_hr_payroll.material_progress_query import FROM_SQL, UNCODED_SQL
+
+    frappe = fake(monkeypatch, {}, sql_rows=[{"name": "M1", "source_request": "R1"}, {"name": "M2", "source_request": "R1"}])
+    assert proc._load_uncoded() == [{"name": "M1", "request": "R1"}, {"name": "M2", "request": "R1"}]
+    query = frappe.queries[0][1]
+    assert FROM_SQL in query and UNCODED_SQL in query
+    for part in ("b.status='正常'", "TRIM(COALESCE(b.material_code,''))=''", "NOT IN ('已拒绝','已撤回')"):
+        assert part in UNCODED_SQL
 
 
 def test_load_stage_counts_reuses_the_material_board_stage_sql(monkeypatch):
@@ -954,7 +988,8 @@ def test_inspect_aging_groups_waiting_pos_by_days_since_the_last_arrival(world):
 def test_overdue_aging_groups_late_materials_and_needs_the_material_board_right(world):
     fill(world)
     block = run("block.overdue_aging", make_ctx(positions=("pmc",), roles=("Employee", "Purchase User")))
-    assert [(r["label"], r["value"], r["tone"]) for r in block["rows"]] == [("1–3 天", "0", ""), ("4–7 天", "0", ""), ("超过 7 天", "2", "bad")]
+    # 物料进度的行：没有来源的 B3 不算（2026-10-13）
+    assert [(r["label"], r["value"], r["tone"]) for r in block["rows"]] == [("1–3 天", "0", ""), ("4–7 天", "0", ""), ("超过 7 天", "1", "bad")]
     world["calls"].clear()
     assert run("block.overdue_aging", make_ctx(positions=("production_asset_owner",))) is None
     assert world["calls"] == []
@@ -962,9 +997,11 @@ def test_overdue_aging_groups_late_materials_and_needs_the_material_board_right(
 
 def test_the_monthly_purchase_trend_covers_six_months_and_is_never_shown_to_pmc(world):
     fill(world)
+    world["month_lines"].append({"po": "P0", "project": "", "amount": 200000})
     block = run("block.proc_month_trend", full_ctx())
     assert [r["label"] for r in block["rows"]] == ["5月", "6月", "7月", "8月", "9月", "10月"]
-    assert [r["value"] for r in block["rows"]] == ["0.0", "0.0", "0.0", "0.0", "20.0", "22.0"]
+    # 物料行金额合计，写法和「本月采购金额」卡片一样（2026-10-13）
+    assert [r["value"] for r in block["rows"]] == ["0 元", "0 元", "0 元", "0 元", "20.0 万", "22.0 万"]
     assert block["rows"][-1]["last"] is True and block["rows"][-1]["pct"] == 100.0
     world["calls"].clear()
     assert run("block.proc_month_trend", make_ctx(positions=("pmc",), roles=("Employee", "Purchase User"))) is None
@@ -974,8 +1011,9 @@ def test_the_monthly_purchase_trend_covers_six_months_and_is_never_shown_to_pmc(
 def test_next_thirty_days_groups_unpaid_purchase_payments_by_planned_week(world):
     fill(world)
     block = run("block.pay_next30", full_ctx())
+    # 2026-10-13：周 = 周一到周日（今天 10-09 周五，10-20 在第 3 周）；金额写法同卡片
     assert [(r["label"], r["value"]) for r in block["rows"]] == [
-        ("已过计划日", "4.5"), ("本周", "0.0"), ("下周", "5.0"), ("第 3 周", "0.0"), ("第 4 周", "0.0"), ("更晚", "0.0"), ("没排期", "2.0")]
+        ("已过计划日", "4.5 万"), ("本周", "0 元"), ("下周", "0 元"), ("第 3 周", "5.0 万"), ("第 4 周", "0 元"), ("更晚", "0 元"), ("没排期", "2.0 万")]
     assert block["rows"][0]["last"] is True                      # 已过计划日的标橙
     world["calls"].clear()
     for blocked in (make_ctx(positions=("pmc",), roles=("Employee", "Purchase User")), make_ctx(positions=("production_asset_owner",))):

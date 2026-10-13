@@ -35,14 +35,16 @@ const selectedName = ref('');
 
 const scope = computed(() => props.page.scope);
 const filter = computed(() => props.page.filter);
-// 看板的「今天不在岗」点进来：「全部」里只留今天在休假 / 调休的人（前端按行里的起止日期过滤）。
+// 看板的「今天不在岗」点进来：「全部」里换成服务端按今天查好的那批人（sets.today，一人一张，和看板的人数一样，
+// 不再从最近 100 张里筛），前端再按起止日期筛一遍、按人去重。
 const todayOnly = computed(() => Boolean(props.page.today) && scope.value === 'all');
 const title = computed(() => listTitle(filter.value));
 const tabs = computed(() => scopeTabs({ sets: props.sets, filter: 'all', isApprover: props.isApprover, canViewAll: props.canViewAll, allLoaded: props.loaded.all }));
-const base = computed(() => props.sets[scope.value] || []);
+const base = computed(() => (todayOnly.value ? props.sets.today : props.sets[scope.value]) || []);
 const counts = computed(() => typeCounts(base.value));
 const typeItems = computed(() => [['all', '全部'], ['请假', '请假'], ['加班', '加班'], ['调休', '调休'], ['出差', '出差']].map(([key, label]) => ({ key, label, count: counts.value[key] ?? 0, on: filter.value === key })));
-const ready = computed(() => ({ todo: props.loaded.review, mine: props.loaded.mine, done: props.loaded.reviewed, all: props.loaded.all })[scope.value] ?? false);
+const ready = computed(() => (todayOnly.value ? props.loaded.today
+  : ({ todo: props.loaded.review, mine: props.loaded.mine, done: props.loaded.reviewed, all: props.loaded.all })[scope.value]) ?? false);
 const today = computed(() => todayText(new Date(props.now)));
 const state = computed(() => ({ type: filter.value, time: time.value, slow: slow.value, query: query.value }));
 const rows = computed(() => {

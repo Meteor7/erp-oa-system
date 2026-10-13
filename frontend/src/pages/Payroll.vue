@@ -9,7 +9,7 @@ import "../styles/payrollUi.css";
 import { period, periodRouteSpec } from "../lib/period";
 import { PAYROLL_QUERY_KEYS, parsePayrollQuery, payrollQueryOf } from "../lib/payrollFilters.js";
 import { bindRouteFilters } from "../lib/urlFilterState.js";
-import { CHIPS, canSave, chipCounts, currentBatchTotal, filterRows, rowState, totalsOf } from "../lib/payrollView.js";
+import { CHIPS, canSave, chipCounts, confirmTargets, currentBatchTotal, filterRows, rowState, totalsOf } from "../lib/payrollView.js";
 import PayrollCharts from "../components/payroll/PayrollCharts.vue";
 import PayrollDrawer from "../components/payroll/PayrollDrawer.vue";
 import PayrollRecon from "../components/payroll/PayrollRecon.vue";
@@ -33,6 +33,11 @@ const social = createResource({ url: "rayher_hr_payroll.api.social_insurance_imp
 const fund = createResource({ url: "rayher_hr_payroll.api.housing_fund_import_entry.get_fund_workbench", method: "GET", makeParams: () => ({ period: period.value, company: "all" }), auto: true });
 const saver = createResource({ url: api + "save_payroll_draft" });
 const adjuster = createResource({ url: api + "apply_salary_adjustment" });
+// 确认本月工资 / 撤回确认（决定 2026-10-13）；总经理、副总经理能打开但只读（can_edit = false）。
+const confirmer = createResource({ url: api + "confirm_payroll" });
+const withdrawer = createResource({ url: api + "withdraw_payroll_confirmation" });
+const access = createResource({ url: api + "get_payroll_access", method: "GET", auto: true });
+const canEdit = computed(() => Boolean(access.data?.can_edit));
 
 const company = ref("all");
 const companyOptions = [{ value: "all", label: "全部公司" }, { value: "Rayher", label: "示例总部" }, { value: "示例研发中心", label: "示例研发中心" }];
@@ -43,6 +48,7 @@ const chartsOpen = ref(readFlag("payroll.charts", true));
 const openEmployee = ref("");
 const saving = reactive({}); const applying = reactive({}); const messages = reactive({}); const errors = reactive({});
 const bulk = reactive({ confirming: false, running: false, done: 0, total: 0, failed: [] });
+const lock = reactive({ asking: false, running: false, done: null, skipped: [], error: "" });
 const n = (value) => Number(value || 0);
 
 function readFlag(key, fallback) { try { const value = localStorage.getItem(key); return value == null ? fallback : value === "1"; } catch { return fallback; } }
@@ -59,6 +65,7 @@ const counts = computed(() => chipCounts(scoped.value));
 const total = computed(() => totalsOf(scoped.value));
 const openRow = computed(() => all.value.find((row) => row.employee === openEmployee.value) || null);
 const bulkTargets = computed(() => scoped.value.filter((row) => rowState(row).key === "new" && canSave(row)));
+const lockTargets = computed(() => confirmTargets(scoped.value));
 const emptyText = computed(() => (chip.value === "draft" ? "本期没有草稿工资条" : "本期没有符合任职期间的员工"));
 const go = (path) => router.push(path);
 
@@ -88,6 +95,23 @@ async function generateAll() {
   }
   bulk.running = false;
   await rows.reload();
+}
+// 确认本月工资：当前公司范围里本页生成的草稿一次确认；确认不了的（比如分摊已定版）列出原因。
+async function confirmAll() {
+  const employees = lockTargets.value.map((row) => row.employee);
+  Object.assign(lock, { asking: false, running: true, done: null, skipped: [], error: "" });
+  try {
+    const result = await confirmer.submit({ period: period.value, employees: JSON.stringify(employees) });
+    lock.done = result?.confirmed || 0; lock.skipped = result?.skipped || [];
+  } catch (e) { lock.error = e?.message || "确认失败"; } finally { lock.running = false; }
+  await rows.reload();
+}
+async function withdrawRow(row, reason) {
+  saving[row.employee] = true; errors[row.employee] = ""; messages[row.employee] = "";
+  try {
+    await withdrawer.submit({ employee: row.employee, period: period.value, reason });
+    messages[row.employee] = "已撤回确认，现在是草稿，可以修改"; await rows.reload();
+  } catch (e) { errors[row.employee] = e?.message || "撤回失败"; } finally { saving[row.employee] = false; }
 }
 </script>
 
@@ -124,9 +148,20 @@ async function generateAll() {
           <span class="pr-ctl">
             <input v-model="query" class="pr-in" placeholder="按姓名查找" aria-label="按姓名查找">
             <label><input v-model="wide" type="checkbox"> 显示全部列（和 Excel 一致）</label>
-            <button type="button" class="btn pri" :disabled="!bulkTargets.length || bulk.running" @click="bulk.confirming = true">批量生成草稿（{{ bulkTargets.length }}）</button>
+            <template v-if="canEdit">
+              <button type="button" class="btn" :disabled="!bulkTargets.length || bulk.running" @click="bulk.confirming = true">批量生成草稿（{{ bulkTargets.length }}）</button>
+              <button type="button" class="btn pri" :disabled="!lockTargets.length || lock.running" @click="lock.asking = true">确认本月工资（{{ lockTargets.length }}）</button>
+            </template>
+            <span v-else-if="access.data" class="pill p-gray">只读</span>
           </span>
         </div>
+        <div v-if="lock.asking" class="lock" role="alertdialog" aria-label="确认本月工资">
+          <span class="k">确认 {{ lockTargets.length }} 人的工资条</span><span class="muted">确认后锁定，不能再改，要改先撤回确认；看板和研发人工成本只算已确认的。个税目前是手填的，请先核对。</span>
+          <span style="margin-left:auto;display:flex;gap:8px"><button type="button" class="btn sm" @click="lock.asking = false">取消</button><button type="button" class="btn pri sm" @click="confirmAll">确认</button></span>
+        </div>
+        <div v-if="lock.running" class="lock" role="status"><span class="k">正在确认…</span></div>
+        <div v-if="lock.done != null && !lock.running" class="banner" role="status">已确认 {{ lock.done }} 人<template v-if="lock.skipped.length">；{{ lock.skipped.length }} 人没有确认：{{ lock.skipped.slice(0, 3).map((item) => `${item.employee_name}（${item.reason}）`).join("；") }}<template v-if="lock.skipped.length > 3"> 等</template></template></div>
+        <div v-if="lock.error" class="banner err" role="alert">确认失败：{{ lock.error }}</div>
         <div v-if="bulk.confirming" class="lock" role="alertdialog" aria-label="确认批量生成">
           <span class="k">将为 {{ bulkTargets.length }} 人生成草稿工资条</span><span class="muted">用页面上现有的数字保存；个税目前是 0，生成后需要逐人填写。</span>
           <span style="margin-left:auto;display:flex;gap:8px"><button type="button" class="btn sm" @click="bulk.confirming = false">取消</button><button type="button" class="btn pri sm" @click="generateAll">确认生成</button></span>
@@ -134,7 +169,7 @@ async function generateAll() {
         <div v-if="bulk.running" class="lock" role="status"><span class="k">正在生成 {{ bulk.done }} / {{ bulk.total }}</span><span class="bar wide"><i :style="{ width: (bulk.done / Math.max(bulk.total, 1) * 100) + '%' }"></i></span></div>
         <div v-if="bulk.failed.length" class="banner err" role="alert">有 {{ bulk.failed.length }} 人没有生成：{{ bulk.failed.slice(0, 3).join("；") }}<template v-if="bulk.failed.length > 3"> 等</template></div>
         <PayrollTable :rows="shown" :wide="wide" :empty-text="emptyText" @open="(row) => (openEmployee = row.employee)" />
-        <div class="pr-note">点一行，在右侧按五步查看和修改这个人的工资；已提交的工资条不能改。没有社保或公积金月度记录的员工不能保存工资草稿；已提交金额以工资单为准，未留存的社保分项显示为 —。</div>
+        <div class="pr-note">点一行，在右侧按五步查看和修改这个人的工资；已确认的工资条不能改，要改先撤回确认。没有社保或公积金月度记录的员工不能保存工资草稿；已确认金额以工资单为准，未留存的社保分项显示为 —。</div>
       </section>
 
       <PayrollRecon :total="total" :social="currentBatchTotal(social.data)" :fund="currentBatchTotal(fund.data)" @go="go" />
@@ -142,7 +177,7 @@ async function generateAll() {
 
     <PayrollDrawer
       v-if="openRow" :row="openRow" :saving="Boolean(saving[openRow.employee])" :applying="Boolean(applying[openRow.employee])"
-      :message="messages[openRow.employee] || ''" :error="errors[openRow.employee] || ''"
-      @close="openEmployee = ''" @save="saveRow" @adjust="applyAdjustment" @go="go" />
+      :message="messages[openRow.employee] || ''" :error="errors[openRow.employee] || ''" :read-only="!canEdit"
+      @close="openEmployee = ''" @save="saveRow" @adjust="applyAdjustment" @withdraw="withdrawRow" @go="go" />
   </div>
 </template>

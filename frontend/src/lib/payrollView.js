@@ -9,13 +9,13 @@ export const money = (value) => (value == null ? '—' : n(value).toLocaleString
 const near = (a, b) => Math.abs(n(a) - n(b)) < 0.005;
 
 // ---------------------------------------------------------------- 每一行
-// 已提交的工资条和别处生成的草稿不能在这里改。
+// 已确认的工资条和别处生成的草稿不能在这里改（已确认的要改，先撤回确认）。
 export function rowLocked(row) {
   return Number(row?.docstatus) === 1 || Boolean(row?.salary_slip && !row.managed);
 }
 
 export function rowState(row) {
-  if (Number(row?.docstatus) === 1) return { key: 'submitted', label: '已提交', tone: 'p-jade' };
+  if (Number(row?.docstatus) === 1) return { key: 'submitted', label: '已确认', tone: 'p-jade' };
   if (row?.salary_slip) return row.managed ? { key: 'draft', label: '草稿', tone: 'p-cobalt' } : { key: 'external', label: '外部草稿', tone: 'p-sun' };
   const noSocial = !row?.social_record_exists, noFund = !row?.housing_record_exists;
   if (noSocial || noFund) return { key: 'blocked', label: noSocial && noFund ? '缺社保公积金记录' : noSocial ? '缺社保记录' : '缺公积金记录', tone: 'p-red' };
@@ -37,8 +37,14 @@ export const isProrated = (row) => n(row?.total_working_days) > 0 && n(row?.paym
 
 // ---------------------------------------------------------------- 筛选
 export const CHIPS = Object.freeze([
-  { key: 'all', label: '全部' }, { key: 'new', label: '未生成' }, { key: 'draft', label: '草稿' }, { key: 'submitted', label: '已提交' }, { key: 'issue', label: '需处理' },
+  { key: 'all', label: '全部' }, { key: 'new', label: '未生成' }, { key: 'draft', label: '草稿' }, { key: 'submitted', label: '已确认' }, { key: 'issue', label: '需处理' },
 ]);
+
+// 确认本月工资：本页生成的草稿（别处生成的草稿不在这里确认）。
+export const confirmTargets = (rows) => (rows || []).filter((row) => rowState(row).key === 'draft');
+
+// 撤回确认：本页生成、已经确认的工资条。
+export const canWithdraw = (row) => Number(row?.docstatus) === 1 && Boolean(row?.managed);
 
 // 筛选页签：草稿 = 已生成、还没提交的工资条（包括别处生成的外部草稿，和看板的「草稿工资条」同口径）；
 // 需处理 = 缺社保或公积金记录、不能保存的人。

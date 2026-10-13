@@ -343,6 +343,46 @@ def _can_record_inspection():
     return _can_record_receipt()
 
 
+# 决定（2026-10-13）：PMC、生产主管从看板能点到的地方都不出现金额（PO、价格审批、付款期次）。
+# 规则同看板的 dashboard/procurement._money_blocked：持有 pmc / 生产主管岗位、又没有任何一个本来就看金额的岗位
+# （采购经理、副总、总经理、财务）；系统管理员不挡。PMC 带着 Purchase User 角色，所以不能只看角色。
+MONEY_POSITIONS = ("procurement_manager", "vice_manager", "general_manager",
+                   "finance_manager", "finance_accountant", "finance_auditor")
+MONEY_KEYS = frozenset({"total_amount", "paid_amount", "outstanding_amount", "amount", "unit_price", "total_price",
+                        "package_total", "selected_unit_price", "selected_total", "po_total_amount", "payment_plan_json"})
+
+
+def _amounts_hidden():
+    return _request_memo("amounts_hidden", _amounts_hidden_uncached)
+
+
+def _amounts_hidden_uncached():
+    user = _user()
+    if user == "administrator" or "System Manager" in _roles():
+        return False
+    if not any(user in position_users(key) for key in ("pmc", "production_asset_owner")):
+        return False
+    return not any(user in position_users(key) for key in MONEY_POSITIONS)
+
+
+def _without_amounts(value):
+    """金额字段一律换成 None（复制一份，不改原对象）；页面看到 amounts_hidden 就显示“—”。"""
+    if isinstance(value, dict):
+        return {key: (None if key in MONEY_KEYS else _without_amounts(item)) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_without_amounts(item) for item in value]
+    return value
+
+
+def _for_viewer(result):
+    """返回给页面前按当前用户去掉金额。"""
+    if not _amounts_hidden():
+        return result
+    cleaned = _without_amounts(result)
+    cleaned["amounts_hidden"] = 1
+    return cleaned
+
+
 def _require_production_receipt():
     if not _can_record_receipt():
         frappe.throw("只有生产主管或系统管理员可以登记到货资料、验收资料、换货到货和退货。")
@@ -577,9 +617,14 @@ def _notify(subject, content, document_type, document_name, source_requests=None
             "subject": f"{subject_text} [{token}]", "email_content": full_content,
             "link": _notification_link(document_type, document_name),
         }).insert(ignore_permissions=True)
+# 这些状态的 PR 不能再生成价格审批单（create_price_approval 会拦），剩余数量不算“待比价”（看板「待比价物料」同一口径）。
+PR_CLOSED_STATUSES = ("草稿", "Draft", "已取消", "已关闭")
+
+
 def _pr_summary(doc):
-    available_line_count = sum(1 for row in (doc.lines or []) if _decimal(row.remaining_quantity) > 0)
-    available_quantity = sum(_decimal(row.remaining_quantity) for row in (doc.lines or []))
+    open_lines = [] if _text(doc.status) in PR_CLOSED_STATUSES else list(doc.lines or [])
+    available_line_count = sum(1 for row in open_lines if _decimal(row.remaining_quantity) > 0)
+    available_quantity = sum(_decimal(row.remaining_quantity) for row in open_lines)
     return {
         "name": doc.name, "status": doc.status or "", "requested_by": doc.requested_by or "",
         "source_projects": doc.source_projects or "", "source_count": int(doc.source_count or 0),
@@ -703,7 +748,7 @@ def _price_summary(doc, quotes=None, steps=None, headers=None):
     projects = sorted({_text(row.project) for row in (doc.lines or []) if _text(row.project)})
     departments = sorted({_text(source.get("department")) for source in source_docs if _text(source.get("department"))})
     requesters = sorted({_text(source.get("employee_name")) for source in source_docs if _text(source.get("employee_name"))})
-    return {
+    return _for_viewer({
         "name": doc.name, "status": doc.status or "", "created_by": doc.created_by or "",
         "source_prs": doc.source_prs or "", "source_requests": ",".join(source_names),
         "source_projects": ",".join(projects), "source_departments": "、".join(departments),
@@ -717,7 +762,7 @@ def _price_summary(doc, quotes=None, steps=None, headers=None):
         "supplier_comparisons": _supplier_comparisons(doc, quotes),
         "steps": _approval_steps(doc.name) if steps is None else steps, "modified": str(doc.modified or ""),
         "can_select_quote": bool(_request_memo("can_select_quote", lambda: _user() in position_users("vice_manager") or "System Manager" in _roles())) and doc.status == "待审批",
-    }
+    })
 
 
 def _po_summary(doc, steps=None):
@@ -737,7 +782,7 @@ def _po_summary(doc, steps=None):
         for line, state in zip(getattr(doc, "lines", []) or [], states)) else 0
     result["can_record_exchange"] = 1 if open_for_fulfilment and "换货中" in states else 0
     result["can_record_return"] = 1 if open_for_fulfilment and "退货中" in states else 0
-    return result
+    return _for_viewer(result)
 
 
 def _po_payment_plan_row(po, row_name):
@@ -1013,7 +1058,9 @@ def list_payment_work_items(limit=500):
         "可提交付款审批": 0, "待到货资料": 1, "待验收": 2,
         "付款审批中": 3, "待实际付款": 4, "待合同生效": 5, "已付款": 6,
     }
-    return sorted(result, key=lambda item: (priority.get(item["work_status"], 9), item["po"], item["installment_no"]))
+    ordered = sorted(result, key=lambda item: (priority.get(item["work_status"], 9), item["po"], item["installment_no"]))
+    # 生产主管 / PMC 在这里登记到货验收，但不看金额（2026-10-13）
+    return [_for_viewer(item) for item in ordered] if _amounts_hidden() else ordered
 
 def po_work_summary():
     """采购付款看板：付款期次按状态汇总、各 PO 的到货 / 验收 / 付款进度。

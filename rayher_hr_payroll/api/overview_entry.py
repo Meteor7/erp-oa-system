@@ -219,16 +219,13 @@ FOREIGN_RD_LABEL = "境外委托研发"
 def _foreign_rd_rows(months, extra_months=()):
     """境外委托研发按项目的分摊额，计入研发（修复 2026-09-29，审查 X2-10，决定 D7）。
 
-    原来首页的研发只读国内分摊行，境外委托研发不在任何首页数字里。只对费用导入已提交的月份计算：
-    国内只算已提交的分摊，草稿导入的境外费用也不提前出现在首页。
-    extra_months：用预览顶上国内部分的月份（没定版），境外部分同样计入，和预览口径一致。
+    原来首页的研发只读国内分摊行，境外委托研发不在任何首页数字里。
+    现在境外部分按月份直接计入（2026-10-13，和研发费用汇总页、分摊页同一口径），不看国内费用导入有没有提交。
     """
-    wanted = set(months)
-    imported = {(int(row.year), int(row.month)) for row in frappe.get_all(
-        "RD Expense Import",
-        filters={"docstatus": 1, "year": ["in", sorted({year for year, _ in wanted})]},
-        fields=["year", "month"], limit_page_length=0) if row.year and row.month} & wanted
-    imported |= set(extra_months) & wanted
+    # 统一口径（2026-10-13）：和研发费用汇总页（allocation_entry.get_allocation_dashboard）、分摊页一样，
+    # 境外委托研发按月份直接计入，不看国内费用导入有没有提交；首页的研发分摊 = 点进去那一页的合计。
+    # extra_months 保留参数，不再需要。
+    imported = set(months)
     if not imported:
         return []
     from rayher_hr_payroll.rayher_hr_payroll.report.rd_allocation_matrix.rd_allocation_matrix import (
@@ -499,8 +496,12 @@ def _attendance_rows(months, department=None, employees=None):
     """已批准的请假、加班、调休；跨月的申请按天拆开，只算落在所选月份里的小时。
 
     修复（2026-09-29，审查 #56 P3）：原来按开始日期归月，一张 9 月 30 日到 10 月 2 日的假
-    全部记在 9 月。现在按每天的明细分月；只有起止日期的旧申请仍按开始日期归月。
+    全部记在 9 月。现在按每天的明细分月。
+    修复（2026-10-13）：拆月和考勤中心用同一个函数（attendance_board.month_window）：只有起止日期的旧申请
+    也按期间里每个周一到周五 8 小时拆，不再整张记在开始那个月。
     """
+    from rayher_hr_payroll import attendance_board
+
     start, end = month_range(months)
     filters = {"request_type": ["in", list(ATTENDANCE_TYPES)],
                "workflow_status": ["in", list(attendance_requests.COMPLETED)],
@@ -510,21 +511,44 @@ def _attendance_rows(months, department=None, employees=None):
     if employees is not None:
         filters["employee"] = ["in", list(employees) or ["__none__"]]
     rows = frappe.get_all("OA Approval Request", filters=filters,
-                          fields=["request_type", "leave_type", "duration_hours", "department",
+                          fields=["name", "request_type", "leave_type", "duration_hours", "department",
                                   "employee", "employee_name", "from_date", "to_date", "attendance_days"],
                           limit_page_length=0)
-    result = []
-    for row in rows:
-        row = dict(row)
-        if row.get("attendance_days"):
-            hours = attendance_requests.window_hours(row, start, end)
-            if hours <= 0:
-                continue
-            row["duration_hours"] = float(hours)
-        elif not (start <= attendance_requests.as_date(row.get("from_date")) <= end):
-            continue
-        result.append(row)
-    return result
+    return attendance_board.month_window(rows, start, end)
+
+
+def month_leave(months, employees=None):
+    """看板“本月请假 / 调休 / 加班”的取数（口径见 attendance_board.leave_figures）：已批准的、在职员工的申请，
+    跨月申请按天拆。employees 给了就只算这些人里在职的。部门按员工档案里的部门（不是申请单上的快照）。
+
+    返回 {totals {leave_days, leave_count, comp_days, overtime_days}, by_type [{label, days}]（只有请假的假别）,
+          by_department [{department, leave, comp, overtime, leave_count, overtime_count}]（天，从多到少，不截断）, figures, headcount}。
+    """
+    from rayher_hr_payroll import attendance_board
+
+    filters = {"status": "Active"}
+    if employees is not None:
+        filters["name"] = ["in", list(employees) or ["__none__"]]
+    staff = frappe.get_all("Employee", filters=filters, fields=["name", "department"], limit_page_length=0)
+    ids = [row.get("name") for row in staff]
+    figures = attendance_board.leave_figures(_attendance_rows(months, None, ids), ids)
+    department_of = {row.get("name"): row.get("department") or "" for row in staff}
+    grouped = {}
+    for item in figures["requests"]:
+        entry = grouped.setdefault(department_of.get(item["employee"], ""), {"leave": 0.0, "comp": 0.0, "overtime": 0.0, "leave_count": 0, "overtime_count": 0})
+        key = {attendance_requests.REQUEST_LEAVE: "leave", attendance_requests.REQUEST_COMP_TIME: "comp"}.get(item["request_type"], "overtime")
+        entry[key] += float(item["hours"])          # 先按小时加，最后再折成天，和合计同一种舍入
+        if key in ("leave", "overtime"):
+            entry[f"{key}_count"] += 1
+    by_department = [{"department": name, **{key: days(value) if isinstance(value, float) else value for key, value in entry.items()}}
+                     for name, entry in grouped.items()]
+    by_department.sort(key=lambda row: (-row["leave"], -row["overtime"], row["department"]))
+    return {
+        "totals": {"leave_days": figures["leave_days"], "leave_count": figures["leave_count"], "comp_days": figures["comp_days"],
+                   "overtime_days": figures["overtime_days"]},
+        "by_type": sorted(({"label": key, "days": days(value)} for key, value in figures["by_type"].items()), key=lambda row: (-row["days"], row["label"])),
+        "by_department": by_department, "figures": figures, "headcount": len(ids),
+    }
 
 
 @frappe.whitelist()

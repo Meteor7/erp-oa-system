@@ -45,8 +45,8 @@ def setup(mt, roles, scope, created=None, reminded=None):
     frappe.get_roles = lambda user=None: list(roles)
     mod._monthly_employee_scope = lambda mode, start=None: scope
     mod._employees_for_scope = lambda sc, start=None: [e for e in EMPS if sc is None or e["name"] in sc]
-    mod._query_monthly_entries = lambda period, employee=None: [{"employee": k, "occurrence_days": v, "hours": v * 8, "project": "P", "employee_name": ""} for k, v in USED.items()]
-    mod._query_legacy_monthly_entries = lambda period, employee=None: []
+    mod._query_monthly_entries = lambda period, employee=None, employees=None: [{"employee": k, "occurrence_days": v, "hours": v * 8, "project": "P", "employee_name": ""} for k, v in USED.items()]
+    mod._query_legacy_monthly_entries = lambda period, employee=None, employees=None: []
     log = list(reminded or [])
 
     def get_all(doctype, filters=None, fields=None, **kw):
@@ -183,7 +183,7 @@ def test_fill_progress_classifies_by_hours_and_shows_days_derived_from_them(mt, 
     mod, _ = mt
     setup(mt, ["Accounts User", "System Manager"], None)
     monkeypatch.setattr(mod, "resolve_monthly_work_limit", lambda year, month, employee=None, **kw: {"day_limit": 21.625, "hour_limit": 173}, raising=False)
-    mod._query_monthly_entries = lambda period, employee=None: [
+    mod._query_monthly_entries = lambda period, employee=None, employees=None: [
         {"employee": "E1", "hours": 173, "project": "P", "employee_name": ""},
         {"employee": "E2", "hours": 172, "project": "P", "employee_name": ""},
         {"employee": "E4", "hours": 173.5, "project": "P", "employee_name": ""},

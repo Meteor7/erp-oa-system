@@ -40,6 +40,10 @@ export function money(value, currency = 'CNY') {
   const body = num(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return !currency || currency === 'CNY' ? `¥ ${body}` : `${currency} ${body}`;
 }
+// 看不到金额的人（服务端标了 amounts_hidden）显示“—”，不显示成 ¥ 0.00。
+export function amountText(value, currency = 'CNY', hidden = false) {
+  return hidden ? '—' : money(value, currency);
+}
 export function quantity(value) { return num(value).toLocaleString('zh-CN', { maximumFractionDigits: 4 }); }
 
 export function todayString(now = new Date()) {
@@ -259,6 +263,8 @@ export function buildPoGroups(items = []) {
       supplier: text(first.supplier), po_status: text(first.po_status), contract_status: text(first.contract_status),
       currency: text(first.currency) || 'CNY', source_price_approvals: text(first.source_price_approvals), sources,
       lines, summary, items: installments, evaluated, records, total, paid,
+      // 生产主管 / PMC：服务端已经去掉金额（amounts_hidden），页面上金额一律显示“—”
+      amounts_hidden: rows.some((row) => Boolean(row.amounts_hidden)),
       flags: {
         receipt: firstFlag(installments, 'can_record_receipt'),
         inspect: firstFlag(installments, 'can_record_inspection'),

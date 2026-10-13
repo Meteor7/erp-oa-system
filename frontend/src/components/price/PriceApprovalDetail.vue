@@ -4,7 +4,7 @@
 import { computed, ref, watch } from 'vue';
 import PriceMatrix from './PriceMatrix.vue';
 import {
-  approvalGuide, approvalTimeline, approvalTone, chosenGroup, money, pillClass, posForApproval, quantity,
+  amountText, approvalGuide, approvalTimeline, approvalTone, chosenGroup, money, pillClass, posForApproval, quantity,
   selectionConsequence, splitList, submitBlockers,
 } from '../../lib/priceView.js';
 
@@ -41,7 +41,7 @@ const linkedPos = computed(() => posForApproval(props.pos, props.approval.name))
 const timeline = computed(() => approvalTimeline(props.approval));
 const lines = computed(() => props.approval.lines || []);
 const totalLabel = computed(() => (chosen.value ? '成交总额' : '已选报价总额'));
-const totalText = computed(() => (chosen.value ? money(props.approval.total_amount) : '—'));
+const totalText = computed(() => (chosen.value ? amountText(props.approval.total_amount, props.approval.amounts_hidden) : '—'));
 const sourceLine = computed(() => {
   const a = props.approval;
   const people = [a.source_requesters, a.source_departments].filter(Boolean).join(' · ');

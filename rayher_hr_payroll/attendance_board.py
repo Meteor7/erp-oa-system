@@ -89,12 +89,103 @@ def window_days(first, work_dates, count=WINDOW_DAYS):
     return result
 
 
+def _days(hours):
+    return round(float(hours or 0) / float(DAY_HOURS), 2)
+
+
+def month_window(rows, month_first, month_last):
+    """请假 / 调休 / 加班按天拆到 [month_first, month_last]：每张申请只留落在这段日期里的小时（duration_hours 换成这个数），
+    一点都不落在里面的丢掉。只有起止日期的旧申请按期间里每个周一到周五 8 小时算（同 expand_days）。调用方只传已批准的。"""
+    result = []
+    for row in rows:
+        if value(row, "request_type") not in (REQUEST_LEAVE, REQUEST_COMP_TIME, REQUEST_OVERTIME):
+            continue
+        hours = sum((hours for day, hours in days_of(row) if month_first <= day <= month_last), ZERO)
+        if hours > 0:
+            result.append({**dict(row), "duration_hours": float(hours)})
+    return result
+
+
+def leave_figures(rows, employee_ids=None):
+    """“本月请假 / 调休 / 加班”的唯一口径（决定 2026-10-13）：看板的本月请假、请假类型、各部门请假、团队本月请假，
+    和考勤中心首页的“本月请假”都用它，数字一定对得上。
+
+    rows：已批准的申请，duration_hours 已经是落在这个月里的小时（month_window 拆好的）。employee_ids 给了就只算这些人（在职的人）。
+    请假只算请假申请，按天（小时 ÷ 8）；调休单独算、不进请假合计；加班另算。
+    返回 {leave_hours, leave_days, leave_count, comp_hours, comp_days, comp_count, overtime_hours, overtime_days, overtime_count,
+          by_type {假别: 小时}（只有请假）, by_kind {颜色类别: 小时}（请假各类 + 调休）, by_employee {员工: {name, leave, comp, overtime}}（小时）,
+          requests [{name, employee, employee_name, request_type, leave_type, from_date, to_date, hours}]}。
+    """
+    ids = None if employee_ids is None else set(employee_ids)
+    keys = {REQUEST_LEAVE: "leave", REQUEST_COMP_TIME: "comp", REQUEST_OVERTIME: "overtime"}
+    hours = {"leave": 0.0, "comp": 0.0, "overtime": 0.0}
+    counts = {"leave": 0, "comp": 0, "overtime": 0}
+    by_type, by_kind, by_employee, requests = {}, {}, {}, []
+    for row in rows:
+        key = keys.get(value(row, "request_type"))
+        employee = value(row, "employee") or value(row, "employee_name") or ""
+        if not key or (ids is not None and value(row, "employee") not in ids):
+            continue
+        amount = float(value(row, "duration_hours") or 0)
+        if amount <= 0:
+            continue
+        hours[key] += amount
+        counts[key] += 1
+        if key == "leave":
+            leave_type = value(row, "leave_type") or "未填类别"
+            by_type[leave_type] = by_type.get(leave_type, 0.0) + amount
+        if key != "overtime":
+            kind = kind_of(row)
+            by_kind[kind] = by_kind.get(kind, 0.0) + amount
+        person = by_employee.setdefault(employee, {"name": value(row, "employee_name") or employee, "leave": 0.0, "comp": 0.0, "overtime": 0.0})
+        person[key] += amount
+        requests.append({"name": value(row, "name") or "", "employee": value(row, "employee") or "", "employee_name": value(row, "employee_name") or employee,
+                         "request_type": value(row, "request_type"), "leave_type": value(row, "leave_type") or "",
+                         "from_date": str(value(row, "from_date") or "")[:10], "to_date": str(value(row, "to_date") or value(row, "from_date") or "")[:10],
+                         "hours": round(amount, 2)})
+    out = {}
+    for key in ("leave", "comp", "overtime"):
+        out[f"{key}_hours"] = round(hours[key], 2)
+        out[f"{key}_days"] = _days(hours[key])
+        out[f"{key}_count"] = counts[key]
+    out.update(by_type={key: round(item, 2) for key, item in by_type.items()}, by_kind={key: round(item, 2) for key, item in by_kind.items()},
+               by_employee=by_employee, requests=requests)
+    return out
+
+
+def today_away(employee_ids, rows, *, first, work_dates):
+    """“今天不在岗”的唯一口径（决定 2026-10-13）：看板的今天不在岗（公司、团队）、考勤中心今天请假和“今天不在岗”列表、
+    团队日历的不在岗人数都用它。
+
+    - 不在岗 off：今天（工作日）有已批准的请假或调休、当天明细小时大于 0 的人，一人一条（同一个人几张单只取最早的一张）；
+    - 出差中 trip：今天（工作日）在已批准的出差期间、今天没有请假 / 调休的人，一人一条；出差不算不在岗。前台待办理的出差已经批准，也算。
+    今天是休息日两样都是空的。返回 {"off": [{employee, kind, request}], "trip": [{employee, request}]}。
+    """
+    if first not in work_dates:
+        return {"off": [], "trip": []}
+    ids = set(employee_ids)
+    off, trips = {}, {}
+    ordered = sorted(rows, key=lambda row: (str(value(row, "from_date") or value(row, "travel_start_date") or ""), str(value(row, "name") or "")))
+    for row in ordered:
+        employee = value(row, "employee")
+        if not is_approved(row) or employee not in ids:
+            continue
+        kind = kind_of(row)
+        if kind in ABSENCE_KINDS:
+            if any(day == first and hours > 0 for day, hours in days_of(row, work_dates)):
+                off.setdefault(employee, {"employee": employee, "kind": kind, "request": value(row, "name") or ""})
+        elif kind == "trip" and first in {day for day, _hours in days_of(row, work_dates)}:
+            trips.setdefault(employee, {"employee": employee, "request": value(row, "name") or "", "row": row})
+    return {"off": list(off.values()), "trip": [item for employee, item in trips.items() if employee not in off]}
+
+
 def build_stats(employee_ids, rows, *, first, work_dates, month_first, month_last, count=WINDOW_DAYS):
     """这批人的汇总数字（只有人数和小时，没有人名）。
 
     rows：这些人的申请（统计时只取已通过的）。返回：
-    today {off, trip, in, rest_day}：今天请假或调休 / 出差 / 在岗的人数；
-    month {hours, per_capita, by_kind}：本月请假和调休的小时（出差、加班不算）及按类型的小时；
+    today {off, trip, in, rest_day, off_by_kind}：今天请假或调休 / 出差 / 在岗的人数（口径见 today_away）；
+    month：本月请假（口径见 leave_figures）：hours / leave_days 只有请假，comp_hours / comp_days 是调休，per_capita 人均请假小时，
+           per_capita_days 人均请假天数，by_kind 请假各类和调休各自的小时；
     rate：未来 count 天工作日的出勤率（请假和调休的小时占应出勤小时的比例）；
     days：每天 {off, by_kind}：当天各类型的人数（off = 请假和调休的人数）。
     """
@@ -103,12 +194,13 @@ def build_stats(employee_ids, rows, *, first, work_dates, month_first, month_las
     dates = [first + timedelta(days=offset) for offset in range(count)]
     index = {day: position for position, day in enumerate(dates)}
     per_day = [{} for _ in dates]
-    month_hours = {kind: ZERO for kind in ABSENCE_KINDS}
     absent = {}
+    approved = []
     for row in rows:
         employee = value(row, "employee")
         if not is_approved(row) or employee not in ids:
             continue
+        approved.append(row)
         kind = kind_of(row)
         if not kind:
             continue
@@ -117,25 +209,30 @@ def build_stats(employee_ids, rows, *, first, work_dates, month_first, month_las
                 per_day[index[day]].setdefault(kind, set()).add(employee)
                 if kind in ABSENCE_KINDS and day in work_dates:
                     absent[(employee, day)] = min(DAY_HOURS, absent.get((employee, day), ZERO) + hours)
-            if kind in ABSENCE_KINDS and month_first <= day <= month_last:
-                month_hours[kind] += hours
     days = window_days(first, work_dates, count)
     for position, entry in enumerate(days):
         found = per_day[position]
         entry["off"] = len(set().union(*(found.get(kind, set()) for kind in ABSENCE_KINDS)))
         entry["by_kind"] = {kind: len(found.get(kind, ())) for kind in ALL_KINDS}
-    gone = set().union(*(per_day[0].get(kind, set()) for kind in ABSENCE_KINDS))
-    trip = per_day[0].get("trip", set()) - gone
+    away = today_away(ids, approved, first=first, work_dates=work_dates)
+    off_by_kind = {}
+    for item in away["off"]:
+        off_by_kind[item["kind"]] = off_by_kind.get(item["kind"], 0) + 1
     work_days = sum(1 for day in dates if day in work_dates)
     capacity = DAY_HOURS * headcount * work_days
     rate = 1.0 if not capacity else round(float(1 - sum(absent.values(), ZERO) / capacity), 4)
-    total = sum(month_hours.values(), ZERO)
+    month = leave_figures(month_window(approved, month_first, month_last), ids)
+    by_kind = {kind: _num(month["by_kind"].get(kind, 0)) for kind in ABSENCE_KINDS}
+    gone, trip = len(away["off"]), len(away["trip"])
     return {
         "headcount": headcount,
-        "today": {"off": len(gone), "trip": len(trip), "in": max(0, headcount - len(gone) - len(trip)), "rest_day": first not in work_dates},
+        "today": {"off": gone, "trip": trip, "in": max(0, headcount - gone - trip), "rest_day": first not in work_dates,
+                  "off_by_kind": off_by_kind},
         "month": {
-            "hours": _num(total), "per_capita": round(float(total) / headcount, 1) if headcount else 0,
-            "by_kind": {kind: _num(hours) for kind, hours in month_hours.items()},
+            "hours": _num(month["leave_hours"]), "per_capita": round(month["leave_hours"] / headcount, 1) if headcount else 0,
+            "leave_days": month["leave_days"], "per_capita_days": round(month["leave_days"] / headcount, 2) if headcount else 0,
+            "comp_hours": _num(month["comp_hours"]), "comp_days": month["comp_days"],
+            "by_kind": by_kind,
         },
         "rate": rate,
         "days": days,
@@ -143,28 +240,13 @@ def build_stats(employee_ids, rows, *, first, work_dates, month_first, month_las
 
 
 def today_trips(employees, rows, *, first, work_dates):
-    """build_stats 里“今天出差”的那些人，一人一条：已批准的出差、今天在出差期间且是工作日；今天已在请假 / 调休的人不算。
-
-    和 build_stats 的 today.trip 同一个口径（人数一定相等），多给每个人的单号、地点和日期，让看板的数字能点进具体的出差申请。
+    """build_stats 里“今天出差”的那些人，一人一条（口径见 today_away，人数一定相等），
+    多给每个人的单号、地点和日期，让看板的数字能点进具体的出差申请。
     """
     known = {value(employee, "name"): employee for employee in employees}
-    gone, trips = set(), {}
-    for row in rows:
-        employee = value(row, "employee")
-        if not is_approved(row) or employee not in known:
-            continue
-        kind = kind_of(row)
-        if not kind or first not in {day for day, _hours in days_of(row, work_dates)}:
-            continue
-        if kind in ABSENCE_KINDS:
-            gone.add(employee)
-        elif kind == "trip":
-            trips.setdefault(employee, []).append(row)
     result = []
-    for employee, items in trips.items():
-        if employee in gone:
-            continue
-        row = sorted(items, key=lambda item: (str(value(item, "travel_start_date") or ""), str(value(item, "name") or "")))[0]
+    for item in today_away(list(known), rows, first=first, work_dates=work_dates)["trip"]:
+        employee, row = item["employee"], item["row"]
         person = known[employee]
         result.append({
             "employee": employee, "employee_name": value(person, "employee_name") or employee, "department": value(person, "department") or "",
@@ -272,6 +354,7 @@ def summarize_departments(employees, rows, pending, *, first, work_dates, month_
             "today_off": stats["today"]["off"], "today_trip": stats["today"]["trip"],
             "trend": [day["off"] for day in stats["days"]],
             "month_hours": stats["month"]["hours"], "per_capita": stats["month"]["per_capita"],
+            "month_leave_days": stats["month"]["leave_days"], "month_comp_hours": stats["month"]["comp_hours"],
             "rate": stats["rate"], "pending": int(pending.get(department, 0)),
         })
     departments.sort(key=lambda item: (-item["headcount"], item["label"]))

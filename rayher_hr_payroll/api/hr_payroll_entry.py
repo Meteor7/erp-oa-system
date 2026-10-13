@@ -99,9 +99,16 @@ def _require_contribution_records(social, housing):
         frappe.throw(frappe._("该员工尚未维护本月公积金记录。"))
 
 
+def _require_read():
+    """看薪酬：人事角色；总经理、副总经理岗位只读（决定 2026-10-13：领导点进来和人事看到的一样，不能改）。"""
+    from rayher_hr_payroll.hr_read_access import require_hr_read
+
+    require_hr_read(ROLES, require_rd_access)
+
+
 def _assert_writable_slip(doc):
     if int(doc.docstatus or 0) == 1:
-        frappe.throw(frappe._("工资单 {0} 已提交，不能覆盖。").format(doc.name))
+        frappe.throw(frappe._("工资单 {0} 已确认，不能修改；要改请先撤回确认。").format(doc.name))
     if not int(doc.hr_spa_managed or 0):
         frappe.throw(frappe._("本月已有其他来源工资单 {0}，不能覆盖。").format(doc.name))
 
@@ -339,7 +346,7 @@ def _row(employee, period, start, end, slip=None):
 
 @frappe.whitelist()
 def get_payroll_rows(period):
-    require_rd_access(ROLES)
+    _require_read()
     period = _period(period)
     start, end = _bounds(period)
     filters, or_filters = _period_employee_filters(start, end)
@@ -494,11 +501,98 @@ def create_draft_salary_slip(employee, period, other_income=0, income_tax=0, oth
 
 
 @frappe.whitelist()
+def get_payroll_access():
+    """页面用：能不能改（人事角色）。总经理、副总经理能打开但只读。"""
+    _require_read()
+    return {"can_edit": bool(set(frappe.get_roles(frappe.session.user)) & set(ROLES))}
+
+
+@frappe.whitelist()
 def list_salary_slips(period):
-    require_rd_access(ROLES)
+    _require_read()
     start, end = _bounds(period)
     return frappe.get_all(
         "Salary Slip", filters={"start_date": start, "end_date": end, "docstatus": ["<", 2]},
         fields=["name", "employee", "employee_name", "gross_pay", "total_deduction", "net_pay", "docstatus", "hr_spa_managed"],
         order_by="employee_name",
     )
+
+
+# ---------------------------------------------------------------- 确认本月工资（决定 2026-10-13）
+# 草稿 = 人事算好、还能改的工资条；确认 = 核对完锁定（提交工资条），发工资、入账、研发人工和看板金额只认已确认的。
+# 要改已确认的：先撤回确认（作废这张，复制一张草稿接着改，作废的那张留作记录）。
+# 研发分摊已经定版、用到了这个人工时的月份，工资单锁定规则（payroll_bridge.block_locked_salary_slip_change）不让撤回。
+REASON_LIMIT = 500
+
+
+@frappe.whitelist(methods=["POST"])
+def confirm_payroll(period, employees=None):
+    """确认本月工资：把本页生成的草稿工资条逐张确认。employees 为空 = 本月全部草稿；
+    别处生成的草稿不在这里确认；某一张确认不了（比如分摊已定版）就跳过，返回原因，其余照常确认。"""
+    require_rd_access(ROLES)
+    period = _period(period)
+    start, end = _bounds(period)
+    wanted = set(frappe.parse_json(employees) or []) if employees else None
+    drafts = frappe.get_all(
+        "Salary Slip", filters={"start_date": start, "end_date": end, "docstatus": 0},
+        fields=["name", "employee", "employee_name", "hr_spa_managed"], order_by="employee_name",
+    )
+    confirmed, skipped = [], []
+    # 确认是人事内部锁定，不顺带给员工发工资条邮件（薪酬设置里开着“提交时发邮件”，HRMS 只在批量发薪时跳过它）。
+    previous = frappe.flags.via_payroll_entry
+    frappe.flags.via_payroll_entry = True
+    try:
+        _confirm_each(drafts, wanted, confirmed, skipped)
+    finally:
+        frappe.flags.via_payroll_entry = previous
+    return {"period": period, "confirmed": len(confirmed), "skipped": skipped}
+
+
+def _confirm_each(drafts, wanted, confirmed, skipped):
+    for row in drafts:
+        if wanted is not None and row.get("employee") not in wanted:
+            continue
+        who = {"employee": row.get("employee"), "employee_name": row.get("employee_name")}
+        if not int(row.get("hr_spa_managed") or 0):
+            skipped.append({**who, "reason": "别处生成的工资条，不在这里确认"})
+            continue
+        frappe.db.savepoint("confirm_payroll")
+        try:
+            doc = frappe.get_doc("Salary Slip", row.get("name"))
+            doc.flags.ignore_permissions = True
+            doc.submit()
+        except Exception as exc:
+            frappe.db.rollback(save_point="confirm_payroll")
+            frappe.clear_messages()
+            skipped.append({**who, "reason": str(exc) or "确认失败"})
+            continue
+        confirmed.append(row.get("employee"))
+
+
+@frappe.whitelist(methods=["POST"])
+def withdraw_payroll_confirmation(employee, period, reason=None):
+    """撤回确认：作废这个人本月已确认的工资条，复制一张草稿接着改；撤回原因记在作废的那张上。"""
+    require_rd_access(ROLES)
+    reason = str(reason or "").strip()
+    if not reason:
+        frappe.throw(frappe._("请写撤回原因。"))
+    if len(reason) > REASON_LIMIT:
+        frappe.throw(frappe._("撤回原因不能超过 {0} 个字。").format(REASON_LIMIT))
+    period = _period(period)
+    start, end = _bounds(period)
+    name = frappe.db.get_value(
+        "Salary Slip", {"employee": employee, "start_date": start, "end_date": end, "docstatus": 1}, "name"
+    )
+    if not name:
+        frappe.throw(frappe._("这个人本月没有已确认的工资条。"))
+    doc = frappe.get_doc("Salary Slip", name)
+    if not int(doc.hr_spa_managed or 0):
+        frappe.throw(frappe._("工资单 {0} 是别处生成的，不能在这里撤回。").format(name))
+    doc.flags.ignore_permissions = True
+    doc.cancel()
+    doc.add_comment("Comment", "撤回确认：" + reason)
+    draft = frappe.copy_doc(doc)
+    draft.amended_from = doc.name
+    draft.docstatus = 0
+    draft.insert(ignore_permissions=True)
+    return {"name": draft.name, "cancelled": doc.name}

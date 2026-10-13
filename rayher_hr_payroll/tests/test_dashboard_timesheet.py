@@ -9,6 +9,8 @@ def make_ctx(**kw):
     base = dict(user="u@example.com", roles=frozenset({"Employee"}), positions=frozenset(), period="2026-10", today="2026-10-09",
                 employee="E0", department="研发软件部 - RAY")
     base.update(kw)
+    # 2026-10-13：工时块的可见性看“有没有在职直接下属”（ctx.has_reports），这里的部门主管都有下属
+    base.setdefault("has_reports", "Department Manager" in base["roles"])
     return core.Ctx(**base)
 
 
@@ -163,7 +165,8 @@ def test_by_department_puts_the_least_filled_first_and_caps_the_rows(calls):
     block = run("block.ts_by_dept", make_ctx(roles=HR))
     assert block["type"] == "bars" and len(block["rows"]) == timesheet.MAX_ROWS
     assert block["rows"][0]["tone"] == "bad" and block["rows"][0]["value"].endswith("/ 1")
-    assert "只列最需要跟进的" in block["sub"] and block["more"] == "填报进度"
+    assert "只列最需要跟进的" in block["sub"] and block["more"] == "各部门"
+    assert block["target"] == {"key": "drill", "params": {"item": "ts.by_dept", "period": "2026-10"}}
     small = fill("all")
     calls["state"]["fill"] = small
     rows = run("block.ts_by_dept", make_ctx(roles=HR))["rows"]
@@ -185,8 +188,9 @@ def test_team_block_lists_people_who_still_owe_hours_first(calls):
 
 def test_projects_block_and_kpi_sum_hours_per_project(calls):
     calls["state"]["fill"] = fill("team")
-    entries = [{"project": f"P{i}", "project_name": f"项目{i}", "project_code": f"C{i}", "hours": 100 - i * 10} for i in range(7)]
-    entries.append({"project": "P0", "project_name": "项目0", "hours": 12.5})
+    entries = [{"employee": "演示员工181", "project": f"P{i}", "project_name": f"项目{i}", "project_code": f"C{i}", "hours": 100 - i * 10} for i in range(7)]
+    entries.append({"employee": "演示员工149", "project": "P0", "project_name": "项目0", "hours": 12.5})
+    entries.append({"employee": "不在名单里", "project": "P9", "project_name": "项目9", "hours": 500})   # 2026-10-13：只算填报名单里的人
     calls["state"]["entries"] = {"entries": entries}
     ctx = make_ctx(roles=DEPT_MANAGER)
     block = run("block.ts_projects", ctx)

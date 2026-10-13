@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from rayher_hr_payroll.dashboard.core import (
-    alert, bar_row, bars, col_row, cols, kpi, provider, target,
+    alert, bar_row, bars, col_row, cols, drill, drill_row, drill_to, kpi, provider, target,
 )
 
 # get_fill_progress 里看全公司的角色；部门主管角色看本部门。其他人（纯员工）拿到的是空名单。
@@ -71,7 +71,9 @@ def _scope_label(kind):
 
 # ---------------------------------------------------------------- 工时填报
 def _fill_visible(ctx):
-    return ctx.can(*FILL_ROLES)
+    """看全公司的角色，或者有在职直接下属的人（“部门主管”的唯一定义，和首页版式的团队页一样用 ctx.has_reports，不看角色名）。
+    范围仍然由 get_fill_progress 自己定，这里只决定要不要去取。"""
+    return ctx.can(*FILL_ALL_ROLES) or bool(ctx.has_reports)
 
 
 def _fill(ctx, *kinds):
@@ -161,22 +163,42 @@ def alert_ts_open_team(ctx):
     return _open_alert(ctx, "alert.ts_open_team", data, "" if data["kind"] == "team" else "全公司 ") if data else None
 
 
+def _dept_ranked(data):
+    """[(部门, 已填满, 人数, 比例)]，比例低的在前（最需要跟进的）。部门名和填报进度页的部门筛选一样。"""
+    groups = {}
+    for row in data["employees"]:
+        name = row["department"] or ""
+        full_count, total = groups.get(name, (0, 0))
+        groups[name] = (full_count + (row["status"] == "full"), total + 1)
+    return sorted(((name, full, total, full / total * 100) for name, (full, total) in groups.items()),
+                  key=lambda item: (item[3], -item[2], item[0]))
+
+
 @provider("block.ts_by_dept", "block", visible=_fill_visible, title="各部门工时填报进度")
 def block_ts_by_dept(ctx):
     data = _fill(ctx, "all")
     if not data:
         return None
-    groups = {}
-    for row in data["employees"]:
-        name = row["department"] or "未分配部门"
-        full_count, total = groups.get(name, (0, 0))
-        groups[name] = (full_count + (row["status"] == "full"), total + 1)
-    ranked = sorted(((name, full, total, full / total * 100) for name, (full, total) in groups.items()),
-                    key=lambda item: (item[3], -item[2], item[0]))
-    rows = [bar_row(name, f"{full} / {total}", pct, "ok" if pct >= 60 else "warn" if pct >= 40 else "bad")
+    ranked = _dept_ranked(data)
+    rows = [bar_row(name or "未分配部门", f"{full} / {total}", pct, "ok" if pct >= 60 else "warn" if pct >= 40 else "bad")
             for name, full, total, pct in ranked[:MAX_ROWS]]
     sub = "已填满 / 部门人数" + (f" · 只列最需要跟进的 {MAX_ROWS} 个部门" if len(ranked) > MAX_ROWS else "")
-    return bars("block.ts_by_dept", "各部门工时填报进度", rows, sub=sub, more="填报进度", to=_board(ctx, "open"), hint=FILL_HINT)
+    return bars("block.ts_by_dept", "各部门工时填报进度", rows, sub=sub, more="各部门", to=drill_to("ts.by_dept", ctx),
+                hint=FILL_HINT + "点进去每个部门一行，再点一行进填报进度、只看那个部门。")
+
+
+@provider("drill.ts.by_dept", "drill", visible=_fill_visible, title="各部门工时填报进度")
+def drill_ts_by_dept(ctx):
+    data = _fill(ctx, "all")
+    ranked = _dept_ranked(data) if data else []
+    rows = [drill_row([name or "未分配部门", f"{full} / {total}", f"{pct:.0f}%"],
+                      target("timesheet.board", period=ctx.period, dept=name or None, status="open" if full < total else None),
+                      tone="bad" if pct < 40 else "warn" if pct < 60 else "")
+            for name, full, total, pct in ranked]
+    total = sum(item[2] for item in ranked)
+    full = sum(item[1] for item in ranked)
+    return drill("drill.ts.by_dept", f"{_month_word(ctx)}各部门工时填报进度", [("部门",), ("已填满 / 人数", "r"), ("比例", "r")], rows,
+                 summary=f"共 {total} 人，已填满 {full} 人", note=FILL_HINT)
 
 
 _STATUS_ORDER = {"none": 0, "part": 1, "over": 2, "full": 3}
@@ -197,14 +219,25 @@ def block_ts_team(ctx):
     return bars("block.ts_team", f"{scope}工时填报进度", rows, sub=sub, more="填报进度", to=_board(ctx), hint=FILL_HINT)
 
 
-def _project_hours(entries):
-    """工时按项目汇总：[(项目名, 小时)]，从多到少。"""
+def _project_hours(entries, roster=None):
+    """工时按项目汇总：[(项目名, 小时, 人数)]，从多到少。roster 给了就只算名单里的人（和填报进度同一个范围）。"""
     totals = {}
     for row in entries:
+        if roster is not None and row.get("employee") not in roster:
+            continue
         key = row.get("project") or row.get("project_code") or ""
-        name, hours = totals.get(key, (row.get("project_name") or row.get("project_code") or key or "未命名项目", 0))
-        totals[key] = (name, hours + float(row.get("hours") or 0))
-    return sorted(totals.values(), key=lambda item: (-item[1], item[0]))
+        name, hours, people = totals.get(key, (row.get("project_name") or row.get("project_code") or key or "未命名项目", 0, set()))
+        totals[key] = (name, hours + float(row.get("hours") or 0), people | {row.get("employee")})
+    return sorted(((name, hours, len(people)) for name, hours, people in totals.values()), key=lambda item: (-item[1], item[0]))
+
+
+def _projects(ctx, data):
+    """填报名单里的人这个月的工时按项目（范围和填报进度一样：含本月离职的、不含免填账号）。"""
+    roster = {row["employee"] for row in data["employees"]}
+    return _project_hours(ctx.memo("ts.entries", lambda: _load_entries(ctx.period))["entries"], roster)
+
+
+PROJECT_HINT = "按月度工时记录里的项目汇总（含旧版按日填报的记录），只算填报名单里的人，范围和填报进度一致。点进去每个项目一行，小时数加起来等于这里。"
 
 
 @provider("block.ts_projects", "block", visible=_fill_visible, title="团队工时按项目")
@@ -212,18 +245,18 @@ def block_ts_projects(ctx):
     data = _fill(ctx, "team", "all")
     if not data:
         return None
-    projects = _project_hours(ctx.memo("ts.entries", lambda: _load_entries(ctx.period))["entries"])
+    projects = _projects(ctx, data)
     if not projects:
         return None
-    top = projects[:5]
+    top = [(name, hours) for name, hours, _people in projects[:5]]
     rest = projects[5:]
     if rest:
-        top.append((f"其他 {len(rest)} 个", sum(hours for _, hours in rest)))
+        top.append((f"其他 {len(rest)} 个", sum(hours for _, hours, _people in rest)))
     biggest = max(hours for _, hours in top) or 1
     rows = [bar_row(name, _n(hours), hours / biggest * 100) for name, hours in top]
     scope = _scope_label(data["kind"])
-    return bars("block.ts_projects", f"{scope}工时按项目", rows, sub=f"{_month_word(ctx)} · 小时", more="填报进度", to=_board(ctx),
-                hint="按月度工时记录里的项目汇总（含旧版按日填报的记录）；范围和填报进度一致。")
+    return bars("block.ts_projects", f"{scope}工时按项目", rows, sub=f"{_month_word(ctx)} · 小时", more="每个项目", to=drill_to("ts.projects", ctx),
+                hint=PROJECT_HINT)
 
 
 @provider("dept.projects", "kpi", visible=_fill_visible, title="工时投到的项目")
@@ -231,10 +264,21 @@ def dept_projects(ctx):
     data = _fill(ctx, "team", "all")
     if not data:
         return None
-    projects = _project_hours(ctx.memo("ts.entries", lambda: _load_entries(ctx.period))["entries"])
+    projects = _projects(ctx, data)
     return kpi("dept.projects", "工时投到的项目", len(projects), "个",
-               f"最多的是 {projects[0][0]}" if projects else "本月还没有工时记录", to=_board(ctx),
-               hint=f"{_scope_label(data['kind'])}填报名单里的人，本月工时投到的不同项目数。")
+               f"最多的是 {projects[0][0]}" if projects else "本月还没有工时记录", to=drill_to("ts.projects", ctx) if projects else None,
+               hint=f"{_scope_label(data['kind'])}填报名单里的人，本月工时投到的不同项目数。" + PROJECT_HINT)
+
+
+@provider("drill.ts.projects", "drill", visible=_fill_visible, title="工时按项目")
+def drill_ts_projects(ctx):
+    data = _fill(ctx, "team", "all")
+    projects = _projects(ctx, data) if data else []
+    rows = [drill_row([name, f"{people} 人", _n(hours), _n(hours / 8)]) for name, hours, people in projects]
+    total = sum(hours for _, hours, _people in projects)
+    scope = _scope_label(data["kind"]) if data else "团队"
+    return drill("drill.ts.projects", f"{scope}{_month_word(ctx)}工时按项目", [("项目",), ("填了的人", "r"), ("小时", "r"), ("天", "r")], rows,
+                 summary=f"共 {len(projects)} 个项目，合计 {_n(total)} 小时", note=PROJECT_HINT)
 
 
 def _trend_periods(period, count=TREND_MONTHS):

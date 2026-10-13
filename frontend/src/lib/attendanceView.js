@@ -231,13 +231,21 @@ export function filterRows(rows, filter) {
 }
 
 // 今天在休假 / 调休的人：已批准的请假、调休单，起止日期包含今天（口径同总览的「今天不在岗」）。
-// 加班不算不在岗。日期是 YYYY-MM-DD 字符串，直接按字典序比较。
+// 加班、出差不算不在岗。日期是 YYYY-MM-DD 字符串，直接按字典序比较。
+// 数据本身由服务端按今天查好（api.today，一人一张）；这里再筛一遍并按人去重，保证列表行数 = 看板上的人数。
 const AWAY_TYPES = ['请假申请', '调休申请'];
 const AWAY_DONE = ['已完成', '已通过'];
 
 export function awayToday(rows, today) {
-  return (rows || []).filter((row) => AWAY_TYPES.includes(row?.request_type) && AWAY_DONE.includes(row?.workflow_status)
-    && String(row.from_date || '').slice(0, 10) <= today && today <= String(row.to_date || row.from_date || '').slice(0, 10));
+  const seen = new Set();
+  return (rows || []).filter((row) => {
+    if (!(AWAY_TYPES.includes(row?.request_type) && AWAY_DONE.includes(row?.workflow_status)
+      && String(row.from_date || '').slice(0, 10) <= today && today <= String(row.to_date || row.from_date || '').slice(0, 10))) return false;
+    const person = row.employee || row.employee_name || row.name;
+    if (seen.has(person)) return false;
+    seen.add(person);
+    return true;
+  });
 }
 
 export function typeCounts(rows) {
@@ -889,6 +897,8 @@ export const api = {
   department: (department) => callApi('attendance_board_entry.get_department_attendance', { department }, { method: 'GET' }),
   overlap: (name) => callApi('attendance_board_entry.get_request_overlap', { name }, { method: 'GET' }),
   all: (requestType = '') => callApi('attendance_entry.list_attendance_all', { request_type: requestType, limit: 100 }, { method: 'GET' }),
+  // 今天不在岗（请假 / 调休）的人，一人一张单：服务端按今天查（不是从最近 100 张里筛），和看板“今天不在岗”同一个口径。
+  today: () => callApi('attendance_entry.list_attendance_away_today', {}, { method: 'GET' }),
   detail: (name) => callApi('attendance_entry.get_attendance_request', { name }, { method: 'GET' }),
   options: (requestType, from, to) => callApi('oa_entry.get_attendance_options', { request_type: requestType, from_date: from || '', to_date: to || '' }, { method: 'GET' }),
   create: (params) => callApi('oa_entry.create_request', params),

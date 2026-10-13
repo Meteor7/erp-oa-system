@@ -28,6 +28,14 @@ APPROVED = frozenset({*att.COMPLETED, "待办理"})
 PENDING = ("待审批", "待办理")
 
 
+def pending_sql(alias=""):
+    """“还在审批”的 SQL 条件：待审批；待办理只算请假 / 加班 / 调休——出差到了前台待办理已经批准了，
+    算“出差中”，不算待审批（决定 2026-10-13）。考勤中心的待审批、看板的考勤待审批共用这一条。"""
+    prefix = f"{alias}." if alias else ""
+    return (f"({prefix}workflow_status = '待审批' OR ({prefix}workflow_status = '待办理' "
+            f"AND {prefix}request_type <> '{REQUEST_TRAVEL}'))")
+
+
 def _require_open():
     if not any(can_access_request_type(item) for item in att.ATTENDANCE_TYPES):
         frappe.throw(frappe._("当前审批功能暂未开放。"), frappe.PermissionError)
@@ -80,7 +88,7 @@ def _pending(employees=None):
     sql = (
         "SELECT e.department AS department, COUNT(*) AS n FROM `tabOA Approval Request` r "
         "JOIN `tabEmployee` e ON e.name = r.employee WHERE e.status = 'Active' "
-        "AND r.request_type IN %(types)s AND r.workflow_status IN %(statuses)s"
+        "AND r.request_type IN %(types)s AND r.workflow_status IN %(statuses)s AND " + pending_sql("r")
         + (" AND r.employee IN %(employees)s" if employees is not None else "") + " GROUP BY e.department"
     )
     args = {"types": tuple(ROW_TYPES), "statuses": PENDING}
@@ -128,7 +136,37 @@ def _team_detail(scope, today):
         "department": "", "label": "我的团队", "headcount": len(ids),
         "pending": sum(_pending(ids).values()), "stats": stats,
         "members": board.build_members(members, rows, **options),
+        # 今天不在岗 / 出差中的人和单号（团队页有人名；口径同 stats.today，看板的“今天不在岗”点进去用）。
+        "today_away": _named_away(board.today_away(ids, rows, **options), members),
     }
+
+
+def _named_away(away, members):
+    names = {member.get("name"): member.get("employee_name") or member.get("name") for member in members}
+    return {
+        "off": [{"employee": item["employee"], "employee_name": names.get(item["employee"]) or item["employee"], "kind": item["kind"],
+                 "request": item["request"]} for item in away["off"]],
+        "trip": [{"employee": item["employee"], "employee_name": names.get(item["employee"]) or item["employee"], "request": item["request"]}
+                 for item in away["trip"]],
+    }
+
+
+def today_away(today=None, employees=None):
+    """今天不在岗（请假 / 调休）和出差中的人（口径见 attendance_board.today_away），一人一条，带姓名、部门和单号：
+    看板“今天不在岗”、考勤中心“今天不在岗”列表用。employees 给了就只算这些人里在职的。"""
+    today = today or date.today()
+    filters = {"status": "Active"}
+    if employees is not None:
+        filters["name"] = ["in", list(employees) or ["__none__"]]
+    staff = frappe.get_all("Employee", filters=filters, fields=["name", "employee_name", "department"], limit_page_length=0)
+    ids = [row.get("name") for row in staff]
+    rows = _rows(ids, today, today, APPROVED)
+    away = board.today_away(ids, rows, first=today, work_dates=_work_dates(today, today))
+    named = _named_away(away, staff)
+    departments = {row.get("name"): row.get("department") or "" for row in staff}
+    for item in named["off"] + named["trip"]:
+        item["department"] = departments.get(item["employee"], "")
+    return named
 
 
 def _company_summary(today):

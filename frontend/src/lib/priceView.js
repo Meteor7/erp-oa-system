@@ -29,6 +29,20 @@ export function money(value) {
   return `¥ ${moneyPlain(value)}`;
 }
 
+// PMC、生产主管看不到金额（服务端已经去掉，单据上带 amounts_hidden）：显示“—”，不显示成 ¥ 0.00。
+export function amountText(value, hidden = false) {
+  return hidden ? '—' : money(value);
+}
+
+// PO 的采购金额 = 物料行金额合计（2026-10-13 决定，看板、费用页同一口径）；表头总额对不上时页面另外标出来。
+export function poLineTotal(po) {
+  return cents((po?.lines || []).reduce((sum, line) => sum + toNumber(line?.amount), 0)) / 100;
+}
+
+export function poHeaderDiffers(po) {
+  return Boolean(po?.lines?.length) && cents(po?.total_amount) !== cents(poLineTotal(po));
+}
+
 export function quantity(value) {
   return toNumber(value).toLocaleString('zh-CN', { maximumFractionDigits: 4 });
 }
@@ -153,7 +167,11 @@ export function occupiedQuantity(line) {
   return Math.max(0, toNumber(line?.quantity) - lineRemaining(line));
 }
 
+// 草稿 / 已取消 / 已关闭的 PR 不能再生成价格审批单，剩余数量不算待比价（和后端 PR_CLOSED_STATUSES、看板「待比价物料」同一口径）。
+export const PR_CLOSED_STATUSES = Object.freeze(['草稿', 'Draft', '已取消', '已关闭']);
+
 export function availableLineCount(pr) {
+  if (PR_CLOSED_STATUSES.includes(String(pr?.status || ''))) return 0;
   return (pr?.lines || []).filter((line) => lineRemaining(line) > 0).length;
 }
 

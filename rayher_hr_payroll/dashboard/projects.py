@@ -1,8 +1,11 @@
 """看板：我负责的项目（项目负责人，不管他还是不是部门主管 / 员工）。
 
-项目里别人提的采购申请 / 购买申请都能看到进度（只读，不含别人没提交的草稿；价格、供应商不显示）。
-数据走 `oa_entry.list_requests(view="all")`，和采购申请页面是同一个权限（`oa_access` 里项目负责人只读可见的规则），
-再按“项目负责人 = 我”筛。只有项目里的采购进度，项目成员的考勤、工时不在这里（那是团队页的事，范围不同）。
+项目里别人提的采购申请 / 购买申请都能看到进度（只读，不含别人没提交的草稿，也不含自己提的——那些在“我提交的”里；
+价格、供应商不显示）。这和采购申请列表的「我负责的项目」页签是同一个范围（procurementView.ownedRows）。
+数据按“项目负责人 = 我”直接查（原来取 list_requests 最近 200 张再筛，单子多了会漏，2026-10-13 改），
+每张单的整理（采购链路阶段、能不能会签）用和列表接口同一个 `oa_entry._summarize_doc`；
+权限同 `oa_access` 里项目负责人只读可见的规则（项目负责人 = 我、不是草稿）。
+只有项目里的采购进度，项目成员的考勤、工时不在这里（那是团队页的事，范围不同）。
 """
 from __future__ import annotations
 
@@ -15,17 +18,27 @@ STAGE_DEMAND, STAGE_EXEC, STAGE_DONE = "demand", "exec", "done"
 STAGE_LABELS = {STAGE_DEMAND: "需求审批", STAGE_EXEC: "采购执行", STAGE_DONE: "已完成"}
 STAGE_COLORS = {STAGE_DEMAND: "#8db4ee", STAGE_EXEC: "#f4c47a", STAGE_DONE: "#78c3a2"}
 MAX_ROWS = 6
-HINT = "只显示项目里的采购 / 购买申请进度，只读；没提交的草稿看不到，价格和供应商不显示。"
+HINT = "只显示项目里别人提的采购 / 购买申请进度，只读；没提交的草稿看不到，价格和供应商不显示。"
 
 
 # ---------------------------------------------------------------- 取数（单独成函数，测试里替换）
 def _load_requests(ctx):
-    from rayher_hr_payroll.api import oa_entry
+    """项目负责人是我、已提交的采购申请 / 购买申请（功能开关关着的类型不取），整理成列表接口的行。"""
+    import frappe
 
-    rows = []
-    for request_type in REQUEST_TYPES:
-        rows += oa_entry.list_requests(view="all", request_type=request_type, limit=200)
-    return rows
+    from rayher_hr_payroll.api import oa_entry
+    from rayher_hr_payroll.oa_feature_gate import visible_request_types
+    from rayher_hr_payroll.procurement_summary_cache import prepare_summaries
+
+    types = [name for name in REQUEST_TYPES if name in set(visible_request_types(list(REQUEST_TYPES)))]
+    if not types:
+        return []
+    names = frappe.get_all("OA Approval Request",
+                           filters={"request_type": ["in", types], "project_owner": ctx.user, "workflow_status": ["!=", "草稿"]},
+                           pluck="name", order_by="modified desc", limit_page_length=0)
+    docs = [oa_entry._load_request(name) for name in names]
+    with prepare_summaries(docs, oa_entry._calculate_procurement_chain):
+        return [oa_entry._summarize_doc(doc) for doc in docs]
 
 
 def _load_projects(ctx):
@@ -38,27 +51,44 @@ def _load_projects(ctx):
 
 
 # ---------------------------------------------------------------- 整理
+# 购买申请办完了的业务状态（付清了，或者被关闭）
+PURCHASE_DONE = ("已付款", "已关闭")
+
+
 def stage_of(row):
-    """一张申请走到哪一段：需求审批 / 采购执行 / 已完成。"""
-    status = row.get("workflow_status")
-    if status in ("待审批", "待办理"):
+    """一张申请走到哪一段：需求审批 / 采购执行 / 已完成；草稿、已驳回、已撤回、已取消返回 None（不算进度）。
+    规则和采购申请列表的阶段（frontend/src/lib/procurementView.js 的 stageKey）一一对应（2026-10-13 对齐，加急采购也用这一个）：
+    - 采购申请：已完成或需求已批准后看采购链路——业务状态已关闭 / 链路 closed = 已完成；其余（等提 PR、询价、价格审批、PO）= 采购执行；
+    - 购买申请：批准后付清或关闭 = 已完成，否则（待付款 / 部分付款）= 采购执行。"""
+    workflow = str(row.get("workflow_status") or "")
+    business = str(row.get("business_status") or "").strip()
+    if workflow in ("草稿", "已拒绝", "已驳回", "已撤回", "已取消") or business in ("已撤回", "已取消"):
+        return None
+    if workflow in ("待审批", "待办理"):
         return STAGE_DEMAND
-    if status != "已完成":
-        return None                      # 草稿、已驳回、已撤回不算进度
     if row.get("request_type") == "购买申请":
-        return STAGE_DONE if row.get("business_status") == "已付款" else STAGE_EXEC
-    stage = (row.get("procurement_chain") or {}).get("stage")
-    if stage == "closed":
-        return STAGE_DONE
-    return STAGE_DEMAND if stage == "demand" else STAGE_EXEC
+        if workflow != "已完成":
+            return STAGE_DEMAND
+        return STAGE_DONE if business in PURCHASE_DONE else STAGE_EXEC
+    if workflow == "已完成" or business.startswith("需求已批准"):
+        if business == "已关闭" or (row.get("procurement_chain") or {}).get("stage") == "closed":
+            return STAGE_DONE
+        return STAGE_EXEC
+    return STAGE_DEMAND
+
+
+def _is_own(ctx, row):
+    """自己提的（同列表的 ownedRows：同一个员工号）。"""
+    return bool((ctx.employee and row.get("employee") == ctx.employee)
+                or str(row.get("owner") or "").lower() == str(ctx.user or "").lower())
 
 
 def _mine(ctx):
-    """项目负责人是我、已提交的申请（草稿不看）：[(row, stage)]，最近的在前。"""
+    """项目负责人是我、别人提的、已提交的申请（草稿、自己提的不看）：[(row, stage)]，最近的在前。"""
     def load():
         found = []
         for row in _load_requests(ctx):
-            if row.get("project_owner") != ctx.user or row.get("workflow_status") == "草稿":
+            if row.get("project_owner") != ctx.user or row.get("workflow_status") == "草稿" or _is_own(ctx, row):
                 continue
             stage = stage_of(row)
             if stage:
@@ -101,15 +131,23 @@ def _where(row, stage):
     return row.get("business_status") or "待付款"
 
 
+def _detail(row):
+    """申请详情：采购申请、购买申请在两个页面（购买申请原来也去采购申请页，打不开）。"""
+    key = DETAIL_TARGET.get(row.get("request_type"))
+    return target(key, request=row.get("name")) if key else None
+
+
 def _request_rows(ctx, items):
     projects = _projects(ctx)
     return [drill_row([row.get("name"), row.get("request_type"), row.get("subject") or "—", row.get("employee_name") or "—",
                        _project_label(projects, row.get("project")), STAGE_LABELS[stage], _where(row, stage)],
-                      target(DETAIL_TARGET[row.get("request_type")], request=row.get("name")) if row.get("request_type") in DETAIL_TARGET else None,
-                      tone="warn" if stage == STAGE_DEMAND else "") for row, stage in items]
+                      _detail(row), tone="warn" if stage == STAGE_DEMAND else "") for row, stage in items]
 
 
 REQUEST_COLUMNS = [("单号",), ("类型",), ("事由",), ("申请人",), ("项目",), ("阶段",), ("现在在",)]
+# “采购执行中”说的就是 stage_of 的规则
+EXEC_RULE = ("采购申请：需求已批准、采购链路还没关闭（等 PMC 提 PR、询价比价、价格审批、PO 执行中）；"
+             "购买申请：已批准、还没付清也没关闭（待付款 / 部分付款）。")
 
 
 @provider("drill.prj.requests", "drill", visible=visible, title="项目里的采购 / 购买申请")
@@ -123,7 +161,7 @@ def drill_prj_requests(ctx):
 def drill_prj_exec(ctx):
     items = [(row, stage) for row, stage in _mine(ctx) if stage == STAGE_EXEC]
     return drill("drill.prj.exec", "采购执行中的申请", REQUEST_COLUMNS, _request_rows(ctx, items), summary=f"共 {len(items)} 张",
-                 note="已批准、正在提 PR、比价、下 PO 或等付款的申请（购买申请：待付款 / 部分付款）。采购申请和购买申请在两个页面里，这里合在一起。")
+                 note=EXEC_RULE + "采购申请和购买申请在两个页面里，这里合在一起。")
 
 
 @provider("drill.prj.sign", "drill", visible=visible, title="待我会签")
@@ -136,16 +174,24 @@ def drill_prj_sign(ctx):
 @provider("drill.prj.projects", "drill", visible=visible, title="我负责的项目")
 def drill_prj_projects(ctx):
     projects = _projects(ctx)
-    per_project = {}
+    per_project, direct = {}, {}
     for row, stage in _mine(ctx):
-        per_project.setdefault(row.get("project") or "", _counts([]))[stage] += 1
+        key = row.get("project") or ""
+        if row.get("request_type") == "购买申请":
+            direct[key] = direct.get(key, 0) + 1
+        else:
+            per_project.setdefault(key, _counts([]))[stage] += 1
     rows = []
     for project in sorted(projects, key=lambda item: str(item.get("name"))):
         counts = per_project.get(project.get("name")) or _counts([])
-        rows.append(drill_row([_project_label(projects, project.get("name")), project.get("status") or "—", counts[STAGE_DEMAND], counts[STAGE_EXEC], counts[STAGE_DONE]],
-                              target("procurement.list", scope="owned")))
-    return drill("drill.prj.projects", "我负责的项目", [("项目",), ("状态",), ("需求审批", "r"), ("采购执行", "r"), ("已完成", "r")], rows,
-                 summary=f"共 {len(projects)} 个项目", note=HINT)
+        # 点一行 = 采购申请列表「我负责的项目」页签，只看这个项目、只看有进度的阶段（不含退回 / 撤回 / 取消）：
+        # 条数 = 这一行前三个数相加。购买申请在另一个页面，单独一列。
+        rows.append(drill_row([_project_label(projects, project.get("name")), project.get("status") or "—", counts[STAGE_DEMAND], counts[STAGE_EXEC],
+                               counts[STAGE_DONE], direct.get(project.get("name"), 0)],
+                              target("procurement.list", scope="owned", project=project.get("name"), stage="live")))
+    return drill("drill.prj.projects", "我负责的项目", [("项目",), ("状态",), ("需求审批", "r"), ("采购执行", "r"), ("已完成", "r"), ("购买申请", "r")], rows,
+                 summary=f"共 {len(projects)} 个项目",
+                 note=HINT + " 前三列是采购申请（点一行到采购申请列表看这个项目的）；购买申请在另一个页面，全部申请合在一起看「项目里的申请」。")
 
 
 # ---------------------------------------------------------------- 指标卡
@@ -162,7 +208,7 @@ def prj_exec(ctx):
     counts = _counts(_mine(ctx))
     return kpi("prj.exec", "采购执行中", counts[STAGE_EXEC], "张", f"需求审批中 {counts[STAGE_DEMAND]} · 已完成 {counts[STAGE_DONE]}",
                to=drill_to("prj.exec", ctx) if counts[STAGE_EXEC] else None,
-               hint="已批准、正在提 PR、比价、下 PO 或等付款的申请（购买申请：待付款 / 部分付款）。" + HINT)
+               hint=EXEC_RULE + HINT)
 
 
 @provider("prj.sign", "kpi", visible=visible, title="待我会签")
@@ -194,8 +240,7 @@ def block_prj_requests(ctx):
         step = row.get("current_step_label") if stage == STAGE_DEMAND else ""
         sub = " · ".join(part for part in (who, _project_label(projects, row.get("project")), f"在 {step}" if step else "") if part)
         tone = "warn" if stage == STAGE_DEMAND else "ok" if stage == STAGE_DONE else "info"
-        rows.append(list_row(row.get("subject") or row.get("name") or "（无主题）", sub, STAGE_LABELS[stage], tone,
-                             target("procurement.detail", request=row.get("name"))))
+        rows.append(list_row(row.get("subject") or row.get("name") or "（无主题）", sub, STAGE_LABELS[stage], tone, _detail(row)))
     if not rows:
         return None
     return listing("block.prj_requests", "项目里最近的申请", rows, sub="只读", more="全部申请", to=drill_to("prj.requests", ctx), hint=HINT)

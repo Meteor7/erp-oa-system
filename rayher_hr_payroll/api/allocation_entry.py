@@ -14,6 +14,24 @@ PREVIEW_STATUS = "预览"
 FINALIZE_DENIED = "只有财务主管可以定版本月分摊。"
 CANCEL_DENIED = "只有财务主管可以撤销定版。"
 ALREADY_FINALIZED = "本月分摊已定版。要重新定版，请先撤销定版。"
+# 总经理、副总经理岗位可以只读分摊数据（决定 2026-10-13）：数据看板上研发分摊的数字点进去能打开。
+# 只放开读（get_allocation、get_allocation_dashboard）；定版、撤销定版、定版检查仍只给财务。
+LEADER_READ_POSITIONS = ("vice_manager", "general_manager")
+
+
+def _is_leader_reader():
+    from rayher_hr_payroll.position_access import position_users
+
+    user = str(getattr(getattr(frappe, "session", None), "user", "") or "").strip().lower()
+    return bool(user) and user in {str(name).lower() for name in (position_users(*LEADER_READ_POSITIONS) or [])}
+
+
+def _require_read_access():
+    """读分摊数据：财务角色（Accounts User / System Manager），或总经理、副总经理岗位（只读）。
+    财务照旧走 require_rd_access；没有财务角色的人，只有岗位是总经理、副总经理才放行。"""
+    if not set(frappe.get_roles() or []) & set(RD_FINANCE_ROLES) and _is_leader_reader():
+        return
+    require_rd_access(RD_FINANCE_ROLES)
 
 
 STAGE_LABELS = {
@@ -624,7 +642,7 @@ def _dashboard_stage_totals(lines):
 
 @frappe.whitelist()
 def get_allocation_dashboard(period, scope="month", mode="all"):
-    require_rd_access(RD_FINANCE_ROLES)
+    _require_read_access()
     mode = _dashboard_mode(mode)
     context = _allocation_dashboard_context(period, scope)
     lines = _domestic_dashboard_lines(context["allocation_names"], context["period_by_parent"])
@@ -887,7 +905,7 @@ def _month_view(period, year, month):
 
 @frappe.whitelist()
 def get_allocation(period, scope="month"):
-    require_rd_access(RD_FINANCE_ROLES)
+    _require_read_access()
     if str(scope or "month") == "year":
         result = _year_allocation(period)
         result["can_finalize"] = _can_finalize()
