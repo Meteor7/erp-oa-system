@@ -19,6 +19,7 @@ import {
   bucketLabel, bucketOf, byWait, canQuickApprove, claimView, filterByBucket, normalizeBucket, statusBuckets, stepTimeline, sumDocs,
   waitText, waitedDays,
 } from '../../lib/claimView.js';
+import { STUCK_AFTER_DAYS, isWaitingTooLong } from '../../lib/waiting.js';
 import {
   backLocation, carryQuery, cleanQuery, detailQuery, formQuery, fromValue, listWithout, originLabel, originOf, pushConfirmText,
   resolveScope,
@@ -161,7 +162,7 @@ const listFilters = computed(() => cleanQuery({
 const listRows = computed(() => {
   const query = search.value.trim().toLowerCase();
   return filterByBucket(docs.value, bucketKey.value).filter((doc) => {
-    if (longOnly.value && (waitedDays(doc, now) || 0) < 3) return false;
+    if (longOnly.value && !isWaitingTooLong(waitedDays(doc, now))) return false;
     return !query || [doc.name, doc.subject, doc.employee_name, doc.payee_name].join(' ').toLowerCase().includes(query);
   });
 });
@@ -635,7 +636,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
               <span class="avatar">{{ (doc.employee_name || '?').slice(0, 1) }}</span>
               <div class="grow-col"><b class="ellipsis">{{ doc.subject || '（无主题）' }}</b><span class="muted">{{ doc.employee_name }} · {{ doc.name }}<template v-if="doc.current_step_label"> · {{ doc.current_step_label }}</template></span></div>
               <span class="amount">¥ {{ money(doc.amount) }}</span>
-              <span :class="['wait', { warn: (waitedDays(doc, now) || 0) >= 3 }]">{{ waitText(waitedDays(doc, now)) }}</span>
+              <span :class="['wait', { warn: isWaitingTooLong(waitedDays(doc, now)) }]">{{ waitText(waitedDays(doc, now)) }}</span>
               <span class="row-actions">
                 <button type="button" class="btn sm" @click="go({ request: doc.name })">看详情</button>
                 <button v-if="canQuickApprove(doc)" type="button" class="btn sm dark" :disabled="busy" @click="approve(doc)">同意</button>
@@ -708,7 +709,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
       </div>
       <div class="filter-bar">
         <input v-model="search" type="search" placeholder="搜单号、申请人、主题、收款单位" aria-label="搜索" />
-        <button v-if="scope === 'todo'" type="button" :class="['chip', { on: longOnly }]" @click="longOnly = !longOnly">等超过 3 天</button>
+        <button v-if="scope === 'todo'" type="button" :class="['chip', { on: longOnly }]" @click="longOnly = !longOnly">等超过 {{ STUCK_AFTER_DAYS }} 天</button>
         <button type="button" class="btn pri" @click="go(formQuery({ view: 'new' }, listFilters))">＋ 新建{{ config.label }}</button>
       </div>
       <div class="panel flush">
@@ -724,7 +725,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
                 <td class="r num">¥ {{ money(doc.amount) }}</td>
                 <td><span :class="pillClass(displayStatus(doc))">{{ displayStatus(doc) }}</span></td>
                 <td>{{ ['待审批', '待办理'].includes(doc.workflow_status) ? (doc.current_step_label || '—') : '—' }}</td>
-                <td :class="{ warn: (waitedDays(doc, now) || 0) >= 3 && ['待审批', '待办理'].includes(doc.workflow_status) }">{{ ['待审批', '待办理'].includes(doc.workflow_status) ? waitText(waitedDays(doc, now)) : '—' }}</td>
+                <td :class="{ warn: isWaitingTooLong(waitedDays(doc, now)) && ['待审批', '待办理'].includes(doc.workflow_status) }">{{ ['待审批', '待办理'].includes(doc.workflow_status) ? waitText(waitedDays(doc, now)) : '—' }}</td>
                 <td class="r">
                   <button v-if="doc.workflow_status === '草稿' && scope === 'mine'" type="button" class="btn sm" @click="go(formQuery({ view: 'new', draft: doc.name }, listFilters))">继续编辑</button>
                   <button v-else type="button" class="btn sm" @click="go(detailQuery(doc.name, listFilters))">详情</button>

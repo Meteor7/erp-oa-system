@@ -53,7 +53,7 @@ test("home cards: 待我审批 / 草稿 / 审批中 / 已通过 with the longest
   ];
   const cards = travelStats(todo, mine, now);
   assert.deepEqual(cards.map((card) => [card.key, card.count]), [["todo", 2], ["draft", 1], ["review", 1], ["approved", 2]]);
-  assert.equal(cards[0].hint, "最久等了 1 天");
+  assert.equal(cards[0].hint, "最久等了 2 天", "09-29 09:00 到 10-01 08:00 是两个日历日（原来按满 24 小时只算 1 天）");
   assert.equal(cards[2].hint, "在 副总经理");
   assert.deepEqual(cards[0].query, { view: "list", scope: "todo" });
   assert.equal(travelStats([], [], now)[0].hint, "没有要审批的");
@@ -61,7 +61,10 @@ test("home cards: 待我审批 / 草稿 / 审批中 / 已通过 with the longest
   assert.equal(travelBucketOf({ workflow_status: "已拒绝" }), "back");
   assert.equal(waitText(0), "今天");
   assert.equal(waitText(2), "等了 2 天");
-  assert.equal(waitedDays({ steps: [{ acted_on: "2026-09-30 10:00:00" }], submitted_on: "2026-09-20 10:00:00" }, now), 0);
+  assert.equal(waitedDays({ steps: [{ acted_on: "2026-09-30 10:00:00" }], submitted_on: "2026-09-20 10:00:00" }, now), 1, "the last action counts, not the submit date; 09-30 10:00 to 10-01 08:00 is one calendar day");
+  // 按日历日期算，和数据看板同一个口径：10-09 23:30 到 10-12 00:30 是 3 天（满 24 小时只有 2 天），不会是负数
+  assert.equal(waitedDays({ submitted_on: "2026-10-09 23:30:00" }, Date.parse("2026-10-12T00:30:00")), 3);
+  assert.equal(waitedDays({ submitted_on: "2026-10-13 09:00:00" }, Date.parse("2026-10-12T10:00:00")), 0);
 });
 
 test("approvers get a 待我审批 list; 全部 is only for people who can see other people's documents", () => {

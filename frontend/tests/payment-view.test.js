@@ -726,6 +726,9 @@ test('waiting time text', () => {
   assert.equal(waitedDays({ creation: '2026-10-01 09:00:00' }, now), 0);
   assert.equal(waitedDays({ steps: [{ acted_on: '2026-09-28 10:00:00' }], creation: '2026-09-01 10:00:00' }, now), 3);
   assert.equal(waitedDays({}, now), null);
+  // 按日历日期算，和数据看板同一个口径：10-09 23:30 到 10-12 00:30 是 3 天（满 24 小时只有 2 天），不会是负数
+  assert.equal(waitedDays({ submitted_on: '2026-10-09 23:30:00' }, Date.parse('2026-10-12T00:30:00')), 3);
+  assert.equal(waitedDays({ submitted_on: '2026-10-13 09:00:00' }, Date.parse('2026-10-12T10:00:00')), 0);
   assert.equal(waitText(null), '—');
   assert.equal(waitText(0), '今天');
   assert.equal(waitText(3), '等了 3 天');

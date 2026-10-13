@@ -9,6 +9,7 @@ import {
   pageCount, pageSlice, projectOptions, projectText, stageFilterLabel, statusOf, waitText, whereText,
 } from '../../lib/procurementView.js';
 import { cleanQuery, detailQuery, formQuery, originLabel, originOf, splitPath } from '../../lib/navContext.js';
+import { isWaitingTooLong } from '../../lib/waiting.js';
 import { apiGet, errText } from './procData.js';
 import { useProc } from './context.js';
 import PipelineBar from './PipelineBar.vue';
@@ -155,7 +156,7 @@ function open(row) {
               <td class="r">{{ (row.business_lines || []).length }} 项</td>
               <td class="pr-pipe-cell"><span :class="['pill', statusOf(row).tone]">{{ statusOf(row).label }}</span><PipelineBar :row="row" :now="now" /></td>
               <td class="ellipsis-cell">{{ whereText(row) }}</td>
-              <td :class="['r', { warn: (approvalWait(row, now) || 0) >= 3 }]">{{ approvalWait(row, now) === null ? '—' : waitText(approvalWait(row, now)) }}</td>
+              <td :class="['r', { warn: isWaitingTooLong(approvalWait(row, now)) }]">{{ approvalWait(row, now) === null ? '—' : waitText(approvalWait(row, now)) }}</td>
             </tr>
             <tr v-if="!shown.length">
               <td colspan="7" class="empty" :role="loadError ? 'alert' : undefined">

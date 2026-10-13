@@ -79,7 +79,8 @@ test('the pages show the pipeline bar, the nudge button and the read-only owner 
   const bar = read('../src/components/procurement/PipelineBar.vue');
   assert.match(bar, /class="pr-pipe"/);
   assert.match(bar, /现在在：/);
-  assert.match(bar, /超过 3 天/);
+  assert.match(bar, /超过 \$\{STUCK_AFTER_DAYS\} 天/);
+  assert.match(bar, /isWaitingTooLong\(wait\)/);
   assert.match(bar, /pr-arrive/);
   assert.match(read('../src/components/procurement/ProcList.vue'), /<PipelineBar :row="row" :now="now" \/>/);
   assert.match(read('../src/components/procurement/ProcHome.vue'), /<PipelineBar :row="row" :now="now" where \/>/);

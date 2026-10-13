@@ -13,6 +13,7 @@ import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
 import { agingTiles, boardAccess, boardRoute, boardTab, bottomColumns, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 import { hereAsFrom, withFrom } from '../lib/navContext.js';
+import { isWaitingTooLong } from '../lib/waiting.js';
 
 // embedded：放在审批中心的分组首页下面时不再自己写标题，只留页签。
 defineProps({ embedded: { type: Boolean, default: false } });
@@ -123,7 +124,7 @@ onMounted(load);
                 <td>{{ row.employee_name }}</td>
                 <td>{{ row.department }}</td>
                 <td class="r num">{{ money(row.amount) }}</td>
-                <td :class="['r', { warn: row.waited_days >= 3 }]">{{ row.waited_days }} 天</td>
+                <td :class="['r', { warn: isWaitingTooLong(row.waited_days) }]">{{ row.waited_days }} 天</td>
                 <td><span :class="pillClass(row.status)">{{ row.status }}</span></td>
               </tr>
               <tr v-if="!queue.length"><td colspan="7" class="empty">出纳没有待付的单据</td></tr>

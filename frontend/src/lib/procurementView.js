@@ -2,6 +2,7 @@
 // 同一个地址用查询参数区分页面，通知里的 ?request= 链接照常打开单据详情。
 // 这里只放不依赖页面的纯函数，方便单元测试。
 import { validateProcurementRequestForm } from './procurementWorkflow.js';
+import { calendarDaysSince } from './waiting.js';
 
 export const REQUEST_PROCUREMENT = '采购申请';
 export const REQUEST_DIRECT = '购买申请';
@@ -158,18 +159,12 @@ export function stageIndex(row) {
 }
 
 // ---------------------------------------------------------------- 时间
-// 按日历日期算（今天减起点那天），和后端的催办、看板同一个口径：10 月 9 日 23:30 起算，10 月 12 日 00:30 就是 3 天。
+// 按日历日期算（今天减起点那天），和后端的催办、看板同一个口径，算法在 waiting.js：10 月 9 日 23:30 起算，10 月 12 日 00:30 就是 3 天。
 // 原来按满 24 小时算，会少算一天：前端还显示 2 天、把“催一下”藏着，后端已经按 3 天放行。
-const startOfDay = (time) => {
-  const day = new Date(time);
-  return new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-};
-
 export function waitedDays(row = {}, now = Date.now()) {
   const stamps = (row.steps || []).map((step) => step.acted_on).filter(Boolean).map(String).sort();
   const since = stamps[stamps.length - 1] || row.submitted_on || row.modified || row.creation;
-  const time = Date.parse(String(since || '').replace(' ', 'T'));
-  return Number.isFinite(time) ? Math.max(0, Math.round((startOfDay(now) - startOfDay(time)) / 86400000)) : null;
+  return calendarDaysSince(since, now);
 }
 
 // 只有还在审批中的单据才算"等待"。

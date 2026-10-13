@@ -3,6 +3,7 @@
 // where = 再显示“现在在谁手上 · 已等几天 · 到货多少”；labels = 条下面写出每一格的名字；footOnly = 只要那一行（详情页上面已经有采购进度条了）。
 import { computed } from 'vue';
 import { arrivalOf, isActive, pipeline, waitedDays, whereText } from '../../lib/procurementView.js';
+import { STUCK_AFTER_DAYS, isWaitingTooLong } from '../../lib/waiting.js';
 
 const props = defineProps({
   row: { type: Object, default: null },
@@ -28,7 +29,7 @@ const holder = computed(() => (props.row ? whereText(props.row) : ''));
     </div>
     <div v-if="where" class="pr-pipe-foot">
       <span v-if="holder && holder !== '—'" class="who">现在在：{{ holder }}</span>
-      <span v-if="wait !== null" :class="['wait', { warn: wait >= 3 }]">{{ wait ? `已等 ${wait} 天${wait >= 3 ? ' · 超过 3 天' : ''}` : '今天提交' }}</span>
+      <span v-if="wait !== null" :class="['wait', { warn: isWaitingTooLong(wait) }]">{{ wait ? `已等 ${wait} 天${isWaitingTooLong(wait) ? ` · 超过 ${STUCK_AFTER_DAYS} 天` : ''}` : '今天提交' }}</span>
       <span v-if="arrival" class="pr-arrive">已到 {{ arrival.got }} / {{ arrival.total }}<span class="t"><i :style="{ width: arrival.pct + '%' }"></i></span></span>
     </div>
     <div v-else-if="arrival" class="pr-pipe-foot"><span class="pr-arrive">已到 {{ arrival.got }} / {{ arrival.total }}<span class="t"><i :style="{ width: arrival.pct + '%' }"></i></span></span></div>

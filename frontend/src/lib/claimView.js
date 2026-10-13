@@ -1,6 +1,7 @@
 // 报销 / 付款页面结构（2026-09-30 改版）：首页分栏目 → 列表页 → 详情页；新建单独一页，分三步。
 // 同一个地址，用查询参数区分页面，通知和待办里的 ?request= 链接照常打开单据详情。
 import { displayStatus } from './expenseClaims.js';
+import { calendarDaysSince } from './waiting.js';
 
 export function claimView(query = {}) {
   if (query.request) return 'detail';
@@ -9,12 +10,11 @@ export function claimView(query = {}) {
   return 'home';
 }
 
-// 距离上一次有人处理（或提交）过了几天；算不出来返回 null。
+// 距离上一次有人处理（或提交）过了几个日历日（口径见 waiting.js）；算不出来返回 null。
 export function waitedDays(doc = {}, now = Date.now()) {
   const stamps = (doc.steps || []).map((step) => step.acted_on).filter(Boolean).map(String).sort();
   const since = stamps[stamps.length - 1] || doc.submitted_on || doc.creation || doc.modified;
-  const time = Date.parse(String(since || '').replace(' ', 'T'));
-  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 86400000)) : null;
+  return calendarDaysSince(since, now);
 }
 
 export function waitText(days) {

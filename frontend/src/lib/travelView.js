@@ -2,6 +2,7 @@
 //   无参数 = 首页；?view=new（可带 &draft=单号）= 新建/编辑草稿；?request=单号 = 详情；?view=list&scope=todo|mine|all = 列表。
 import { displayStatus } from './expenseClaims.js';
 import { resolveScope } from './navContext.js';
+import { calendarDaysSince } from './waiting.js';
 
 export function travelView(query = {}) {
   if (query.request) return 'detail';
@@ -60,8 +61,7 @@ export function dateRange(row = {}) {
 export function waitedDays(doc = {}, now = Date.now()) {
   const stamps = (doc.steps || []).map((step) => step.acted_on).filter(Boolean).map(String).sort();
   const since = stamps[stamps.length - 1] || doc.submitted_on || doc.creation || doc.modified;
-  const time = Date.parse(String(since || '').replace(' ', 'T'));
-  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 86400000)) : null;
+  return calendarDaysSince(since, now);
 }
 
 export function waitText(days) {

@@ -18,6 +18,7 @@ import {
   backLocation, carryQuery, cleanQuery, detailQuery, formQuery, fromValue, hereAsFrom, listWithout, originLabel, originOf,
 } from '../../lib/navContext.js';
 import { useLeaveConfirm } from '../../lib/leaveConfirm.js';
+import { isWaitingTooLong } from '../../lib/waiting.js';
 
 const REQUEST_TYPE = '出差申请';
 const route = useRoute();
@@ -298,7 +299,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft], (
               <span class="avatar">{{ (doc.employee_name || '?').slice(0, 1) }}</span>
               <div class="grow-col"><b class="ellipsis">{{ doc.subject || '（无主题）' }}</b><span class="muted">{{ doc.employee_name }}<template v-if="doc.department"> · {{ doc.department }}</template> · {{ doc.name }}<template v-if="doc.project"> · 项目 {{ doc.project }}</template></span></div>
               <div class="tv-dest"><span>{{ doc.travel_destination }}</span><span class="muted">{{ dateRange(doc) }}（{{ doc.travel_days || 0 }} 天）</span></div>
-              <span :class="['wait', { warn: (waitedDays(doc, now) || 0) >= 3 }]">{{ waitText(waitedDays(doc, now)) }}</span>
+              <span :class="['wait', { warn: isWaitingTooLong(waitedDays(doc, now)) }]">{{ waitText(waitedDays(doc, now)) }}</span>
               <span class="row-actions">
                 <button type="button" class="btn sm" @click="go({ request: doc.name })">看详情</button>
                 <button v-if="doc.can_approve" type="button" class="btn sm dark" :disabled="busy" @click="approve(doc)">同意</button>

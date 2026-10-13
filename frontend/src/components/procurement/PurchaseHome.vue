@@ -10,6 +10,7 @@ import {
   shortDate, waitText, waitedDays,
 } from '../../lib/procurementView.js';
 import { cleanQuery, detailQuery, formQuery, hereAsFrom, originOf } from '../../lib/navContext.js';
+import { isWaitingTooLong } from '../../lib/waiting.js';
 import { apiGet, apiPost, errText, settle } from './procData.js';
 import { useProc } from './context.js';
 
@@ -187,7 +188,7 @@ const usedPercent = (quota, key) => {
             <span class="avatar">{{ (row.employee_name || '?').slice(0, 1) }}</span>
             <div class="grow-col"><b class="ellipsis">{{ row.subject || '（无主题）' }}</b><span class="muted ellipsis">{{ row.employee_name }} · {{ row.department }} · {{ row.purchase_method }} · {{ row.current_step_label }}</span></div>
             <span class="amount">¥ {{ money(row.amount) }}</span>
-            <span :class="['wait', { warn: (waitedDays(row, now) || 0) >= 3 }]">{{ waitText(waitedDays(row, now)) }}</span>
+            <span :class="['wait', { warn: isWaitingTooLong(waitedDays(row, now)) }]">{{ waitText(waitedDays(row, now)) }}</span>
             <span class="row-actions">
               <button type="button" class="btn sm" @click="ctx.go({ request: row.name })">看详情</button>
               <button v-if="quickApprove(row)" type="button" class="btn sm dark" :disabled="ctx.busy" @click="approve(row)">同意</button>

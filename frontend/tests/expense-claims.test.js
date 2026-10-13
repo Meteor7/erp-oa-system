@@ -330,6 +330,9 @@ test("claim pages: home, list, detail and a separate new page share one address 
   assert.equal(waitedDays({ steps: [{ acted_on: "2026-09-26 09:00:00" }, { acted_on: null }] }, now), 4);
   assert.equal(waitedDays({ creation: "2026-09-30 08:00:00" }, now), 0);
   assert.equal(waitedDays({}, now), null);
+  // 按日历日期算，和数据看板同一个口径：10-09 23:30 到 10-12 00:30 是 3 天（满 24 小时只有 2 天），不会是负数
+  assert.equal(waitedDays({ submitted_on: "2026-10-09 23:30:00" }, Date.parse("2026-10-12T00:30:00")), 3);
+  assert.equal(waitedDays({ submitted_on: "2026-10-13 09:00:00" }, Date.parse("2026-10-12T10:00:00")), 0);
   assert.equal(canQuickApprove({ can_approve: true }), true);
   assert.equal(canQuickApprove({ can_approve: true, current_step_mode: "handle" }), false, "confirming payment happens on the detail page");
   assert.equal(canQuickApprove({ can_approve: false, can_edit_expense_items: true }), false, "the cashier fills accounts on the detail page");

@@ -6,6 +6,7 @@ import {
   LIST_LIMIT, approveBlocker, approvalWorkItems, approvalWait, mergeRows, ownedRows, paymentWorkItems, poBreakdown, poWorkItems,
   prWorkItems, priceWorkItems, shortDate, stageDistribution, stageGroups, statusOf, longestWait, waitText, waitedDays,
 } from '../../lib/procurementView.js';
+import { isWaitingTooLong } from '../../lib/waiting.js';
 import { canCreatePr, canEditPrice, canOpenBoard, canSeePo, canSeePrice, isViceManager } from './access.js';
 import { apiGet, errText, loadPurchaseOrders, settle } from './procData.js';
 import { useProc } from './context.js';
@@ -222,7 +223,7 @@ function openItem(item) {
           <div v-for="item in todoTop" :key="item.key" class="todo-row pr-todo">
             <span :class="['pill', item.tone]">{{ item.tag }}</span>
             <div class="grow-col"><b class="ellipsis">{{ item.subject }}</b><span class="muted ellipsis">{{ item.meta }}</span></div>
-            <span :class="['wait', { warn: (item.wait || 0) >= 3 }]">{{ item.request ? waitText(item.wait) : '' }}</span>
+            <span :class="['wait', { warn: isWaitingTooLong(item.wait) }]">{{ item.request ? waitText(item.wait) : '' }}</span>
             <span class="row-actions"><button type="button" class="btn sm dark" @click="openItem(item)">{{ item.action }}</button></span>
           </div>
           <div v-if="!todo.length" class="empty">没有要你处理的事项。</div>

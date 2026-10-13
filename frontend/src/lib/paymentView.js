@@ -7,6 +7,7 @@ import {
   canCloseProcurement, canCompleteSupplierRefund, canRecordArrival, canRecordInspection, canWriteoffPrepayment,
 } from './procurementWorkflow.js';
 import { documentChecklistForRequest } from './businessDocumentChecklist.js';
+import { calendarDaysSince } from './waiting.js';
 
 const EPS = 1e-6;
 
@@ -519,8 +520,7 @@ export function queueFilter(rows = [], filter = 'all', { employee = '' } = {}) {
 export function waitedDays(request = {}, now = Date.now()) {
   const stamps = (request.steps || []).map((s) => s.acted_on).filter(Boolean).map(String).sort();
   const since = stamps[stamps.length - 1] || request.submitted_on || request.creation || request.modified;
-  const time = Date.parse(text(since).replace(' ', 'T'));
-  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 86400000)) : null;
+  return calendarDaysSince(since, now);
 }
 export function waitText(days) {
   if (days === null || days === undefined) return '—';

@@ -3,8 +3,8 @@
 import { GROUP_HOME_PATHS } from './approvalGroupPaths.js';
 import { boardRoute } from './expenseBoards.js';
 import { approvalWait, approveBlocker, money, shortDate, waitedDays } from './procurementView.js';
+import { STUCK_AFTER_DAYS, isWaitingTooLong } from './waiting.js';
 
-export const STALE_DAYS = 3;
 export const TODO_LIMIT = 6;
 export const MINE_LIMIT = 3;
 const ACTIVE = new Set(['待审批', '待办理', '待流转']);
@@ -62,7 +62,7 @@ export function todoRow(row, { here = '', now = Date.now() } = {}) {
     key: `oa:${row.name}`, type: row.request_type, tone: typeTone(row.request_type),
     subject: row.subject || '（无主题）', who: row.employee_name || '', dept: row.department || '',
     amount: amountText(row), node: row.current_step_label ? `现在在：${row.current_step_label}` : '',
-    days, waited: waitedText(days), warn: days >= STALE_DAYS,
+    days, waited: waitedText(days), warn: isWaitingTooLong(days),
     to: { path: boardRoute(row.request_type), query: { request: row.name, ...(here ? { from: here } : {}) } },
     action: row.request_type === '采购申请' && approveBlocker(row) ? '补录并审批' : '去处理 →',
   };
@@ -76,7 +76,7 @@ export function workRow(item, { here = '' } = {}) {
     : item.to;
   return {
     key: item.key, type: item.tag, tone: typeTone(item.tag) || 'g-orange', subject: item.subject, who: '', dept: '', amount: '',
-    node: item.meta || '', days, waited: item.request ? waitedText(days) : '', warn: days >= STALE_DAYS, to, action: `${item.action || '处理'} →`,
+    node: item.meta || '', days, waited: item.request ? waitedText(days) : '', warn: isWaitingTooLong(days), to, action: `${item.action || '处理'} →`,
   };
 }
 
@@ -124,7 +124,7 @@ export function buildGroupHome(groupKey, { pending = {}, mine = {}, work = {}, h
   const mineActive = mineAll.filter((row) => row.active);
   const month = monthOf(new Date(now).toISOString());
   const monthCount = mineAll.filter((row) => row.row.workflow_status !== '草稿' && monthOf(row.row.creation) === month).length;
-  const waitingOver = [...todo, ...mineActive.map((row) => ({ days: waitedDays(row.row, now) ?? 0 }))].filter((row) => row.days >= STALE_DAYS).length;
+  const waitingOver = [...todo, ...mineActive.map((row) => ({ days: waitedDays(row.row, now) ?? 0 }))].filter((row) => isWaitingTooLong(row.days)).length;
   const waitInvoice = mineAll.filter((row) => row.row.business_status === PAID_WAIT_INVOICE || row.row.invoice_followup_status === '待收票').length;
 
   const kpis = [
@@ -132,7 +132,7 @@ export function buildGroupHome(groupKey, { pending = {}, mine = {}, work = {}, h
     { key: 'mine', label: '我提交的在途', value: mineActive.length, unit: '张', sub: mineActive.length ? '卡在谁手里一眼能看到' : '没有进行中的', tone: '', anchor: 'gh-mine' },
     groupKey === 'payment'
       ? { key: 'invoice', label: '待补票', value: waitInvoice, unit: '张', sub: waitInvoice ? '先付款、后补票的' : '没有要补票的', tone: '', anchor: 'gh-mine' }
-      : { key: 'stale', label: `我这里卡住超过 ${STALE_DAYS} 天`, value: waitingOver, unit: '张', sub: waitingOver ? '待办和我提交的合计' : '没有卡住的', tone: waitingOver ? 'warn' : '', anchor: 'gh-todo' },
+      : { key: 'stale', label: `我这里卡住超过 ${STUCK_AFTER_DAYS} 天`, value: waitingOver, unit: '张', sub: waitingOver ? '待办和我提交的合计' : '没有卡住的', tone: waitingOver ? 'warn' : '', anchor: 'gh-todo' },
     { key: 'month', label: '本月我提交的', value: monthCount, unit: '张', sub: '不含草稿', tone: '', anchor: 'gh-mine' },
   ];
   return {
