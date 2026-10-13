@@ -221,6 +221,12 @@ export function boardTab(query = {}) {
   return query.tab === 'procurement' ? 'procurement' : 'main';
 }
 
+// ?focus=cashier|invoices：从数据看板的卡片点进来，直接滚到付款看板的那一块（id="bd-cashier" / "bd-invoices"）。
+const FOCUS_IDS = Object.freeze({ cashier: 'bd-cashier', invoices: 'bd-invoices' });
+export function focusAnchor(query = {}) {
+  return FOCUS_IDS[String(query.focus || '')] || '';
+}
+
 // 底部一排卡片：部门范围没有"今年付给谁最多"，只剩两列，不留空列。
 export function bottomColumns(data = {}) {
   return data.scope === 'department' ? 2 : 3;

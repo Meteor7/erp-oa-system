@@ -1,7 +1,7 @@
 <script setup>
 // 审批中心的分组首页：采购/购买申请、付款申请。上面是我要处理的、我提交的和快捷新建，下面是原来的看板。
 // 子页面（采购申请、购买申请、出差、报销、付款…）不变；这里只做汇总，每张单点开还是各自类型的页面。
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
 import '../styles/groupHomeUi.css';
@@ -9,7 +9,7 @@ import PaymentBoard from './PaymentBoard.vue';
 import RequestBoard from './RequestBoard.vue';
 import { GROUPS, MINE_LIMIT, buildGroupHome, listLinkFor } from '../lib/approvalGroup.js';
 import { canSee, inMenu } from '../lib/access.js';
-import { boardRoute } from '../lib/expenseBoards.js';
+import { boardRoute, focusAnchor } from '../lib/expenseBoards.js';
 import { callApi } from '../lib/expenseClaims.js';
 import { hereAsFrom } from '../lib/navContext.js';
 import { emptyWork, loadProcurementWork } from '../components/procurement/work.js';
@@ -75,7 +75,11 @@ function scrollTo(anchor) {
 }
 
 onMounted(() => {
-  load().catch((error) => { loadError.value = String(error?.message || error); });
+  // ?focus=cashier：上面的“待我处理”加载完会把下面的看板顶下去，所以第一次加载完再滚一次到那一块（之后定时刷新不再滚）。
+  load().then(() => {
+    const anchor = focusAnchor(route.query);
+    if (anchor && alive) nextTick(() => scrollTo(anchor));
+  }).catch((error) => { loadError.value = String(error?.message || error); });
   window.addEventListener('focus', refreshWhenVisible);
   timer = window.setInterval(refreshWhenVisible, 60000);
 });

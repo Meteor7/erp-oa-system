@@ -10,15 +10,13 @@ import DonutChart from '../components/expense-ui/DonutChart.vue';
 import HBars from '../components/expense-ui/HBars.vue';
 import StackedBars from '../components/expense-ui/StackedBars.vue';
 import ProcurementTab from '../components/expense-ui/ProcurementTab.vue';
-import { agingTiles, boardAccess, cashierSplit, boardRoute, boardTab, bottomColumns, dueText, paymentKpis, scopeText } from '../lib/expenseBoards.js';
+import { agingTiles, boardAccess, cashierSplit, boardRoute, boardTab, bottomColumns, dueText, focusAnchor, paymentKpis, scopeText } from '../lib/expenseBoards.js';
 import { callApi, money, pillClass } from '../lib/expenseClaims.js';
 import { hereAsFrom, withFrom } from '../lib/navContext.js';
 import { isWaitingTooLong } from '../lib/waiting.js';
 
 // embedded：放在审批中心的分组首页下面时不再自己写标题，只留页签。
 defineProps({ embedded: { type: Boolean, default: false } });
-// ?focus=cashier|invoices：从数据看板的卡片点进来，加载完直接滚到那一块（id="bd-cashier" / "bd-invoices"）。
-const FOCUS_IDS = Object.freeze({ cashier: 'bd-cashier', invoices: 'bd-invoices' });
 const route = useRoute();
 const router = useRouter();
 const tab = computed(() => boardTab(route.query));
@@ -64,7 +62,8 @@ async function load() {
   } finally {
     loading.value = false;
   }
-  const anchor = FOCUS_IDS[String(route.query.focus || '')];
+  // 从数据看板点进来（?focus=cashier）：加载完滚到那一块；放在分组首页下面时，首页上面的列表加载完还会再滚一次。
+  const anchor = focusAnchor(route.query);
   if (anchor && tab.value === 'main') nextTick(() => document.getElementById(anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
 }
 
