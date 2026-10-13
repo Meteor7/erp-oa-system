@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import {
   TYPES, TYPE_LABELS, TYPE_ORDER, detailLocation, effectLine, effectRows, isTrip, kindOf, listLocation, newLocation, pathForFilter, parseLocation,
-  requestTitle, rowDays, sizeText, tripDayCount, typeCounts, typeForPath,
+  backLabel, backLocation, originOf, originQuery, requestTitle, rowDays, sizeText, tripDayCount, typeCounts, typeForPath,
 } from "../src/lib/attendanceView.js";
 import { applyFilters, lengthText, statusInfo, stripCells, whenText } from "../src/lib/attendanceFlow.js";
 import { rowKind } from "../src/lib/attendanceCharts.js";
@@ -136,4 +136,21 @@ test("the approval centre and the sidebar no longer list trips next to purchase 
   assert.doesNotMatch(group, /\/approval\/travel/);
   const paths = read("../src/lib/approvalGroupPaths.js");
   assert.doesNotMatch(paths, /\/approval\/travel/);
+});
+
+test("a trip opened from the dashboard (or another page) goes back to that page, not to a list", () => {
+  const query = { request: "OA-T1", from: "/dashboard/detail?item=att.trip&period=2026-10" };
+  const origin = originOf(query);
+  assert.equal(origin.kind, "page");
+  assert.deepEqual(backLocation(origin), { path: "/dashboard/detail", query: { item: "att.trip", period: "2026-10" } });
+  assert.equal(backLabel(origin), "返回看板明细");
+  assert.deepEqual(originQuery(origin), { from: "/dashboard/detail?item=att.trip&period=2026-10" });
+  assert.equal(backLabel(originOf({ from: "/somewhere/else" })), "返回上一页");
+  // 外部地址和脚本地址不当作来源
+  assert.equal(originOf({ from: "//evil.example/x" }).kind, "");
+  assert.equal(originOf({ from: "https://evil.example/x" }).kind, "");
+  // 原来的两种来源不变
+  assert.equal(originOf({ from: "home" }).kind, "home");
+  assert.deepEqual(originOf({ from: "list", fscope: "todo", ftype: "出差" }), { kind: "list", scope: "todo", filter: "出差" });
+  assert.equal(backLabel(originOf({})), "返回列表");
 });

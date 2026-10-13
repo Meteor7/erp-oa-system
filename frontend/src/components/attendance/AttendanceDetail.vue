@@ -83,7 +83,7 @@ const timeline = computed(() => steps.value.map((step, index) => ({
   who: step.who || '待指定', role: stepRole(step.label), note: step.note,
   sub: { done: '已通过', stop: '已驳回', current: '等待中', wait: '未开始' }[step.state] + (step.time && step.state !== 'wait' ? ` · ${stamp(step.time)}` : ''),
 })));
-const hasOrigin = computed(() => props.origin?.kind === 'list');
+const hasOrigin = computed(() => ['list', 'page'].includes(props.origin?.kind));
 const tone = computed(() => ({ ok: 'ok', warn: 'warn', bad: 'bad', info: 'info' }[tag.value?.tone] || ''));
 
 function who(user) {

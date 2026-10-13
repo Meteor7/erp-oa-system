@@ -4,6 +4,7 @@
 // 这里只放不依赖界面的计算：查询参数解析、跳转目标、筛选和计数、每天的时段与小时、汇总和影响、审批进度。
 // 服务端仍是权威校验（额度、日期冲突、每天上限），这里只做即时提示。
 import { callApi } from './expenseClaims.js';
+import { fromValue, originLabel as pageLabel, splitPath } from './navContext.js';
 
 export const HOURS_PER_DAY = 8;
 // 公司规定：请假和调休每天 8 小时，上午 3 小时，下午 5 小时，也可以自定义小时（每次 0.5，0.5–8）；加班按小时。
@@ -108,12 +109,16 @@ export function originOf(query = {}) {
     return { kind: 'list', scope: SCOPE_KEYS.includes(scope) ? scope : 'mine', filter: filterOf(one(query.ftype)) };
   }
   if (from === 'home') return { kind: 'home', scope: '', filter: FILTER_ALL };
+  // 别的页面（数据看板、报销、付款……）点进来的：from 是那个页面的站内地址，返回就回到那里。
+  const page = fromValue(query);
+  if (page && page !== 'list') return { kind: 'page', from: page, label: pageLabel(query), scope: '', filter: FILTER_ALL };
   return { kind: '', scope: '', filter: FILTER_ALL };
 }
 
 export function originQuery(origin) {
   if (origin?.kind === 'list') return { from: 'list', fscope: origin.scope || 'mine', ftype: origin.filter || FILTER_ALL };
   if (origin?.kind === 'home') return { from: 'home' };
+  if (origin?.kind === 'page' && origin.from) return { from: origin.from };
   return {};
 }
 
@@ -185,11 +190,13 @@ export function newLocation({ type = '', draft = '' } = {}, origin = null) {
 // 取消 / 返回：回到从哪来的；没有来源时回到该类型"我的"列表。
 export function backLocation(origin, { filter = FILTER_ALL, homePath = FALLBACK_HOME_PATH } = {}) {
   if (origin?.kind === 'home') return homeLocation(homePath);
+  if (origin?.kind === 'page' && origin.from) return splitPath(origin.from);
   if (origin?.kind === 'list') return listLocation({ scope: origin.scope || 'mine', filter: origin.filter || FILTER_ALL }, homePath);
   return listLocation({ scope: 'mine', filter }, homePath);
 }
 
 export function backLabel(origin) {
+  if (origin?.kind === 'page') return origin.label ? `返回${origin.label}` : '返回上一页';
   return origin?.kind === 'home' ? '返回首页' : '返回列表';
 }
 
