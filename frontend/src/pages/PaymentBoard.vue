@@ -17,6 +17,8 @@ import { isWaitingTooLong } from '../lib/waiting.js';
 
 // embedded：放在审批中心的分组首页下面时不再自己写标题，只留页签。
 defineProps({ embedded: { type: Boolean, default: false } });
+// ?focus=cashier|invoices：从数据看板的卡片点进来，加载完直接滚到那一块（id="bd-cashier" / "bd-invoices"）。
+const FOCUS_IDS = Object.freeze({ cashier: 'bd-cashier', invoices: 'bd-invoices' });
 const route = useRoute();
 const router = useRouter();
 const tab = computed(() => boardTab(route.query));
@@ -62,6 +64,8 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  const anchor = FOCUS_IDS[String(route.query.focus || '')];
+  if (anchor && tab.value === 'main') nextTick(() => document.getElementById(anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
 }
 
 function refresh() {

@@ -102,7 +102,7 @@ function move(delta) {
 
 const scopeLabel = computed(() => SCOPES.find((item) => item.key === scope.value)?.label || '');
 const subtitle = computed(() => {
-  if (todayOnly.value) return '只读：今天正在休假或调休的人（已批准的申请，从最近 100 张里筛出）。';
+  if (todayOnly.value) return '只读：今天正在休假或调休的人（已批准的申请，按今天查，一人一行，和看板“今天不在岗”的人数一样）。';
   return scope.value === 'all' ? '只读：所有人已提交的请假、加班、调休、出差（最近 100 张）。' : '点一行，右边直接看清楚并处理；批量处理勾选后统一同意。';
 });
 const emptyText = computed(() => (todayOnly.value ? '今天没有人在休假或调休' : active.value ? '没有符合筛选的申请' : '这个范围里没有申请'));

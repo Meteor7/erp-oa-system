@@ -141,6 +141,11 @@ test("the request board and the payment board read their tab from the address", 
     assert.match(read(`../src/pages/${page}.vue`), /boardTab\(route\.query\)/, page);
   }
   assert.deepEqual(targets["board.request"].params, ["tab"]);
-  assert.deepEqual(targets["board.payment"].params, ["tab"]);
+  assert.deepEqual(targets["board.payment"].params, ["tab", "focus"]);
+  // 「出纳待付款」点进来带 focus=cashier：付款看板加载完滚到 id="bd-cashier" 那一块
+  const payment = read("../src/pages/PaymentBoard.vue");
+  assert.match(payment, /cashier: 'bd-cashier'/);
+  assert.match(payment, /id="bd-cashier"/);
+  assert.match(payment, /FOCUS_IDS\[String\(route\.query\.focus/);
   assert.match(read("../src/lib/expenseBoards.js"), /query\.tab === 'procurement' \? 'procurement' : 'main'/);
 });

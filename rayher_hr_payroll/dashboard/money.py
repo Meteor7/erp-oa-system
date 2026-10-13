@@ -1004,7 +1004,7 @@ def pay_cashier_queue(ctx):
     if waiting:
         parts.append(f"等待超过 {STUCK_DAYS} 天 {len(waiting)} 张")
     return kpi("pay.cashier_queue", "出纳待付款", number, unit, " · ".join(parts), "bad" if waiting else ("hot" if urgent else ""),
-               to=target("board.payment"),
+               to=target("board.payment", focus="cashier"),   # 直接滚到付款看板的「出纳待付款」那一块
                hint="报销单、付款单走到最后一步「出纳确认付款」、还没付的（不含已付款等核验发票的付款单）。采购付款的最后一步是总经理，不在这里。"
                     "和付款看板「出纳待付款」的张数、金额一样。")
 
