@@ -3,6 +3,7 @@
 // 这里只放不依赖页面的纯函数，方便单元测试。
 import { validateProcurementRequestForm } from './procurementWorkflow.js';
 import { calendarDaysSince } from './waiting.js';
+import { isRejectionEvent } from './operationLog.js';
 
 export const REQUEST_PROCUREMENT = '采购申请';
 export const REQUEST_DIRECT = '购买申请';
@@ -102,7 +103,7 @@ export function draftKind(row) {
   if (row?.business_status === '已撤回' || row?.workflow_status_label === '已撤回') return 'withdrawn';
   const log = Array.isArray(row?.operation_log) ? row.operation_log : [];
   const last = log[log.length - 1];
-  if (last && /驳回|退回/.test(String(last.action || ''))) return 'rejected';
+  if (last && isRejectionEvent(last.action)) return 'rejected';
   return 'draft';
 }
 
@@ -598,7 +599,7 @@ export function lastRejection(row) {
   const rejected = [...(row?.steps || [])].reverse().find((step) => step.status === '已拒绝' && step.note);
   if (rejected) return rejected.note;
   const log = Array.isArray(row?.operation_log) ? row.operation_log : [];
-  const event = [...log].reverse().find((item) => /驳回|退回/.test(String(item.action || '')));
+  const event = [...log].reverse().find((item) => isRejectionEvent(item.action));
   return event?.note || '';
 }
 

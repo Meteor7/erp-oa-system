@@ -370,7 +370,8 @@ def _operation_events(doc):
 
 
 def _append_request_event(doc, action, from_status, to_status, note="", details=None):
-    note = _bounded_optional_text(note, "操作说明", 500)
+    # 和审批意见、驳回原因一样最多 1000 字，否则写得长的意见会在记日志时报错。
+    note = _bounded_optional_text(note, "操作说明", 1000)
     events = _operation_events(doc)
     event = {
         "action": str(action),
@@ -4216,6 +4217,9 @@ def _validate_procurement_material_codes(doc, step):
         )
 
 
+PAYMENT_HANDLE_TYPES = frozenset({REQUEST_REIMBURSEMENT, REQUEST_PAYMENT, REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT})
+
+
 @frappe.whitelist(methods=["POST"])
 @attendance_request_transaction
 def action_request(name, action="approve", note=None, reject_target=None, expected_step_key=None):
@@ -4286,6 +4290,7 @@ def action_request(name, action="approve", note=None, reject_target=None, expect
             step.acted_on = now_datetime()
             if note:
                 step.note = note
+            _append_request_event(doc, "同意", doc.workflow_status, doc.workflow_status, note, {"actor": actor, "step": _clean(step.label)})
             _save_document(doc)
             _sync_assignments_after_save(doc)
             return _summarize_doc(doc, authorized_expense_lines)
@@ -4299,6 +4304,12 @@ def action_request(name, action="approve", note=None, reject_target=None, expect
         _set_step_action(step, done_status, actor, note)
         _advance_after_step(doc, step)
         contract_delivery_confirmed = _finalize_contract_delivery_if_complete(doc, step)
+        # 每一步同意 / 办理都记进操作记录；付款类的办理就是付款，下面会记“确认付款”，这里不重复记。
+        if not (step.mode == "handle" and doc.request_type in PAYMENT_HANDLE_TYPES):
+            _append_request_event(
+                doc, "已办理" if step.mode == "handle" else "同意", from_status, doc.workflow_status, note,
+                {"actor": actor, "step": _clean(step.label)},
+            )
         if step.mode == "handle" and doc.request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
             from rayher_hr_payroll.api import expense_claim_entry
             expense_claim_entry.mark_paid(doc, actor, from_status, note, step)

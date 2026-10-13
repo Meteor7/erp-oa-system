@@ -2906,6 +2906,10 @@ def test_override_completes_all_mode_step_with_real_actor_audit(monkeypatch):
     oa_entry.action_request(doc.name, "approve", note="business override")
 
     assert doc.workflow_status == oa_entry.STATUS_COMPLETED
+    events = json.loads(doc.operation_log)
+    assert [event["action"] for event in events] == ["同意"], "同意 is written to the operation log"
+    assert events[0]["details"] == {"actor": "admin@staff.example.invalid", "step": step.label}
+    assert events[0]["note"] == "business override" and events[0]["to_status"] == oa_entry.STATUS_COMPLETED
     assert step.action_by == "admin@staff.example.invalid"
     assert json.loads(step.approved_by) == ["admin@staff.example.invalid"]
     assert "person046@business.example.invalid" not in json.loads(step.approved_by)
@@ -2975,6 +2979,8 @@ def test_assigned_executive_counts_as_one_cosigner_instead_of_override(monkeypat
 
     oa_entry.action_request(doc.name, "approve", note="first cosigner")
 
+    events = json.loads(doc.operation_log)
+    assert [(event["action"], event["details"]["actor"]) for event in events] == [("同意", "person046@business.example.invalid")], "each cosigner is logged"
     assert doc.workflow_status == oa_entry.STATUS_PENDING
     assert doc.current_step_index == 1
     assert step.status == oa_entry.STATUS_PENDING
@@ -3597,6 +3603,8 @@ def test_procurement_payment_final_handle_posts_ledger_and_enters_arrival_lifecy
 
     oa_entry.action_request(doc.name, "approve", "已付款")
 
+    actions = [event["action"] for event in json.loads(doc.operation_log)]
+    assert actions.count("确认付款") == 1 and "已办理" not in actions and "同意" not in actions, "payment is logged once"
     assert paid == ["PAY-PROC-HANDLE"]
     assert doc.workflow_status == oa_entry.STATUS_PAID
     assert doc.business_status == "待到货"
@@ -4086,3 +4094,13 @@ def test_last_submitted_on_uses_the_latest_submission_event():
     assert oa_entry._last_submitted_on(events) == "2026-07-15 08:30:00"
     assert oa_entry._last_submitted_on([{"action": "创建草稿"}]) == ""
     assert oa_entry._last_submitted_on(None) == ""
+
+
+def test_operation_log_takes_an_opinion_as_long_as_the_approval_note_allows():
+    """审批意见、驳回原因最多 1000 字；操作记录原来只收 500 字，写得长的意见会在记日志时报错。"""
+    frappe_stub.session.user = "approver@example.com"
+    doc = Row(operation_log="[]")
+    oa_entry._append_request_event(doc, "同意", "待审批", "已完成", "字" * 1000)
+    assert json.loads(doc.operation_log)[-1]["note"] == "字" * 1000
+    with pytest.raises(Exception):
+        oa_entry._append_request_event(doc, "同意", "待审批", "已完成", "字" * 1001)

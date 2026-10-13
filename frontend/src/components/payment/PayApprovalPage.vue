@@ -10,6 +10,7 @@ import {
   requestTone, stepRows, validateReject,
 } from '../../lib/paymentView.js';
 import { OA_API, errorText } from './paymentApi.js';
+import { eventLabel } from '../../lib/operationLog.js';
 import PayDocuments from './PayDocuments.vue';
 import PayGateGrid from './PayGateGrid.vue';
 import PayLegacyActions from './PayLegacyActions.vue';
@@ -272,7 +273,7 @@ function openWork() {
           <div class="pt"><span>操作记录</span></div>
           <div v-for="(event, index) in log" :key="index" class="pay-log">
             <span class="muted">{{ formatTime(event.acted_on) }}</span>
-            <span>{{ event.action }} · {{ event.actor }}<template v-if="event.note"> · {{ event.note }}</template></span>
+            <span>{{ eventLabel(event.action) }} · {{ event.actor }}<template v-if="event.note"> · {{ event.note }}</template></span>
           </div>
         </section>
       </aside>

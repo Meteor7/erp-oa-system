@@ -12,6 +12,7 @@ import {
   requestFacts, stageOf, statusOf, stepTimeline, unboundLines,
 } from '../../lib/procurementView.js';
 import { paymentPoLink } from '../../lib/priceView.js';
+import { eventLabel } from '../../lib/operationLog.js';
 import { backLocation, carryQuery, fromValue, originLabel } from '../../lib/navContext.js';
 import { canCreatePr, canOpenBoard, isInsider } from './access.js';
 import { apiGet, apiPost, errText, loadPurchaseOrders, settle } from './procData.js';
@@ -411,7 +412,7 @@ function toggleLine(index) {
             <div class="pt">操作记录</div>
             <div v-for="(event, index) in log" :key="index" class="pr-log">
               <span class="muted">{{ formatDateTime(event.acted_on) }}</span>
-              <span>{{ ctx.nameOf(event.actor) }} · {{ event.action }}<template v-if="event.note"> · {{ event.note }}</template></span>
+              <span>{{ ctx.nameOf(event.actor) }} · {{ eventLabel(event.action) }}<template v-if="event.note"> · {{ event.note }}</template></span>
             </div>
             <div v-if="!log.length" class="muted">还没有操作记录</div>
             <div class="muted pr-docs-note">只记这张申请本身的操作；价格审批、PO、付款的记录在各自页面。</div>

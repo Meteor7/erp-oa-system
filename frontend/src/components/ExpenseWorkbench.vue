@@ -22,6 +22,7 @@ import {
 // ];
 //               <Button variant="subtle" @click="previewRow = selectedRow"><FeatherIcon name="eye" class="h-4 w-4" />查看发票</Button>
 import ExpenseApprovalRecords from './expense/ExpenseApprovalRecords.vue';
+import { eventLabel } from '../lib/operationLog.js';
 import ExpenseStatistics from './expense/ExpenseStatistics.vue';
 import InvoicePreviewDrawer from './invoice/InvoicePreviewDrawer.vue';
 import InvoiceUploadWorkbench from './invoice/InvoiceUploadWorkbench.vue';
@@ -978,7 +979,7 @@ watch(() => requestForm.invoice_handling_mode, (mode) => {
 
               <section v-if="selectedRequest.operation_log?.length" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                 <h4 class="text-sm font-semibold text-gray-900">&#x64CD;&#x4F5C;&#x8BB0;&#x5F55;</h4>
-                <div class="mt-3 max-h-52 space-y-2 overflow-y-auto"><div v-for="(event,index) in selectedRequest.operation_log" :key="index" class="rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-600"><div class="font-medium text-gray-800">{{ event.action }}</div><div>{{ event.actor }} &middot; {{ dateText(event.acted_on) }}</div><div>{{ event.from_status }} &rarr; {{ event.to_status }}<span v-if="event.note"> &middot; {{ event.note }}</span></div></div></div>
+                <div class="mt-3 max-h-52 space-y-2 overflow-y-auto"><div v-for="(event,index) in selectedRequest.operation_log" :key="index" class="rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-600"><div class="font-medium text-gray-800">{{ eventLabel(event.action) }}</div><div>{{ event.actor }} &middot; {{ dateText(event.acted_on) }}</div><div>{{ event.from_status }} &rarr; {{ event.to_status }}<span v-if="event.note"> &middot; {{ event.note }}</span></div></div></div>
               </section>
             </aside>
           </div>

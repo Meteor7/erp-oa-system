@@ -11,6 +11,7 @@ import {
   rejectionOf, requestTitle, rowDays, sizeText, stamp, statusTag, stepRole, stepStates, totalOf, weekLabel, workedSpan, dayChip,
 } from '../../lib/attendanceView.js';
 import { hereAsFrom } from '../../lib/navContext.js';
+import { eventLabel } from '../../lib/operationLog.js';
 import { pushTarget } from '../../lib/travelView.js';
 import { lengthText } from '../../lib/attendanceFlow.js';
 import { rowKind } from '../../lib/attendanceCharts.js';
@@ -413,7 +414,7 @@ onMounted(async () => {
               <details v-if="request.operation_log?.length" class="af-log">
                 <summary>操作记录（{{ request.operation_log.length }}）</summary>
                 <ol>
-                  <li v-for="(event, index) in [...request.operation_log].reverse()" :key="index">{{ stamp(event.timestamp || event.acted_on) }} · {{ event.action }} · {{ who(event.details?.actor || event.actor || event.user) }}<template v-if="event.note"> · {{ event.note }}</template></li>
+                  <li v-for="(event, index) in [...request.operation_log].reverse()" :key="index">{{ stamp(event.timestamp || event.acted_on) }} · {{ eventLabel(event.action) }} · {{ who(event.details?.actor || event.actor || event.user) }}<template v-if="event.note"> · {{ event.note }}</template></li>
                 </ol>
               </details>
             </div>
