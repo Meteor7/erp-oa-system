@@ -1,7 +1,8 @@
 """看板：我负责的项目（项目负责人，不管他还是不是部门主管 / 员工）。
 
 项目里别人提的采购申请 / 购买申请都能看到进度（只读，不含别人没提交的草稿，也不含自己提的——那些在“我提交的”里；
-价格、供应商不显示）。这和采购申请列表的「我负责的项目」页签是同一个范围（procurementView.ownedRows）。
+价格、供应商不显示）。这和采购申请列表的「我负责的项目」页签是同一个范围：页签也按“项目负责人 = 我”
+在服务端查（api/procurement_owned.list_owned_requests，用这里的 _load_requests，不再限最近 200 张；审查 #79-5）。
 数据按“项目负责人 = 我”直接查（原来取 list_requests 最近 200 张再筛，单子多了会漏，2026-10-13 改），
 每张单的整理（采购链路阶段、能不能会签）用和列表接口同一个 `oa_entry._summarize_doc`；
 权限同 `oa_access` 里项目负责人只读可见的规则（项目负责人 = 我、不是草稿）。
@@ -22,15 +23,17 @@ HINT = "只显示项目里别人提的采购 / 购买申请进度，只读；没
 
 
 # ---------------------------------------------------------------- 取数（单独成函数，测试里替换）
-def _load_requests(ctx):
-    """项目负责人是我、已提交的采购申请 / 购买申请（功能开关关着的类型不取），整理成列表接口的行。"""
+def _load_requests(ctx, request_types=REQUEST_TYPES):
+    """项目负责人是我、已提交的采购申请 / 购买申请（功能开关关着的类型不取），整理成列表接口的行。
+    request_types：只取其中几类（采购申请列表「我负责的项目」页签只要采购申请，api/procurement_owned）。"""
     import frappe
 
     from rayher_hr_payroll.api import oa_entry
     from rayher_hr_payroll.oa_feature_gate import visible_request_types
     from rayher_hr_payroll.procurement_summary_cache import prepare_summaries
 
-    types = [name for name in REQUEST_TYPES if name in set(visible_request_types(list(REQUEST_TYPES)))]
+    wanted = [name for name in REQUEST_TYPES if name in set(request_types)]
+    types = [name for name in wanted if name in set(visible_request_types(list(wanted)))]
     if not types:
         return []
     names = frappe.get_all("OA Approval Request",

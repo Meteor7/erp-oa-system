@@ -5,6 +5,7 @@ import { Badge, Button, Card, createResource } from 'frappe-ui';
 import AccommodationTabs from '../components/AccommodationTabs.vue';
 import { extractFrappeError } from '../lib/frappeError';
 import { isFormDirty, useLeaveConfirm } from '../lib/leaveConfirm.js';
+import { canEditHr } from '../lib/access.js';
 import { bindRouteFilters, queryText } from '../lib/urlFilterState.js';
 import {
   ROOMS_PATH, announceRoomSaved, findRoom, parseRoomFilters, parseRoomsLocation, roomBackLabel, roomFilterQuery,
@@ -25,10 +26,12 @@ const checkoutHistory = createResource({
   method: 'GET',
   auto: true,
 });
+// 总经理、副总经理只读打开本页：不显示新增 / 编辑，也不取员工下拉（那个接口只给人事，取了会报没有权限）。
+const canEdit = canEditHr();
 const employees = createResource({
   url: 'rayher_hr_payroll.api.accommodation_entry.get_emp_options',
   method: 'GET',
-  auto: true,
+  auto: canEdit,
 });
 const saver = createResource({ url: 'rayher_hr_payroll.api.accommodation_master_entry.save_room' });
 
@@ -59,8 +62,9 @@ const location = computed(() => parseRoomsLocation(route.query));
 const viewState = computed(() => roomViewState(location.value, rows.data, { loading: rows.loading, failed: Boolean(rows.error) }));
 // 保存成功后正在等列表刷新、回到来的地方：这段时间表单保持原样，不闪"找不到"。
 const state = computed(() => (leaving.value ? (location.value.view === 'new' ? 'new' : 'edit') : viewState.value));
-const isList = computed(() => state.value === 'list');
-const isForm = computed(() => state.value === 'new' || state.value === 'edit');
+// 只读的人打开 ?view=new / edit 的地址也只看到列表。
+const isList = computed(() => !canEdit || state.value === 'list');
+const isForm = computed(() => canEdit && (state.value === 'new' || state.value === 'edit'));
 const title = computed(() => roomTitle(location.value.view, originalRoomNo.value));
 const backLabel = computed(() => roomBackLabel(route.query));
 const loadError = computed(() => (rows.error ? extractFrappeError(rows.error, '房间资料加载失败') : ''));
@@ -270,7 +274,7 @@ async function save() {
     <template v-if="isList">
       <div v-if="savedNotice" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status" data-saved-notice>{{ savedNotice }}</div>
       <Card title="宿舍基本信息管理">
-        <template #actions><Button variant="solid" data-room-new @click="openNew">新增房间</Button></template>
+        <template v-if="canEdit" #actions><Button variant="solid" data-room-new @click="openNew">新增房间</Button></template>
         <p class="mb-4 text-sm text-gray-500">统一维护房间租赁、押金、附件及入住关系；每月租金是整套房间的总租金。退宿后记录进入下方历史，不会被新入住人覆盖。</p>
         <div v-if="filters.lease" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <span>续租清单：只显示在用房间里 60 天内到期或已过期的租约（{{ filteredRows.length }} 间）。</span>
@@ -286,7 +290,7 @@ async function save() {
           </div>
         </div>
         <div v-if="leftStillRegistered.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {{ leftStillRegistered.length }} 位已离职员工还登记在住：{{ leftStillRegistered.map((row) => `${row.room_no} ${row.employee_name}`).join('、') }}。请核实后点"编辑"填写退宿日期。
+          {{ leftStillRegistered.length }} 位已离职员工还登记在住：{{ leftStillRegistered.map((row) => `${row.room_no} ${row.employee_name}`).join('、') }}。<template v-if="canEdit">请核实后点"编辑"填写退宿日期。</template>
         </div>
         <div class="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 md:flex-row">
           <input v-model="filters.keyword" class="min-w-0 flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="搜索房号、房型或入住人" />
@@ -308,7 +312,7 @@ async function save() {
                 <td class="whitespace-nowrap px-3 py-2">{{ row.lease_start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.lease_end_date || '-' }}</td><td class="px-3 py-2 text-right">{{ money(row.monthly_rent) }}</td><td class="px-3 py-2 text-right">{{ money(row.paid_deposit) }}</td>
                 <td class="max-w-[150px] px-3 py-2"><a v-if="row.rent_contract_attachment" :href="row.rent_contract_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看合同</a><span v-else class="text-gray-400">-</span></td>
                 <td class="max-w-[150px] px-3 py-2"><a v-if="row.deposit_attachment" :href="row.deposit_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看附件</a><span v-else class="text-gray-400">-</span></td>
-                <td class="whitespace-nowrap px-3 py-2">{{ row.employee_name || row.room_purpose || '-' }}<span v-if="row.employee_left" class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">已离职</span></td><td class="whitespace-nowrap px-3 py-2">{{ row.start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.end_date || '-' }}</td><td class="max-w-[220px] px-3 py-2">{{ row.remark || '-' }}</td><td class="px-3 py-2 text-right"><router-link :to="editLocation(row)" class="text-xs text-blue-600 hover:underline" data-room-edit>编辑</router-link></td>
+                <td class="whitespace-nowrap px-3 py-2">{{ row.employee_name || row.room_purpose || '-' }}<span v-if="row.employee_left" class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">已离职</span></td><td class="whitespace-nowrap px-3 py-2">{{ row.start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.end_date || '-' }}</td><td class="max-w-[220px] px-3 py-2">{{ row.remark || '-' }}</td><td class="px-3 py-2 text-right"><template v-if="canEdit"><router-link :to="editLocation(row)" class="text-xs text-blue-600 hover:underline" data-room-edit>编辑</router-link></template><span v-else class="text-xs text-gray-400">只读</span></td>
               </tr>
               <tr v-if="!filteredRows.length"><td colspan="14" class="py-8 text-center text-gray-400">暂无宿舍基础资料</td></tr>
             </tbody>

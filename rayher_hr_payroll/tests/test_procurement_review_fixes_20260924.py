@@ -68,7 +68,7 @@ def test_notifications_for_requesters_hide_prices(monkeypatch):
     monkeypatch.setattr(chain.frappe, "get_doc", lambda *args, **kwargs: sources[args[1]] if len(args) > 1 else Doc(args[0]), raising=False)
     monkeypatch.setattr(chain.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True), raising=False)
     holders = {"pmc": "pmc@example.com", "procurement_manager": "pm@example.com", "vice_manager": "vp@example.com"}
-    monkeypatch.setattr(chain, "position_users", lambda *keys: {holders[key] for key in keys})
+    monkeypatch.setattr(chain, "position_users", lambda *keys: {holders[key] for key in keys if key in holders})
     monkeypatch.setattr(chain, "_user", lambda: "pm@example.com")
     monkeypatch.setattr(chain, "_linked_material_context", lambda names: "物料:" + ",".join(sorted(names)))
     monkeypatch.setattr(chain, "_notification_link", lambda *args: "/x")
@@ -76,6 +76,8 @@ def test_notifications_for_requesters_hide_prices(monkeypatch):
     by_user = {row["for_user"]: row for row in sent}
     assert set(by_user) == {"pmc@example.com", "vp@example.com", "buyer@example.com", "alice@example.com", "bob@example.com"}
     assert "999.00" in by_user["vp@example.com"]["email_content"] and "OA-2" in by_user["buyer@example.com"]["email_content"]
+    # 2026-10-13：PMC 收完整进度，但正文不带金额
+    assert "999.00" not in by_user["pmc@example.com"]["email_content"] and "OA-2" in by_user["pmc@example.com"]["email_content"]
     for requester, own, other in (("alice@example.com", "OA-1", "OA-2"), ("bob@example.com", "OA-2", "OA-1")):
         assert "999.00" not in by_user[requester]["email_content"] and "供应商" not in by_user[requester]["email_content"]
         assert own in by_user[requester]["email_content"] and other not in by_user[requester]["email_content"]

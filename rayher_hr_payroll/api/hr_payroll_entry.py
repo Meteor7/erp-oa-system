@@ -544,13 +544,29 @@ def confirm_payroll(period, employees=None):
     previous = frappe.flags.via_payroll_entry
     frappe.flags.via_payroll_entry = True
     try:
-        _confirm_each(drafts, wanted, confirmed, skipped)
+        _confirm_each(drafts, wanted, confirmed, skipped, period)
     finally:
         frappe.flags.via_payroll_entry = previous
     return {"period": period, "confirmed": len(confirmed), "skipped": skipped}
 
 
-def _confirm_each(drafts, wanted, confirmed, skipped):
+RESAVE_FAILED = "按现在的社保、公积金、宿舍和计薪天数重算失败："
+
+
+def _resave_draft(doc, period):
+    """确认前重算：草稿存的是当时的社保 / 公积金 / 宿舍 / 应计薪天数，页面（_row）却按现在的数显示。
+    用工资条上人事填的数（hr_* 和计薪天数），走 save_payroll_draft 同一套计算重新保存，确认锁定的就是页面上看到的金额。"""
+    save_payroll_draft(
+        doc.employee, period, payment_days=doc.payment_days,
+        base_salary=_as_float(doc.hr_base_salary), salary_adjustment=_as_float(doc.hr_salary_adjustment),
+        company_subsidy=_as_float(doc.hr_company_subsidy), bonus=_as_float(doc.hr_bonus),
+        other_adjustment=_as_float(doc.hr_other_adjustment), income_tax=_as_float(doc.hr_income_tax),
+        advanced_paid=_as_float(doc.hr_advanced_paid),
+    )
+    return frappe.get_doc("Salary Slip", doc.name)
+
+
+def _confirm_each(drafts, wanted, confirmed, skipped, period):
     for row in drafts:
         if wanted is not None and row.get("employee") not in wanted:
             continue
@@ -559,14 +575,17 @@ def _confirm_each(drafts, wanted, confirmed, skipped):
             skipped.append({**who, "reason": "别处生成的工资条，不在这里确认"})
             continue
         frappe.db.savepoint("confirm_payroll")
+        stage = RESAVE_FAILED
         try:
             doc = frappe.get_doc("Salary Slip", row.get("name"))
+            doc = _resave_draft(doc, period)   # 重算失败（比如社保记录没了）：这张跳过，写明原因
+            stage = ""
             doc.flags.ignore_permissions = True
             doc.submit()
         except Exception as exc:
             frappe.db.rollback(save_point="confirm_payroll")
             frappe.clear_messages()
-            skipped.append({**who, "reason": str(exc) or "确认失败"})
+            skipped.append({**who, "reason": stage + (str(exc) or "确认失败")})
             continue
         confirmed.append(row.get("employee"))
 

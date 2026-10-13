@@ -93,14 +93,29 @@ def _days(hours):
     return round(float(hours or 0) / float(DAY_HOURS), 2)
 
 
+def _legacy_month_hours(row, month_first, month_last):
+    """没有逐日明细的旧申请：按原来的规矩，duration_hours 整张记在开始日期所在的月（不按工作日 8 小时拆）。"""
+    try:
+        start = as_date(value(row, "from_date"))
+        hours = Decimal(str(value(row, "duration_hours") or 0))
+    except (ValueError, TypeError, ArithmeticError):
+        return ZERO
+    return hours if month_first <= start <= month_last else ZERO
+
+
 def month_window(rows, month_first, month_last):
     """请假 / 调休 / 加班按天拆到 [month_first, month_last]：每张申请只留落在这段日期里的小时（duration_hours 换成这个数），
-    一点都不落在里面的丢掉。只有起止日期的旧申请按期间里每个周一到周五 8 小时算（同 expand_days）。调用方只传已批准的。"""
+    一点都不落在里面的丢掉。调用方只传已批准的。
+    修复（2026-10-13 审查）：没有逐日明细（attendance_days）的旧申请不再按每个工作日 8 小时拆（周六加班会丢、
+    2 小时加班变 8 小时、4 小时半天假变 8 小时），按原来的规矩：duration_hours 记在开始日期所在的月。"""
     result = []
     for row in rows:
         if value(row, "request_type") not in (REQUEST_LEAVE, REQUEST_COMP_TIME, REQUEST_OVERTIME):
             continue
-        hours = sum((hours for day, hours in days_of(row) if month_first <= day <= month_last), ZERO)
+        if value(row, "attendance_days"):
+            hours = sum((hours for day, hours in days_of(row) if month_first <= day <= month_last), ZERO)
+        else:
+            hours = _legacy_month_hours(row, month_first, month_last)
         if hours > 0:
             result.append({**dict(row), "duration_hours": float(hours)})
     return result

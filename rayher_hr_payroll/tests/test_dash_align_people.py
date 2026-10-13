@@ -70,12 +70,12 @@ def test_month_leave_counts_leave_only_in_days_and_keeps_comp_time_apart():
     assert sum(item["hours"] for item in figures["requests"] if item["request_type"] == att.REQUEST_LEAVE) == figures["leave_hours"]
 
 
-def test_an_old_request_without_daily_detail_is_split_by_weekdays_like_the_attendance_centre():
+def test_an_old_request_without_daily_detail_counts_its_hours_in_the_start_month():
+    # 审查修正（2026-10-13）：没有逐日明细的旧申请按 duration_hours 记在开始日期所在的月，不按工作日 8 小时拆
     legacy = {"name": "OLD", "employee": "A", "request_type": att.REQUEST_LEAVE, "leave_type": "事假", "workflow_status": "已完成",
               "from_date": "2026-09-29", "to_date": "2026-10-02", "attendance_days": None, "duration_hours": 32}
-    october = board.month_window([legacy], *MONTH)
-    assert october[0]["duration_hours"] == 16.0                                               # 10-01、10-02 两个工作日
-    assert board.month_window([legacy], date(2026, 9, 1), date(2026, 9, 30))[0]["duration_hours"] == 16.0
+    assert board.month_window([legacy], *MONTH) == []
+    assert board.month_window([legacy], date(2026, 9, 1), date(2026, 9, 30))[0]["duration_hours"] == 32.0
 
 
 def test_the_attendance_centre_home_month_figure_is_the_same_function():

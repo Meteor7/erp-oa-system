@@ -19,7 +19,8 @@ def test_period_pay_totals_shape(monkeypatch):
         {"employee": "E2", "docstatus": 1, "gross_pay": 200.0, "total_deduction": 40.0},
     ])
     out = pb.period_pay_totals("2026-07")
-    assert out == {"gross": 300.0, "deductions": 70.0, "confirmed": 2, "draft": 0, "draft_gross": 0.0}
+    assert out == {"gross": 300.0, "deductions": 70.0, "confirmed": 2, "draft": 0, "draft_gross": 0.0,
+                   "external_draft": 0, "external_draft_gross": 0.0}
 
 
 def test_period_pay_totals_counts_only_confirmed_slips_and_reports_drafts(monkeypatch):
@@ -31,15 +32,17 @@ def test_period_pay_totals_counts_only_confirmed_slips_and_reports_drafts(monkey
         captured.update(filters)
         return [
             {"employee": "E1", "docstatus": 1, "gross_pay": 1000.0, "total_deduction": 100.0},
-            {"employee": "E2", "docstatus": 0, "gross_pay": 2000.0, "total_deduction": 200.0},
-            {"employee": "E3", "docstatus": 0, "gross_pay": 3000.0, "total_deduction": 300.0},
+            # 审查修正（2026-10-13）：draft 只数薪酬计算页生成的草稿（hr_spa_managed = 1），别处的另算 external_draft
+            {"employee": "E2", "docstatus": 0, "gross_pay": 2000.0, "total_deduction": 200.0, "hr_spa_managed": 1},
+            {"employee": "E3", "docstatus": 0, "gross_pay": 3000.0, "total_deduction": 300.0, "hr_spa_managed": 1},
             # 撤回确认后重做的草稿：同一个人已经有确认的就不算草稿
             {"employee": "E1", "docstatus": 0, "gross_pay": 999.0, "total_deduction": 0.0},
         ]
 
     monkeypatch.setattr(pb.frappe, "get_all", get_all)
     out = pb.period_pay_totals("2026-10")
-    assert out == {"gross": 1000.0, "deductions": 100.0, "confirmed": 1, "draft": 2, "draft_gross": 5000.0}
+    assert out == {"gross": 1000.0, "deductions": 100.0, "confirmed": 1, "draft": 2, "draft_gross": 5000.0,
+                   "external_draft": 0, "external_draft_gross": 0.0}
     assert captured == {"docstatus": ["<", 2], "start_date": ["between", ["2026-10-01", "2026-10-31"]]}
 
 

@@ -349,7 +349,9 @@ def _can_record_inspection():
 MONEY_POSITIONS = ("procurement_manager", "vice_manager", "general_manager",
                    "finance_manager", "finance_accountant", "finance_auditor")
 MONEY_KEYS = frozenset({"total_amount", "paid_amount", "outstanding_amount", "amount", "unit_price", "total_price",
-                        "package_total", "selected_unit_price", "selected_total", "po_total_amount", "payment_plan_json"})
+                        "package_total", "selected_unit_price", "selected_total", "po_total_amount", "payment_plan_json",
+                        # 合同草稿正文里有“合同金额：CNY x”，合同快照 JSON 里有 total_amount：整段不给（审查 #79-1）
+                        "contract_draft_content", "contract_snapshot", "price_snapshot"})
 
 
 def _amounts_hidden():
@@ -594,13 +596,18 @@ def _notify(subject, content, document_type, document_name, source_requests=None
             if value and "@" in value:
                 related[value].add(request_name)
     insiders.discard("")
+    # PMC / 生产主管收完整进度，但正文里的金额（本次付款、累计付款…）不给（和 _amounts_hidden 同一判断）
+    money_free = {_text(user).lower() for user in position_users("pmc", "production_asset_owner")}
+    money_free -= {_text(user).lower() for user in position_users(*MONEY_POSITIONS)}
     recipients = insiders | set(related)
     recipients.discard(_user().lower())
     token = f"procurement-chain:{document_type}:{document_name}:{uuid4()}"
     detail = _linked_material_context(source_requests)
 
     def message_for(recipient):
-        if recipient in insiders:
+        if recipient in insiders and recipient in money_free:
+            body, context = f"{subject}。金额不对你显示，详情请在 PO 页面查看。", detail
+        elif recipient in insiders:
             body, context = content, detail
         else:
             body, context = "采购进度有更新，请在物料进度中查看。", _linked_material_context(sorted(related[recipient]))
@@ -662,6 +669,8 @@ def _supplier_comparisons(doc, quotes):
             "quote_name": quote.name,
             "price_line": quote.price_line,
             "material_serial": _text(line_map[quote.price_line].material_serial),
+            # 报没报价单独给一个标志：PMC 看不到单价时页面靠它显示“已报价 + 货期”（审查 #79-2）
+            "quoted": 1 if float(quote.unit_price or 0) > 0 else 0,
             "unit_price": float(quote.unit_price or 0),
             "total_price": float(quote.total_price or 0),
             "delivery_date": str(quote.delivery_date or ""),
@@ -765,13 +774,25 @@ def _price_summary(doc, quotes=None, steps=None, headers=None):
     })
 
 
+def _plan_row_paid(row):
+    """这一期付清没有（同 priceView.planStatus）。"""
+    amount = _decimal(getattr(row, "amount", 0))
+    return _text(getattr(row, "status", None)) == "已付款" or (amount > 0 and _decimal(getattr(row, "paid_amount", 0)) >= amount)
+
+
 def _po_summary(doc, steps=None):
     result = doc.as_dict()
     result["steps"] = _approval_steps(doc.name) if steps is None else steps
     result["contract_status"] = _text(getattr(doc, "contract_status", None)) or "待补充信息"
-    result["payment_plan"] = [row.as_dict() for row in (getattr(doc, "payment_plan", []) or [])]
+    result["payment_plan"] = [
+        {**row.as_dict(), "paid_full": 1 if _plan_row_paid(row) else 0} for row in (getattr(doc, "payment_plan", []) or [])]
     result["paid_amount"] = float(getattr(doc, "paid_amount", 0) or 0)
     result["outstanding_amount"] = max(0, float(doc.total_amount or 0) - result["paid_amount"])
+    # 付清没有：和 close_po 同一条件，在去掉金额之前算好；看不到金额的人靠它判断“付款结清”（审查 #79-3）
+    total = _decimal(doc.total_amount)
+    result["paid_full"] = 1 if total > 0 and _decimal(getattr(doc, "paid_amount", 0)) >= total and all(
+        _decimal(getattr(row, "paid_amount", 0)) >= _decimal(getattr(row, "amount", 0))
+        for row in (getattr(doc, "payment_plan", []) or [])) else 0
     result["can_manage_purchase"] = 1 if _can_purchase() else 0
     result["can_seal_contract"] = 1 if _can_seal_contract(doc) and result["contract_status"] == "待电子用印" else 0
     states = [_text(getattr(line, "inspection_status", None)) for line in (getattr(doc, "lines", []) or [])]

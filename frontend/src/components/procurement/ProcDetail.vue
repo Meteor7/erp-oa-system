@@ -11,7 +11,7 @@ import {
   currentStepKey, detailBanner, formatDateTime, money, pmcButtonLabel, projectText, quantityText, relatedDocuments,
   requestFacts, stageOf, statusOf, stepTimeline, unboundLines,
 } from '../../lib/procurementView.js';
-import { paymentPoLink } from '../../lib/priceView.js';
+import { amountText, paymentPoLink } from '../../lib/priceView.js';
 import { eventLabel } from '../../lib/operationLog.js';
 import { backLocation, carryQuery, fromValue, originLabel } from '../../lib/navContext.js';
 import { canCreatePr, canOpenBoard, isInsider } from './access.js';
@@ -119,10 +119,13 @@ const chainAction = computed(() => {
   return key === 'quote' ? { label: '处理询价 / 比价', to: chainRoute(current) } : { label: '打开价格审批单', to: chainRoute(current) };
 });
 
+// PMC、生产主管看不到金额（PO 上带 amounts_hidden，金额是 null）：显示“—”，不算成 0
 function poAmount(po) {
+  if (po.amounts_hidden) return null;
   const own = (po.lines || []).filter((line) => line.source_request === row.value?.name);
   return own.length ? own.reduce((sum, line) => sum + Number(line.amount || 0), 0) : Number(po.total_amount || 0);
 }
+const poCash = (po, value) => amountText(value, po.amounts_hidden);
 
 async function act(action) {
   const current = row.value;
@@ -351,7 +354,7 @@ function toggleLine(index) {
             <div v-for="po in poRows" :key="po.name" class="pr-po">
               <div class="pr-po-head">
                 <div><span class="muted">{{ po.name }} · 供应商</span><b>{{ po.supplier || '—' }}</b></div>
-                <div><span class="muted">PO 总额（本申请物料）</span><b>¥ {{ money(poAmount(po)) }}</b></div>
+                <div><span class="muted">PO 总额（本申请物料）</span><b>{{ poCash(po, poAmount(po)) }}</b></div>
                 <div><span class="muted">付款方式</span>{{ po.payment_method || '—' }}</div>
                 <div><span class="muted">币种 / 税率</span>{{ po.currency || 'CNY' }} / {{ po.tax_rate || 0 }}%</div>
                 <router-link v-if="row.can_view_procurement_po" :to="{ name: 'procurement-price-approvals', query: { tab: 'po', po: po.name } }" class="btn sm">打开 PO →</router-link>
@@ -363,7 +366,7 @@ function toggleLine(index) {
                   <tbody>
                     <tr v-for="plan in po.payment_plan || []" :key="plan.name">
                       <td>{{ plan.installment_name }}</td><td>{{ plan.payment_stage }}</td>
-                      <td class="r num">{{ plan.percentage }}%</td><td class="r num strong">¥ {{ money(plan.amount) }}</td>
+                      <td class="r num">{{ plan.percentage }}%</td><td class="r num strong">{{ poCash(po, plan.amount) }}</td>
                       <td>{{ plan.trigger_condition || '—' }}</td><td>{{ plan.invoice_requirement || '—' }}</td>
                       <td>
                         <span class="pill p-gray">{{ plan.status || '待生成' }}</span>

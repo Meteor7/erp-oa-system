@@ -1,12 +1,13 @@
 <script setup>
 // 物料执行进度：按原始物料跟踪 PR → 价格审批 → PO → 到货 / 验收；付款显示关联 PO 的整体状态。
-// 申请人只看数量和状态；供应商、单价、金额只给能看价格 / PO 的角色（采购、PMC、副总、财务等）。
+// 申请人只看数量和状态；供应商、单价、金额只给能看价格 / PO 的角色（采购、PMC、副总、财务等），其中 PMC、生产主管不看金额。
 // 属性和事件保持不变（request / sourceLine / expanded），2026-09-30 只改了样式。
 import { computed, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
 import '../styles/expenseUi.css';
 import '../styles/procurementUi.css';
-import { money, quantityText } from '../lib/procurementView.js';
+import { quantityText } from '../lib/procurementView.js';
+import { amountText } from '../lib/priceView.js';
 import { canSeeProcurementPO, canSeeProcurementPrice } from '../lib/access.js';
 import { loadPurchaseOrders } from './procurement/procData.js';
 
@@ -47,13 +48,17 @@ const boardLink = (line) => ({ path: '/approval/material-progress', query: { req
 const number = quantityText;
 
 // 这一项物料在某张 PO 里的供应商、单价、本申请金额（一张 PO 也可能同时包含别的申请的物料）。
+// PMC、生产主管看不到金额（PO 上带 amounts_hidden）：单价、金额是 null，显示“—”，不显示成 ¥ 0.00。
 function priceOf(order, line) {
   const po = orders.value[order.name];
   if (!po) return null;
+  if (po.amounts_hidden) return { supplier: po.supplier || '—', unit: null, amount: null, hidden: true };
   const rows = (po.lines || []).filter((item) => item.source_line === line.source_line);
   const amount = rows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  return { supplier: po.supplier || '—', unit: rows[0] ? Number(rows[0].unit_price || 0) : 0, amount };
+  return { supplier: po.supplier || '—', unit: rows[0] ? Number(rows[0].unit_price || 0) : 0, amount, hidden: false };
 }
+const cash = (price, value) => amountText(value, price.hidden);
+const amountsHidden = computed(() => Object.values(orders.value).some((po) => po.amounts_hidden));
 </script>
 
 <template>
@@ -61,7 +66,7 @@ function priceOf(order, line) {
     <div class="pt">
       <span>执行明细 <span class="muted">每项物料：申请 → PR → 价格审批 → PO，数量和状态</span></span>
       <span class="row-actions">
-        <span v-if="insider" class="tag">含供应商和金额（仅采购 / PMC / 副总 / 财务可见）</span>
+        <span v-if="insider" class="tag">{{ amountsHidden ? '含供应商（金额不对你显示）' : '含供应商和金额（仅采购 / 副总 / 财务可见）' }}</span>
         <button type="button" class="btn sm" :aria-expanded="opened" @click="toggle">{{ opened ? '收起进度' : '查看执行进度' }}</button>
       </span>
     </div>
@@ -101,7 +106,7 @@ function priceOf(order, line) {
               <div><span class="k">所在 PO 付款（整单）</span>{{ order.payment_status }}</div>
               <template v-if="insider && priceOf(order, line)">
                 <div><span class="k">供应商</span>{{ priceOf(order, line).supplier }}</div>
-                <div><span class="k">单价 / 本申请金额</span><b>¥ {{ money(priceOf(order, line).unit) }} / ¥ {{ money(priceOf(order, line).amount) }}</b></div>
+                <div><span class="k">单价 / 本申请金额</span><b>{{ cash(priceOf(order, line), priceOf(order, line).unit) }} / {{ cash(priceOf(order, line), priceOf(order, line).amount) }}</b></div>
               </template>
             </div>
             <p v-if="!branch.orders.length" class="muted pr-exec-empty">尚未建立 PO</p>

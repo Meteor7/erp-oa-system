@@ -208,22 +208,29 @@ def designation_suggestion(role_key, *, store=None):
     return _designation_holder(_text(role_key), spec, _store(store))
 
 
+def seed_missing_assignment(role_key, *, store=None):
+    """给一个还没有任何配置的岗位按职务补建配置；返回 (补建了没有, 没补的原因)。已有配置（包括停用的）不动。"""
+    role_key = _text(role_key)
+    spec = ROLE_SPECS.get(role_key)
+    if not spec:
+        return False, f"未知审批角色：{role_key}"
+    store = _store(store)
+    if store.assignment_exists(role_key):
+        return False, f"审批角色{spec['label']}已有岗位任命（包括停用的），不动"
+    try:
+        holder = _designation_holder(role_key, spec, store)
+    except ApprovalRoleResolutionError as exc:
+        return False, str(exc)
+    if not holder["user"] or not store.is_user_enabled(holder["user"]):
+        return False, f"审批角色{spec['label']}按职务找到的人没有启用的账号"
+    store.upsert_assignment(role_key, spec["label"], holder["employee"], holder["user"])
+    return True, ""
+
+
 def seed_missing_assignments(*, store=None):
     """给一条配置都没有的岗位按职务补建一次配置（新装的站点）；已有配置（包括停用的）不动。"""
     store = _store(store)
-    seeded = []
-    for role_key, spec in ROLE_SPECS.items():
-        if store.assignment_exists(role_key):
-            continue
-        try:
-            holder = _designation_holder(role_key, spec, store)
-        except ApprovalRoleResolutionError:
-            continue
-        if not holder["user"] or not store.is_user_enabled(holder["user"]):
-            continue
-        store.upsert_assignment(role_key, spec["label"], holder["employee"], holder["user"])
-        seeded.append(role_key)
-    return seeded
+    return [role_key for role_key in ROLE_SPECS if seed_missing_assignment(role_key, store=store)[0]]
 
 
 def _resolve_role_uncached(role_key, *, store=None):

@@ -1,6 +1,7 @@
 <script setup>
 // 采购申请列表：待我处理 / 我提交的 / 全部（全局角色）或与我相关（其他人）/ 我负责的项目（项目负责人，只读）。
 // 搜索、阶段、项目、加急都是在已取回的最近 200 张里筛（后端没有搜索接口）；每页 50 张。
+// 「我负责的项目」单独按项目负责人在服务端取全部（procurement_owned.list_owned_requests，和看板同一份数；审查 #79-5）。
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../../styles/navUi.css';
@@ -10,14 +11,14 @@ import {
 } from '../../lib/procurementView.js';
 import { cleanQuery, detailQuery, formQuery, originLabel, originOf, splitPath } from '../../lib/navContext.js';
 import { isWaitingTooLong } from '../../lib/waiting.js';
-import { apiGet, errText } from './procData.js';
+import { apiGet, errText, settle } from './procData.js';
 import { useProc } from './context.js';
 import PipelineBar from './PipelineBar.vue';
 
 const ctx = useProc();
 const route = useRoute();
 const router = useRouter();
-const data = reactive({ mine: [], pending: [], all: [], loaded: false });
+const data = reactive({ mine: [], pending: [], all: [], owned: null, loaded: false });
 const loading = ref(false);
 const loadError = ref('');
 const now = ctx.now;
@@ -27,13 +28,15 @@ const page = ref(0);
 
 const scope = computed(() => listScope(route.query, ctx.globalAccess ? 'todo' : 'mine'));
 const listFor = (view) => apiGet('oa_entry.list_requests', { view, request_type: ctx.requestType, limit: LIST_LIMIT });
+// 取不到（接口不可用）时是 null，退回到从“全部”里筛
+const listOwned = () => settle(() => apiGet('procurement_owned.list_owned_requests', { request_type: ctx.requestType }), null);
 
 async function load({ silent = false } = {}) {
   if (!silent) loading.value = true;
   try {
     // “全部”服务端按权限限定：全局角色看全部，其他人看自己提的、经手的，以及自己负责的项目里别人提的（只读）。
-    const [mine, pending, all] = await Promise.all([listFor('mine'), listFor('pending'), listFor('all')]);
-    Object.assign(data, { mine: mine || [], pending: pending || [], all: all || [], loaded: true });
+    const [mine, pending, all, ownedAll] = await Promise.all([listFor('mine'), listFor('pending'), listFor('all'), listOwned()]);
+    Object.assign(data, { mine: mine || [], pending: pending || [], all: all || [], owned: Array.isArray(ownedAll) ? ownedAll : null, loaded: true });
     loadError.value = '';
   } catch (error) {
     loadError.value = errText(error, '业务单据加载失败');
@@ -47,7 +50,7 @@ onMounted(() => load());
 defineExpose({ reload: load });
 
 const related = computed(() => mergeRows(ctx.requestType, data.mine, data.pending, data.all));
-const owned = computed(() => ownedRows(data.all, ctx.currentUser, ctx.currentEmployee));
+const owned = computed(() => ownedRows(data.owned || data.all, ctx.currentUser, ctx.currentEmployee));
 const byScope = computed(() => ({
   todo: data.pending,
   mine: data.mine,
@@ -66,7 +69,10 @@ const rows = computed(() => filterRows(base.value, filters, ctx.projectName));
 const pages = computed(() => pageCount(rows.value.length));
 const shown = computed(() => pageSlice(rows.value, Math.min(page.value, pages.value - 1)));
 const projectChoices = computed(() => projectOptions(base.value, ctx.projectName));
-const maybeMore = computed(() => base.value.length >= LIST_LIMIT);
+// 「我负责的项目」从服务端取的是全部，不受 200 张限制；退回到从“全部”里筛时，“全部”满 200 张就提示可能不全
+const maybeMore = computed(() => (scope.value === 'owned'
+  ? !data.owned && data.all.length >= LIST_LIMIT
+  : base.value.length >= LIST_LIMIT));
 const emptyText = computed(() => {
   if (loading.value) return '正在读取申请和待办，请稍候';
   if (loadError.value) return `业务单据加载失败：${loadError.value}`;

@@ -282,6 +282,11 @@ export function canQuickApprove(row) {
   return Boolean(row) && row.can_approve !== false && row.current_step_mode !== 'handle' && ['待审批', '待办理'].includes(row.workflow_status);
 }
 
+// 行内能不能“驳回”：出差的前台办理这一步只能点“已办理”，服务端 can_reject 也是 false（修复 2026-10-13）。
+export function canQuickReject(row) {
+  return Boolean(row) && row.can_reject !== false && row.current_step_mode !== 'handle';
+}
+
 // ---------------------------------------------------------------- 等待时间和提交时间
 
 function toTime(value) {

@@ -109,7 +109,8 @@ PROCUREMENT_PO_ROLES = PROCUREMENT_GLOBAL_ROLES | {"Accounts User", "Finance Use
 
 SOURCE_MANUAL = "\u624b\u5de5\u65b0\u5efa"
 SOURCE_INVOICE_PUSH = "发票下推"
-OPERATION_LOG_LIMIT = 100
+# 每一步同意 / 办理都记进日志以后 100 条不够：旧记录被截掉，按条数算的轮次（提交、撤回付款）会算回去（修复 2026-10-13）。
+OPERATION_LOG_LIMIT = 500
 REPORT_LIMIT = 1000
 
 INVOICE_UPLOADED = "\u5df2\u4e0a\u4f20"
@@ -801,6 +802,15 @@ def _require_leave_accounts(steps, copied_to, label="请假审批"):
             raise ApprovalRouteError(f"{label}账号未启用或不存在：{user}")
 
 
+# 会发抄送的事件：提交（请假、加班、调休）、确认合同交期、采购付款确认付款。
+COPY_EVENT_ACTIONS = frozenset({"提交申请", "确认合同交期", "确认付款"})
+
+
+def _copy_round(doc):
+    """第几次抄送：只数会发抄送的事件，不数全部日志条数（日志有条数上限，满了以后条数不再变）。"""
+    return sum(1 for event in _operation_events(doc) if isinstance(event, dict) and event.get("action") in COPY_EVENT_ACTIONS)
+
+
 def _notify_copied_users(doc):
     request_type = getattr(doc, "request_type", None)
     if request_type not in {*ATTENDANCE_TYPES, REQUEST_PROCUREMENT, REQUEST_PROCUREMENT_PAYMENT}:
@@ -823,9 +833,10 @@ def _notify_copied_users(doc):
         user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
         if not user:
             continue
-        # 修复（2026-09-29，审查 #14）：键里带上操作日志条数。第二次确认合同交期、撤回付款后重新付款时
+        # 修复（2026-09-29，审查 #14）：键里带上轮次。第二次确认合同交期、撤回付款后重新付款时
         # 原来键不变，抄送人收不到新的通知；同一次事件重复调用仍然只发一次。
-        key = f"oa-copy:{doc.name}:{subject_prefix}:{len(_operation_events(doc))}"
+        # 修复（2026-10-13）：轮次只数会发抄送的事件；原来用日志条数，日志满了以后后面的抄送都被当成已发过。前缀 n 和旧键分开。
+        key = f"oa-copy:{doc.name}:{subject_prefix}:n{_copy_round(doc)}"
         if frappe.db.exists(
             "Notification Log",
             {"for_user": user, "document_type": "OA Approval Request", "document_name": doc.name,
@@ -1452,6 +1463,18 @@ def _calculate_procurement_chain(doc, data=None):
         return empty
 
 
+def _procurement_amounts_hidden():
+    """PMC / 生产主管看不到金额（和 procurement_chain 同一个判断）：合同草稿正文和报价快照里都有金额。"""
+    from rayher_hr_payroll.api import procurement_chain
+
+    return procurement_chain._amounts_hidden()
+
+
+def _hide_procurement_money(doc):
+    """只有采购申请带合同草稿和报价快照；别的单据不用判断。"""
+    return getattr(doc, "request_type", None) == REQUEST_PROCUREMENT and _procurement_amounts_hidden()
+
+
 def _summarize_doc(doc, authorized_expense_lines=None):
     step = _current_step(doc)
     invoice_summary = invoice_service.request_invoice_summary(doc)
@@ -1557,7 +1580,7 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "price_delivery_terms": getattr(doc, "price_delivery_terms", None) or "",
         "price_warranty_terms": getattr(doc, "price_warranty_terms", None) or "",
         "price_invoice_condition": getattr(doc, "price_invoice_condition", None) or "",
-        "price_snapshot": _parse_json(getattr(doc, "price_snapshot", None), default={}),
+        "price_snapshot": {} if _hide_procurement_money(doc) else _parse_json(getattr(doc, "price_snapshot", None), default={}),
         "price_submitted_by": getattr(doc, "price_submitted_by", None) or "",
         "price_submitted_on": getattr(doc, "price_submitted_on", None) or "",
         "price_approved_by": getattr(doc, "price_approved_by", None) or "",
@@ -1573,7 +1596,7 @@ def _summarize_doc(doc, authorized_expense_lines=None):
         "contract_entity": getattr(doc, "contract_entity", None) or "",
         "contract_template": getattr(doc, "contract_template", None) or "",
         "contract_seal_user": getattr(doc, "contract_seal_user", None) or "",
-        "contract_draft_content": getattr(doc, "contract_draft_content", None) or "",
+        "contract_draft_content": "" if _hide_procurement_money(doc) else (getattr(doc, "contract_draft_content", None) or ""),
         "contract_reviewed_by": getattr(doc, "contract_reviewed_by", None) or "",
         "contract_reviewed_on": getattr(doc, "contract_reviewed_on", None) or "",
         "contract_sealed_by": getattr(doc, "contract_sealed_by", None) or "",
@@ -4090,6 +4113,10 @@ def get_expense_statistics(
     return {"totals": totals, "rows": rows, "truncated": truncated}
 
 
+# 每一步同意 / 办理也记进了操作日志（f3d85cf 起），审批记录里已经按审批节点列过，日志里的这两种不再重复列。
+STEP_LOG_ACTIONS = frozenset({"同意", "已办理"})
+
+
 def _approval_record_matches(record, approver, action, start_date, end_date):
     if approver and approver not in set(record["approvers"]) | {record["actor"]}:
         return False
@@ -4161,7 +4188,7 @@ def list_expense_approval_records(
             if _approval_record_matches(record, approver_filter, action_filter, start_date, end_date):
                 records.append(record)
         for event in _operation_events(doc):
-            if not isinstance(event, dict):
+            if not isinstance(event, dict) or _clean(event.get("action")) in STEP_LOG_ACTIONS:
                 continue
             record = {
                 **common,
@@ -4716,20 +4743,34 @@ def _reset_request_to_draft(doc, note=""):
         request_type=doc.request_type,
         applicant_employee=getattr(doc, "employee", None),
     )
-    route = preview_route(
-        doc.request_type,
-        ctx["department"],
-        ctx["supervisor"],
-        ctx["asset_category"],
-        active=False,
-        project_owner=getattr(doc, "project_owner", None),
-        project_owner_name=getattr(doc, "project_owner_name", None),
-        purchase_method=getattr(doc, "purchase_method", None),
-        payment_stage=getattr(doc, "payment_stage", None),
-        applicant_employee=getattr(doc, "employee", None),
-    )
-    doc.copied_to = _json_list(route.get("copied_to") or [])
-    _append_steps(doc, route["steps"])
+    # 修复（2026-10-13）：撤回不能因为路线上某个岗位（比如新加的前台办理）没有任命就失败。先单独解析岗位，
+    # 解析不了就保留原来的步骤、清掉审批进度；草稿里的步骤只是预览，重新提交时会按最新路线重算。
+    try:
+        _resolve_approval_roles(
+            doc.request_type, department=ctx["department"], asset_category=ctx["asset_category"],
+            purchase_method=getattr(doc, "purchase_method", None),
+        )
+    except ApprovalRouteError:
+        route = None
+    else:
+        route = preview_route(
+            doc.request_type,
+            ctx["department"],
+            ctx["supervisor"],
+            ctx["asset_category"],
+            active=False,
+            project_owner=getattr(doc, "project_owner", None),
+            project_owner_name=getattr(doc, "project_owner_name", None),
+            purchase_method=getattr(doc, "purchase_method", None),
+            payment_stage=getattr(doc, "payment_stage", None),
+            applicant_employee=getattr(doc, "employee", None),
+        )
+    if route is None:
+        for step in list(getattr(doc, "steps", []) or []):
+            _reset_approval_step(step)
+    else:
+        doc.copied_to = _json_list(route.get("copied_to") or [])
+        _append_steps(doc, route["steps"])
     doc.workflow_status = STATUS_DRAFT
     doc.business_status = ""
     doc.current_step_index = 0
@@ -5253,6 +5294,9 @@ def add_sign_request(name, approver, position, opinion, expected_step_key=None):
         _require_expected_step(doc, step, expected_step_key)
         if not _matched_approvers(step) or not _can_act_on_current_step(doc):
             frappe.throw(frappe._("Only the current approver may add an approver."))
+        # 出差的前台办理只能点“已办理”：原来只是页面不给按钮，直接调接口前加签后，被加的人能驳回（修复 2026-10-13）。
+        if _is_travel_desk_step(doc, step):
+            frappe.throw(frappe._("前台办理这一步不能加签，办完请直接点“已办理”；有问题请联系申请人。"))
         resolved = _resolve_add_sign_approver(approver)
         actor_names = _actor_names()
         if resolved in actor_names:
@@ -5447,7 +5491,10 @@ def get_approval_center_dashboard(kind, limit=200):
         rows = result.get("rows") or []
         user = _clean(frappe.session.user).lower()
         roles = set(frappe.get_roles(user) or [])
-        can_view_financial = user in position_users("procurement_manager", "vice_manager", "general_manager") or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})
+        # PMC / 生产主管即使带着 Purchase User 角色也不给金额（和 procurement_chain._amounts_hidden 同一判断）
+        can_view_financial = not _procurement_amounts_hidden() and (
+            user in position_users("procurement_manager", "vice_manager", "general_manager")
+            or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"}))
         result["can_view_financial"] = can_view_financial
         if kind == "request":
             request_names = [row["name"] for row in rows if row.get("request_type") == REQUEST_PROCUREMENT]
@@ -5485,9 +5532,9 @@ def get_approval_center_dashboard(kind, limit=200):
                     "linked_requests": sorted({item.source_request for item in related if item.source_request}),
                     "linked_prs": sorted({item.source_pr for item in related if item.source_pr}),
                     "po_status": po.status if po else "", "supplier": po.supplier if po else row.get("supplier", ""),
-                    "po_total_amount": float(po.total_amount or 0) if po else 0,
-                    "po_paid_amount": float(po.paid_amount or 0) if po else 0,
-                    "po_unpaid_amount": max(float(po.total_amount or 0) - float(po.paid_amount or 0), 0) if po else 0,
+                    "po_total_amount": (float(po.total_amount or 0) if po else 0) if can_view_financial else None,
+                    "po_paid_amount": (float(po.paid_amount or 0) if po else 0) if can_view_financial else None,
+                    "po_unpaid_amount": (max(float(po.total_amount or 0) - float(po.paid_amount or 0), 0) if po else 0) if can_view_financial else None,
                 })
         return result
     except ApprovalCenterError as exc:

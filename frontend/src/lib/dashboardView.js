@@ -39,10 +39,20 @@ export function monthLabel(value) {
 }
 
 // ---------------------------------------------------------------- 页签
-// 地址里的 tab 不在返回的页签里（岗位变了、链接过期）就回到第一个。
+// 旧页签的地址：研发页签并进了“经营”（cost），旧书签 ?tab=rd 落到经营页签（审查 2026-10-13）。
+export const TAB_ALIASES = Object.freeze({ rd: 'cost' });
+
+// 地址里的 tab 是旧名字时给出新名字，否则给 ''（页面据此把地址换成新名字）。
+export function tabAlias(requested) {
+  const wanted = String(firstValue(requested) || '');
+  return Object.prototype.hasOwnProperty.call(TAB_ALIASES, wanted) ? TAB_ALIASES[wanted] : '';
+}
+
+// 地址里的 tab 不在返回的页签里（岗位变了、链接过期）就回到第一个；旧名字先换成新名字。
 export function resolveTabKey(tabs = [], requested) {
   const list = Array.isArray(tabs) ? tabs : [];
-  const wanted = String(firstValue(requested) || '');
+  const raw = String(firstValue(requested) || '');
+  const wanted = list.some((item) => item.key === raw) ? raw : (tabAlias(raw) || raw);
   if (wanted && list.some((item) => item.key === wanted)) return wanted;
   return list[0]?.key || '';
 }

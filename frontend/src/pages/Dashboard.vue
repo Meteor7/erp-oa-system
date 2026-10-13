@@ -12,7 +12,7 @@ import { period } from '../lib/period';
 import { buildTargetTable, dashboardFrom, targetState } from '../lib/dashboardTargets';
 import targetsJson from '../lib/dashboardTargetsData';
 import {
-  EMPTY_PAGE_TEXT, currentMonth, errorText, greetingFor, isValidMonth, monthLabel, neighbourTab, pageView, resolveTabKey, tabQuery,
+  EMPTY_PAGE_TEXT, currentMonth, errorText, greetingFor, isValidMonth, monthLabel, neighbourTab, pageView, resolveTabKey, tabAlias, tabQuery,
 } from '../lib/dashboardView';
 import { arrangeBlocks, attentionFirst, foldKpis, kpiGridClass, readMoreKpis, writeMoreKpis } from '../lib/dashboardLayout';
 import DashKpi from '../components/dashboard/DashKpi.vue';
@@ -38,6 +38,11 @@ watch(period, () => { if (isValidMonth(period.value)) home.reload(); });
 const data = computed(() => home.data || null);
 const tabs = computed(() => data.value?.tabs || []);
 const activeKey = computed(() => resolveTabKey(tabs.value, route.query.tab));
+// 旧地址 ?tab=rd 落到经营页签后，把地址也换成 ?tab=cost（replace，不多一条历史）。
+watch(activeKey, (key) => {
+  const alias = tabAlias(route.query.tab);
+  if (alias && key === alias) router.replace({ path: route.path, query: tabQuery(route.query, key) });
+}, { immediate: true });
 const page = computed(() => pageView(data.value?.pages?.[activeKey.value]));
 const role = computed(() => data.value?.role || {});
 const firstLoad = computed(() => home.loading && !data.value);
@@ -113,9 +118,10 @@ function setPeriod(value) {
 
       <div :id="`db-panel-${activeKey}`" class="db-panel" :class="{ 'is-loading': home.loading }" role="tabpanel" :aria-labelledby="`db-tab-${activeKey}`">
         <!-- 干活岗位的总览：先「要我处理」/「需要关注」，再指标卡 -->
+        <!-- key 带页签：换页签时“全部 N 条”的展开状态不跟过去（Vue 会复用同一个组件） -->
         <div v-if="attnFirst" class="db-attn" :class="`is-${page.attention}`">
-          <DashTodos v-if="page.showTodos" :todos="page.todos" :resolve="resolve" @go="go" />
-          <DashAlerts v-if="page.showAlerts" :alerts="page.alerts" :resolve="resolve" @go="go" />
+          <DashTodos v-if="page.showTodos" :key="`todos-${activeKey}`" :todos="page.todos" :resolve="resolve" @go="go" />
+          <DashAlerts v-if="page.showAlerts" :key="`alerts-${activeKey}`" :alerts="page.alerts" :resolve="resolve" @go="go" />
         </div>
 
         <div v-if="page.kpis.length" class="db-kpiwrap">
@@ -128,8 +134,8 @@ function setPeriod(value) {
         </div>
 
         <div v-if="!attnFirst && page.attention !== 'none'" class="db-attn" :class="`is-${page.attention}`">
-          <DashTodos v-if="page.showTodos" :todos="page.todos" :resolve="resolve" @go="go" />
-          <DashAlerts v-if="page.showAlerts" :alerts="page.alerts" :resolve="resolve" @go="go" />
+          <DashTodos v-if="page.showTodos" :key="`todos-${activeKey}`" :todos="page.todos" :resolve="resolve" @go="go" />
+          <DashAlerts v-if="page.showAlerts" :key="`alerts-${activeKey}`" :alerts="page.alerts" :resolve="resolve" @go="go" />
         </div>
 
         <div v-if="arranged.cards.length" class="db-blocks">

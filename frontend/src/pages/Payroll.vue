@@ -9,14 +9,14 @@ import "../styles/payrollUi.css";
 import { period, periodRouteSpec } from "../lib/period";
 import { PAYROLL_QUERY_KEYS, parsePayrollQuery, payrollQueryOf } from "../lib/payrollFilters.js";
 import { bindRouteFilters } from "../lib/urlFilterState.js";
-import { CHIPS, canSave, chipCounts, confirmTargets, currentBatchTotal, filterRows, rowState, totalsOf } from "../lib/payrollView.js";
+import { CHIPS, canSave, chipCounts, confirmTargets, currentBatchTotal, dirtyRows, editSnapshot, filterRows, rowState, totalsOf } from "../lib/payrollView.js";
 import PayrollCharts from "../components/payroll/PayrollCharts.vue";
 import PayrollDrawer from "../components/payroll/PayrollDrawer.vue";
 import PayrollRecon from "../components/payroll/PayrollRecon.vue";
 import PayrollSummary from "../components/payroll/PayrollSummary.vue";
 import PayrollTable from "../components/payroll/PayrollTable.vue";
 
-// 期间和「只看草稿」放在地址里（?period=&status=draft），要在下面的请求发出前读好，否则会先查一次错误的月份。
+// 期间和「只看草稿 / 只看已确认」放在地址里（?period=&status=draft|submitted），要在下面的请求发出前读好，否则会先查一次错误的月份。
 const statusFilter = ref("");
 bindRouteFilters({ route: useRoute(), router: useRouter(), specs: [periodRouteSpec(), {
   keys: PAYROLL_QUERY_KEYS,
@@ -41,7 +41,7 @@ const canEdit = computed(() => Boolean(access.data?.can_edit));
 
 const company = ref("all");
 const companyOptions = [{ value: "all", label: "全部公司" }, { value: "Rayher", label: "示例总部" }, { value: "示例研发中心", label: "示例研发中心" }];
-const chip = ref(statusFilter.value === "draft" ? "draft" : "all");
+const chip = ref(statusFilter.value || "all");
 const query = ref("");
 const wide = ref(false);
 const chartsOpen = ref(readFlag("payroll.charts", true));
@@ -54,8 +54,10 @@ const n = (value) => Number(value || 0);
 function readFlag(key, fallback) { try { const value = localStorage.getItem(key); return value == null ? fallback : value === "1"; } catch { return fallback; } }
 function writeFlag(key, value) { try { localStorage.setItem(key, value ? "1" : "0"); } catch { /* 存不了就不记 */ } }
 function toggleCharts() { chartsOpen.value = !chartsOpen.value; writeFlag("payroll.charts", chartsOpen.value); }
-function setChip(key) { chip.value = key; statusFilter.value = key === "draft" ? "draft" : ""; }
-watch(statusFilter, (value) => { if (value === "draft") chip.value = "draft"; else if (chip.value === "draft") chip.value = "all"; });
+// 草稿、已确认两个页签写进地址（看板链接用 ?status=submitted 进来只看已确认的）。
+const URL_CHIPS = ["draft", "submitted"];
+function setChip(key) { chip.value = key; statusFilter.value = URL_CHIPS.includes(key) ? key : ""; }
+watch(statusFilter, (value) => { if (URL_CHIPS.includes(value)) chip.value = value; else if (URL_CHIPS.includes(chip.value)) chip.value = "all"; });
 watch(period, () => { rows.reload(); social.reload(); fund.reload(); openEmployee.value = ""; });
 
 const all = computed(() => rows.data || []);
@@ -63,10 +65,17 @@ const scoped = computed(() => filterRows(all.value, { company: company.value }))
 const shown = computed(() => filterRows(all.value, { chip: chip.value, query: query.value, company: company.value }));
 const counts = computed(() => chipCounts(scoped.value));
 const total = computed(() => totalsOf(scoped.value));
+// 只看已确认时，计算链和图表也只算已确认的人：和看板「人力成本 · 工资（只算已确认）」对得上。
+const summaryRows = computed(() => (chip.value === "submitted" ? scoped.value.filter((row) => rowState(row).key === "submitted") : scoped.value));
+// 改了还没保存：行加载时记下可改的输入，和现在比；有人没保存就不让确认本月工资（确认锁定的是已保存的草稿）。
+const baseline = ref({});
+watch(() => rows.data, (data) => { baseline.value = editSnapshot(data); }, { immediate: true });
+const dirty = computed(() => dirtyRows(scoped.value, baseline.value));
+const dirtyEmployees = computed(() => new Set(dirty.value.map((row) => row.employee)));
 const openRow = computed(() => all.value.find((row) => row.employee === openEmployee.value) || null);
 const bulkTargets = computed(() => scoped.value.filter((row) => rowState(row).key === "new" && canSave(row)));
 const lockTargets = computed(() => confirmTargets(scoped.value));
-const emptyText = computed(() => (chip.value === "draft" ? "本期没有草稿工资条" : "本期没有符合任职期间的员工"));
+const emptyText = computed(() => (chip.value === "draft" ? "本期没有草稿工资条" : chip.value === "submitted" ? "本期没有已确认的工资条" : "本期没有符合任职期间的员工"));
 const go = (path) => router.push(path);
 
 async function saveRow(row) {
@@ -98,6 +107,7 @@ async function generateAll() {
 }
 // 确认本月工资：当前公司范围里本页生成的草稿一次确认；确认不了的（比如分摊已定版）列出原因。
 async function confirmAll() {
+  if (dirty.value.length) { lock.asking = false; return; }
   const employees = lockTargets.value.map((row) => row.employee);
   Object.assign(lock, { asking: false, running: true, done: null, skipped: [], error: "" });
   try {
@@ -132,13 +142,13 @@ async function withdrawRow(row, reason) {
     <div v-if="rows.error" class="banner err" role="alert">薪酬明细加载失败：{{ rows.error.message || rows.error }}</div>
     <div v-if="rows.loading && !all.length" class="empty">正在加载薪酬明细...</div>
     <template v-else>
-      <PayrollSummary :rows="scoped" @go="go" />
+      <PayrollSummary :rows="summaryRows" @go="go" />
 
       <div class="pr-tools" style="margin-top:-4px">
-        <span class="pr-note">图表按当前公司统计</span>
+        <span class="pr-note">图表按当前公司统计<template v-if="chip === 'submitted'">，只算已确认的工资条</template></span>
         <button type="button" class="btn sm" :aria-expanded="chartsOpen" @click="toggleCharts">{{ chartsOpen ? "收起图表 ▴" : "展开图表 ▾" }}</button>
       </div>
-      <PayrollCharts v-if="chartsOpen" :rows="scoped" />
+      <PayrollCharts v-if="chartsOpen" :rows="summaryRows" />
 
       <section class="panel" aria-label="员工工资">
         <div class="pr-tools">
@@ -150,12 +160,13 @@ async function withdrawRow(row, reason) {
             <label><input v-model="wide" type="checkbox"> 显示全部列（和 Excel 一致）</label>
             <template v-if="canEdit">
               <button type="button" class="btn" :disabled="!bulkTargets.length || bulk.running" @click="bulk.confirming = true">批量生成草稿（{{ bulkTargets.length }}）</button>
-              <button type="button" class="btn pri" :disabled="!lockTargets.length || lock.running" @click="lock.asking = true">确认本月工资（{{ lockTargets.length }}）</button>
+              <span v-if="dirty.length" class="pill p-sun" data-payroll-dirty>有 {{ dirty.length }} 人改了还没保存</span>
+              <button type="button" class="btn pri" data-payroll-confirm :disabled="!lockTargets.length || lock.running || dirty.length > 0" :title="dirty.length ? '先保存或撤销改动，再确认' : undefined" @click="lock.asking = true">确认本月工资（{{ lockTargets.length }}）</button>
             </template>
             <span v-else-if="access.data" class="pill p-gray">只读</span>
           </span>
         </div>
-        <div v-if="lock.asking" class="lock" role="alertdialog" aria-label="确认本月工资">
+        <div v-if="lock.asking && !dirty.length" class="lock" role="alertdialog" aria-label="确认本月工资">
           <span class="k">确认 {{ lockTargets.length }} 人的工资条</span><span class="muted">确认后锁定，不能再改，要改先撤回确认；看板和研发人工成本只算已确认的。个税目前是手填的，请先核对。</span>
           <span style="margin-left:auto;display:flex;gap:8px"><button type="button" class="btn sm" @click="lock.asking = false">取消</button><button type="button" class="btn pri sm" @click="confirmAll">确认</button></span>
         </div>
@@ -178,6 +189,7 @@ async function withdrawRow(row, reason) {
     <PayrollDrawer
       v-if="openRow" :row="openRow" :saving="Boolean(saving[openRow.employee])" :applying="Boolean(applying[openRow.employee])"
       :message="messages[openRow.employee] || ''" :error="errors[openRow.employee] || ''" :read-only="!canEdit"
+      :dirty="dirtyEmployees.has(openRow.employee)"
       @close="openEmployee = ''" @save="saveRow" @adjust="applyAdjustment" @withdraw="withdrawRow" @go="go" />
   </div>
 </template>

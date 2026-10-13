@@ -1,7 +1,7 @@
 <script setup>
 // 「要我处理」：等待最久的排在前面（后端已排好序）；没有待办写"没有需要你处理的事"。
 // 2026-10-13 排版：先列 5 条，“全部 N 条”就地展开（不跳页）。
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { EMPTY_TODO_TEXT } from '../../lib/dashboardView.js';
 import { limitRows } from '../../lib/dashboardLayout.js';
 import { targetHint } from '../../lib/dashboardTargets.js';
@@ -12,6 +12,8 @@ const props = defineProps({
 });
 const emit = defineEmits(['go']);
 const open = ref(false);
+// 换了一批（换页签、换月份）就收起来，不沿用上一批的展开状态
+watch(() => props.todos, () => { open.value = false; });
 const view = computed(() => limitRows(props.todos, open.value));
 </script>
 

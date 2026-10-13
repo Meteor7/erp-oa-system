@@ -221,9 +221,17 @@ function query() {
   selectedOrder.value = '';
   refresh();
 }
-function selectStage(value) {
-  status.value = status.value === value ? '' : value;
+// 阶段写进地址（?status=）：之后去掉别的筛选、改地址时，监听不会把阶段又拨回看板带来的那个（审查 #79-6）
+function setStatus(value) {
+  status.value = value;
+  const next = { ...route.query };
+  if (value) next.status = value;
+  else delete next.status;
+  if (String(route.query.status || '') !== value) router.replace({ path: route.path, query: next });
   query();
+}
+function selectStage(value) {
+  setStatus(status.value === value ? '' : value);
 }
 function selectOrder(group) {
   selectedOrder.value = group ? group.key : '';
@@ -514,7 +522,7 @@ async function cancelRow(reason) {
     </div>
 
     <div class="mp-stages" role="tablist" aria-label="物料阶段">
-      <button type="button" :class="{ on: !status }" :aria-pressed="!status" @click="status = ''; query()"><small>&nbsp;</small><span>全部</span><strong>{{ allStageCount }}</strong></button>
+      <button type="button" :class="{ on: !status }" :aria-pressed="!status" @click="setStatus('')"><small>&nbsp;</small><span>全部</span><strong>{{ allStageCount }}</strong></button>
       <button v-for="(item, index) in stageStatuses" :key="item" type="button" :class="{ on: status === item, zero: !counts[item] }" :aria-pressed="status === item" @click="selectStage(item)">
         <small>{{ String(index + 1).padStart(2, '0') }}</small><span>{{ item }}</span><strong>{{ counts[item] || 0 }}</strong>
       </button>

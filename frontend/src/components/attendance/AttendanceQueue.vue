@@ -3,7 +3,7 @@
 // 同意、驳回按钮在行内；驳回要写原因（必填），可以选退回给谁，写在这一行下面，不用跳页面。
 import { computed, ref } from 'vue';
 import {
-  canQuickApprove, effectLine, kindOf, personShort, rangeText, rowDays, sizeText, waitText, workedSpan,
+  canQuickApprove, canQuickReject, effectLine, kindOf, personShort, rangeText, rowDays, sizeText, waitText, workedSpan,
 } from '../../lib/attendanceView.js';
 import { isSlow } from '../../lib/attendanceFlow.js';
 import { rowKind } from '../../lib/attendanceCharts.js';
@@ -97,7 +97,7 @@ async function confirmReject(row) {
         <div class="acts">
           <span v-if="waitTag(row)" :class="['ac-tag', waitTag(row).tone]">{{ waitTag(row).text }}</span>
           <template v-if="rejectFor !== row.name">
-            <button type="button" class="ac-btn sm danger" :disabled="busy" @click="startReject(row)">驳回</button>
+            <button v-if="canQuickReject(row)" type="button" class="ac-btn sm danger" :disabled="busy" @click="startReject(row)">驳回</button>
             <button v-if="canQuickApprove(row)" type="button" class="ac-btn sm pri" :disabled="busy" @click="emit('approve', row)">同意</button>
             <button v-else type="button" class="ac-btn sm" @click="emit('open', row)">去详情处理</button>
           </template>

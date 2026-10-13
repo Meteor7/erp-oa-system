@@ -43,6 +43,27 @@ export const CHIPS = Object.freeze([
 // 确认本月工资：本页生成的草稿（别处生成的草稿不在这里确认）。
 export const confirmTargets = (rows) => (rows || []).filter((row) => rowState(row).key === 'draft');
 
+// ---------------------------------------------------------------- 改了还没保存（审查 2026-10-13）
+// 抽屉里的输入框直接改这一行的数字；确认本月工资锁定的是已保存的草稿，所以有人改了没保存时不让确认。
+export const EDITABLE_FIELDS = Object.freeze(['payment_days', 'base_salary', 'salary_adjustment', 'company_subsidy', 'bonus', 'other_adjustment', 'income_tax', 'advanced_paid']);
+
+// 行加载时记下每个人可改的输入：{员工: {字段: 数字}}。
+export function editSnapshot(rows) {
+  const snapshot = {};
+  (rows || []).forEach((row) => {
+    if (row?.employee) snapshot[row.employee] = Object.fromEntries(EDITABLE_FIELDS.map((key) => [key, n(row[key])]));
+  });
+  return snapshot;
+}
+
+// 和加载时比，有输入改过的行（输入框给的是字符串，按数字比；空当 0）。
+export function dirtyRows(rows, snapshot) {
+  return (rows || []).filter((row) => {
+    const before = snapshot?.[row?.employee];
+    return Boolean(before) && EDITABLE_FIELDS.some((key) => !near(row[key], before[key]));
+  });
+}
+
 // 撤回确认：本页生成、已经确认的工资条。
 export const canWithdraw = (row) => Number(row?.docstatus) === 1 && Boolean(row?.managed);
 

@@ -78,6 +78,8 @@ def test_confirm_submits_this_pages_drafts_without_emailing_and_skips_the_rest(m
     docs = {"SAL-1": Slip(frappe, "SAL-1"), "SAL-3": Slip(frappe, "SAL-3", fail="本期研发分摊已定版")}
     frappe.get_all = get_all
     frappe.get_doc = lambda doctype, name: docs[name]
+    # 确认前的重算另有测试（test_hr_review_fixes.py），这里只看确认本身
+    monkeypatch.setattr(module, "_resave_draft", lambda doc, period: doc)
     result = module.confirm_payroll("2026-10")
 
     assert captured == {"start_date": date(2026, 10, 1), "end_date": date(2026, 10, 31), "docstatus": 0}
@@ -98,6 +100,7 @@ def test_confirm_can_be_limited_to_chosen_people(monkeypatch):
     frappe.get_all = lambda *args, **kwargs: [dict(row) for row in DRAFTS]
     docs = {"SAL-1": Slip(frappe, "SAL-1"), "SAL-3": Slip(frappe, "SAL-3")}
     frappe.get_doc = lambda doctype, name: docs[name]
+    monkeypatch.setattr(module, "_resave_draft", lambda doc, period: doc)
     result = module.confirm_payroll("2026-10", employees=json.dumps(["E3"]))
     assert result["confirmed"] == 1 and docs["SAL-3"].submitted and not docs["SAL-1"].submitted
     assert result["skipped"] == []

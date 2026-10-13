@@ -211,7 +211,7 @@ const money = (value) => Number(value || 0).toLocaleString('zh-CN', {
               </td>
               <td class="p-2 text-xs leading-5 text-gray-600">
                 <div v-if="kind === 'request'">PO {{ row.linked_pos?.length || 0 }} · {{ row.po_statuses?.join('、') || '未下单' }}</div>
-                <div v-else>{{ row.po_status || '-' }} · PO总额 {{ money(row.po_total_amount) }}</div>
+                <div v-else>{{ row.po_status || '-' }}<template v-if="data.can_view_financial"> · PO总额 {{ money(row.po_total_amount) }}</template></div>
                 <div v-if="data.can_view_financial">已付 {{ money(row.po_paid_amount) }} · 未付 {{ money(row.po_unpaid_amount) }}</div>
               </td>
               <td class="p-2">{{ row.asset_classification || '历史未分类' }}</td>

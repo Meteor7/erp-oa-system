@@ -10,8 +10,11 @@ import {
 } from '../lib/dormitoryBoard';
 import { boardEditLocation, useRoomNotice } from '../lib/accommodationRooms.js';
 import { FEE_PATH, takeSaved } from '../lib/accommodationFees.js';
+import { canEditHr } from '../lib/access.js';
 
 const router = useRouter();
+// 总经理、副总经理只读打开：不显示编辑房间、登记费用（服务端也会拒绝）。
+const canEdit = canEditHr();
 // 在房间内页或费用登记内页保存后回到本页：显示一条"已保存 A-302"，几秒后消失。
 const roomNotice = useRoomNotice();
 const feeNotice = takeSaved();
@@ -138,7 +141,7 @@ function registerFee(item) {
         <div v-if="leavers.length" class="flex flex-col gap-1 px-4 py-2.5 md:flex-row md:items-center md:gap-3">
           <span class="hidden h-1.5 w-1.5 shrink-0 rounded-full md:block" :style="{ background: COLORS.leaver }"></span>
           <span class="flex-1"><b class="font-semibold">{{ leavers.length }} 位已离职员工还登记在住：</b>{{ leavers.map((item) => `${item.room_no} ${item.employee_name}`).join('、') }}</span>
-          <router-link to="/accommodation/master" class="shrink-0 font-medium text-[#A35A17] hover:underline">去填写退宿日期 →</router-link>
+          <router-link :to="{ path: '/accommodation/master', query: { leaver: '1' } }" class="shrink-0 font-medium text-[#A35A17] hover:underline">{{ canEdit ? '去填写退宿日期 →' : '查看这些房间 →' }}</router-link>
         </div>
       </div>
 
@@ -185,7 +188,7 @@ function registerFee(item) {
           </div>
           <div v-else class="dorm-empty">
             <div>{{ title }}还没有登记宿舍费用</div>
-            <button type="button" class="font-medium text-[#A35A17] hover:underline" @click="registerFee(null)">去登记本月费用 →</button>
+            <button v-if="canEdit" type="button" class="font-medium text-[#A35A17] hover:underline" data-board-register @click="registerFee(null)">去登记本月费用 →</button>
           </div>
         </section>
 
@@ -280,7 +283,7 @@ function registerFee(item) {
               <div class="flex justify-between text-xs"><span :style="{ color: COLORS.companyText }">公司 {{ money(room.company) }}</span><span :style="{ color: COLORS.personalText }">个人 {{ money(room.personal) }}</span></div>
               <div class="text-xs leading-relaxed text-[#3D4555]">{{ roomNote(room) }}</div>
             </div>
-            <div class="flex gap-2">
+            <div v-if="canEdit" class="flex gap-2" data-board-actions>
               <button type="button" class="flex-1 rounded-md border border-[#D5DAE2] bg-white py-2 text-[13px] text-[#1A2130] hover:bg-[#F3F4F6]" @click="editRoom(room)">编辑房间</button>
               <button type="button" class="flex-1 rounded-md bg-[#1A2130] py-2 text-[13px] text-white hover:bg-[#2B3445]" @click="registerFee(room)">登记费用</button>
             </div>

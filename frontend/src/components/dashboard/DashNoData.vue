@@ -20,7 +20,8 @@ const items = computed(() => emptyStripItems(props.blocks).map((item) => ({ ...i
       <span v-if="index" class="db-nodata-sep" aria-hidden="true">·</span>
       <span class="db-nodata-i" :data-block="item.key">
         <button v-if="item.link.state === 'link'" type="button" class="db-link" @click="emit('go', item.link.to)">{{ item.title }}</button>
-        <span v-else :title="targetHint(item.link.state) || undefined">{{ item.title }}</span>
+        <!-- 打不开的（没权限、目标未知）和其他链接一样标成灰色“off” -->
+        <span v-else :class="{ 'is-off': ['denied', 'unknown'].includes(item.link.state) }" :title="targetHint(item.link.state) || undefined">{{ item.title }}</span>
         <span v-if="item.sub" class="db-mut">（{{ item.sub }}）</span>
       </span>
     </template>

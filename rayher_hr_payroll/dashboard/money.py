@@ -479,8 +479,10 @@ def _labor(ctx):
         rows = frappe.get_all("Accommodation Deduction", filters={"period": ctx.period},
                               fields=dormitory_board.DEDUCTION_FIELDS, limit_page_length=0)
         dorm = dormitory_board._cost(rows)
-        # 工资只算已确认的工资条（决定 2026-10-13）；draft = 只有草稿工资条、还没确认的人数，作为进度提示
+        # 工资只算已确认的工资条（决定 2026-10-13）；draft = 薪酬计算页生成、还没确认的人数，作为进度提示；
+        # external_draft = 别处生成的草稿人数（薪酬计算页不确认它们，单独说明）
         return {"gross": float(pay.get("gross") or 0), "draft": int(pay.get("draft", 0) or 0),
+                "external_draft": int(pay.get("external_draft", 0) or 0),
                 "social": sum(float(value.get("si") or 0) for value in contributions.values()),
                 "fund": sum(float(value.get("hf") or 0) for value in contributions.values()),
                 "has_contributions": bool(contributions),
@@ -1410,10 +1412,15 @@ def block_invoice_status(ctx):
 def _wage_cells(data):
     """工资那一行：(说明, 金额)。只算已确认的工资条；还有没确认的写出人数（决定 2026-10-13，确认本月工资后才作数）。"""
     draft = int(data.get("draft", 0) or 0)
+    external = int(data.get("external_draft", 0) or 0)
+    # 别处生成的草稿薪酬计算页不确认，单独写出来（审查 2026-10-13）
+    extra = f"；{external} 人是别处生成的草稿" if external else ""
     if data["gross"]:
-        return "已确认的工资条" + (f"；另有 {draft} 人没确认" if draft else ""), _amt(data["gross"])
+        return "已确认的工资条" + (f"；另有 {draft} 人没确认" if draft else "") + extra, _amt(data["gross"])
     if draft:
-        return f"还有 {draft} 人工资条没确认", f"—（还有 {draft} 人工资条没确认）"
+        return f"还有 {draft} 人工资条没确认" + extra, f"—（还有 {draft} 人工资条没确认）"
+    if external:
+        return f"本期还没有已确认的工资条{extra}", "—"
     return "本期还没有已确认的工资条", "—"
 
 
@@ -1441,7 +1448,8 @@ def drill_cost_labor(ctx):
     social = data["social"] + data["fund"]
     wage_note, wage_value = _wage_cells(data)
     rows = [
-        drill_row(["工资（应发合计）", wage_note, wage_value], target("payroll", period=ctx.period)),
+        # 只算已确认的：点进薪酬计算页也只看已确认的工资条，合计对得上（审查 2026-10-13）
+        drill_row(["工资（应发合计）", wage_note, wage_value], target("payroll", period=ctx.period, status="submitted")),
         drill_row(["社保 + 公积金（公司承担）", "员工记录里已确认的单位承担部分" if data["has_contributions"] else "本期还没有已确认的记录",
                    _amt(social) if data["has_contributions"] else "—"], target("social", period=ctx.period)),
         drill_row(["宿舍（公司承担）", "公司承担的宿舍费用" if data["dorm_registered"] else "本期宿舍费用还没登记",

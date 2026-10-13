@@ -164,19 +164,29 @@ def _has_employee(ctx):
 
 
 def _load_my_trips(ctx):
-    """我已办理、还没回来的出差（最近的在前）：前台办理完给我的行程提醒用。"""
+    """我已办理、还没回来的出差（最近的在前）：前台办理完给我的行程提醒用。
+
+    只算真的经过前台办理的出差（有办理节点而且已办理）；旧路线的出差、前台自己的出差没有这一步，不提醒（修复 2026-10-13）。
+    """
     import frappe
 
     rows = frappe.db.sql(
         "SELECT name, travel_destination, travel_start_date, travel_end_date FROM `tabOA Approval Request` "
         "WHERE request_type = '出差申请' AND employee = %(employee)s AND workflow_status = '已完成' AND travel_end_date >= %(today)s "
-        "ORDER BY travel_start_date, name LIMIT 5", {"employee": ctx.employee, "today": ctx.today}, as_dict=True)
+        "ORDER BY travel_start_date, name LIMIT 20", {"employee": ctx.employee, "today": ctx.today}, as_dict=True)
+    trips = []
     for row in rows:
-        notes = frappe.db.sql(
-            "SELECT note FROM `tabOA Approval Step` WHERE parent = %s AND mode = 'handle' AND IFNULL(note, '') != '' ORDER BY acted_on DESC LIMIT 1",
+        desk = frappe.db.sql(
+            "SELECT status, note FROM `tabOA Approval Step` WHERE parent = %s AND mode = 'handle' ORDER BY acted_on DESC",
             (row["name"],), as_dict=True)
-        row["note"] = (notes[0]["note"] if notes else "") or ""
-    return rows
+        done = [step for step in desk or [] if step.get("status") == "已办理"]
+        if not done:
+            continue
+        row["note"] = next((str(step.get("note") or "").strip() for step in done if str(step.get("note") or "").strip()), "")
+        trips.append(row)
+        if len(trips) >= 5:
+            break
+    return trips
 
 
 # ---------------------------------------------------------------- 假期 / 加班

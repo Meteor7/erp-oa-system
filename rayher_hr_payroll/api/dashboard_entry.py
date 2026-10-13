@@ -8,6 +8,11 @@ RD_TYPES = ("全时研发", "非全时研发", "研发辅助")
 
 
 def _can_view_procurement_financial():
+    # PMC、生产主管一律不给金额（PMC 带 Purchase User 角色，原来会拿到一组 0 金额；审查 #79-3），判断同采购链路
+    from rayher_hr_payroll.api.procurement_chain import _amounts_hidden
+
+    if _amounts_hidden():
+        return False
     user = str(frappe.session.user or "").strip().lower()
     roles = set(frappe.get_roles(user) or [])
     return user in position_users("procurement_manager", "vice_manager", "general_manager") or bool(roles & {"System Manager", "Accounts User", "Purchase User", "Purchase Manager"})

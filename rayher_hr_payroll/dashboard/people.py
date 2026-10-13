@@ -324,6 +324,10 @@ def _fetch_leave_stats(ctx):
         entry = merged.setdefault(label, {"label": label, "leave": 0.0, "comp": 0.0, "overtime": 0.0, "leave_count": 0, "overtime_count": 0})
         for key in ("leave", "comp", "overtime", "leave_count", "overtime_count"):
             entry[key] += row.get(key) or 0
+    # month_leave 已经让各部门加起来等于合计；同名部门合并后再去掉浮点尾巴，明细加总仍等于卡片
+    for entry in merged.values():
+        for key in ("leave", "comp", "overtime"):
+            entry[key] = round(entry[key], 2)
     stats["by_department"] = sorted(merged.values(), key=lambda row: (-row["leave"], -row["overtime"], row["label"]))
     return stats
 
@@ -615,9 +619,14 @@ def hr_pay_total(ctx):
     previous = _num(_pay_totals(ctx, _shift_month(ctx.period, -1)).get("gross"))
     value, unit = money_wan(gross)
     parts = []
-    if payroll["draft"]:
+    # 人数和金额用同一个口径（payroll_bridge：本页生成的草稿；别处生成的草稿单独写，审查 2026-10-13）
+    draft = int(totals.get("draft", payroll["draft"]) or 0)
+    external = int(totals.get("external_draft", 0) or 0)
+    if draft:
         draft_gross = _num(totals.get("draft_gross", payroll["draft_gross"]))
-        parts.append(f"还有 {payroll['draft']} 人没确认（草稿 约 {_wan_text(draft_gross)}）")
+        parts.append(f"还有 {draft} 人没确认（草稿 约 {_wan_text(draft_gross)}）")
+    if external:
+        parts.append(f"{external} 人是别处生成的草稿")
     if not gross:
         parts.append("这个月还没有确认的工资条")
     elif not previous:

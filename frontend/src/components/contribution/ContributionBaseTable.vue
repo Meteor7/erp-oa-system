@@ -10,6 +10,7 @@ const props = defineProps({
   householdOptions: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
+  readonly: { type: Boolean, default: false },   // 只读（总经理、副总经理）：不能改基数、户口，也不能按上月带入
 });
 const emit = defineEmits(['base', 'household', 'carry', 'export']);
 
@@ -41,11 +42,12 @@ const cell = (value) => (value == null ? '—' : money(value));
   <section class="panel">
     <div class="pt">
       <span>第三步：{{ name }}基数与金额 <span class="muted">全员 {{ rows.length }} 人 · 缺基数{{ kind === 'si' ? '或户口' : '' }} {{ missing }} 人</span></span>
-      <span class="cw-chips">
+      <span v-if="!readonly" class="cw-chips">
         <button type="button" class="btn sm" :disabled="!carryable || busy" @click="emit('carry')">缺基数的按上月带入{{ carryable ? `（${carryable} 人）` : '' }}</button>
       </span>
     </div>
-    <div class="muted">直接改数字，改完当场重算金额，并写入员工档案（下个月自动沿用）。缺基数的格子标红，必须填完才能确认生效。{{ kind === 'si' ? '户口决定要不要缴地方补充养老，没填户口无法复算。' : '' }}</div>
+    <div v-if="readonly" class="muted">只读查看：基数和户口由人事维护。</div>
+    <div v-else class="muted">直接改数字，改完当场重算金额，并写入员工档案（下个月自动沿用）。缺基数的格子标红，必须填完才能确认生效。{{ kind === 'si' ? '户口决定要不要缴地方补充养老，没填户口无法复算。' : '' }}</div>
     <div class="cw-foot">
       <span class="cw-seg" role="group" aria-label="筛选">
         <button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button>
@@ -62,13 +64,13 @@ const cell = (value) => (value == null ? '—' : money(value));
           <tr v-for="row in shown" :key="row.employee">
             <td><span class="cw-avatar">{{ String(row.employee_name || '').slice(-2) }}</span><b>{{ row.employee_name }}</b><div class="cw-sub">{{ displayCompany(row.company) }} · {{ displayDepartment(row.department) }}</div></td>
             <td v-if="kind === 'si'">
-              <select class="cell-hk" :class="{ miss: row.household_classification === '待完善' }" :value="row.household || ''" :aria-label="`${row.employee_name} 户口`" :disabled="busy" @change="onHousehold(row, $event)">
+              <select class="cell-hk" :class="{ miss: row.household_classification === '待完善' }" :value="row.household || ''" :aria-label="`${row.employee_name} 户口`" :disabled="busy || readonly" @change="onHousehold(row, $event)">
                 <option value="" disabled>未维护</option>
                 <option v-for="option in householdChoices(row)" :key="option" :value="option">{{ option }}</option>
               </select>
             </td>
             <td class="r num">{{ cell(row.prev_base) }}</td>
-            <td class="r"><input class="cell-base" :class="{ miss: row.base == null, chg: row.base != null && row.prev_base != null && Math.abs(row.prev_base - row.base) > 0.005 }" inputmode="decimal" :value="row.base ?? ''" placeholder="填写" :aria-label="`${row.employee_name} ${name}基数`" :disabled="busy" @change="onBase(row, $event)"></td>
+            <td class="r"><input class="cell-base" :class="{ miss: row.base == null, chg: row.base != null && row.prev_base != null && Math.abs(row.prev_base - row.base) > 0.005 }" inputmode="decimal" :value="row.base ?? ''" placeholder="填写" :aria-label="`${row.employee_name} ${name}基数`" :disabled="busy || readonly" @change="onBase(row, $event)"></td>
             <td class="r num">{{ cell(row.employee_amount) }}</td>
             <td class="r num">{{ cell(row.company_amount) }}</td>
             <td><span :class="['pill', baseStatus(row, kind).tone]">{{ baseStatus(row, kind).text }}</span></td>

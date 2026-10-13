@@ -8,6 +8,7 @@ import { canSave, canWithdraw, figures, isProrated, money, rowLocked, rowState }
 const props = defineProps({
   row: { type: Object, required: true }, saving: { type: Boolean, default: false }, applying: { type: Boolean, default: false },
   message: { type: String, default: '' }, error: { type: String, default: '' }, readOnly: { type: Boolean, default: false },
+  dirty: { type: Boolean, default: false },   // 这个人改了还没保存（页面按加载时的输入比出来）
 });
 const emit = defineEmits(['close', 'save', 'adjust', 'withdraw', 'go']);
 const f = computed(() => figures(props.row));
@@ -77,6 +78,7 @@ const canApply = computed(() => !locked.value && Number(props.row.salary_adjustm
       <div>
         <span class="pr-note">{{ readOnly ? '只读：可以查看，不能修改。' : locked ? (showWithdraw ? '工资条已确认，要改请先撤回确认。' : '别处生成的工资条不能在这里修改。') : '改动会当场重新计算，点“保存草稿”才会写入。' }}</span>
         <div v-if="withdrawing" class="pr-line" style="margin-top:6px"><input v-model="reason" maxlength="500" placeholder="撤回原因（必填），例如：个税填错了" aria-label="撤回原因" style="flex:1"></div>
+        <div v-if="dirty && !readOnly" class="pr-note" data-payroll-row-dirty style="color:#B54708">这个人改了还没保存；没保存的改动不会被确认。</div>
         <div v-if="message" class="ok" role="status">{{ message }}</div>
         <div v-if="error" class="err" role="alert">{{ error }}</div>
       </div>

@@ -380,6 +380,14 @@ def _serialize(board, source=None, metrics=None, approval_steps=None, po_statuse
     }
 
 
+def _for_viewer(row):
+    """PMC、生产主管看不到金额（已付、PO 总额、付款单金额换成 None，带 amounts_hidden），
+    判断同 procurement_chain._amounts_hidden（审查 #79-4）。付款状态是按金额在服务端算好的，照常给。"""
+    from rayher_hr_payroll.api import procurement_chain
+
+    return procurement_chain._for_viewer(row)
+
+
 def _match(row, text):
     if not text:
         return True
@@ -503,7 +511,7 @@ def list_material_progress(search="", requester="", status="", limit=50, offset=
     if boards:
         metrics, sources, steps_by_source, po_statuses = _batch_chain_context(boards)
         for board in boards:
-            result.append(_serialize(board, source=sources[board.source_request], metrics=metrics[(board.source_request, board.source_line)], approval_steps=steps_by_source.get(board.source_request, []), po_statuses=po_statuses))
+            result.append(_for_viewer(_serialize(board, source=sources[board.source_request], metrics=metrics[(board.source_request, board.source_line)], approval_steps=steps_by_source.get(board.source_request, []), po_statuses=po_statuses)))
     base_where, base_params = conditions(search, requester, "", source_request, **flags)
     counts = frappe.db.sql(f"SELECT {stage_sql()} AS stage,COUNT(*) AS total {FROM_SQL} WHERE {base_where} GROUP BY stage", base_params, as_dict=True)
     people_where, people_params = conditions(source_request=source_request)
@@ -610,7 +618,7 @@ def update_material_progress(name, values=None, expected_modified=None):
         frappe.throw("没有检测到修改。")
     board.save(ignore_permissions=True)
     _notify_change(board, source, changed, actor)
-    return _serialize(board)
+    return _for_viewer(_serialize(board))
 
 
 @frappe.whitelist(methods=["POST"])
@@ -618,7 +626,7 @@ def cancel_material_progress(name, reason=None):
     actor = _board_user()
     board = frappe.get_doc("OA Material Progress", _clean(name))
     if board.status == "已取消":
-        return _serialize(board)
+        return _for_viewer(_serialize(board))
     reason = _clean(reason)
     if not reason:
         frappe.throw("取消物料记录必须填写原因。")
@@ -629,4 +637,4 @@ def cancel_material_progress(name, reason=None):
     board.save(ignore_permissions=True)
     source = frappe.get_doc("OA Approval Request", board.source_request)
     _notify_change(board, source, {"status": {"before": "正常", "after": f"已取消（{reason}）"}}, actor)
-    return _serialize(board)
+    return _for_viewer(_serialize(board))

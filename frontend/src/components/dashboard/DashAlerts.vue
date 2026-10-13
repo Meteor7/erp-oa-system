@@ -1,7 +1,7 @@
 <script setup>
 // 「需要关注」：每条点一下带着筛选打开对应页面。
 // 2026-10-13 排版：先列 5 条，“全部 N 条”就地展开（不跳页）。
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { EMPTY_ALERT_TEXT } from '../../lib/dashboardView.js';
 import { limitRows } from '../../lib/dashboardLayout.js';
 import { targetHint } from '../../lib/dashboardTargets.js';
@@ -12,6 +12,8 @@ const props = defineProps({
 });
 const emit = defineEmits(['go']);
 const open = ref(false);
+// 换了一批（换页签、换月份）就收起来，不沿用上一批的展开状态
+watch(() => props.alerts, () => { open.value = false; });
 const view = computed(() => limitRows(props.alerts, open.value));
 </script>
 

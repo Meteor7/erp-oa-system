@@ -497,8 +497,8 @@ def _attendance_rows(months, department=None, employees=None):
 
     修复（2026-09-29，审查 #56 P3）：原来按开始日期归月，一张 9 月 30 日到 10 月 2 日的假
     全部记在 9 月。现在按每天的明细分月。
-    修复（2026-10-13）：拆月和考勤中心用同一个函数（attendance_board.month_window）：只有起止日期的旧申请
-    也按期间里每个周一到周五 8 小时拆，不再整张记在开始那个月。
+    修复（2026-10-13）：拆月和考勤中心用同一个函数（attendance_board.month_window）。
+    没有逐日明细的旧申请仍按 duration_hours 记在开始日期所在的月（审查修正：不按工作日 8 小时拆）。
     """
     from rayher_hr_payroll import attendance_board
 
@@ -515,6 +515,28 @@ def _attendance_rows(months, department=None, employees=None):
                                   "employee", "employee_name", "from_date", "to_date", "attendance_days"],
                           limit_page_length=0)
     return attendance_board.month_window(rows, start, end)
+
+
+def split_days(hours_by_key, total_days):
+    """每组的小时折成天（2 位小数），各组加起来正好等于 total_days（最大余数法）：
+    分开四舍五入会出现 3 × 0.5 小时 = 0.06 × 3 = 0.18、合计却是 0.19 的情况（审查 2026-10-13）。"""
+    keys = list(hours_by_key)
+    if not keys:
+        return {}
+    exact = {key: max(0.0, float(hours_by_key[key] or 0)) * 100 / HOURS_PER_DAY for key in keys}
+    cents = {key: int(exact[key] + 1e-9) for key in keys}
+    rest = int(round(float(total_days or 0) * 100)) - sum(cents.values())
+    order = sorted(keys, key=lambda key: (-(exact[key] - cents[key]), str(key)))
+    for index in range(abs(rest)):
+        if rest > 0:
+            cents[order[index % len(order)]] += 1
+        else:
+            # 合计比各组少（不该发生）：从余数最小、还有数的组里扣
+            candidates = [key for key in reversed(order) if cents[key] > 0]
+            if not candidates:
+                break
+            cents[candidates[0]] -= 1
+    return {key: cents[key] / 100 for key in keys}
 
 
 def month_leave(months, employees=None):
@@ -537,16 +559,20 @@ def month_leave(months, employees=None):
     for item in figures["requests"]:
         entry = grouped.setdefault(department_of.get(item["employee"], ""), {"leave": 0.0, "comp": 0.0, "overtime": 0.0, "leave_count": 0, "overtime_count": 0})
         key = {attendance_requests.REQUEST_LEAVE: "leave", attendance_requests.REQUEST_COMP_TIME: "comp"}.get(item["request_type"], "overtime")
-        entry[key] += float(item["hours"])          # 先按小时加，最后再折成天，和合计同一种舍入
+        entry[key] += float(item["hours"])          # 先按小时加，最后再折成天
         if key in ("leave", "overtime"):
             entry[f"{key}_count"] += 1
-    by_department = [{"department": name, **{key: days(value) if isinstance(value, float) else value for key, value in entry.items()}}
+    # 各部门的天数加起来一定等于卡片上的合计（最大余数法分配舍入）
+    split = {key: split_days({name: entry[key] for name, entry in grouped.items()}, figures[f"{key}_days"])
+             for key in ("leave", "comp", "overtime")}
+    by_department = [{"department": name, **{key: split[key][name] if key in split else value for key, value in entry.items()}}
                      for name, entry in grouped.items()]
     by_department.sort(key=lambda row: (-row["leave"], -row["overtime"], row["department"]))
+    type_days = split_days(figures["by_type"], figures["leave_days"])
     return {
         "totals": {"leave_days": figures["leave_days"], "leave_count": figures["leave_count"], "comp_days": figures["comp_days"],
                    "overtime_days": figures["overtime_days"]},
-        "by_type": sorted(({"label": key, "days": days(value)} for key, value in figures["by_type"].items()), key=lambda row: (-row["days"], row["label"])),
+        "by_type": sorted(({"label": key, "days": type_days[key]} for key in figures["by_type"]), key=lambda row: (-row["days"], row["label"])),
         "by_department": by_department, "figures": figures, "headcount": len(ids),
     }
 

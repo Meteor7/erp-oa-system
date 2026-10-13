@@ -61,7 +61,8 @@ INVOICE_FOLLOWUP_RECEIVED = "已收票"
 DEFAULT_EXCLUDE_REASON = "本人排除（未填原因）"
 WORKBENCH_STATUSES = {"排队中", "识别中", "待确认", "已确认", "疑似重复", "失败", "已排除"}
 WORKBENCH_PRIVILEGED_ROLES = {"System Manager", "Accounts User", "HR User", "HR Manager"}
-OPERATION_LOG_LIMIT = 100
+# 和 oa_entry.OPERATION_LOG_LIMIT 一致：这里也会往审批单的日志里写，限值小了会把 OA 那边的记录截短（修复 2026-10-13）。
+OPERATION_LOG_LIMIT = 500
 
 
 def _throw(message: str):

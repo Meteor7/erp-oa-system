@@ -8,6 +8,7 @@ import '../../styles/contributionUi.css';
 import { period, usePeriodFromRoute } from '../../lib/period';
 import { extractFrappeError } from '../../lib/frappeError';
 import { displayCompany } from '../../lib/displayBrand.js';
+import { canEditHr } from '../../lib/access.js';
 import {
   SHARED_API, STEPS, STATUS_LABEL, activationBlockers, batchOf, issueFilter, kindOf, missingBaseCount, money, normalizeRow,
   pendingSummary, progress, readinessText, signed, sortIssues, stepStates,
@@ -18,6 +19,8 @@ import ContributionBaseTable from './ContributionBaseTable.vue';
 const props = defineProps({ kind: { type: String, required: true } });
 const cfg = kindOf(props.kind);
 const other = kindOf(props.kind === 'si' ? 'fund' : 'si');
+// 总经理、副总经理只读打开：不显示上传、取消批次、确认纳入 / 忽略、改基数、确认生效（服务端也会拒绝）。
+const canEdit = canEditHr();
 
 // 看板链接带 ?period=YYYY-MM：先读好期间，再建下面的数据请求。
 usePeriodFromRoute(useRoute(), useRouter());
@@ -233,12 +236,13 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
 
     <section v-if="step === 1" class="panel" aria-label="导入申报表">
       <div class="pt"><span>第一步：导入本月{{ cfg.fileTitle }} <span class="muted">Excel 只当作“申报结果”，金额以后台按档案复算为准</span></span></div>
-      <label :class="['cw-drop', { over: dragging }]" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="onDrop">
+      <div v-if="!canEdit" class="cw-hint" data-cw-readonly>只读查看：导入和处理由人事完成，这里只能看已导入的批次和核对结果。</div>
+      <label v-if="canEdit" :class="['cw-drop', { over: dragging }]" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="onDrop">
         <input type="file" accept=".xlsx" @change="onPick">
         <b>{{ file ? file.name : `把${cfg.source}导出的 ${cfg.fileTitle}（.xlsx）拖到这里，或点击选择` }}</b>
         <span class="muted">{{ kind === 'si' ? '读取“申报明细”工作表里的在职人员' : '按表头名字识别：姓名、证件号码、缴存基数、个人缴存额、单位缴存额（缴存年月可有可无）' }}</span>
       </label>
-      <div class="cw-foot"><span class="muted">{{ unmatchedHint }}</span><button type="button" class="btn pri" :disabled="busy || !file" @click="upload">{{ busy ? '处理中…' : '上传并核对' }}</button></div>
+      <div v-if="canEdit" class="cw-foot"><span class="muted">{{ unmatchedHint }}</span><button type="button" class="btn pri" data-cw-upload :disabled="busy || !file" @click="upload">{{ busy ? '处理中…' : '上传并核对' }}</button></div>
       <div class="cw-hint">
         <b>怎么认人：</b>先用证件号码，认不出再按姓名（姓名唯一才自动关联），都认不出的放进差异让人确认。<br>
         <b>怎么复算：</b>{{ kind === 'si' ? '示例总部按 2026 政策：养老 个人 8% / 单位 16%；医疗 个人 2% / 单位 6%（基数不低于 6,727）；生育 单位 0.5%；工伤 单位 0.8%；失业 个人 0.2% / 单位 0.8%；地方补充养老 1% 仅深户。户口取员工档案。' : '公积金 = 档案公积金基数 × 比例（默认个人 7%、单位 7%）；本月已有月度记录的按记录里的基数和比例。社保和公积金基数各自维护，不要求一致。' }}<br>
@@ -250,7 +254,7 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
           <tbody><tr v-for="item in data.batches" :key="item.name">
             <td>{{ item.source_filename }}<div class="muted">{{ company2(item) }}</div></td><td>{{ item.uploaded_at }}</td><td class="r num">{{ item.parsed_rows }}</td><td class="r num">{{ item.pending_rows }}</td>
             <td><span :class="['pill', statusPill(item.status)]">{{ STATUS_LABEL[item.status] || item.status }}</span></td>
-            <td><span v-if="item.status === 'Pending Activation'" class="cw-chips"><input v-model="batchNotes[item.name]" class="cell" style="width:200px" placeholder="取消批次时填写原因" :aria-label="`取消 ${item.source_filename} 的原因`"><button type="button" class="btn sm danger" :disabled="busy" @click="cancelBatch(item)">取消批次</button></span><span v-else class="muted">{{ item.cancel_remark || '-' }}</span></td>
+            <td><span v-if="canEdit && item.status === 'Pending Activation'" class="cw-chips"><input v-model="batchNotes[item.name]" class="cell" style="width:200px" placeholder="取消批次时填写原因" :aria-label="`取消 ${item.source_filename} 的原因`"><button type="button" class="btn sm danger" :disabled="busy" @click="cancelBatch(item)">取消批次</button></span><span v-else class="muted">{{ item.cancel_remark || '-' }}</span></td>
           </tr></tbody>
         </table>
       </div>
@@ -265,7 +269,7 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
           <button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button>
         </span>
       </div>
-      <div v-if="!batch" class="cw-block">还没有导入{{ cfg.fileTitle }}，没有可核对的内容。<button type="button" class="btn sm" @click="step = 1">去导入</button></div>
+      <div v-if="!batch" class="cw-block">还没有导入{{ cfg.fileTitle }}，没有可核对的内容。<button v-if="canEdit" type="button" class="btn sm" @click="step = 1">去导入</button></div>
       <div class="tbl">
         <table>
           <thead><tr><th>员工</th><th>差异原因</th><th class="r">申报合计</th><th class="r">复算合计</th><th class="r">差额</th><th>状态</th></tr></thead>
@@ -285,7 +289,7 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
       <div class="cw-foot"><span class="muted">点一行看明细并选择处理方式；每一条处理都会记下是谁、什么时候、为什么。</span><button type="button" class="btn pri" @click="step = 3">下一步：基数与金额 →</button></div>
     </section>
 
-    <ContributionBaseTable v-else-if="step === 3" :kind="kind" :rows="rows" :household-options="baseTable.data?.household_options || []" :loading="baseTable.loading" :busy="busy" @base="onBase" @household="onHousehold" @carry="onCarry" />
+    <ContributionBaseTable v-else-if="step === 3" :kind="kind" :rows="rows" :readonly="!canEdit" :household-options="baseTable.data?.household_options || []" :loading="baseTable.loading" :busy="busy" @base="onBase" @household="onHousehold" @carry="onCarry" />
 
     <section v-else class="panel" aria-label="确认生效">
       <div class="pt"><span>第四步：确认{{ cfg.name }}生效 <span class="muted">生效后这个月的{{ cfg.name }}记录写入系统，薪酬计算直接读取</span></span></div>
@@ -299,10 +303,10 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
       </div>
       <div class="cw-foot">
         <span class="muted">生效后需要改动：重新上传文件生成新批次，或在“基数与金额”里改基数。</span>
-        <span class="cw-chips"><router-link to="/payroll" class="btn">去薪酬计算</router-link><button type="button" class="btn pri" :disabled="busy || !batch || batch.status === 'Current' || blockers.length > 0" @click="activate">确认{{ cfg.name }}生效</button></span>
+        <span class="cw-chips"><router-link to="/payroll" class="btn">去薪酬计算</router-link><button v-if="canEdit" type="button" class="btn pri" data-cw-activate :disabled="busy || !batch || batch.status === 'Current' || blockers.length > 0" @click="activate">确认{{ cfg.name }}生效</button></span>
       </div>
     </section>
 
-    <ContributionDrawer v-if="openItem" :kind="kind" :item="openItem" :employees="employees.data || []" :busy="busy" :error="drawerError" @close="openId = ''; drawerError = ''" @confirm="onConfirm" @ignore="onIgnore" @fix="onFix" />
+    <ContributionDrawer v-if="openItem" :kind="kind" :item="openItem" :readonly="!canEdit" :employees="employees.data || []" :busy="busy" :error="drawerError" @close="openId = ''; drawerError = ''" @confirm="onConfirm" @ignore="onIgnore" @fix="onFix" />
   </div>
 </template>

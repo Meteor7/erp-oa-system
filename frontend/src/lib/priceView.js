@@ -258,20 +258,26 @@ function priceOf(group, line) {
   return (group?.prices || []).find((item) => item.price_line === line.name) || null;
 }
 
+// 报没报价：服务端给了 quoted 标志就用它（PMC 看不到单价，unit_price 是 null）；老数据没有标志时按单价 > 0。
+export function isQuoted(price) {
+  if (!price) return false;
+  if (price.quoted !== undefined && price.quoted !== null) return Boolean(Number(price.quoted));
+  return toNumber(price.unit_price) > 0;
+}
+
 export function chosenGroup(approval) {
   return (approval?.supplier_comparisons || []).find((group) => group.is_selected) || null;
 }
 
 // 比价矩阵：总价只在"这家报全了所有物料"时才互相比较；只报了一部分的不比总价、不标最低；每个物料单独标最低单价。
+// 看不到金额（amounts_hidden）时：报没报价、货期照常，单价 / 小计 / 合计是 null（页面显示“—”），不标最低。
 export function buildMatrix(approval) {
   const lines = approval?.lines || [];
   const groups = approval?.supplier_comparisons || [];
+  const hidden = Boolean(approval?.amounts_hidden);
   const suppliers = groups.map((group) => {
-    const quoted = lines.filter((line) => {
-      const price = priceOf(group, line);
-      return price && toNumber(price.unit_price) > 0;
-    });
-    const total = lines.reduce((sum, line) => {
+    const quoted = lines.filter((line) => isQuoted(priceOf(group, line)));
+    const total = hidden ? null : lines.reduce((sum, line) => {
       const price = priceOf(group, line);
       return sum + (price ? toNumber(price.unit_price) * toNumber(line.quantity) : 0);
     }, 0);
@@ -283,21 +289,21 @@ export function buildMatrix(approval) {
     };
   });
   const complete = suppliers.filter((item) => item.complete);
-  if (complete.length >= 2) {
+  if (!hidden && complete.length >= 2) {
     const min = Math.min(...complete.map((item) => cents(item.total)));
     complete.forEach((item) => { item.lowestComplete = cents(item.total) === min; });
   }
   const rows = lines.map((line) => {
-    const quotes = groups.map((group) => priceOf(group, line)).map((price) => (price && toNumber(price.unit_price) > 0 ? price : null));
-    const quotedUnits = quotes.filter(Boolean).map((price) => cents(price.unit_price));
+    const quotes = groups.map((group) => priceOf(group, line)).map((price) => (isQuoted(price) ? price : null));
+    const quotedUnits = hidden ? [] : quotes.filter(Boolean).map((price) => cents(price.unit_price));
     const best = quotedUnits.length >= 2 ? Math.min(...quotedUnits) : null;
     return {
       line,
       cells: quotes.map((price, index) => ({
         supplier: groups[index].supplier,
         quoted: Boolean(price),
-        unit: price ? toNumber(price.unit_price) : null,
-        total: price ? toNumber(price.unit_price) * toNumber(line.quantity) : null,
+        unit: price && !hidden ? toNumber(price.unit_price) : null,
+        total: price && !hidden ? toNumber(price.unit_price) * toNumber(line.quantity) : null,
         delivery: price ? String(price.delivery_date || '') : '',
         best: price !== null && best !== null && cents(price.unit_price) === best,
         chosen: Boolean(groups[index].is_selected),
@@ -326,11 +332,8 @@ export function latestDelivery(group) {
 export function selectionConsequence(approval, group) {
   if (!group) return null;
   const lines = approval?.lines || [];
-  const quoted = lines.filter((line) => {
-    const price = priceOf(group, line);
-    return price && toNumber(price.unit_price) > 0;
-  });
-  const total = quoted.reduce((sum, line) => sum + toNumber(priceOf(group, line).unit_price) * toNumber(line.quantity), 0);
+  const quoted = lines.filter((line) => isQuoted(priceOf(group, line)));
+  const total = approval?.amounts_hidden ? null : quoted.reduce((sum, line) => sum + toNumber(priceOf(group, line).unit_price) * toNumber(line.quantity), 0);
   return { supplier: group.supplier, quoted: quoted.length, returned: lines.length - quoted.length, total, lineCount: lines.length };
 }
 
@@ -352,7 +355,7 @@ export function approvalGuide(approval, { canEdit = false } = {}) {
     }
     return {
       tone: 'jade',
-      text: `已选择：${info.supplier}，成交总额 ${money(info.total)}。${info.returned ? `它没报价的 ${info.returned} 项物料会退回 PR，需要重新比价。` : `${info.lineCount} 项物料全部成交。`}审批通过后立刻生成 1 张 PO 草稿。`,
+      text: `已选择：${info.supplier}，成交总额 ${amountText(info.total, approval?.amounts_hidden)}。${info.returned ? `它没报价的 ${info.returned} 项物料会退回 PR，需要重新比价。` : `${info.lineCount} 项物料全部成交。`}审批通过后立刻生成 1 张 PO 草稿。`,
     };
   }
   if (status === '待审批') {
@@ -614,14 +617,19 @@ export function lineReceived(line) {
   return toNumber(line?.received_quantity) >= toNumber(line?.quantity) && toNumber(line?.quantity) > 0;
 }
 
+// 看不到金额（amounts_hidden）时“付清没有”用服务端算好的 paid_full，已付 / 总额给 null（显示“—”），不当成 0。
 export function poProgress(po) {
   const lines = po?.lines || [];
   const received = lines.filter(lineReceived).length;
   const passed = lines.filter((line) => String(line.inspection_status || '') === '已通过').length;
+  const hidden = Boolean(po?.amounts_hidden);
   const planPaid = (po?.payment_plan || []).every((row) => toNumber(row.paid_amount) >= toNumber(row.amount));
-  const paidFull = cents(po?.paid_amount) >= cents(po?.total_amount) && cents(po?.total_amount) > 0 && planPaid;
+  const paidFull = hidden
+    ? Boolean(Number(po?.paid_full || 0))
+    : cents(po?.paid_amount) >= cents(po?.total_amount) && cents(po?.total_amount) > 0 && planPaid;
   return {
-    lineCount: lines.length, received, passed, paid: toNumber(po?.paid_amount), total: toNumber(po?.total_amount),
+    lineCount: lines.length, received, passed,
+    paid: hidden ? null : toNumber(po?.paid_amount), total: hidden ? null : toNumber(po?.total_amount),
     allReceived: lines.length > 0 && received === lines.length,
     allPassed: lines.length > 0 && passed === lines.length,
     paidFull,
@@ -640,7 +648,7 @@ export function poCloseBlockers(po) {
 
 export function planStatus(row) {
   const amount = toNumber(row?.amount);
-  if (row?.status === '已付款' || (amount > 0 && toNumber(row?.paid_amount) >= amount)) return { text: '已付款', tone: 'jade' };
+  if (row?.status === '已付款' || Number(row?.paid_full || 0) || (amount > 0 && toNumber(row?.paid_amount) >= amount)) return { text: '已付款', tone: 'jade' };
   if (row?.payment_request) return { text: row.status === '审批中' ? '付款审批中' : (row.status || '付款审批中'), tone: 'cobalt' };
   if (row?.status === '待审批') return { text: '待审批（未发起）', tone: 'gray' };
   return { text: row?.status || '待生成', tone: 'gray' };

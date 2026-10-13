@@ -27,7 +27,9 @@ test("payroll: ?status=draft filters the rows and clearing it goes back to no pa
     { employee: "C", salary_slip: null, docstatus: null },
   ];
   assert.deepEqual(parsePayrollQuery({ status: "draft" }), { status: "draft" });
-  assert.deepEqual(parsePayrollQuery({ status: "submitted" }), { status: "" });
+  // 审查修正（2026-10-13）：?status=submitted 只看已确认（看板「人力成本 · 工资」的链接）；其他值清掉
+  assert.deepEqual(parsePayrollQuery({ status: "submitted" }), { status: "submitted" });
+  assert.deepEqual(parsePayrollQuery({ status: "bogus" }), { status: "" });
   assert.deepEqual(parsePayrollQuery({}), { status: "" });
   assert.deepEqual(payrollQueryOf({ status: "draft" }), { status: "draft" });
   assert.deepEqual(payrollQueryOf({ status: "" }), {});
@@ -43,7 +45,7 @@ test("payroll page: period and the draft filter are bound to the address before 
   assert.match(source, /sources: \[statusFilter\]/);
   assert.ok(indexOf(source, "bindRouteFilters(") < indexOf(source, 'createResource({ url: api + "get_payroll_rows"'), "period must be read before the first fetch");
   // 页签「草稿」就是地址里的 ?status=draft：点它写进地址，别的页签清掉
-  assert.match(source, /statusFilter\.value = key === "draft" \? "draft" : ""/);
+  assert.match(source, /statusFilter\.value = URL_CHIPS\.includes\(key\) \? key : ""/);
   assert.match(source, /data-payroll-draft-only/);
   assert.match(source, /只看草稿工资条/);
   assert.match(source, /本期没有草稿工资条/);

@@ -59,11 +59,11 @@ def _window(today, back=None):
 
 
 def _rows(employees, start, end, statuses=None):
-    """这些员工在 [start, end] 里的请假、加班、调休、出差申请（含每日明细）。"""
+    """这些员工在 [start, end] 里的请假、加班、调休、出差申请（含每日明细；没有明细的旧申请本月数字用 duration_hours）。"""
     if not employees:
         return []
     return frappe.db.sql(
-        "SELECT name, employee, request_type, leave_type, workflow_status, from_date, to_date, attendance_days, "
+        "SELECT name, employee, request_type, leave_type, workflow_status, from_date, to_date, attendance_days, duration_hours, "
         "travel_start_date, travel_end_date, travel_destination FROM `tabOA Approval Request` "
         "WHERE employee IN %(employees)s AND request_type IN %(types)s AND workflow_status IN %(statuses)s "
         "AND ((request_type <> %(travel)s AND from_date <= %(end)s AND to_date >= %(start)s) "

@@ -11,6 +11,7 @@ const props = defineProps({
   employees: { type: Array, default: () => [] },
   busy: { type: Boolean, default: false },
   error: { type: String, default: '' },
+  readonly: { type: Boolean, default: false },   // 只读（总经理、副总经理）：不给处理选项和提交按钮
 });
 const emit = defineEmits(['close', 'confirm', 'ignore', 'fix']);
 
@@ -71,7 +72,8 @@ const cell = (value) => (value == null ? '—' : money(value));
         </table>
       </div>
       <div v-else class="muted">档案里这个人有{{ kindOf(kind).name }}基数，本月申报表却没有他。</div>
-      <template v-if="!item.resolved">
+      <div v-if="readonly && !item.resolved" class="muted" data-cw-drawer-readonly>待人事处理。</div>
+      <template v-else-if="!item.resolved">
         <b>怎么处理</b>
         <label v-for="option in choices" :key="option.index" class="cw-opt">
           <input v-model.number="choice" type="radio" name="cw-choice" :value="option.index">
@@ -89,7 +91,7 @@ const cell = (value) => (value == null ? '—' : money(value));
     </div>
     <footer>
       <button type="button" class="btn" @click="emit('close')">关闭</button>
-      <button v-if="!item.resolved" type="button" class="btn pri" :disabled="!canSubmit" @click="submit">{{ submitText }}</button>
+      <button v-if="!readonly && !item.resolved" type="button" class="btn pri" :disabled="!canSubmit" @click="submit">{{ submitText }}</button>
     </footer>
   </aside>
 </template>

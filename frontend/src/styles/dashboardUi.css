@@ -120,6 +120,8 @@
 .db-nodata-sep { color: var(--db-line2); }
 .db-nodata .db-link { font-size: 12.5px; }
 .db-nodata .db-mut { font-size: 12px; }
+/* 暂无数据里打不开的标题：和其他打不开的链接一样灰、禁用光标 */
+.db-nodata .is-off { color: var(--db-ink3); cursor: not-allowed; text-decoration: none; }
 .db-block.is-failed { background: #FFFAF9; border-color: var(--db-red-line); }
 .db-bars { display: flex; flex-direction: column; gap: 9px; padding: 6px 16px 16px; }
 .db-br { display: grid; grid-template-columns: minmax(64px, 110px) minmax(0, 1fr) minmax(52px, auto); gap: 10px; align-items: center; font-size: 13px; }
