@@ -613,7 +613,7 @@ export function hoursByMonth(days) {
 // 该员工当月已填工时、新上限是多少后端没有给，页面不猜，只说"超过新上限时需要他先调整"。
 export function effectRows(request, impact = '') {
   if (isTrip(request)) {
-    return [{ kind: 'balance', label: '出差', value: '不扣额度', note: '出差期间不算请假，不扣年假和工时上限；审批通过后到前台办理，办完你会收到行程提醒；出差途中的打车、住宿等费用，报销时直接关联这张出差申请' }];
+    return [{ kind: 'balance', label: '出差', value: '不扣额度', note: '出差期间不算请假，不扣年假和工时上限；审批通过后到前台办理，前台办完申请人会收到行程提醒；出差途中的打车、住宿等费用，报销时直接关联这张出差申请' }];
   }
   const hours = totalOf(request);
   const label = rowLabel(request);
@@ -835,7 +835,7 @@ export function stepStates(request, names = {}) {
     else if (status.includes('拒绝') || status.includes('撤回')) state = 'stop';
     else if (active && Number(step.step_index) === Number(request.current_step_index)) state = 'current';
     const who = people(step.approvers, names);
-    return { label: step.label, who, state, note: step.note || '', time: step.acted_on || '' };
+    return { label: step.label, who, state, note: step.note || '', time: step.acted_on || '', handle: step.mode === 'handle' };
   });
 }
 

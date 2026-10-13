@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import {
   TYPES, TYPE_LABELS, TYPE_ORDER, detailLocation, effectLine, effectRows, isTrip, kindOf, listLocation, newLocation, pathForFilter, parseLocation,
-  backLabel, backLocation, originOf, originQuery, requestTitle, rowDays, sizeText, statusTag, tripDayCount, typeCounts, typeForPath,
+  backLabel, backLocation, originOf, originQuery, requestTitle, rowDays, sizeText, statusTag, stepStates, tripDayCount, typeCounts, typeForPath,
 } from "../src/lib/attendanceView.js";
 import { applyFilters, lengthText, statusInfo, stripCells, whenText } from "../src/lib/attendanceFlow.js";
 import { rowKind } from "../src/lib/attendanceCharts.js";
@@ -194,4 +194,20 @@ test("the leave form asks for the route again when the dates change (3 calendar 
   const center = read("../src/pages/AttendanceCenter.vue");
   assert.match(center, /@dates="onDates"/);
   assert.match(center, /loadRoute\('请假申请', from, to\)/);
+});
+
+test("the front desk step reads 已办理 once done, and the trip hint does not speak to the approver as the applicant", () => {
+  const request = {
+    workflow_status: "已完成", current_step_index: 2,
+    steps: [
+      { step_index: 1, label: "副总经理：演示员工21", mode: "approve", status: "已通过", approvers: ["q@tests-x.example.invalid"] },
+      { step_index: 2, label: "前台办理：演示员工30", mode: "handle", status: "已通过", approvers: ["w@tests-x.example.invalid"] },
+    ],
+  };
+  assert.deepEqual(stepStates(request, {}).map((step) => [step.state, step.handle]), [["done", false], ["done", true]]);
+  const detail = read("../src/components/attendance/AttendanceDetail.vue");
+  assert.match(detail, /done: step\.handle \? '已办理' : '已通过'/);
+  const view = read("../src/lib/attendanceView.js");
+  assert.match(view, /前台办完申请人会收到行程提醒/);
+  assert.doesNotMatch(view, /办完你会收到行程提醒/);
 });

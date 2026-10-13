@@ -86,7 +86,8 @@ const timeline = computed(() => steps.value.map((step, index) => ({
   key: `${index}-${step.label}`,
   cls: { done: 'done', current: 'now', stop: 'rejected', wait: 'todo' }[step.state],
   who: step.who || '待指定', role: stepRole(step.label), note: step.note,
-  sub: { done: '已通过', stop: '已驳回', current: '等待中', wait: '未开始' }[step.state] + (step.time && step.state !== 'wait' ? ` · ${stamp(step.time)}` : ''),
+  // 前台办理这一步办完叫“已办理”，不叫“已通过”。
+  sub: { done: step.handle ? '已办理' : '已通过', stop: '已驳回', current: '等待中', wait: '未开始' }[step.state] + (step.time && step.state !== 'wait' ? ` · ${stamp(step.time)}` : ''),
 })));
 const hasOrigin = computed(() => ['list', 'page'].includes(props.origin?.kind));
 const tone = computed(() => ({ ok: 'ok', warn: 'warn', bad: 'bad', info: 'info' }[tag.value?.tone] || ''));
