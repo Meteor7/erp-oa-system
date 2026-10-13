@@ -536,7 +536,10 @@ def test_a_short_leave_is_not_copied_to_the_vice_manager_any_more():
 
 
 def test_the_hr_manager_own_short_leave_still_has_an_approver():
-    """人事经理自己请 3 天以内的假：直属上级是高管被跳过、人事经理是他自己，路线会变空——照常走到副总，不能提交不了。"""
+    """人事经理自己请 3 天以内的假：直属上级是高管被跳过、人事经理是他自己，路线会变空——由总经理（演示员工28）审批，不能提交不了。"""
     steps = build_leave_route(department="人事行政部 - RAY", supervisor="演示员工29", supervisor_user=LEAVE_FINANCE_APPROVER_USER,
                               supervisor_decision="skip", applicant_user=LEAVE_ADMIN_APPROVER_USER, span_days=2)
-    assert labels(steps) == ["演示员工21"]
+    assert labels(steps) == ["演示员工29"]
+    long_steps = build_leave_route(department="人事行政部 - RAY", supervisor="演示员工29", supervisor_user=LEAVE_FINANCE_APPROVER_USER,
+                                   supervisor_decision="skip", applicant_user=LEAVE_ADMIN_APPROVER_USER, span_days=4)
+    assert labels(long_steps) == ["演示员工21"]
