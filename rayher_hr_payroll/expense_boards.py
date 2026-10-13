@@ -173,7 +173,7 @@ def request_board(rows, *, today, stuck_days=STUCK_DAYS, stale_days=STALE_DAYS):
 
     trips = []
     for row in rows:
-        if _get(row, "request_type") != REQUEST_TRAVEL or _get(row, "workflow_status") != COMPLETED:
+        if _get(row, "request_type") != REQUEST_TRAVEL or _get(row, "workflow_status") not in (COMPLETED, "待办理"):
             continue
         start, end = as_date(_get(row, "travel_start_date")), as_date(_get(row, "travel_end_date"))
         if not start or (end and (today - end).days > TRIP_LOOKBACK_DAYS):

@@ -36,6 +36,13 @@ ALL_KINDS = ABSENCE_KINDS + ("trip", "ot")
 _KIND_RANK = {kind: (0 if kind in ABSENCE_KINDS else 1 if kind == "trip" else 2) for kind in ALL_KINDS}
 
 
+def is_approved(row):
+    """已批准：请假、加班、调休通过后是已完成 / 已通过；出差两级审批通过后到前台办理（待办理），
+    按出差日期算人，不等前台点完“已办理”（副总、总经理自己出差直接到前台备案，也算）。"""
+    status = value(row, "workflow_status")
+    return status in COMPLETED or (value(row, "request_type") == REQUEST_TRAVEL and status == "待办理")
+
+
 def _num(hours):
     number = float(hours)
     return int(number) if number == int(number) else round(number, 2)
@@ -100,7 +107,7 @@ def build_stats(employee_ids, rows, *, first, work_dates, month_first, month_las
     absent = {}
     for row in rows:
         employee = value(row, "employee")
-        if value(row, "workflow_status") not in COMPLETED or employee not in ids:
+        if not is_approved(row) or employee not in ids:
             continue
         kind = kind_of(row)
         if not kind:
@@ -144,7 +151,7 @@ def today_trips(employees, rows, *, first, work_dates):
     gone, trips = set(), {}
     for row in rows:
         employee = value(row, "employee")
-        if value(row, "workflow_status") not in COMPLETED or employee not in known:
+        if not is_approved(row) or employee not in known:
             continue
         kind = kind_of(row)
         if not kind or first not in {day for day, _hours in days_of(row, work_dates)}:
@@ -184,7 +191,7 @@ def _cells(rows, employee_ids, first, work_dates, count):
         kind = kind_of(row)
         if not kind:
             continue
-        pending = value(row, "workflow_status") not in COMPLETED
+        pending = not is_approved(row)
         for day, hours in days_of(row, work_dates):
             if day in index:
                 cell = {"kind": kind, "pending": pending, "hours": _num(hours)}

@@ -237,6 +237,35 @@ def notify_request_applicant(doc, status, *, actor=None, note=None, event_key=No
     return True
 
 
+def notify_travel_arranged(doc, *, actor=None, note=None, event_key=None, store=None):
+    """出差办理完（前台已备案）：给申请人一条单独的提醒，和抄送、审批结果通知都不一样——他要按行程安排手头的工作。"""
+    store = store or FrappeAssignmentStore()
+    user = _clean(getattr(doc, "owner", None))
+    if not user:
+        employee = _clean(getattr(doc, "employee", None))
+        user = _clean(frappe.db.get_value("Employee", employee, "user_id")) if employee else ""
+    if not user:
+        return False
+    key = event_key or f"oa-travel-arranged:{_clean(getattr(doc, 'name', None))}"
+    if store.notification_exists(for_user=user, document_name=doc.name, key=key):
+        return False
+    place = _clean(getattr(doc, "travel_destination", None))
+    start = _clean(getattr(doc, "travel_start_date", None))[:10]
+    end = _clean(getattr(doc, "travel_end_date", None))[:10]
+    days = int(getattr(doc, "travel_days", 0) or 0)
+    subject = f"出差已办理，请安排行程：{doc.name} [{key}]"
+    content = (
+        f"出差地点：{place or '—'}<br>出差日期：{start} 至 {end}" + (f"（{days} 天）" if days else "")
+        + "<br>前台已办理，请按行程安排好手头的工作和交接。"
+    )
+    if note:
+        content += f"<br>前台备注：{_clean(note)}"
+    if actor:
+        content += f"<br>办理人：{_clean(actor)}"
+    store.create_notification(for_user=user, document_name=doc.name, subject=subject, content=content, link=_request_link(doc))
+    return True
+
+
 def close_request_assignments(doc, *, store=None):
     store = store or FrappeAssignmentStore()
     reference_type = _clean(getattr(doc, "doctype", None)) or "OA Approval Request"

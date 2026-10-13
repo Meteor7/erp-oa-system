@@ -196,7 +196,7 @@ defineExpose({ dirty });
       </div>
       <div class="af-block">
         <div class="ac-note">通过后</div>
-        <div class="ac-note">出差期间不算请假，不扣年假和工时上限；途中的打车、住宿等费用，报销时直接关联这张出差申请。</div>
+        <div class="ac-note">审批通过后到前台办理（备案、安排行程），办完你会收到一条行程提醒，请按行程安排好手头的工作。出差期间不算请假；途中的打车、住宿等费用，报销时直接关联这张出差申请。</div>
       </div>
       <div class="af-block">
         <div class="ac-note">审批路线（自动带出）</div>

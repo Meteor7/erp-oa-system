@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import {
   TYPES, TYPE_LABELS, TYPE_ORDER, detailLocation, effectLine, effectRows, isTrip, kindOf, listLocation, newLocation, pathForFilter, parseLocation,
-  backLabel, backLocation, originOf, originQuery, requestTitle, rowDays, sizeText, tripDayCount, typeCounts, typeForPath,
+  backLabel, backLocation, originOf, originQuery, requestTitle, rowDays, sizeText, statusTag, tripDayCount, typeCounts, typeForPath,
 } from "../src/lib/attendanceView.js";
 import { applyFilters, lengthText, statusInfo, stripCells, whenText } from "../src/lib/attendanceFlow.js";
 import { rowKind } from "../src/lib/attendanceCharts.js";
@@ -153,4 +153,45 @@ test("a trip opened from the dashboard (or another page) goes back to that page,
   assert.equal(originOf({ from: "home" }).kind, "home");
   assert.deepEqual(originOf({ from: "list", fscope: "todo", ftype: "出差" }), { kind: "list", scope: "todo", filter: "出差" });
   assert.equal(backLabel(originOf({})), "返回列表");
+});
+
+// ---------------------------------------------------------------- 新流程（2026-10-13）：前台办理、请假三天以内到人事为止
+
+test("a trip waiting at the front desk says so: 待办理 for her, 待前台办理 for everyone else", () => {
+  assert.deepEqual(statusTag(trip({ workflow_status: "待办理", can_act: true })), { text: "待办理", tone: "warn" });
+  assert.deepEqual(statusTag(trip({ workflow_status: "待办理", can_act: false })), { text: "待前台办理", tone: "info" });
+  assert.deepEqual(statusTag(trip({ workflow_status: "待审批", can_act: true })), { text: "待审批", tone: "warn" });
+  assert.deepEqual(statusTag({ request_type: "报销单", workflow_status: "待办理", can_act: false }), { text: "审批中", tone: "info" });
+});
+
+test("the front desk step only offers 已办理 with an optional note, never 驳回", () => {
+  const detail = read("../src/components/attendance/AttendanceDetail.vue");
+  assert.match(detail, /const desk = computed\(\(\) => trip\.value && active\.value && request\.value\?\.current_step_mode === 'handle'\)/);
+  assert.match(detail, /<section v-if="request\.can_act && desk" class="af-ps af-actions" aria-label="前台办理">/);
+  assert.match(detail, /<section v-if="request\.can_act && desk" class="ac-panel af-bar" aria-label="前台办理">/);
+  const deskBlocks = detail.split('aria-label="前台办理"').slice(1).map((part) => part.slice(0, part.indexOf("</section>")));
+  assert.equal(deskBlocks.length, 2);
+  for (const block of deskBlocks) {
+    assert.match(block, />已办理</);
+    assert.doesNotMatch(block, /驳回/);
+  }
+  assert.match(detail, /wasDesk \? '已办理，已给申请人发了行程提醒'/);
+});
+
+test("a trip lists the reimbursements and payments linked to it and opens them", () => {
+  const detail = read("../src/components/attendance/AttendanceDetail.vue");
+  assert.match(detail, /const linked = computed\(\(\) => data\.value\?\.linked \|\| \[\]\)/);
+  assert.match(detail, /aria-label="关联的报销和付款"/);
+  assert.match(detail, /path: row\.request_type === '付款单' \? '\/approval\/payment' : '\/approval\/claim'/);
+});
+
+test("the leave form asks for the route again when the dates change (3 calendar days or less stops at HR)", () => {
+  const view = read("../src/lib/attendanceView.js");
+  assert.match(view, /route: \(requestType, from = '', to = ''\) => callApi\('attendance_entry\.get_attendance_route', \{ request_type: requestType, from_date: from \|\| '', to_date: to \|\| '' \}/);
+  const form = read("../src/components/attendance/AttendanceForm.vue");
+  assert.match(form, /if \(props\.requestType === '请假申请'\) emit\('dates', \{ from, to \}\)/);
+  assert.match(form, /请假连续 3 个日历日以内，审批到人事经理为止/);
+  const center = read("../src/pages/AttendanceCenter.vue");
+  assert.match(center, /@dates="onDates"/);
+  assert.match(center, /loadRoute\('请假申请', from, to\)/);
 });

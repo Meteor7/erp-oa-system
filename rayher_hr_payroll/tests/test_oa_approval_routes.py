@@ -491,3 +491,45 @@ def test_procurement_route_refuses_a_supervisor_without_an_account(monkeypatch):
     monkeypatch.setattr(oa_approval, "resolve_role", lambda key: {"role_key": key, "role_label": key, "employee_name": key, "user": key + "@example.com"})
     with pytest.raises(oa_approval.ApprovalRouteError, match="没有关联可用账号"):
         oa_approval.build_procurement_route(supervisor="张主管", supervisor_user="", supervisor_decision="approve", applicant_user="a@example.com")
+
+
+def test_short_leave_span_counts_calendar_days_including_both_ends():
+    from rayher_hr_payroll.oa_approval import is_short_leave, leave_span_days
+
+    assert leave_span_days("2026-10-09", "2026-10-11") == 3
+    assert leave_span_days("2026-10-09", "2026-10-09") == 1
+    assert leave_span_days("2026-10-09", "2026-10-12") == 4          # 周五到周一：只有 2 个工作日，但是 4 个日历日
+    assert leave_span_days("2026-10-12", "2026-10-09") is None
+    assert leave_span_days("", "2026-10-09") is None
+    assert is_short_leave("2026-10-09", "2026-10-11") is True
+    assert is_short_leave("2026-10-09", "2026-10-12") is False
+    assert is_short_leave(None, None) is False
+
+
+def test_leave_of_three_calendar_days_or_less_stops_at_the_hr_manager():
+    common = dict(department="研发部 - RAY", supervisor="演示员工132", supervisor_user="person024@staff.example.invalid",
+                  applicant_user="employee@staff.example.invalid")
+    assert labels(build_leave_route(**common, span_days=3)) == ["直属主管：演示员工132", "人事经理"]
+    assert labels(build_leave_route(**common, span_days=1)) == ["直属主管：演示员工132", "人事经理"]
+    assert labels(build_leave_route(**common, span_days=4)) == ["直属主管：演示员工132", "人事经理", "演示员工21"]
+    assert labels(build_leave_route(**common)) == ["直属主管：演示员工132", "人事经理", "演示员工21"], "no dates = the full route"
+    finance = dict(common, department="财务部 - RAY", supervisor="演示员工16", supervisor_user="person072@staff.example.invalid")
+    assert labels(build_leave_route(**finance, span_days=2)) == ["直属主管：演示员工16", "人事经理"]
+    assert labels(build_leave_route(**finance, span_days=5)) == ["直属主管：演示员工16", "人事经理", "演示员工29"]
+
+
+def test_only_leave_uses_the_short_route_overtime_and_comp_time_keep_theirs():
+    from rayher_hr_payroll.oa_approval import build_route
+    from rayher_hr_payroll.oa_document_types import REQUEST_LEAVE
+
+    kw = dict(department="研发部 - RAY", supervisor="演示员工132", supervisor_user="person024@staff.example.invalid",
+              applicant_user="employee@staff.example.invalid", from_date="2026-10-09", to_date="2026-10-10")
+    assert labels(build_route(REQUEST_LEAVE, **kw)) == ["直属主管：演示员工132", "人事经理"]
+    assert labels(build_route("加班申请", **kw)) == ["直属主管：演示员工132", "人事经理", "演示员工21"]
+    assert labels(build_route("调休申请", **kw)) == ["直属主管：演示员工132", "人事经理", "演示员工21"]
+    assert labels(build_route(REQUEST_LEAVE, **{**kw, "to_date": "2026-10-13"})) == ["直属主管：演示员工132", "人事经理", "演示员工21"]
+
+
+def test_a_short_leave_is_not_copied_to_the_vice_manager_any_more():
+    assert leave_copy_recipients(short=True) == [{"label": "人事经理", "user": LEAVE_ADMIN_APPROVER_USER}]
+    assert leave_copy_recipients(LEAVE_ADMIN_APPROVER_USER, short=True) == []

@@ -18,7 +18,7 @@ def run(key, ctx):
 
 
 ME_KEYS = ["me.annual", "me.comp", "me.overtime_month", "me.requests", "me.timesheet", "me.claim", "me.cc", "me.unread", "me.approvals",
-           "alert.me_timesheet", "alert.me_leave_unused", "block.me_requests", "block.me_timesheet", "block.me_strip", "block.me_balances", "todo.queue"]
+           "alert.me_timesheet", "alert.me_leave_unused", "alert.me_trip", "block.me_requests", "block.me_timesheet", "block.me_strip", "block.me_balances", "todo.queue"]
 
 
 @pytest.fixture
@@ -53,6 +53,8 @@ def data(monkeypatch):
     monkeypatch.setattr(personal, "_load_approval_summary", lambda: state["summary"])
     monkeypatch.setattr(personal, "_load_notification_counts", lambda: state["notes"])
     monkeypatch.setattr(personal, "_load_approval_queue", lambda limit: state["queue"])
+    state["trips"] = []
+    monkeypatch.setattr(personal, "_load_my_trips", lambda ctx: state["trips"])
     state["calls"] = calls
     return state
 
@@ -409,3 +411,24 @@ def test_my_balances_show_annual_and_comp_as_bars(data):
     data["leave"] = {"visible": False}
     assert run("block.me_balances", make_ctx()) is None
     assert run("block.me_balances", make_ctx(employee="")) is None
+
+
+def test_a_handled_trip_shows_a_reminder_to_arrange_the_itinerary_until_the_return_day(data):
+    """前台办理完：申请人看板上有一条行程提醒（带前台备注），和抄送、已完成通知不一样；没有出差就不出现。"""
+    ctx = make_ctx()
+    assert run("alert.me_trip", ctx) is None
+    data["trips"] = [{"name": "OA-T1", "travel_destination": "上海", "travel_start_date": "2026-10-12", "travel_end_date": "2026-10-14", "note": "机票已订"},
+                     {"name": "OA-T2", "travel_destination": "北京", "travel_start_date": "2026-10-20", "travel_end_date": "2026-10-20", "note": ""}]
+    item = run("alert.me_trip", make_ctx())
+    assert item["title"] == "10-12 至 10-14 去上海出差，前台已办理，请安排好行程，另有 1 次出差"
+    assert item["sub"] == "机票已订" and item["tone"] == "info"
+    assert item["target"] == {"key": "travel.detail", "params": {"request": "OA-T1"}}
+    data["trips"] = data["trips"][1:]
+    item = run("alert.me_trip", make_ctx())
+    assert item["title"] == "10-20 去北京出差，前台已办理，请安排好行程" and item["sub"] == "请安排好手头的工作和交接"
+
+
+def test_every_role_overview_carries_the_trip_reminder():
+    for profile, spec in layout.LAYOUTS.items():
+        overview = spec["tabs"][0]
+        assert "alert.me_trip" in overview["alerts"], profile

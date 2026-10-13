@@ -172,3 +172,15 @@ def test_today_trips_is_the_same_group_as_the_trip_number_in_the_stats():
     saturday = date(2026, 10, 17)
     assert board.today_trips(employees, rows, first=saturday, work_dates=WORK) == []
     assert stats([e["name"] for e in employees], rows, first=saturday)["today"]["trip"] == 0
+
+
+def test_a_trip_counts_by_its_dates_once_approved_even_while_the_front_desk_has_not_clicked_yet():
+    """决定 2026-10-13：出差按出差时间算人。两级审批通过后在前台办理（待办理）就算；请假没有办理节点，“待办理”不算。"""
+    at_desk = trip("A", "2026-10-15", "2026-10-16", status="待办理")
+    pending = trip("B", "2026-10-15", "2026-10-16", status="待审批")
+    assert board.is_approved(at_desk) is True and board.is_approved(pending) is False
+    assert board.is_approved(row("C", att.REQUEST_LEAVE, "待办理", [("2026-10-15", 8)], "年假")) is False
+    result = stats(["A", "B"], [at_desk, pending])
+    assert result["today"]["trip"] == 1
+    employees = [{"name": "A", "employee_name": "员工A", "department": "RD"}, {"name": "B", "employee_name": "员工B", "department": "RD"}]
+    assert [item["employee"] for item in board.today_trips(employees, [at_desk, pending], first=TODAY, work_dates=WORK)] == ["A"]

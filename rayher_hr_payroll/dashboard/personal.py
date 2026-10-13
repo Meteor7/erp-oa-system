@@ -162,6 +162,22 @@ def _has_employee(ctx):
     return bool(ctx.employee)
 
 
+def _load_my_trips(ctx):
+    """我已办理、还没回来的出差（最近的在前）：前台办理完给我的行程提醒用。"""
+    import frappe
+
+    rows = frappe.db.sql(
+        "SELECT name, travel_destination, travel_start_date, travel_end_date FROM `tabOA Approval Request` "
+        "WHERE request_type = '出差申请' AND employee = %(employee)s AND workflow_status = '已完成' AND travel_end_date >= %(today)s "
+        "ORDER BY travel_start_date, name LIMIT 5", {"employee": ctx.employee, "today": ctx.today}, as_dict=True)
+    for row in rows:
+        notes = frappe.db.sql(
+            "SELECT note FROM `tabOA Approval Step` WHERE parent = %s AND mode = 'handle' AND IFNULL(note, '') != '' ORDER BY acted_on DESC LIMIT 1",
+            (row["name"],), as_dict=True)
+        row["note"] = (notes[0]["note"] if notes else "") or ""
+    return rows
+
+
 # ---------------------------------------------------------------- 假期 / 加班
 def _leave(ctx):
     summary = ctx.memo("me.leave", _load_leave_summary)
@@ -202,6 +218,21 @@ def me_overtime_month(ctx):
     sub = f"请假 {_n(leave_days)} 天" + (f" · 调休 {_n(month['comp_hours'])} 小时" if month.get("comp_hours") else "")
     return kpi("me.overtime_month", f"{_month_word(ctx)}加班", _n(month.get("overtime_hours")), "小时", sub, to=target("attendance.home"),
                hint="本人已批准和审批中的加班小时数；请假按天、调休按小时，都含审批中的。")
+
+
+@provider("alert.me_trip", "alert", visible=_has_employee)
+def alert_me_trip(ctx):
+    """出差办理完以后的行程提醒：显示到回来那天为止，带前台的备注；和“抄送”“已完成”通知不一样，是要他安排工作的。"""
+    trips = ctx.memo("me.trips", lambda: _load_my_trips(ctx))
+    if not trips:
+        return None
+    trip = trips[0]
+    start, end = str(trip.get("travel_start_date") or "")[5:10], str(trip.get("travel_end_date") or "")[5:10]
+    when = start if not end or end == start else f"{start} 至 {end}"
+    place = str(trip.get("travel_destination") or "").strip()
+    more = f"，另有 {len(trips) - 1} 次出差" if len(trips) > 1 else ""
+    return alert("alert.me_trip", "info", f"{when} 去{place or '外地'}出差，前台已办理，请安排好行程{more}",
+                 str(trip.get("note") or "").strip() or "请安排好手头的工作和交接", "出差详情", target("travel.detail", request=trip["name"]))
 
 
 @provider("alert.me_leave_unused", "alert", visible=_has_employee)

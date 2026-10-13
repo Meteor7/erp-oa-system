@@ -546,6 +546,8 @@ const STATUS_TONES = { 草稿: ['草稿', ''], 待审批: ['审批中', 'info'],
 // 状态标签：{text, tone}，tone 是 ok / info / warn / bad / ''（灰）；轮到我审批的显示"待审批"。
 export function statusTag(row) {
   if (row?.workflow_status === '草稿' && rejectionOf(row)) return { text: '被退回', tone: 'warn' };
+  // 出差审批通过后在前台办理（备案、安排行程）：轮到前台的人说“待办理”，其他人说“待前台办理”。
+  if (isTrip(row) && row?.workflow_status === '待办理') return row.can_act ? { text: '待办理', tone: 'warn' } : { text: '待前台办理', tone: 'info' };
   if (['待审批', '待办理'].includes(row?.workflow_status) && row?.can_act) return { text: '待审批', tone: 'warn' };
   const [text, tone] = STATUS_TONES[row?.workflow_status] || [row?.workflow_status || '', ''];
   return { text, tone };
@@ -611,7 +613,7 @@ export function hoursByMonth(days) {
 // 该员工当月已填工时、新上限是多少后端没有给，页面不猜，只说"超过新上限时需要他先调整"。
 export function effectRows(request, impact = '') {
   if (isTrip(request)) {
-    return [{ kind: 'balance', label: '出差', value: '不扣额度', note: '出差期间不算请假，不扣年假和工时上限；通过后，出差途中的打车、住宿等费用直接关联这张出差申请去报销' }];
+    return [{ kind: 'balance', label: '出差', value: '不扣额度', note: '出差期间不算请假，不扣年假和工时上限；审批通过后到前台办理，办完你会收到行程提醒；出差途中的打车、住宿等费用，报销时直接关联这张出差申请' }];
   }
   const hours = totalOf(request);
   const label = rowLabel(request);
@@ -878,7 +880,8 @@ export const STALE_STEP = /单据已经变化|页面版本过旧/;
 
 export const api = {
   home: (params) => callApi('attendance_entry.get_attendance_home', params, { method: 'GET' }),
-  route: (requestType) => callApi('attendance_entry.get_attendance_route', { request_type: requestType }, { method: 'GET' }),
+  // 请假连续 3 个日历日以内的审批路线更短，所以路线要带上起止日期（别的类型忽略）。
+  route: (requestType, from = '', to = '') => callApi('attendance_entry.get_attendance_route', { request_type: requestType, from_date: from || '', to_date: to || '' }, { method: 'GET' }),
   mine: (requestType = '') => callApi('attendance_entry.list_attendance_mine', { request_type: requestType, limit: 100 }, { method: 'GET' }),
   review: () => callApi('attendance_entry.list_attendance_review', {}, { method: 'GET' }),
   reviewed: () => callApi('attendance_entry.list_attendance_reviewed', { limit: 100 }, { method: 'GET' }),

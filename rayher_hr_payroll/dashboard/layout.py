@@ -33,7 +33,7 @@ _PEOPLE_TAB = tab(
 _LEADER_OVERVIEW = tab(
     "overview", "总览",
     kpis=["cost.total", "pay.unpaid", "approval.stuck", "proc.urgent", "hr.active", "ts.rate", "alloc.status", "hr.expiring"],
-    alerts=["alert.urgent", "alert.pay_waiting", "alert.stuck", "alert.ts_open", "alert.inspect_stale", "alert.alloc_preview", "alert.rd_gap"],
+    alerts=["alert.urgent", "alert.pay_waiting", "alert.stuck", "alert.ts_open", "alert.inspect_stale", "alert.alloc_preview", "alert.rd_gap", "alert.me_trip"],
     blocks=["block.cost_mix", "block.pay_wait_dist"],
     todos=True,
 )
@@ -63,7 +63,7 @@ LAYOUTS = {
         "tabs": [
             tab("overview", "总览",
                 kpis=["pay.unpaid", "pay.waiting", "pay.in_approval", "cost.total", "alloc.status", "claim.todo", "invoice.review", "pay.paid_month"],
-                alerts=["alert.pay_waiting", "alert.alloc_unknown", "alert.invoice", "alert.stuck"],
+                alerts=["alert.pay_waiting", "alert.alloc_unknown", "alert.invoice", "alert.stuck", "alert.me_trip"],
                 blocks=["block.pay_steps", "block.pay_next30"], todos=True),
             tab("cash", "付款与现金", kpis=["pay.unpaid", "pay.waiting", "pay.in_approval", "pay.paid_month"],
                 blocks=["block.pay_trend", "block.pay_suppliers", "block.pay_wait_dist", "block.pay_stage", "block.pay_steps", "block.pay_next30"]),
@@ -74,21 +74,21 @@ LAYOUTS = {
     "finance_accountant": {
         "note": "记账、核对发票、跟进费用导入和分摊。",
         "tabs": [tab("overview", "总览", kpis=["claim.todo", "pay.todo", "invoice.review", "me.processed"],
-                     alerts=["alert.invoice", "alert.alloc_unknown"], blocks=["block.aging", "block.invoice_status"], todos=True),
+                     alerts=["alert.invoice", "alert.alloc_unknown", "alert.me_trip"], blocks=["block.aging", "block.invoice_status"], todos=True),
                  tab("invoice", "发票与报销", kpis=["invoice.review", "claim.todo"],
                      blocks=["block.invoice_status", "block.claim_category", "block.alloc_mix"])],
     },
     "finance_auditor": {
         "note": "要付谁、付多少、哪些等得太久。",
         "tabs": [tab("overview", "总览", kpis=["pay.cashier_queue", "pay.unpaid", "pay.waiting", "pay.paid_month"],
-                     alerts=["alert.pay_waiting"], blocks=["block.pay_next30", "block.pay_wait_dist"], todos=True)],
+                     alerts=["alert.pay_waiting", "alert.me_trip"], blocks=["block.pay_next30", "block.pay_wait_dist"], todos=True)],
     },
     "hr_manager": {
         "note": "人员、合同、考勤、薪酬社保和宿舍。",
         "tabs": [
             tab("overview", "总览",
                 kpis=["hr.active", "hr.joined_left", "hr.away_today", "hr.expiring", "hr.payroll", "hr.social_pending", "hr.dorm_rate", "hr.file_pending"],
-                alerts=["alert.att_pending", "alert.probation", "alert.payroll_draft", "alert.contract", "alert.dorm_lease", "alert.dorm_leaver", "alert.dorm_register", "alert.rd_gap"],
+                alerts=["alert.att_pending", "alert.probation", "alert.payroll_draft", "alert.contract", "alert.dorm_lease", "alert.dorm_leaver", "alert.dorm_register", "alert.rd_gap", "alert.me_trip"],
                 blocks=["block.pay_progress", "block.dorm_summary", "block.dept_headcount"], todos=True),
             _PEOPLE_TAB,
             tab("pay", "薪酬与社保", kpis=["hr.payroll", "hr.pay_total", "hr.pay_si", "hr.pay_hf"],
@@ -102,7 +102,7 @@ LAYOUTS = {
         "tabs": [
             tab("overview", "总览",
                 kpis=["proc.urgent", "proc.to_compare", "proc.price_pending", "proc.po_transit", "proc.po_overdue", "proc.ready_to_pay", "proc.pay_planned_passed", "proc.month_amount"],
-                alerts=["alert.urgent", "alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_quote", "alert.uncoded"],
+                alerts=["alert.urgent", "alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_quote", "alert.uncoded", "alert.me_trip"],
                 blocks=["block.urgent_requests", "block.week_cols", "block.proc_chain", "block.arrival_inspect"], todos=True),
             tab("analysis", "采购分析", kpis=["proc.month_amount", "proc.suppliers_count", "proc.to_inspect", "proc.month_inspected"],
                 blocks=["block.proc_month_trend", "block.proc_suppliers", "block.proc_projects", "block.inspect_aging"]),
@@ -112,14 +112,14 @@ LAYOUTS = {
         "note": "提 PR、盯物料到货、给物料编码。（这里不显示金额）",
         "tabs": [tab("overview", "总览",
                      kpis=["proc.await_pr", "proc.material_overdue", "proc.week_arrive", "proc.uncoded", "proc.po_transit", "proc.risk_projects", "me.approvals", "proc.price_pending"],
-                     alerts=["alert.urgent", "alert.material_overdue", "alert.uncoded", "alert.risk_projects"],
+                     alerts=["alert.urgent", "alert.material_overdue", "alert.uncoded", "alert.risk_projects", "alert.me_trip"],
                      blocks=["block.urgent_requests", "block.week_cols", "block.overdue_aging", "block.material_stage", "block.risk_projects"], todos=True)],
     },
     "production_asset_owner": {
         "note": "登记到货和验收，看本周要到什么货。",
         "tabs": [tab("overview", "总览",
                      kpis=["proc.to_arrive", "proc.to_inspect", "proc.week_arrive", "proc.po_overdue", "proc.exchange", "proc.return", "proc.month_inspected", "proc.month_arrived"],
-                     alerts=["alert.inspect_stale", "alert.po_overdue"],
+                     alerts=["alert.inspect_stale", "alert.po_overdue", "alert.me_trip"],
                      blocks=["block.week_cols", "block.inspect_aging", "block.week_schedule", "block.arrival_inspect"], todos=True)],
     },
     "dept_manager": {
@@ -127,7 +127,7 @@ LAYOUTS = {
         "tabs": [
             tab("overview", "总览",
                 kpis=["me.approvals", "team.away", "team.away2w", "ts.team", "team.leave", "team.overtime"],
-                alerts=["alert.team_low_staff", "alert.ts_open_team"],
+                alerts=["alert.team_low_staff", "alert.ts_open_team", "alert.me_trip"],
                 blocks=["block.team_calendar", "block.team_leave_types"], todos=True),
             tab("team", "团队", kpis=["team.headcount", "team.leave", "team.overtime"],
                 blocks=["block.team_people_hours", "block.ts_team"]),
@@ -138,7 +138,7 @@ LAYOUTS = {
         "note": "我的待办、假期、申请、报销和工时。",
         "tabs": [tab("overview", "总览",
                      kpis=["me.annual", "me.comp", "me.overtime_month", "me.requests", "me.timesheet", "me.claim", "me.cc", "me.unread"],
-                     alerts=["alert.me_timesheet", "alert.me_leave_unused"],
+                     alerts=["alert.me_timesheet", "alert.me_leave_unused", "alert.me_trip"],
                      blocks=["block.me_strip", "block.me_balances", "block.me_requests", "block.me_timesheet"], todos=True)],
     },
 }

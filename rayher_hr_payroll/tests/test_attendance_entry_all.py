@@ -116,12 +116,14 @@ def test_hr_opens_any_submitted_trip_read_only_but_a_plain_employee_cannot(entry
     detail = getattr(module.get_attendance_request, "__wrapped__", module.get_attendance_request)
     monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])             # 出差申请的“全部”只给系统管理员、高管：人事走下面的只读通道
     monkeypatch.setattr(module, "_balances", lambda employee, cache: {"annual": None, "comp": None})
+    monkeypatch.setattr(module, "_linked_documents", lambda trip: [{"name": "BX-1", "request_type": "报销单"}] if trip == "OA-2" else [])
     state.summaries = {"OA-2": {"name": "OA-2", "request_type": "出差申请", "employee": "E1", "employee_name": "演示员工117", "steps": [],
                                 "travel_start_date": "2026-10-12", "travel_end_date": "2026-10-13", "travel_destination": "上海"}}
     state.roles = ["HR User"]
     result = detail("OA-2")
     assert result["request"]["travel_destination"] == "上海" and "关联报销" in result["impact"]
     assert result["mine"] is False                                                           # 人事只读，不是自己的：不显示“发起报销”
+    assert result["linked"] == [{"name": "BX-1", "request_type": "报销单"}]
     monkeypatch.setattr(module.oa_entry, "list_requests", lambda view="mine", **kwargs: [{"name": "OA-2"}] if view == "mine" else [])
     assert detail("OA-2")["mine"] is True
     assert "workflow_status <> '草稿'" in state.sql[0][0]                                  # 草稿只有本人看得到
@@ -134,3 +136,25 @@ def test_the_default_list_of_submitted_requests_includes_trips(entry):
     module, _raw, state = entry
     module._attendance_names(None, 5)
     assert state.sql[0][1]["types"] == module.LIST_TYPES and "出差申请" in state.sql[0][1]["types"]
+
+
+def test_a_trip_lists_the_reimbursements_and_payments_linked_to_it_that_the_viewer_may_open(monkeypatch):
+    """出差详情里的“关联的报销和付款”：按 source_request 反查报销单、付款单，只留当前登录人自己能打开的。"""
+    module = importlib.import_module("rayher_hr_payroll.api.attendance_entry")
+    seen = {}
+
+    def get_all(doctype, filters=None, pluck=None, **kwargs):
+        seen["filters"] = filters
+        return ["BX-1", "FK-2", "BX-3"]
+
+    visible = {"BX-1": {"name": "BX-1", "request_type": "报销单", "subject": "上海打车", "employee_name": "演示员工117", "amount": 86,
+                        "workflow_status": "待审批", "business_status": "", "steps": [1]},
+               "FK-2": {"name": "FK-2", "request_type": "付款单", "subject": "酒店", "employee_name": "演示员工117", "amount": 640,
+                        "workflow_status": "已付款", "business_status": "已付款"}}
+    monkeypatch.setattr(module.frappe, "get_all", get_all, raising=False)
+    monkeypatch.setattr(module.oa_entry, "list_requests", lambda view="all", name=None, limit=1, **kw: [visible[name]] if name in visible else [])
+    rows = module._linked_documents("OA-T1")
+    assert seen["filters"] == {"source_request": "OA-T1", "request_type": ["in", ["报销单", "付款单"]]}
+    assert [row["name"] for row in rows] == ["BX-1", "FK-2"], "BX-3 is not visible to this viewer"
+    assert rows[0] == {"name": "BX-1", "request_type": "报销单", "subject": "上海打车", "employee_name": "演示员工117", "amount": 86,
+                       "workflow_status": "待审批", "business_status": ""}

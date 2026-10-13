@@ -136,12 +136,42 @@ LEAVE_OTHER_APPROVER_NAME = VICE_MANAGER_NAME
 LEAVE_OTHER_APPROVER_USER = VICE_MANAGER_USER
 
 
-def leave_copy_recipients(applicant_user=None, roles=None):
+# 请假从第一天到最后一天连续不超过 3 个日历日（含周末和节假日，决定 2026-10-13）：审批到人事经理为止，
+# 不再走副总经理 / 总经理，也不再单独抄送副总（副总在数据看板和考勤中心里能看到）。
+SHORT_LEAVE_MAX_DAYS = 3
+
+
+def _as_day(value):
+    from datetime import date, datetime
+
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(_clean(value)[:10])
+    except ValueError:
+        return None
+
+
+def leave_span_days(from_date, to_date):
+    """请假第一天到最后一天一共几个日历日（含首尾）；日期缺失或前后颠倒返回 None。"""
+    start, end = _as_day(from_date), _as_day(to_date)
+    if not start or not end or end < start:
+        return None
+    return (end - start).days + 1
+
+
+def is_short_leave(from_date, to_date):
+    span = leave_span_days(from_date, to_date)
+    return span is not None and span <= SHORT_LEAVE_MAX_DAYS
+
+
+def leave_copy_recipients(applicant_user=None, roles=None, *, short=False):
     snapshots = _roles(roles)
-    candidates = [
-        ("人事经理", snapshots["hr_manager"]),
-        (_role_label(snapshots["vice_manager"], name_only=True), snapshots["vice_manager"]),
-    ]
+    candidates = [("人事经理", snapshots["hr_manager"])]
+    if not short:
+        candidates.append((_role_label(snapshots["vice_manager"], name_only=True), snapshots["vice_manager"]))
     applicant = _clean(applicant_user).lower()
     recipients = []
     seen = set()
@@ -195,6 +225,7 @@ def build_leave_route(
     supervisor_decision=None,
     applicant_user=None,
     roles=None,
+    span_days=None,
 ):
     department = _clean(department)
     supervisor = _clean(supervisor)
@@ -202,6 +233,7 @@ def build_leave_route(
     supervisor_decision = _clean(supervisor_decision)
     applicant_user = _clean(applicant_user).lower()
     snapshots = _roles(roles)
+    short = span_days is not None and span_days <= SHORT_LEAVE_MAX_DAYS
     if not department:
         raise ApprovalRouteError("请假申请缺少申请人所属部门")
     if supervisor_decision not in {"", "approve", "skip"}:
@@ -219,16 +251,58 @@ def build_leave_route(
         _append_unique_approval(steps, SUPERVISOR_LABEL_PREFIX + supervisor, supervisor_user, applicant_user=applicant_user)
     hr = snapshots["hr_manager"]
     _append_unique_approval(steps, "人事经理", _role_user(hr, "人事经理"), applicant_user=applicant_user)
-    final_key = "general_manager" if classify_department(department) == "finance" else "vice_manager"
-    final = snapshots[final_key]
-    _append_unique_approval(
-        steps,
-        _role_label(final, name_only=True),
-        _role_user(final, _role_label(final)),
-        applicant_user=applicant_user,
-    )
+    if not short:
+        final_key = "general_manager" if classify_department(department) == "finance" else "vice_manager"
+        final = snapshots[final_key]
+        _append_unique_approval(
+            steps,
+            _role_label(final, name_only=True),
+            _role_user(final, _role_label(final)),
+            applicant_user=applicant_user,
+        )
     if not steps:
         raise ApprovalRouteError("请假审批路线不能为空")
+    return steps
+
+
+def build_travel_route(*, department, supervisor, supervisor_user, supervisor_decision=None, applicant_user=None, roles=None):
+    """出差申请（决定 2026-10-13）：直属上级 → 副总经理（财务部门是总经理）→ 前台办理（行政专员）。
+
+    - 直属上级本人就是副总 / 总经理时，只批这一步，然后到前台办理；
+    - 副总、总经理自己出差不用审批，直接到前台备案；
+    - 前台自己出差，前台这一步跳过（不自己办理自己的）。
+    前台这一步是“办理”，只能点已办理，不能退回；办完给申请人发一条单独的行程提醒。
+    """
+    snapshots = _roles(roles)
+    applicant = _clean(applicant_user).lower()
+    decision = _clean(supervisor_decision)
+    if decision not in {"", "approve", "skip"}:
+        raise ApprovalRouteError(f"不支持的直属主管决策：{decision}")
+    steps = []
+    if not _top_supervisor("", applicant, snapshots):
+        name = _clean(supervisor)
+        user_id = _clean(supervisor_user).lower()
+        direct_is_top = bool(name or user_id) and _top_supervisor(name, user_id, snapshots)
+        if direct_is_top or decision != "skip":
+            if not name:
+                raise ApprovalRouteError("出差申请缺少直属上级")
+            if not user_id:
+                raise ApprovalRouteError(f"直属上级 {name} 没有关联可用账号")
+            _append_unique_approval(steps, "直属部门主管：" + name, user_id, applicant_user=applicant)
+        if not direct_is_top:
+            final_key = "general_manager" if classify_department(department) == "finance" else "vice_manager"
+            final = snapshots[final_key]
+            prefix = "总经理：" if final_key == "general_manager" else "副总经理："
+            _append_unique_approval(
+                steps, prefix + (_role_label(final, name_only=True) or ""), _role_user(final, _role_label(final)),
+                applicant_user=applicant,
+            )
+    desk = snapshots["front_desk"]
+    desk_user = _role_user(desk, "前台办理")
+    if desk_user != applicant:
+        steps.append(_handle("前台办理：" + (_role_label(desk, name_only=True) or "行政专员"), approvers=[desk_user]))
+    if not steps:
+        raise ApprovalRouteError("出差审批路线不能为空")
     return steps
 
 
@@ -477,6 +551,8 @@ def build_route(
     upper_supervisor=None,
     upper_supervisor_user=None,
     roles=None,
+    from_date=None,
+    to_date=None,
 ):
     if request_type in ATTENDANCE_TYPES:
         return build_leave_route(
@@ -486,6 +562,8 @@ def build_route(
             supervisor_decision=supervisor_decision,
             applicant_user=applicant_user,
             roles=roles,
+            # 只有请假按天数分流；加班、调休的路线不变。
+            span_days=leave_span_days(from_date, to_date) if request_type == REQUEST_LEAVE else None,
         )
     if request_type == REQUEST_PROCUREMENT:
         return build_procurement_route(
@@ -510,15 +588,12 @@ def build_route(
             roles=roles,
         )
     if request_type == REQUEST_TRAVEL:
-        # 出差申请与购买申请的"其他购买"路线相同：直属主管 → 副总经理。
-        return build_direct_purchase_route(
-            purchase_method="其他购买",
+        return build_travel_route(
+            department=department,
             supervisor=supervisor,
             supervisor_user=supervisor_user,
             supervisor_decision=supervisor_decision,
             applicant_user=applicant_user,
-            upper_supervisor=upper_supervisor,
-            upper_supervisor_user=upper_supervisor_user,
             roles=roles,
         )
     if request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:

@@ -23,6 +23,8 @@ from rayher_hr_payroll.team_scope import team_members
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar
 
 ROW_TYPES = (*att.ATTENDANCE_TYPES, REQUEST_TRAVEL)
+# 统计里算已批准的状态：已完成 / 已通过，加上出差在前台办理（待办理）。其他类型没有办理节点，不会有“待办理”。
+APPROVED = frozenset({*att.COMPLETED, "待办理"})
 PENDING = ("待审批", "待办理")
 
 
@@ -133,7 +135,7 @@ def _company_summary(today):
     """全公司和各部门的汇总数字：只有人数、小时、比例，没有人名。"""
     window = _window(today)
     employees = frappe.get_all("Employee", filters={"status": "Active"}, fields=["name", "department"], limit_page_length=0)
-    rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], att.COMPLETED)
+    rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], APPROVED)
     return board.summarize_departments(
         employees, rows, _pending(), first=today, work_dates=window["work_dates"],
         month_first=window["month_first"], month_last=window["month_last"],
@@ -145,7 +147,7 @@ def today_trips(today=None):
     today = today or date.today()
     window = _window(today)
     employees = frappe.get_all("Employee", filters={"status": "Active"}, fields=["name", "employee_name", "department"], limit_page_length=0)
-    rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], att.COMPLETED)
+    rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], APPROVED)
     return board.today_trips(employees, rows, first=today, work_dates=window["work_dates"])
 
 
@@ -227,7 +229,7 @@ def get_request_overlap(name):
             continue
         person = found.setdefault(row.get("employee"), {"name": names.get(row.get("employee")), "kind": kind, "dates": set(), "pending": True})
         person["dates"].update(dates)
-        person["pending"] = person["pending"] and row.get("workflow_status") not in att.COMPLETED
+        person["pending"] = person["pending"] and not board.is_approved(row)
         if kind in board.ABSENCE_KINDS:
             person["kind"] = kind
     people = sorted(({**person, "dates": [day.isoformat() for day in sorted(person["dates"])]} for person in found.values()),

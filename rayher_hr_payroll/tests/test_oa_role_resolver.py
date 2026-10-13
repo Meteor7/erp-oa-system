@@ -191,7 +191,7 @@ def test_role_assignment_doctype_has_unique_role_and_user_links():
     assert set(ROLE_SPECS) == {
         "pmc", "hr_manager", "finance_auditor", "finance_accountant", "finance_manager",
         "vice_manager", "general_manager", "production_asset_owner",
-        "procurement_manager", "it_asset_owner",
+        "procurement_manager", "it_asset_owner", "front_desk",
     }
 
 def test_hr_assignment_overrides_designation_until_employee_profile_is_available():

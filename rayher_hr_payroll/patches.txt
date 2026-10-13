@@ -23,3 +23,4 @@ rayher_hr_payroll.patches.v1_0.backfill_active_uniqueness_keys
 rayher_hr_payroll.patches.v1_0.normalize_invoice_numbers
 rayher_hr_payroll.patches.v1_0.seed_approval_role_assignments
 rayher_hr_payroll.patches.v1_0.grant_department_manager_to_supervisors
+rayher_hr_payroll.patches.v1_0.seed_front_desk_assignment

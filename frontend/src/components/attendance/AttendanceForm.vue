@@ -19,7 +19,7 @@ const props = defineProps({
   route: { type: Object, default: null },
   types: { type: Array, default: () => ['请假申请', '加班申请', '调休申请', '出差申请'] },
 });
-const emit = defineEmits(['switch-type', 'draft-type', 'draft-saved', 'submitted', 'cancel']);
+const emit = defineEmits(['switch-type', 'draft-type', 'draft-saved', 'submitted', 'cancel', 'dates']);
 
 const MODES = [
   { key: 'full', label: '全天', title: '全天 8 小时' },
@@ -191,6 +191,8 @@ watch(multiDay, (on) => {
   if (!on && overtime.value) form.to = form.from;
 });
 watch([() => form.from, () => form.to], loadDays);
+// 请假的路线跟着日期走（连续 3 个日历日以内到人事经理为止）：日期变了通知页面重取路线。
+watch([() => form.from, () => form.to], ([from, to]) => { if (props.requestType === '请假申请') emit('dates', { from, to }); });
 watch([month, () => props.requestType], loadMonth, { immediate: true });
 
 // 页面里换类型：旧类型的假别、每天怎么请、主题清掉，日期和事由留着；在途的请求作废，按新类型重新算每一天。
@@ -382,6 +384,7 @@ defineExpose({ dirty });
         </ol>
         <div v-else-if="route?.error" class="af-err">{{ route.error }}</div>
         <div v-else class="ac-note">审批路线加载中…</div>
+        <div v-if="route?.short_leave" class="ac-note">请假连续 3 个日历日以内，审批到人事经理为止。</div>
         <div v-if="route?.copied_to?.length" class="ac-note">抄送：{{ route.copied_to.map((item) => item.label || item.name).join('、') }}</div>
       </div>
       <div class="af-block">

@@ -65,6 +65,10 @@ const span = computed(() => workedSpan(days.value, request.value?.from_date, req
 const effect = computed(() => (request.value ? effectRows(request.value, data.value?.impact) : []));
 const isDraft = computed(() => request.value?.workflow_status === '草稿');
 const active = computed(() => ['待审批', '待办理'].includes(request.value?.workflow_status));
+// 出差在“前台办理”这一步：前台只有办理（点“已办理”，备注选填），不能驳回；办完申请人收到一条行程提醒。
+const desk = computed(() => trip.value && active.value && request.value?.current_step_mode === 'handle');
+// 报销、付款里关联了这张出差申请的单据（只列当前登录人自己有权打开的）。
+const linked = computed(() => data.value?.linked || []);
 const stepText = computed(() => {
   const all = request.value?.steps || [];
   return `第 ${request.value?.current_step_index || 1} 步 / 共 ${all.length || 1} 步 · ${stepRole(request.value?.current_step_label)}`;
@@ -74,6 +78,7 @@ const statusLine = computed(() => {
   if (!active.value) return tag.value.text;
   const mine = request.value.can_act;
   const step = steps.value.find((item) => item.state === 'current');
+  if (desk.value) return `${mine ? '待办理' : '待前台办理'} · ${mine ? '轮到你' : '等待'}（${stepRole(step?.label || request.value.current_step_label)}${!mine && step?.who ? ` ${step.who}` : ''}）`;
   return `${mine ? '待审批' : '审批中'} · ${mine ? '轮到你' : '等待'}（${stepRole(step?.label || request.value.current_step_label)}${!mine && step?.who ? ` ${step.who}` : ''}）`;
 });
 const dayHint = computed(() => (overtime.value ? '加班按小时填' : '全天 8 小时 · 上午 3 小时 · 下午 5 小时 · 自定义小时'));
@@ -138,12 +143,13 @@ async function act(action) {
     return;
   }
   busy.value = true;
+  const wasDesk = desk.value;
   try {
     // 带着页面上看到的那一步：单据已经被别人处理过时服务端拒绝，页面重新加载最新的一步。
     const params = { name: props.name, action, note: note.value.trim(), expected_step_key: request.value?.current_step_key || '' };
     if (action === 'reject') params.reject_target = target.value || 'applicant';
     await api.act(params);
-    message.value = action === 'approve' ? '已同意，转给下一步' : '已驳回';
+    message.value = action === 'approve' ? (wasDesk ? '已办理，已给申请人发了行程提醒' : '已同意，转给下一步') : '已驳回';
     note.value = '';
     rejecting.value = false;
     await load();
@@ -177,6 +183,11 @@ async function withdraw() {
   } finally {
     busy.value = false;
   }
+}
+
+// 打开关联的报销 / 付款单。
+function openLinked(row) {
+  emit('navigate', { path: row.request_type === '付款单' ? '/approval/payment' : '/approval/claim', query: { request: row.name, from: hereAsFrom(route.path, route.query) } });
 }
 
 // 下推报销 / 付款：目标页先弹出"确定要创建草稿吗"，确认后才生成；from 让它取消时回到这里。
@@ -241,7 +252,12 @@ onMounted(async () => {
 
       <div v-if="error" class="af-ps"><div class="af-err" role="alert">{{ error }}</div></div>
       <div v-if="message" class="af-ps"><div class="af-ok" role="status">{{ message }}</div></div>
-      <section v-if="request.can_act" class="af-ps af-actions" aria-label="审批操作">
+      <section v-if="request.can_act && desk" class="af-ps af-actions" aria-label="前台办理">
+        <div class="af-sec2">前台办理 <span>办完点“已办理”；备注选填，申请人会在行程提醒里看到</span></div>
+        <textarea ref="noteBox" v-model="note" rows="2" maxlength="1000" placeholder="例如：机票 CA1234 已订，酒店已订两晚" aria-label="办理备注"></textarea>
+        <div class="btns"><span class="ac-note grow">办理后给申请人发一条行程提醒</span><button type="button" class="ac-btn pri" :disabled="busy" @click="act('approve')">已办理</button></div>
+      </section>
+      <section v-else-if="request.can_act" class="af-ps af-actions" aria-label="审批操作">
         <template v-if="rejecting">
           <div class="af-sec2">驳回原因 <span>必填，申请人会看到</span></div>
           <textarea ref="noteBox" v-model="note" rows="2" maxlength="1000" placeholder="例如：请补充具体原因" aria-label="驳回原因" :aria-invalid="noteError" @input="noteError = false"></textarea>
@@ -284,7 +300,15 @@ onMounted(async () => {
         <span :class="['ac-tag', 'af-status', tone]">{{ statusLine }}</span>
       </div>
 
-      <section v-if="request.can_act" class="ac-panel af-bar" aria-label="审批操作">
+      <section v-if="request.can_act && desk" class="ac-panel af-bar" aria-label="前台办理">
+        <div><b>轮到你办理</b><div class="ac-note">{{ stepText }}</div></div>
+        <label class="af-note">
+          <span class="ac-note">办理备注（选填，申请人会在行程提醒里看到，例如订票、订酒店信息）</span>
+          <textarea ref="noteBox" v-model="note" rows="2" maxlength="1000" placeholder="例如：机票 CA1234 已订，酒店已订两晚"></textarea>
+        </label>
+        <div class="btns"><button type="button" class="ac-btn pri" :disabled="busy" @click="act('approve')">已办理</button></div>
+      </section>
+      <section v-else-if="request.can_act" class="ac-panel af-bar" aria-label="审批操作">
         <div><b>轮到你审批</b><div class="ac-note">{{ stepText }}</div></div>
         <label class="af-note">
           <span class="ac-note">审批意见（驳回时必填）</span>
@@ -352,7 +376,20 @@ onMounted(async () => {
             </div>
           </section>
 
-          <section class="ac-panel af-ps-wrap" aria-label="通过后的影响">
+          <section v-if="trip" class="ac-panel af-ps-wrap" aria-label="关联的报销和付款">
+            <div class="af-ps">
+              <div class="af-sec2">关联的报销和付款 <span>{{ linked.length }} 张</span></div>
+              <div v-for="row in linked" :key="row.name" class="af-ln"><button type="button" class="ac-link" @click="openLinked(row)">{{ row.name }}</button><span class="ac-note">{{ row.request_type }} · {{ row.subject || '（无主题）' }}</span><b>{{ row.amount ? '¥ ' + numText(row.amount) : '' }} <span class="ac-tag">{{ row.business_status || row.workflow_status }}</span></b></div>
+              <div v-if="!linked.length" class="ac-note">还没有关联的报销、付款。出差途中的打车、住宿等费用，在报销、付款里选这张出差申请就会出现在这里。</div>
+              <div class="ac-note">{{ effect[0]?.note }}</div>
+            </div>
+            <div v-if="overlap?.visible" class="af-ps af-mates">
+              <div class="af-sec2">同期谁不在 <span>只有部门主管和人事、管理层能看到</span></div>
+              <div v-for="person in overlap.people" :key="person.name" class="m"><span :class="['ac-av', person.kind]">{{ (person.name || '').slice(-2) }}</span><b>{{ person.name }}</b><span><span :class="['ac-tag', person.kind]">{{ { annual: '年假', personal: '事假', sick: '病假', comp: '调休', other: '其他假', trip: '出差' }[person.kind] }}</span> <span class="ac-note">{{ overlapWhen(person) }}{{ person.pending ? '（审批中）' : '' }}</span></span></div>
+              <div v-if="!overlap.people.length" class="ac-note">这几天部门里没有人请假、调休或出差。</div>
+            </div>
+          </section>
+          <section v-else class="ac-panel af-ps-wrap" aria-label="通过后的影响">
             <div class="af-ps">
               <div class="af-sec2">通过后的影响</div>
               <div v-for="row in effect" :key="row.label"><div class="af-ln"><span>{{ row.label }}</span><b>{{ row.value }}</b></div><div class="ac-note">{{ row.note }}</div></div>

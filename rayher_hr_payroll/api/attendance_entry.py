@@ -18,7 +18,7 @@ from rayher_hr_payroll.api import oa_entry
 from rayher_hr_payroll.attendance_scope import EMPLOYEE, MANAGER, resolve_scope
 from rayher_hr_payroll.team_scope import team_members
 from rayher_hr_payroll.oa_approval import ApprovalRouteError
-from rayher_hr_payroll.oa_document_types import REQUEST_TRAVEL
+from rayher_hr_payroll.oa_document_types import REQUEST_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_TRAVEL
 from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 from rayher_hr_payroll.working_calendar import resolve_monthly_calendar, resolve_monthly_work_limit
 
@@ -161,16 +161,17 @@ def get_attendance_home(request_type=None, period=None):
 
 
 @frappe.whitelist()
-def get_attendance_route(request_type):
-    """新建申请时的审批路线：审批人给姓名，不再给邮箱。"""
+def get_attendance_route(request_type, from_date=None, to_date=None):
+    """新建申请时的审批路线：审批人给姓名，不再给邮箱。请假连续 3 个日历日以内到人事经理为止，所以要带起止日期。"""
     _user()
     if request_type not in LIST_TYPES:
         frappe.throw(frappe._("不支持的申请类型。"))
-    preview = oa_entry.preview_route(request_type)
+    preview = oa_entry.preview_route(request_type, from_date=from_date or None, to_date=to_date or None)
     steps = preview.get("steps") or []
     copied = preview.get("copied_to") or []
     names = _names([user for step in steps for user in step.get("approvers") or []] + [row.get("user") for row in copied])
     return {
+        "short_leave": bool(preview.get("short_leave")),
         "steps": [{
             "step_index": step.get("step_index"), "label": step.get("label"), "mode": step.get("mode"),
             "approvers": [{"user": user, "name": names.get(str(user).lower(), user)} for user in step.get("approvers") or []],
@@ -203,13 +204,30 @@ def get_attendance_request(name):
     users += [step.get("action_by") for step in row.get("steps") or []]
     users += [entry.get("user") for entry in row.get("copied_to") or [] if isinstance(entry, dict)]
     # 是不是我自己的出差申请（决定要不要显示"发起报销 / 发起付款"）：和"我的"列表同一个判断。
-    mine = bool(oa_entry.list_requests(view="mine", name=name, limit=1)) if row.get("request_type") == REQUEST_TRAVEL else False
+    is_trip = row.get("request_type") == REQUEST_TRAVEL
+    mine = bool(oa_entry.list_requests(view="mine", name=name, limit=1)) if is_trip else False
     return {
         "request": row,
         "names": _names(users),
         "impact": center.impact_text(row, annual=balances["annual"], comp=balances["comp"]),
         "mine": mine,
+        "linked": _linked_documents(row.get("name")) if is_trip else [],
     }
+
+
+def _linked_documents(trip):
+    """报销、付款里关联了这张出差申请的单据（出差途中的打车、住宿等费用在那边报）：只列当前登录人自己有权打开的。"""
+    names = frappe.get_all(
+        "OA Approval Request", filters={"source_request": trip, "request_type": ["in", [REQUEST_REIMBURSEMENT, REQUEST_PAYMENT]]},
+        pluck="name", order_by="creation desc", limit_page_length=50,
+    )
+    linked = []
+    for name in names:
+        found = oa_entry.list_requests(view="all", name=name, limit=1)
+        if found:
+            item = found[0]
+            linked.append({key: item.get(key) for key in ("name", "request_type", "subject", "employee_name", "amount", "workflow_status", "business_status")})
+    return linked
 
 
 def _attendance_names(request_types, limit, name=None):

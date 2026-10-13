@@ -16,6 +16,8 @@ ROLE_SPECS = {
     "general_manager": {"label": "总经理", "designation": "总经理"},
     "production_asset_owner": {"label": "生产设备负责人", "designation": "生产主管"},
     "procurement_manager": {"label": "采购经理", "designation": "采购经理"},
+    # 出差申请审批通过后到前台备案、安排行程（2026-10-13）：只认岗位任命，职务“行政专员”只用来给新站点补建任命。
+    "front_desk": {"label": "前台办理", "designation": "行政专员"},
 }
 PMC_EMPLOYEE = "HR-EMP-90017"
 PMC_EMPLOYEE_NAME = "演示员工178"

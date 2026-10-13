@@ -30,6 +30,7 @@ from rayher_hr_payroll.oa_approval import (
     REQUEST_PROCUREMENT_PAYMENT,
     ApprovalRouteError,
     build_route,
+    is_short_leave,
     leave_copy_recipients,
     normalize_asset_category,
 )
@@ -58,6 +59,7 @@ from rayher_hr_payroll.oa_assignments import (
     _request_link,
     notify_rejected_applicant,
     notify_request_applicant,
+    notify_travel_arranged,
     sync_current_assignments,
 )
 from rayher_hr_payroll.oa_organization import (
@@ -140,7 +142,7 @@ def _resolve_approval_roles(request_type, *, department="", asset_category="", p
     elif request_type == REQUEST_PROCUREMENT_PAYMENT:
         keys = ["vice_manager", "finance_accountant", "finance_manager", "finance_auditor", "general_manager"]
     elif request_type == REQUEST_TRAVEL:
-        keys = ["vice_manager", "general_manager"]
+        keys = ["vice_manager", "general_manager", "front_desk"]
     elif request_type in {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}:
         keys = ["finance_auditor", "finance_manager", "general_manager"]
         if "财务" not in _clean(department):
@@ -785,7 +787,7 @@ def _resolve_route_approver(value):
         if enabled_user:
             return str(enabled_user)
     return candidate
-def _require_leave_accounts(steps, copied_to):
+def _require_leave_accounts(steps, copied_to, label="请假审批"):
     users = []
     for step in steps:
         users.extend(step.get("approvers") or [])
@@ -795,7 +797,7 @@ def _require_leave_accounts(steps, copied_to):
             "User", {"name": user, "enabled": 1}, "name"
         )
         if not enabled:
-            raise ApprovalRouteError(f"请假审批账号未启用或不存在：{user}")
+            raise ApprovalRouteError(f"{label}账号未启用或不存在：{user}")
 
 
 def _notify_copied_users(doc):
@@ -1085,6 +1087,11 @@ def _can_act_on_current_step(doc, user=None):
     return bool((matched and not already_signed) or _is_oa_override_user(user))
 
 
+def _is_travel_desk_step(doc, step):
+    """出差申请当前在“前台办理”这一步（办理节点，不是审批节点）。"""
+    return getattr(doc, "request_type", None) == REQUEST_TRAVEL and getattr(step, "mode", None) == "handle"
+
+
 def _request_capabilities(doc, user=None):
     step = _current_step(doc)
     can_act = _can_act_on_current_step(doc, user)
@@ -1096,11 +1103,13 @@ def _request_capabilities(doc, user=None):
         and (_is_finance_user(user) or is_override)
     )
     can_approve = bool(can_act and (not finance_edit or classification_ready))
+    desk = _is_travel_desk_step(doc, step)
     return {
         "can_approve": can_approve,
-        "can_reject": bool(can_act),
+        # 出差的前台办理只能点已办理，不能退回、不能加签（决定 2026-10-13）。
+        "can_reject": bool(can_act and not desk),
         # 合同交期确认阶段不能加签；付款（经办）节点只能前加签（修复 2026-09-29，决定 D6/D9）。
-        "can_add_sign": bool(can_act and not _is_contract_delivery_step(step)),
+        "can_add_sign": bool(can_act and not desk and not _is_contract_delivery_step(step)),
         "can_add_sign_after": bool(can_act and not _is_contract_delivery_step(step) and getattr(step, "mode", None) != "handle"),
         "can_edit_expense_items": finance_edit,
         "classification_ready": classification_ready,
@@ -1764,6 +1773,8 @@ def _advance_after_step(doc, step):
     doc.workflow_status = STATUS_WAIT_HANDLE if next_step.mode == "handle" else STATUS_PENDING
     if doc.request_type in {REQUEST_EXPENSE_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT} and next_step.mode == "handle":
         doc.business_status = "待付款"
+    elif doc.request_type == REQUEST_TRAVEL and next_step.mode == "handle":
+        doc.business_status = "待前台办理"
     elif doc.request_type == REQUEST_PROCUREMENT:
         if _clean(getattr(next_step, "label", None)) == "采购询价/录入价格":
             doc.business_status = "需求已批准/待询价"
@@ -1959,7 +1970,7 @@ def _prepare_request_doc(
         classification = _expense_classification(doc_type, asset_category, submitting=submit)
         ctx["asset_category"] = classification["asset_category"]
         doc_type = classification["doc_type"]
-    route = ({"steps": [], "copied_to": []} if request_type == REQUEST_EXPENSE_PAYMENT and not submit else preview_route(request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=submit))
+    route = ({"steps": [], "copied_to": []} if request_type == REQUEST_EXPENSE_PAYMENT and not submit else preview_route(request_type, ctx["department"], ctx["supervisor"], ctx["asset_category"], active=submit, from_date=from_date, to_date=to_date))
     steps = route["steps"]
     if request_type in ATTENDANCE_TYPES and submit and (not from_date or not to_date):
         frappe.throw(frappe._("\u8bf7\u586b\u5199\u8bf7\u5047\u5f00\u59cb\u548c\u7ed3\u675f\u65e5\u671f\u3002"))
@@ -2302,6 +2313,8 @@ def _submit_draft(doc):
         purchase_method=getattr(doc, "purchase_method", None),
         payment_stage=getattr(doc, "payment_stage", None),
         applicant_employee=getattr(doc, "employee", None),
+        from_date=getattr(doc, "from_date", None),
+        to_date=getattr(doc, "to_date", None),
     )
     doc.copied_to = _json_list(route.get("copied_to") or [])
     steps = route["steps"]
@@ -2309,7 +2322,8 @@ def _submit_draft(doc):
     if not steps:
         frappe.throw(frappe._("审批路线不能为空，请先维护申请人的组织审批关系。"))
     doc.workflow_status = steps[0]["status"]
-    doc.business_status = "待审批"
+    # 副总、总经理自己出差没有审批，第一步就是前台备案。
+    doc.business_status = "待前台办理" if doc.request_type == REQUEST_TRAVEL and steps[0]["mode"] == "handle" else "待审批"
     doc.current_step_index = 1
     doc.current_step_label = steps[0]["label"]
     _append_request_event(doc, "提交申请", old_status, doc.workflow_status)
@@ -2378,7 +2392,7 @@ def get_options():
 def preview_route(
     request_type, department=None, supervisor=None, asset_category=None, active=True,
     project_owner=None, project_owner_name=None, purchase_method=None, payment_stage=None,
-    applicant_employee=None,
+    applicant_employee=None, from_date=None, to_date=None,
 ):
     require_request_type_access(request_type)
     try:
@@ -2409,17 +2423,23 @@ def preview_route(
             upper_supervisor=ctx.get("upper_supervisor"),
             upper_supervisor_user=ctx.get("upper_supervisor_user"),
             roles=roles,
+            from_date=from_date,
+            to_date=to_date,
         )
+        short_leave = request_type == REQUEST_LEAVE and is_short_leave(from_date, to_date)
         copied_to = (
-            leave_copy_recipients(ctx.get("applicant_user"), roles=roles)
+            leave_copy_recipients(ctx.get("applicant_user"), roles=roles, short=short_leave)
             if request_type in ATTENDANCE_TYPES else []
         )
         if request_type in ATTENDANCE_TYPES:
             _require_leave_accounts(steps, copied_to)
+        elif request_type == REQUEST_TRAVEL:
+            _require_leave_accounts(steps, [], label="出差审批")
         return {
             "context": ctx,
             "steps": _serialize_route_steps(steps, active=_to_bool(active)),
             "copied_to": copied_to,
+            "short_leave": short_leave,
             "role_snapshots": list(roles.values()),
         }
     except ApprovalRouteError as exc:
@@ -4222,6 +4242,8 @@ def action_request(name, action="approve", note=None, reject_target=None, expect
         ):
             frappe.throw(frappe._("请填写供应商、报价明细并通过询价表单提交价格。"))
         if action == "reject":
+            if _is_travel_desk_step(doc, step):
+                frappe.throw(frappe._("前台办理这一步不能退回，办完请直接点“已办理”；有问题请联系申请人。"))
             authorized_expense_lines = _with_expense_attachments(
                 doc, [_serialize_expense_line(row) for row in getattr(doc, "expense_lines", [])]
             )
@@ -4293,7 +4315,13 @@ def action_request(name, action="approve", note=None, reject_target=None, expect
             _append_request_event(doc, "确认付款", from_status, STATUS_PAID, note)
         _save_document(doc)
         _sync_assignments_after_save(doc)
-        if doc.workflow_status in {STATUS_COMPLETED, STATUS_PAID}:
+        if doc.workflow_status == STATUS_COMPLETED and _is_travel_desk_step(doc, step):
+            # 出差办理完：给申请人一条单独的行程提醒（不是普通的“已完成”通知）。
+            notify_travel_arranged(
+                doc, actor=actor, note=note,
+                event_key=f"oa-travel-arranged:{doc.name}:{_event_stamp(_operation_events(doc)[-1] if _operation_events(doc) else None)}",
+            )
+        elif doc.workflow_status in {STATUS_COMPLETED, STATUS_PAID}:
             notify_request_applicant(
                 doc,
                 "已完成" if doc.workflow_status == STATUS_COMPLETED else "已付款",

@@ -111,12 +111,12 @@ function pickDept(department) {
   if (department) loadDrill();
 }
 
-async function loadRoute(requestType) {
+async function loadRoute(requestType, from = '', to = '') {
   approval.value = null;
   if (!requestType) return;
   const token = latest.route.begin();
   try {
-    const data = await api.route(requestType);
+    const data = await api.route(requestType, from, to);
     if (latest.route.isCurrent(token)) approval.value = data;
   } catch (failure) {
     if (latest.route.isCurrent(token)) approval.value = { steps: [], copied_to: [], error: messageOf(failure) };
@@ -285,6 +285,11 @@ function onSubmitted({ name, requestType }) {
 }
 
 // 详情页告诉我们这张申请的类型：路径和类型不一致时（旧链接、通知）换成它自己类型的路径，侧栏才高亮对。
+// 请假的起止日期变了：连续 3 个日历日以内的路线更短，按新日期重取路线。
+function onDates({ from, to }) {
+  if (view.value === 'new' && newTypeRequest.value === '请假申请') loadRoute('请假申请', from, to);
+}
+
 function onDetailLoaded(request) {
   const wanted = TYPES[request?.request_type]?.path;
   if (!wanted) return;
@@ -421,7 +426,7 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
 
       <AttendanceForm
         v-else ref="formRef" :request-type="newTypeRequest" :draft-name="page.draft" :home="home" :route="approval" :types="availableTypes"
-        @switch-type="switchType" @draft-type="onDraftType" @draft-saved="onDraftSaved" @submitted="onSubmitted" @cancel="goBack" />
+        @switch-type="switchType" @draft-type="onDraftType" @draft-saved="onDraftSaved" @submitted="onSubmitted" @cancel="goBack" @dates="onDates" />
     </div>
   </div>
 </template>

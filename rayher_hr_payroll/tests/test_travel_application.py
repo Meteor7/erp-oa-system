@@ -6,9 +6,10 @@ import pytest
 
 from rayher_hr_payroll.oa_approval import (
     REQUEST_EXPENSE_PAYMENT,
-    build_direct_purchase_route,
+    ApprovalRouteError,
     build_expense_payment_route,
     build_route,
+    build_travel_route,
 )
 from rayher_hr_payroll.oa_document_types import (
     OPT_IN_REQUEST_TYPES,
@@ -16,7 +17,7 @@ from rayher_hr_payroll.oa_document_types import (
     REQUEST_REIMBURSEMENT,
     REQUEST_TRAVEL,
 )
-from rayher_hr_payroll.tests.test_oa_approval_routes import procurement_roles
+from rayher_hr_payroll.tests.test_oa_approval_routes import procurement_roles, role
 from rayher_hr_payroll.travel_requests import TravelRequestError, normalize_travel
 
 
@@ -53,20 +54,63 @@ def test_invalid_travel_is_rejected_with_a_readable_message(overrides, message):
         normalize_travel(travel(**overrides))
 
 
-ROUTE_KW = dict(
-    supervisor="张主管",
-    supervisor_user="zhang@example.com",
-    applicant_user="wang@example.com",
-    upper_supervisor="",
-    upper_supervisor_user="",
-)
+def travel_roles():
+    return {**procurement_roles(), "front_desk": role("front_desk", "前台办理", "desk@example.com", "演示员工30")}
 
 
-def test_travel_route_matches_direct_purchase_other_method():
-    roles = procurement_roles()
-    steps = build_route(REQUEST_TRAVEL, roles=roles, **ROUTE_KW)
-    assert steps == build_direct_purchase_route(purchase_method="其他购买", roles=roles, **ROUTE_KW)
-    assert [step["approvers"] for step in steps] == [["zhang@example.com"], ["vice@example.com"]]
+def route(**kw):
+    values = dict(department="研发软件部", supervisor="张主管", supervisor_user="zhang@example.com", supervisor_decision="approve",
+                  applicant_user="wang@example.com", roles=travel_roles())
+    values.update(kw)
+    return build_travel_route(**values)
+
+
+def shape(steps):
+    return [(step["label"], step["mode"], step["approvers"]) for step in steps]
+
+
+def test_trip_goes_direct_supervisor_then_vice_manager_then_front_desk():
+    """决定 2026-10-13：直属上级 → 副总经理（演示员工37）→ 前台办理（行政专员），前台是办理不是审批。"""
+    assert shape(route()) == [
+        ("直属部门主管：张主管", "approve", ["zhang@example.com"]),
+        ("副总经理：演示员工21", "approve", ["vice@example.com"]),
+        ("前台办理：演示员工30", "handle", ["desk@example.com"]),
+    ]
+    # build_route 分到同一条路线
+    assert build_route(REQUEST_TRAVEL, department="研发软件部", supervisor="张主管", supervisor_user="zhang@example.com",
+                       supervisor_decision="approve", applicant_user="wang@example.com", roles=travel_roles()) == route()
+
+
+def test_finance_department_goes_to_the_general_manager_instead():
+    assert [step["label"] for step in route(department="财务部 - RAY")] == ["直属部门主管：张主管", "总经理：演示员工29", "前台办理：演示员工30"]
+
+
+@pytest.mark.parametrize("name, user, department", [
+    ("演示员工21", "vice@example.com", "研发软件部"),
+    ("演示员工29", "general@example.com", "研发软件部"),
+    ("演示员工21", "vice@example.com", "财务部 - RAY"),
+])
+def test_a_direct_supervisor_who_is_vice_or_general_manager_approves_alone(name, user, department):
+    for decision in ("approve", "skip"):           # 组织关系里高管当直属上级时 decision 常是 skip，照样由他批这一步
+        assert [step["label"] for step in route(supervisor=name, supervisor_user=user, supervisor_decision=decision, department=department)] == [
+            f"直属部门主管：{name}", "前台办理：演示员工30"]
+
+
+@pytest.mark.parametrize("applicant", ["vice@example.com", "general@example.com"])
+def test_vice_and_general_manager_trips_need_no_approval_and_go_straight_to_the_front_desk(applicant):
+    steps = route(applicant_user=applicant, supervisor="", supervisor_user="", supervisor_decision="skip")
+    assert shape(steps) == [("前台办理：演示员工30", "handle", ["desk@example.com"])]
+
+
+def test_the_front_desk_never_handles_her_own_trip():
+    assert [step["label"] for step in route(applicant_user="desk@example.com")] == ["直属部门主管：张主管", "副总经理：演示员工21"]
+
+
+def test_a_missing_direct_supervisor_is_refused_with_a_readable_message():
+    with pytest.raises(ApprovalRouteError, match="出差申请缺少直属上级"):
+        route(supervisor="", supervisor_user="")
+    with pytest.raises(ApprovalRouteError, match="没有关联可用账号"):
+        route(supervisor_user="")
 
 
 @pytest.mark.parametrize("request_type", [REQUEST_REIMBURSEMENT, REQUEST_PAYMENT])
