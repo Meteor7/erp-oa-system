@@ -334,7 +334,8 @@ def _review_contract(po_name):
 
 
 def _seal_contract(po_name):
-    frappe.set_user(SEAL_USER)
+    # 用印人由岗位决定（save_po_contract_information 写在 PO 上），按 PO 上记的人用印，账号改名、换人都不受影响。
+    frappe.set_user(frappe.db.get_value("OA Purchase Order", po_name, "contract_seal_user") or SEAL_USER)
     return seal_po_contract(po_name, "正式链路验收电子用印")
 
 
@@ -353,7 +354,8 @@ def _receive_all(po_name):
 
 
 def _inspect_all(po_name):
-    frappe.set_user(resolve_role("procurement_manager")["user"])
+    # 验收和到货一样只能由生产主管登记（procurement_chain._require_production_receipt）。
+    frappe.set_user(resolve_role("production_asset_owner")["user"])
     po = frappe.get_doc("OA Purchase Order", po_name)
     evidence = _evidence_file(po_name, "inspection")
     return record_po_inspection(po_name, json.dumps([
