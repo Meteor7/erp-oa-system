@@ -296,6 +296,8 @@ def build_tab(ctx, tab, include_todos=True):
             out["todos"] = _run(provider_, ctx, errors) or []
     out["has_todos"] = bool(tab.get("todos"))
     out["has_alerts"] = bool(tab.get("alerts"))
+    # 2026-10-13 排版：没有「要我处理」的页签、和看整体的岗位（layout 里 kpis_first）先放指标卡；其他总览先放「要我处理」
+    out["kpis_first"] = bool(tab.get("kpis_first")) or not tab.get("todos")
     return out
 
 

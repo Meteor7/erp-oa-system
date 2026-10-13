@@ -215,7 +215,8 @@ def test_the_people_tab_has_a_people_and_an_attendance_section():
         tab = next(item for item in layout.LAYOUTS[profile]["tabs"] if item["key"] == "people")
         assert [section["title"] for section in tab["sections"]] == ["人员", "考勤"], profile
         attendance_section = tab["sections"][1]
-        assert {"hr.away_today", "att.pending", "att.leave", "att.overtime", "att.rate", "att.trip"} <= set(attendance_section["kpis"])
+        # 2026-10-13 排版：考勤段 6 张卡（3 列 × 2 排），本月请假 / 加班都有卡片能点开
+        assert attendance_section["kpis"] == ["hr.away_today", "att.trip", "att.pending", "att.rate", "att.leave", "att.overtime"]
         assert {"block.att_depts", "block.att_trend", "block.leave_types"} <= set(attendance_section["blocks"])
 
 

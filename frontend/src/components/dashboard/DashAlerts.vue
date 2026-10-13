@@ -1,13 +1,18 @@
 <script setup>
 // 「需要关注」：每条点一下带着筛选打开对应页面。
+// 2026-10-13 排版：先列 5 条，“全部 N 条”就地展开（不跳页）。
+import { computed, ref } from 'vue';
 import { EMPTY_ALERT_TEXT } from '../../lib/dashboardView.js';
+import { limitRows } from '../../lib/dashboardLayout.js';
 import { targetHint } from '../../lib/dashboardTargets.js';
 
-defineProps({
+const props = defineProps({
   alerts: { type: Array, default: () => [] },
   resolve: { type: Function, required: true },
 });
 const emit = defineEmits(['go']);
+const open = ref(false);
+const view = computed(() => limitRows(props.alerts, open.value));
 </script>
 
 <template>
@@ -19,7 +24,7 @@ const emit = defineEmits(['go']);
     </div>
     <p v-if="!alerts.length" class="db-empty">{{ EMPTY_ALERT_TEXT }}</p>
     <ul v-else class="db-rows">
-      <li v-for="item in alerts" :key="item.key" class="db-li">
+      <li v-for="item in view.shown" :key="item.key" class="db-li">
         <component :is="resolve(item.target).state === 'link' ? 'button' : 'div'" class="db-row" :data-alert="item.key"
           :class="{ 'is-link': resolve(item.target).state === 'link', 'is-off': ['denied', 'unknown'].includes(resolve(item.target).state) }"
           :type="resolve(item.target).state === 'link' ? 'button' : undefined"
@@ -33,5 +38,8 @@ const emit = defineEmits(['go']);
         </component>
       </li>
     </ul>
+    <div v-if="view.more" class="db-foot">
+      <button type="button" class="db-link" :aria-expanded="open ? 'true' : 'false'" @click="open = !open">{{ open ? '收起' : `全部 ${view.total} 条` }}</button>
+    </div>
   </section>
 </template>

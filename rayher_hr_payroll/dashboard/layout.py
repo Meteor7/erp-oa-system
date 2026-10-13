@@ -3,13 +3,16 @@
 块的内容、数据来源和权限判断在各 provider 模块里（money / people / timesheet / procurement / personal）。
 这里只管"这个岗位按什么顺序放哪些块"；放进来的块如果当前这个人没权限，provider 会自己返回 None。
 总览页签的 `todos: True` 表示第一屏左边放「要我处理」（key `todo.queue`，不缓存）。
+`kpis_first: True`（看整体的岗位：总经理、副总、财务主管、人事经理）总览先放指标卡再放「要我处理」；
+干活的岗位总览先放「要我处理」。
+排版（2026-10-13）：每个页签 / 分段尽量放 4 或 8 张指标卡（前端按实际张数排列）；图表块的配对、空块收起由前端决定。
 设计依据：docs/superpowers/specs/2026-10-09-role-dashboard-design.md
 """
 
 
-def tab(key, label, kpis=(), alerts=(), blocks=(), todos=False, sections=()):
+def tab(key, label, kpis=(), alerts=(), blocks=(), todos=False, sections=(), kpis_first=False):
     return {"key": key, "label": label, "kpis": list(kpis), "alerts": list(alerts), "blocks": list(blocks), "todos": todos,
-            "sections": [dict(section) for section in sections]}
+            "sections": [dict(section) for section in sections], "kpis_first": kpis_first}
 
 
 def section(title, sub="", kpis=(), blocks=()):
@@ -18,16 +21,18 @@ def section(title, sub="", kpis=(), blocks=()):
 
 
 # 人事页签：人员 / 考勤 两段（考勤只有汇总，没有人名；点进考勤中心再点部门才看到人名）。
-_PEOPLE_TAB = tab(
-    "people", "人事",
-    sections=[
-        section("人员", "在职、合同、宿舍", kpis=["hr.active", "hr.joined_left", "hr.left_month"],
-                blocks=["block.dept_headcount", "block.expiring_list", "block.dorm_summary"]),
-        section("考勤", "只有人数和天数，不显示人名；要看是谁，点进考勤中心",
-                kpis=["hr.away_today", "att.trip", "att.pending", "att.leave", "att.overtime", "att.rate"],
-                blocks=["block.leave_types", "block.att_depts", "block.att_trend"]),
-    ],
-)
+# 2026-10-13 排版：人员段 4 张卡（加上“60 天内到期”）；考勤段 6 张卡，正好 3 列 × 2 排，本月请假 / 本月加班都能点开明细。
+# 宿舍块只给没有宿舍页签的人（总经理 / 副总）；人事经理有自己的宿舍页签，这里不重复。
+_PEOPLE_SECTION = section("人员", "在职、合同、宿舍", kpis=["hr.active", "hr.joined_left", "hr.left_month", "hr.expiring"],
+                          blocks=["block.dept_headcount", "block.expiring_list", "block.dorm_summary"])
+_ATTENDANCE_SECTION = section("考勤", "只有人数和天数，不显示人名；要看是谁，点进考勤中心",
+                              kpis=["hr.away_today", "att.trip", "att.pending", "att.rate", "att.leave", "att.overtime"],
+                              blocks=["block.leave_types", "block.att_depts", "block.att_trend"])
+_PEOPLE_TAB = tab("people", "人事", sections=[_PEOPLE_SECTION, _ATTENDANCE_SECTION])
+_HR_PEOPLE_TAB = tab("people", "人事", sections=[
+    {**_PEOPLE_SECTION, "blocks": [key for key in _PEOPLE_SECTION["blocks"] if key != "block.dorm_summary"]},
+    _ATTENDANCE_SECTION,
+])
 
 
 _LEADER_OVERVIEW = tab(
@@ -35,7 +40,7 @@ _LEADER_OVERVIEW = tab(
     kpis=["cost.total", "pay.unpaid", "approval.stuck", "proc.urgent", "hr.active", "ts.rate", "alloc.status", "hr.expiring"],
     alerts=["alert.urgent", "alert.pay_waiting", "alert.stuck", "alert.ts_open", "alert.inspect_stale", "alert.alloc_preview", "alert.rd_gap", "alert.me_trip"],
     blocks=["block.cost_mix", "block.pay_wait_dist"],
-    todos=True,
+    todos=True, kpis_first=True,
 )
 # 老板的“采购”页：加急的采购排在最前面，其次是价格审批、在途 PO、逾期、本周到货、付款到期、缺料影响的项目。
 _LEADER_PROC_TAB = tab(
@@ -45,14 +50,15 @@ _LEADER_PROC_TAB = tab(
     alerts=["alert.urgent", "alert.po_overdue", "alert.pay_planned_passed", "alert.inspect_stale", "alert.risk_projects"],
     blocks=["block.urgent_requests", "block.week_cols", "block.risk_projects", "block.pay_next30", "block.proc_month_trend", "block.proc_suppliers"],
 )
+# 2026-10-13 排版：经营页不再重复总览的“待付款按等待时长”；原来的“研发”页签并进经营页，成为“研发”一段（4 个页签：总览 经营 采购 人事）。
 _LEADER_TABS = [
     _LEADER_OVERVIEW,
     tab("cost", "经营", kpis=["cost.total", "cost.rd", "cost.po", "cost.expense"],
-        blocks=["block.cost_trend", "block.cost_projects", "block.pay_wait_dist", "block.proc_chain", "block.labor_cost"]),
+        blocks=["block.cost_trend", "block.cost_projects", "block.proc_chain", "block.labor_cost"],
+        sections=[section("研发", "工时填报和研发分摊", kpis=["ts.rate", "ts.rd_count", "cost.rd_pending", "hr.rd_gap"],
+                          blocks=["block.ts_by_dept", "block.alloc_mix"])]),
     _LEADER_PROC_TAB,
     _PEOPLE_TAB,
-    tab("rd", "研发", kpis=["ts.rate", "ts.rd_count", "cost.rd_pending", "hr.rd_gap"],
-        blocks=["block.ts_by_dept", "block.alloc_mix"]),
 ]
 
 LAYOUTS = {
@@ -64,7 +70,7 @@ LAYOUTS = {
             tab("overview", "总览",
                 kpis=["pay.unpaid", "pay.waiting", "pay.in_approval", "cost.total", "alloc.status", "claim.todo", "invoice.review", "pay.paid_month"],
                 alerts=["alert.pay_waiting", "alert.alloc_unknown", "alert.invoice", "alert.stuck", "alert.me_trip"],
-                blocks=["block.pay_steps", "block.pay_next30"], todos=True),
+                blocks=["block.pay_steps", "block.pay_next30"], todos=True, kpis_first=True),
             tab("cash", "付款与现金", kpis=["pay.unpaid", "pay.waiting", "pay.in_approval", "pay.paid_month"],
                 blocks=["block.pay_trend", "block.pay_suppliers", "block.pay_wait_dist", "block.pay_stage", "block.pay_steps", "block.pay_next30"]),
             tab("cost", "费用与分摊", kpis=["cost.total", "cost.rd", "cost.cap", "cost.unknown"],
@@ -75,7 +81,8 @@ LAYOUTS = {
         "note": "记账、核对发票、跟进费用导入和分摊。",
         "tabs": [tab("overview", "总览", kpis=["claim.todo", "pay.todo", "invoice.review", "me.processed"],
                      alerts=["alert.invoice", "alert.alloc_unknown", "alert.me_trip"], blocks=["block.aging", "block.invoice_status"], todos=True),
-                 tab("invoice", "发票与报销", kpis=["invoice.review", "claim.todo"],
+                 # 2026-10-13 排版：补满 4 张卡（付款待我处理、本月已处理）
+                 tab("invoice", "发票与报销", kpis=["invoice.review", "claim.todo", "pay.todo", "me.processed"],
                      blocks=["block.invoice_status", "block.claim_category", "block.alloc_mix"])],
     },
     "finance_auditor": {
@@ -89,8 +96,9 @@ LAYOUTS = {
             tab("overview", "总览",
                 kpis=["hr.active", "hr.joined_left", "hr.away_today", "hr.expiring", "hr.payroll", "hr.social_pending", "hr.dorm_rate", "hr.file_pending"],
                 alerts=["alert.att_pending", "alert.probation", "alert.payroll_draft", "alert.contract", "alert.dorm_lease", "alert.dorm_leaver", "alert.dorm_register", "alert.rd_gap", "alert.me_trip"],
-                blocks=["block.pay_progress", "block.dorm_summary", "block.dept_headcount"], todos=True),
-            _PEOPLE_TAB,
+                # 2026-10-13 排版：宿舍汇总只在宿舍页签，总览和人事页不再重复
+                blocks=["block.pay_progress", "block.dept_headcount"], todos=True, kpis_first=True),
+            _HR_PEOPLE_TAB,
             tab("pay", "薪酬与社保", kpis=["hr.payroll", "hr.pay_total", "hr.pay_si", "hr.pay_hf"],
                 blocks=["block.pay_progress", "block.si_hf_list", "block.pay_by_dept"]),
             tab("dorm", "宿舍", kpis=["hr.dorm_rate", "hr.dorm_vacant", "hr.dorm_lease", "hr.dorm_leaver"],
@@ -125,13 +133,14 @@ LAYOUTS = {
     "dept_manager": {
         "note": "团队的审批、出勤、请假加班和工时。团队 = 汇报关系向下的在职员工。",
         "tabs": [
+            # 2026-10-13 排版：总览 4 张卡；两周内不在岗、本月加班放团队页；工时页补上“工时已填满”凑满 4 张
             tab("overview", "总览",
-                kpis=["me.approvals", "team.away", "team.away2w", "ts.team", "team.leave", "team.overtime"],
+                kpis=["me.approvals", "team.away", "team.leave", "ts.team"],
                 alerts=["alert.team_low_staff", "alert.ts_open_team", "alert.me_trip"],
                 blocks=["block.team_calendar", "block.team_leave_types"], todos=True),
-            tab("team", "团队", kpis=["team.headcount", "team.leave", "team.overtime"],
+            tab("team", "团队", kpis=["team.headcount", "team.away2w", "team.leave", "team.overtime"],
                 blocks=["block.team_people_hours", "block.ts_team"]),
-            tab("ts", "工时", kpis=["ts.rate", "dept.projects", "ts.none"], blocks=["block.ts_projects", "block.ts_trend"]),
+            tab("ts", "工时", kpis=["ts.rate", "ts.team", "ts.none", "dept.projects"], blocks=["block.ts_projects", "block.ts_trend"]),
         ],
     },
     "employee": {
@@ -147,9 +156,10 @@ LAYOUTS = {
 # 多个身份拼在一起（决定 2026-10-12）：首页按优先级最高的岗位排版，再按他实际有的身份多加页签，互不覆盖——
 # 有在职直接下属的多一个“团队”页，负责项目的多一个“我负责的项目”页。每个页签只用自己的范围：
 # 团队页只给团队，项目页只给项目，不会因为他是主管就看到项目成员的考勤。
+# 2026-10-13 排版：4 张卡；“两周内不在岗”由下面的团队日历直接看
 TEAM_TAB = tab(
     "team", "团队",
-    kpis=["team.headcount", "team.away", "team.away2w", "team.leave", "team.overtime"],
+    kpis=["team.headcount", "team.away", "team.leave", "team.overtime"],
     alerts=["alert.team_low_staff"],
     blocks=["block.team_calendar", "block.team_people_hours", "block.team_leave_types", "block.ts_team"],
 )

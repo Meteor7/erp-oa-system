@@ -59,19 +59,21 @@ test("the target table is the backend json, imported by a one-line module", () =
   assert.doesNotMatch(read("../src/lib/dashboardTargets.js"), /import .*targets\.json/, "the pure module does not import the json itself");
 });
 
-test("kpis come first, then todos beside alerts, then the blocks", () => {
-  const kpis = page.indexOf('class="db-kpis"');
-  const attention = page.indexOf('class="db-attn"');
-  const blocks = page.indexOf('class="db-blocks"');
-  assert.ok(kpis > -1 && attention > kpis && blocks > attention);
-  assert.match(page, /<DashTodos v-if="page\.showTodos"/);
-  assert.match(page, /<DashAlerts v-if="page\.showAlerts"/);
-  // both live in the same container, so they share one screen row
-  const container = page.slice(attention, blocks);
-  assert.ok(container.indexOf("<DashTodos") > -1 && container.indexOf("<DashAlerts") > container.indexOf("<DashTodos"));
-  assert.match(page, /v-if="page\.attention !== 'none'"/);
+// 2026-10-13 排版：干活岗位的总览先「要我处理」再指标卡（attnFirst），看整体的岗位和其他页签先指标卡；图表块永远在后面。
+test("todos beside alerts sit before or after the kpis as the server says, then the blocks", () => {
+  const panel = page.slice(page.indexOf('class="db-panel"'));
+  const firstAttn = panel.indexOf('<div v-if="attnFirst" class="db-attn"');
+  const kpis = panel.indexOf('class="db-kpis"');
+  const laterAttn = panel.indexOf(`<div v-if="!attnFirst && page.attention !== 'none'" class="db-attn"`);
+  const blocks = panel.indexOf('class="db-blocks"');
+  assert.ok(firstAttn > -1 && kpis > firstAttn && laterAttn > kpis && blocks > laterAttn);
+  assert.match(page, /const attnFirst = computed\(\(\) => attentionFirst\(page\.value\)\)/);
+  for (const container of [panel.slice(firstAttn, kpis), panel.slice(laterAttn, blocks)]) {
+    // both live in the same container, so they share one screen row
+    assert.ok(container.indexOf('<DashTodos v-if="page.showTodos"') > -1 && container.indexOf('<DashAlerts v-if="page.showAlerts"') > container.indexOf("<DashTodos"));
+  }
   assert.match(css, /\.db-attn\.is-both \{ grid-template-columns: minmax\(0, 1\.25fr\) minmax\(0, 1fr\); \}/);
-  assert.match(css, /@media \(max-width: 1000px\)[\s\S]*\.db-attn\.is-both/);
+  assert.match(css, /@media \(max-width: 860px\)[\s\S]*\.db-attn\.is-both/);
 });
 
 test("empty and failing states are all spelled out", () => {

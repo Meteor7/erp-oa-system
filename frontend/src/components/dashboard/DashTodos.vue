@@ -1,13 +1,18 @@
 <script setup>
 // 「要我处理」：等待最久的排在前面（后端已排好序）；没有待办写"没有需要你处理的事"。
+// 2026-10-13 排版：先列 5 条，“全部 N 条”就地展开（不跳页）。
+import { computed, ref } from 'vue';
 import { EMPTY_TODO_TEXT } from '../../lib/dashboardView.js';
+import { limitRows } from '../../lib/dashboardLayout.js';
 import { targetHint } from '../../lib/dashboardTargets.js';
 
-defineProps({
+const props = defineProps({
   todos: { type: Array, default: () => [] },
   resolve: { type: Function, required: true },
 });
 const emit = defineEmits(['go']);
+const open = ref(false);
+const view = computed(() => limitRows(props.todos, open.value));
 </script>
 
 <template>
@@ -19,7 +24,7 @@ const emit = defineEmits(['go']);
     </div>
     <p v-if="!todos.length" class="db-empty">{{ EMPTY_TODO_TEXT }}</p>
     <ul v-else class="db-rows">
-      <li v-for="(item, index) in todos" :key="index" class="db-row" :class="{ 'is-link': resolve(item.target).state === 'link' }"
+      <li v-for="(item, index) in view.shown" :key="index" class="db-row" :class="{ 'is-link': resolve(item.target).state === 'link' }"
           @click="resolve(item.target).state === 'link' && emit('go', resolve(item.target).to)">
         <div class="db-row-main">
           <div class="db-row-t"><span class="db-tag" :class="item.toneClass">{{ item.kind }}</span> {{ item.title }}</div>
@@ -29,5 +34,8 @@ const emit = defineEmits(['go']);
         <button v-else-if="resolve(item.target).state !== 'none'" type="button" class="db-btn" disabled :title="targetHint(resolve(item.target).state)">{{ item.btn }}</button>
       </li>
     </ul>
+    <div v-if="view.more" class="db-foot">
+      <button type="button" class="db-link" :aria-expanded="open ? 'true' : 'false'" @click="open = !open">{{ open ? '收起' : `全部 ${view.total} 条` }}</button>
+    </div>
   </section>
 </template>

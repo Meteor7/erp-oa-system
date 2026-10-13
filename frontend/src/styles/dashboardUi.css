@@ -55,6 +55,14 @@
 
 /* ------------------------------------------------------------ 指标卡 */
 .db-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+/* 2026-10-13 排版：列数按实际张数（lib/dashboardLayout.js kpiColumns）：1–4 演示员工128行放下，5–6 演示员工129列，7 张以上四列 */
+.db-kpis.is-c1 { grid-template-columns: minmax(0, 1fr); }
+.db-kpis.is-c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.db-kpis.is-c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.db-kpis.is-c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.db-kpiwrap { display: flex; flex-direction: column; gap: 8px; }
+.db-more { align-self: flex-end; border: 0; background: none; padding: 2px 4px; font-size: 12px; color: var(--db-brand-d); cursor: pointer; }
+.db-more:hover { text-decoration: underline; }
 .db-kpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 13px 15px; border: 1px solid var(--db-line); border-radius: 12px; background: var(--db-card); text-align: left; }
 .db-kpi.is-link { cursor: pointer; }
 .db-kpi.is-link:hover { border-color: var(--db-line2); box-shadow: 0 1px 4px rgba(26, 33, 48, .08); }
@@ -83,7 +91,10 @@
 .db-hd-block .db-link, .db-hd-block .db-off-link { margin-left: auto; }
 .db-empty { padding: 26px 16px; text-align: center; color: var(--db-ink3); font-size: 13px; }
 .db-failed { color: var(--db-red); }
-.db-attn { display: grid; gap: 16px; align-items: start; }
+/* 2026-10-13 排版：「要我处理」「需要关注」两张卡等高，“全部 N 条”贴在卡片底部 */
+.db-attn { display: grid; gap: 16px; align-items: stretch; }
+.db-attn > .db-card { display: flex; flex-direction: column; }
+.db-foot { margin-top: auto; padding: 8px 16px 10px; border-top: 1px solid #EFF0F3; text-align: center; }
 .db-attn.is-both { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
 .db-attn.is-todos, .db-attn.is-alerts { grid-template-columns: minmax(0, 1fr); }
 .db-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 11px 16px; border: 0; border-top: 1px solid #EFF0F3; background: none; text-align: left; }
@@ -99,7 +110,16 @@
 .db-todos .db-row:hover { background: #FCFCFD; }
 
 /* ------------------------------------------------------------ 图表块 */
-.db-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+/* 2026-10-13 排版：同一行的两张卡等高（stretch），卡片内部竖排；落单的、要宽度的块占满一行（.is-full / .is-wide） */
+.db-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.db-blocks > .db-block { display: flex; flex-direction: column; min-width: 0; }
+.db-block.is-full { grid-column: 1 / -1; }
+/* 本期没有数据的块收成一行 */
+.db-nodata { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; padding: 9px 14px; border: 1px dashed var(--db-line2); border-radius: 10px; background: var(--db-soft); font-size: 12.5px; color: var(--db-ink3); }
+.db-nodata-h { color: var(--db-ink2); font-weight: 500; }
+.db-nodata-sep { color: var(--db-line2); }
+.db-nodata .db-link { font-size: 12.5px; }
+.db-nodata .db-mut { font-size: 12px; }
 .db-block.is-failed { background: #FFFAF9; border-color: var(--db-red-line); }
 .db-bars { display: flex; flex-direction: column; gap: 9px; padding: 6px 16px 16px; }
 .db-br { display: grid; grid-template-columns: minmax(64px, 110px) minmax(0, 1fr) minmax(52px, auto); gap: 10px; align-items: center; font-size: 13px; }
@@ -220,7 +240,10 @@
 
 /* ------------------------------------------------------------ 窄屏 */
 @media (max-width: 1000px) {
-  .db-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .db-kpis, .db-kpis.is-c3, .db-kpis.is-c4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* 2026-10-13 排版：860px 以下两两成对的卡片改成一列 */
+@media (max-width: 860px) {
   .db-attn.is-both, .db-blocks { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 480px) {

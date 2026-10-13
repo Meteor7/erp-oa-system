@@ -202,7 +202,7 @@ export function blockView(block = {}) {
   const calendar = type === 'calendar' && !failed ? calendarView(block) : null;
   return {
     key: String(block.key || ''), type, title: String(block.title || ''), sub: String(block.sub || ''),
-    rows, calendar, wide: type === 'calendar', failed, failedText: failed ? BLOCK_FAILED_TEXT : '',
+    rows, calendar, wide: type === 'calendar' || block.wide === true, failed, failedText: failed ? BLOCK_FAILED_TEXT : '',
     empty: !failed && (calendar ? calendar.people.length === 0 : rows.length === 0),
     more: String(block.more || ''), target: block.target || null, hint: String(block.hint || ''),
   };
@@ -228,8 +228,10 @@ export function pageView(page) {
   const showTodos = Boolean(source.has_todos);
   const showAlerts = Boolean(source.has_alerts);
   const attention = showTodos && showAlerts ? 'both' : showTodos ? 'todos' : showAlerts ? 'alerts' : 'none';
+  // 2026-10-13 排版：后端 kpis_first=false（干活岗位的总览）时先放「要我处理」；没给就按原来先放指标卡
+  const kpisFirst = source.kpis_first !== false;
   return {
-    kpis, alerts, todos, blocks, sections, showTodos, showAlerts, attention,
+    kpis, alerts, todos, blocks, sections, showTodos, showAlerts, attention, kpisFirst,
     todoCount: todos.length, alertCount: alerts.length,
     isEmpty: !kpis.length && !blocks.length && !sections.length && !(showTodos || showAlerts),
   };

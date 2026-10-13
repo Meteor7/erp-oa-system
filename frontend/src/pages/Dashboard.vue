@@ -2,7 +2,8 @@
 // 按岗位区分的数据看板（首页）。内容、顺序、权限全部由后端 dashboard_home.get_home 决定，
 // 这里只负责：问候 + 期间 + 页签（进地址 ?tab=）+ 指标卡 / 要我处理 / 需要关注 / 图表块 + 通知。
 // 点击跳转用 targets.json 的目标名（lib/dashboardTargets.js），页面里不写任何岗位名或页面路径。
-import { computed, watch } from 'vue';
+// 排版（2026-10-13，lib/dashboardLayout.js）：指标卡按张数排列、总览只先放 4 张；图表块成对等高、落单的占满一行，空块收进最后一行。
+import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { createResource } from 'frappe-ui';
 import { canSee, currentUser } from '../lib/access';
@@ -13,7 +14,9 @@ import targetsJson from '../lib/dashboardTargetsData';
 import {
   EMPTY_PAGE_TEXT, currentMonth, errorText, greetingFor, isValidMonth, monthLabel, neighbourTab, pageView, resolveTabKey, tabQuery,
 } from '../lib/dashboardView';
+import { arrangeBlocks, attentionFirst, foldKpis, kpiGridClass, readMoreKpis, writeMoreKpis } from '../lib/dashboardLayout';
 import DashKpi from '../components/dashboard/DashKpi.vue';
+import DashNoData from '../components/dashboard/DashNoData.vue';
 import DashTodos from '../components/dashboard/DashTodos.vue';
 import DashAlerts from '../components/dashboard/DashAlerts.vue';
 import DashBlock from '../components/dashboard/DashBlock.vue';
@@ -39,6 +42,17 @@ const page = computed(() => pageView(data.value?.pages?.[activeKey.value]));
 const role = computed(() => data.value?.role || {});
 const firstLoad = computed(() => home.loading && !data.value);
 const showNotes = computed(() => !firstLoad.value && (!tabs.value.length || activeKey.value === 'overview'));
+
+// 排版：总览的指标卡先放 4 张，其余在“更多指标”后面（展开与否按浏览器记住）；干活岗位的总览先放「要我处理」。
+const moreKpis = ref(readMoreKpis());
+function toggleMoreKpis() {
+  moreKpis.value = !moreKpis.value;
+  writeMoreKpis(moreKpis.value);
+}
+const kpiFold = computed(() => foldKpis(page.value.kpis, { fold: activeKey.value === 'overview', open: moreKpis.value }));
+const attnFirst = computed(() => attentionFirst(page.value));
+const arranged = computed(() => arrangeBlocks(page.value.blocks));
+const sectionLayouts = computed(() => page.value.sections.map((section) => arrangeBlocks(section.blocks)));
 
 const greeting = computed(() => greetingFor(new Date().getHours()));
 const userName = computed(() => role.value.person || currentUser() || '');
@@ -79,7 +93,7 @@ function setPeriod(value) {
     </header>
 
     <div v-if="firstLoad" class="db-skel" role="status" aria-label="正在加载看板">
-      <div class="db-kpis"><i v-for="n in 8" :key="n" class="db-skel-kpi"></i></div>
+      <div class="db-kpis"><i v-for="n in 4" :key="n" class="db-skel-kpi"></i></div>
       <div class="db-attn is-both"><i class="db-skel-card"></i><i class="db-skel-card"></i></div>
     </div>
 
@@ -98,27 +112,40 @@ function setPeriod(value) {
       </div>
 
       <div :id="`db-panel-${activeKey}`" class="db-panel" :class="{ 'is-loading': home.loading }" role="tabpanel" :aria-labelledby="`db-tab-${activeKey}`">
-        <div v-if="page.kpis.length" class="db-kpis">
-          <DashKpi v-for="item in page.kpis" :key="item.key" :kpi="item" :state="resolve(item.target)" @go="go" />
-        </div>
-
-        <div v-if="page.attention !== 'none'" class="db-attn" :class="`is-${page.attention}`">
+        <!-- 干活岗位的总览：先「要我处理」/「需要关注」，再指标卡 -->
+        <div v-if="attnFirst" class="db-attn" :class="`is-${page.attention}`">
           <DashTodos v-if="page.showTodos" :todos="page.todos" :resolve="resolve" @go="go" />
           <DashAlerts v-if="page.showAlerts" :alerts="page.alerts" :resolve="resolve" @go="go" />
         </div>
 
-        <div v-if="page.blocks.length" class="db-blocks">
-          <DashBlock v-for="item in page.blocks" :key="item.key" :block="item" :resolve="resolve" @go="go" />
+        <div v-if="page.kpis.length" class="db-kpiwrap">
+          <div class="db-kpis" :class="kpiGridClass(kpiFold.shown.length)">
+            <DashKpi v-for="item in kpiFold.shown" :key="item.key" :kpi="item" :state="resolve(item.target)" @go="go" />
+          </div>
+          <button v-if="kpiFold.foldable" type="button" class="db-more" :aria-expanded="moreKpis ? 'true' : 'false'" @click="toggleMoreKpis">
+            {{ moreKpis ? '收起指标' : `更多指标 ${kpiFold.hidden}` }}
+          </button>
         </div>
+
+        <div v-if="!attnFirst && page.attention !== 'none'" class="db-attn" :class="`is-${page.attention}`">
+          <DashTodos v-if="page.showTodos" :todos="page.todos" :resolve="resolve" @go="go" />
+          <DashAlerts v-if="page.showAlerts" :alerts="page.alerts" :resolve="resolve" @go="go" />
+        </div>
+
+        <div v-if="arranged.cards.length" class="db-blocks">
+          <DashBlock v-for="card in arranged.cards" :key="card.block.key" :class="{ 'is-full': card.span === 'full' }" :block="card.block" :resolve="resolve" @go="go" />
+        </div>
+        <DashNoData :blocks="arranged.empty" :resolve="resolve" @go="go" />
 
         <section v-for="(section, index) in page.sections" :key="`${section.title}-${index}`" class="db-sec" :aria-label="section.title">
           <div class="db-sec-h"><h2>{{ section.title }}</h2><span v-if="section.sub" class="db-mut">{{ section.sub }}</span></div>
-          <div v-if="section.kpis.length" class="db-kpis">
+          <div v-if="section.kpis.length" class="db-kpis" :class="kpiGridClass(section.kpis.length)">
             <DashKpi v-for="item in section.kpis" :key="item.key" :kpi="item" :state="resolve(item.target)" @go="go" />
           </div>
-          <div v-if="section.blocks.length" class="db-blocks">
-            <DashBlock v-for="item in section.blocks" :key="item.key" :block="item" :resolve="resolve" @go="go" />
+          <div v-if="sectionLayouts[index].cards.length" class="db-blocks">
+            <DashBlock v-for="card in sectionLayouts[index].cards" :key="card.block.key" :class="{ 'is-full': card.span === 'full' }" :block="card.block" :resolve="resolve" @go="go" />
           </div>
+          <DashNoData :blocks="sectionLayouts[index].empty" :resolve="resolve" @go="go" />
         </section>
 
         <p v-if="page.isEmpty" class="db-empty db-card">{{ EMPTY_PAGE_TEXT }}</p>
