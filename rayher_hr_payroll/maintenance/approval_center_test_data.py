@@ -192,7 +192,7 @@ class FrappeSeedStore:
     def prerequisites(self):
         roles = {}
         for role_key in (
-            "pmc", "hr_manager", "finance_auditor", "finance_manager", "vice_manager",
+            "pmc", "hr_manager", "finance_auditor", "finance_accountant", "finance_manager", "vice_manager",
             "general_manager", "production_asset_owner",
         ):
             snapshot = resolve_role(role_key)
