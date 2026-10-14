@@ -24,8 +24,8 @@ const hoursText = (row) => (row.total_hours != null ? `${Number(row.actual_hours
           </td>
           <td class="r num">{{ money(figures(row).adjusted) }}<div v-if="Number(row.salary_adjustment)" class="pr-note">调薪 {{ Number(row.salary_adjustment) > 0 ? '+' : '' }}{{ money(row.salary_adjustment) }}</div></td>
           <td class="r num"><b>{{ money(figures(row).payable) }}</b><div v-if="Number(row.company_subsidy) + Number(row.bonus) + Number(row.other_adjustment)" class="pr-note">含补贴/奖金/其他 {{ money(Number(row.company_subsidy) + Number(row.bonus) + Number(row.other_adjustment)) }}</div></td>
-          <td class="r num"><span v-if="row.social_record_exists">{{ money(row.social_insurance) }}</span><span v-else class="pill p-red">社保未维护</span></td>
-          <td class="r num"><span v-if="row.housing_record_exists">{{ money(row.housing_fund) }}</span><span v-else class="pill p-red">公积金未维护</span></td>
+          <td class="r num"><span v-if="row.social_record_exists">{{ money(row.social_insurance) }}</span><span v-else class="pill p-red" :title="row.social_missing || ''">社保算不出来</span></td>
+          <td class="r num"><span v-if="row.housing_record_exists">{{ money(row.housing_fund) }}</span><span v-else class="pill p-red" :title="row.fund_missing || ''">公积金算不出来</span></td>
           <td class="r num">{{ money(figures(row).tax) }}<div v-if="row.tax_manual" class="pr-note">手动</div></td>
           <td class="r num">{{ figures(row).other ? money(figures(row).other) : '—' }}</td>
           <td class="r num net"><b :style="figures(row).net < 0 ? 'color:#B42318' : ''">{{ money(figures(row).net) }}</b></td>
@@ -46,7 +46,7 @@ const hoursText = (row) => (row.total_hours != null ? `${Number(row.actual_hours
           <td>{{ index + 1 }}</td><td>{{ displayCompany(row.company) }}</td><td>{{ row.id_card_number_cn || '-' }}</td><td>{{ gender(row.gender) }}</td><td>{{ row.expense_account_category || '-' }}</td><td>{{ displayDepartment(row.department) || '-' }}</td><td>{{ row.designation || '-' }}</td><td>{{ row.date_of_joining || '-' }}</td><td>{{ row.relieving_date || '-' }}</td>
           <td class="r num">{{ hoursText(row) }}</td><td><b>{{ row.employee_name }}</b></td>
           <td class="r num">{{ cell(row.base_salary) }}</td><td class="r num">{{ cell(row.salary_adjustment) }}</td><td class="r num">{{ money(figures(row).adjusted) }}</td><td class="r num">{{ cell(row.company_subsidy) }}</td><td class="r num">{{ cell(row.bonus) }}</td><td class="r num">{{ cell(row.other_adjustment) }}</td><td class="r num"><b>{{ money(figures(row).payable) }}</b></td>
-          <td class="r num">{{ cell(row.employee_pension) }}</td><td class="r num">{{ cell(row.employee_medical) }}</td><td class="r num">{{ cell(row.employee_unemployment) }}</td><td class="r num">{{ row.social_record_exists ? money(row.social_insurance) : '社保未维护' }}</td><td class="r num">{{ row.housing_record_exists ? money(row.housing_fund) : '公积金未维护' }}</td>
+          <td class="r num">{{ cell(row.employee_pension) }}</td><td class="r num">{{ cell(row.employee_medical) }}</td><td class="r num">{{ cell(row.employee_unemployment) }}</td><td class="r num">{{ row.social_record_exists ? money(row.social_insurance) : '社保算不出来' }}</td><td class="r num">{{ row.housing_record_exists ? money(row.housing_fund) : '公积金算不出来' }}</td>
           <td class="r num">{{ money(figures(row).tax) }}</td><td class="r num">{{ money(row.accommodation) }}</td><td class="r num">{{ money(row.advanced_paid) }}</td><td class="r num"><b>{{ money(figures(row).net) }}</b></td>
           <td>{{ row.bank_name || '-' }}</td><td>{{ row.bank_ac_no || '-' }}</td><td>{{ row.cell_number || '-' }}</td><td><span :class="['pill', rowState(row).tone]">{{ rowState(row).label }}</span></td>
         </tr>

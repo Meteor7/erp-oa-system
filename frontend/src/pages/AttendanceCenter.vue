@@ -185,6 +185,8 @@ function currentOrigin() {
 }
 
 const goHome = () => go(homeLocation(homePath));
+// 详情页面包屑的“考勤中心”：从首页点进来的，回到点进来时的首页（部门、时间、类型、N 月概览的筛选都带着）
+const goDetailHome = () => (origin.value?.kind === 'home' ? goBack() : goHome());
 const goList = (scope, filter) => go(listLocation({ scope, filter }, homePath));
 const goNew = (type = '') => go(newLocation({ type }, currentOrigin() || origin.value));
 const onHome = (patch) => setHome(patch || {});
@@ -432,7 +434,7 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
 
     <AttendanceDetail
       v-else-if="view === 'detail'" :key="page.request" :name="page.request" :origin="origin" :reject-mode="page.reject"
-      @home="goHome" @back="goBack" @navigate="go" @loaded="onDetailLoaded" @changed="refreshLists" />
+      @home="goDetailHome" @back="goBack" @navigate="go" @loaded="onDetailLoaded" @changed="refreshLists" />
 
     <div v-else class="acx af-page">
       <div class="af-head">

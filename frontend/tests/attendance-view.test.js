@@ -615,3 +615,9 @@ test("the routes stay as they were, and the replaced components are gone", () =>
   assert.equal(exists("../src/components/attendance/AttendanceDayStack.vue"), false);
   assert.equal(exists("../src/components/attendance/AttendanceTeamGrid.vue"), false);   // 两周网格换成了团队日历
 });
+
+test("the detail crumb returns to the home page the request was opened from, filters included", () => {
+  const page = readFileSync(new URL("../src/pages/AttendanceCenter.vue", import.meta.url), "utf8");
+  assert.match(page, /const goDetailHome = \(\) => \(origin\.value\?\.kind === 'home' \? goBack\(\) : goHome\(\)\);/);
+  assert.match(page, /@home="goDetailHome" @back="goBack"/);
+});

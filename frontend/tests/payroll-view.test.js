@@ -17,9 +17,9 @@ test("a row is in exactly one state, in the order a slip is produced", () => {
   assert.equal(rowState(row({ salary_slip: "SS-1", docstatus: 0, managed: true })).label, "草稿");
   assert.equal(rowState(row({ salary_slip: "SS-2", docstatus: 0, managed: false })).label, "外部草稿");
   assert.equal(rowState(row({ salary_slip: "SS-3", docstatus: 1, managed: true })).label, "已确认");
-  assert.equal(rowState(row({ social_record_exists: false })).label, "缺社保记录");
-  assert.equal(rowState(row({ housing_record_exists: false })).label, "缺公积金记录");
-  assert.equal(rowState(row({ social_record_exists: false, housing_record_exists: false })).label, "缺社保公积金记录");
+  assert.equal(rowState(row({ social_record_exists: false })).label, "缺社保");
+  assert.equal(rowState(row({ housing_record_exists: false })).label, "缺公积金");
+  assert.equal(rowState(row({ social_record_exists: false, housing_record_exists: false })).label, "缺社保公积金");
 });
 
 test("submitted and external slips are locked; a draft can be saved only when both records exist", () => {

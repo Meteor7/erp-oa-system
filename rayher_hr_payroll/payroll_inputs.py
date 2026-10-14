@@ -229,7 +229,7 @@ def tax_basis(employee, company, period, exclude=None):
     if pending:
         warnings.append("还没确认的工资：" + "、".join(pending) + "；个税累计没算它们，先确认前面的月份")
     if int(month[5:]) > 1 and not prior["months"] and not profile:
-        warnings.append(f"{year} 年之前月份的累计数没有录入（个税资料），本月个税按今年第一个月算，可能偏少")
+        warnings.append(f"今年 1–{int(month[5:]) - 1} 月的累计数没有录入（个税资料里的期初累计），本月个税按今年第一个月算，可能偏少")
     return {
         "tax_period": month, "year": year, "prior": prior, "low_income": bool(profile.get("low_income_rule")),
         "special_additional": _num(profile.get("special_total")), "other": _num(profile.get("other_deduction")),

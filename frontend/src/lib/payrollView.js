@@ -18,7 +18,8 @@ export function rowState(row) {
   if (Number(row?.docstatus) === 1) return { key: 'submitted', label: '已确认', tone: 'p-jade' };
   if (row?.salary_slip) return row.managed ? { key: 'draft', label: '草稿', tone: 'p-cobalt' } : { key: 'external', label: '外部草稿', tone: 'p-sun' };
   const noSocial = !row?.social_record_exists, noFund = !row?.housing_record_exists;
-  if (noSocial || noFund) return { key: 'blocked', label: noSocial && noFund ? '缺社保公积金记录' : noSocial ? '缺社保记录' : '缺公积金记录', tone: 'p-red' };
+  // 社保公积金算不出来（档案没有基数、公司当年政策没配置，原因在 social_missing / fund_missing）
+  if (noSocial || noFund) return { key: 'blocked', label: noSocial && noFund ? '缺社保公积金' : noSocial ? '缺社保' : '缺公积金', tone: 'p-red' };
   return { key: 'new', label: '未生成', tone: 'p-gray' };
 }
 
