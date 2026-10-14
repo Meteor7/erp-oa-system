@@ -281,7 +281,9 @@ def test_headcount_cards(monkeypatch):
     assert (left["value"], left["sub"]) == ("1", "另有 1 人离职日在本月、还没到")
     assert left["target"] == {"key": "personnel.left_month", "params": {}}
     away = run(ctx, "hr.away_today")
-    assert (away["value"], away["sub"], away["target"]["key"]) == ("3", "事假 2 · 调休 1", "attendance.today")
+    # 2026-10-14：人事经理岗位在考勤中心首页看得到全公司的人名，点进去落在「谁不在 · 今天」；只有 HR 角色的人仍进“今天不在岗”的列表
+    assert (away["value"], away["sub"], away["target"]["key"]) == ("3", "事假 2 · 调休 1", "attendance.away")
+    assert run(make_ctx(positions=frozenset()), "hr.away_today")["target"]["key"] == "attendance.today"
 
 
 def test_joined_and_left_cards_do_not_point_at_this_month_filter_for_another_month(monkeypatch):
@@ -404,7 +406,9 @@ def test_headcount_and_leave_blocks(monkeypatch):
     assert dept["rows"][0]["pct"] == 100 and dept["rows"][1]["pct"] == 50
     leave = run(ctx, "block.leave_types")
     assert [(r["label"], r["value"]) for r in leave["rows"]] == [("事假", "1.5"), ("年假", "1")]
-    assert leave["rows"][0]["pct"] == 100 and leave["target"] == {"key": "drill", "params": {"item": "att.leave", "period": PERIOD}}
+    # 2026-10-14：点进去是考勤中心「N 月」概览的请假（选好月份）；只有 HR 角色、没有岗位的人首页看不到别人，仍进按部门的明细
+    assert leave["rows"][0]["pct"] == 100 and leave["target"] == {"key": "attendance.month", "params": {"metric": "leave", "month": PERIOD}}
+    assert run(make_ctx(positions=frozenset()), "block.leave_types")["target"] == {"key": "drill", "params": {"item": "att.leave", "period": PERIOD}}
     assert "÷ 8" in leave["hint"]
 
 

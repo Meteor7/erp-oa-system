@@ -126,7 +126,9 @@ def test_every_company_leave_number_adds_up_to_the_same_total(company_leave):
     ctx = make_ctx()
     card = run("att.leave", ctx)
     assert (card["value"], card["unit"], card["sub"]) == ("2.5", "天", "另有调休 1 天")
-    drill = detail_of(ctx, card)
+    # 2026-10-14：卡片直接进考勤中心「N 月」概览；按部门的清单留给旧链接，合计不变
+    assert card["target"] == {"key": "attendance.month", "params": {"metric": "leave", "month": "2026-10"}}
+    drill = core.get_detail_for(ctx, "att.leave")
     assert drill["summary"] == "共 3 张，合计 2.5 天"
     assert [row_["cells"] for row_ in drill["rows"]] == [["研发软件部", "2 张", "2 天"], ["客服部", "1 张", "0.5 天"]]
     depts = run("block.att_depts", ctx)
@@ -134,10 +136,10 @@ def test_every_company_leave_number_adds_up_to_the_same_total(company_leave):
     assert depts["target"] == card["target"] and "不含调休" in depts["hint"] and "员工档案" in depts["hint"]
     types = run("block.leave_types", ctx)
     assert sum(float(item["value"]) for item in types["rows"]) == 2.5 and "另有调休 1 天" in types["sub"]
-    assert all(item["label"] != "调休" for item in types["rows"])
-    # 别的月份：考勤中心只看当月，明细里的行就不能再点
+    assert all(item["label"] != "调休" for item in types["rows"]) and types["target"] == card["target"]
+    # 别的月份：考勤中心的「N 月」概览也能看别的月份，明细里的行带着那个月份进去
     other = core.get_detail_for(make_ctx(period="2026-09"), "att.leave")
-    assert all(row_["target"] is None for row_ in other["rows"])
+    assert all(row_["target"] == {"key": "attendance.month", "params": {"metric": "leave", "month": "2026-09"}} for row_ in other["rows"])
 
 
 # ================================================================ 今天不在岗：一个函数
@@ -168,7 +170,9 @@ def test_company_away_today_card_and_list_are_the_same_people(monkeypatch):
         "trip": [{"employee": "D", "employee_name": "丁", "request": "T-D"}]})
     card = run("hr.away_today", make_ctx())
     assert (card["value"], card["sub"]) == ("3", "年假 2 · 调休 1 · 另有出差 1")
-    assert card["target"] == {"key": "attendance.today", "params": {}}
+    # 2026-10-14：人事经理 / 副总 / 总经理进考勤中心首页「谁不在 · 今天」；只有 HR 角色的人仍进“今天不在岗”的列表
+    assert card["target"] == {"key": "attendance.away", "params": {}}
+    assert run("hr.away_today", make_ctx(positions=frozenset()))["target"] == {"key": "attendance.today", "params": {}}
     assert "一人只算一次" in card["hint"] and "出差不算不在岗" in card["hint"]
 
 

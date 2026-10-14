@@ -20,12 +20,12 @@ def section(title, sub="", kpis=(), blocks=()):
     return {"title": title, "sub": sub, "kpis": list(kpis), "blocks": list(blocks)}
 
 
-# 人事页签：人员 / 考勤 两段（考勤只有汇总，没有人名；点进考勤中心再点部门才看到人名）。
+# 人事页签：人员 / 考勤 两段（看板上考勤只有汇总；点卡片进考勤中心首页对应的那一块，人名在那里，决定 2026-10-14）。
 # 2026-10-13 排版：人员段 4 张卡（加上“60 天内到期”）；考勤段 6 张卡，正好 3 列 × 2 排，本月请假 / 本月加班都能点开明细。
 # 宿舍块只给没有宿舍页签的人（总经理 / 副总）；人事经理有自己的宿舍页签，这里不重复。
 _PEOPLE_SECTION = section("人员", "在职、合同、宿舍", kpis=["hr.active", "hr.joined_left", "hr.left_month", "hr.expiring"],
                           blocks=["block.dept_headcount", "block.expiring_list", "block.dorm_summary"])
-_ATTENDANCE_SECTION = section("考勤", "只有人数和天数，不显示人名；要看是谁，点进考勤中心",
+_ATTENDANCE_SECTION = section("考勤", "这里只有人数和天数；要看是谁，点卡片进考勤中心",
                               kpis=["hr.away_today", "att.trip", "att.pending", "att.rate", "att.leave", "att.overtime"],
                               blocks=["block.leave_types", "block.att_depts", "block.att_trend"])
 _PEOPLE_TAB = tab("people", "人事", sections=[_PEOPLE_SECTION, _ATTENDANCE_SECTION])

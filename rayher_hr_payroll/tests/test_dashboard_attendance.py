@@ -1,4 +1,4 @@
-"""看板人事页的“考勤”一段：只有汇总，没有人名。"""
+"""看板人事页的“考勤”一段：看板上只有汇总（人数、天数）；点卡片进考勤中心首页对应的那一块，人名在那里（决定 2026-10-14）。"""
 import json
 from types import SimpleNamespace
 
@@ -131,18 +131,50 @@ def test_every_card_opens_a_list_that_adds_up_to_the_number_on_the_card(state):
     assert len(old["rows"]) == 3 and old["summary"] == "共 3 张，都等了超过 3 天"
     assert all(row["tone"] == "bad" for row in old["rows"])
 
-    card, detail = open_list("att.leave")
-    # 2026-10-13：部门清单和卡片同一份数（people._leave_stats），部门按员工档案，合计等于卡片
+    # 2026-10-14：本月请假 / 加班直接进考勤中心「N 月」概览（选好类型和月份），出差中进「谁不在」选好出差；不再进按部门的数字清单
+    assert run("att.leave", ctx)["target"] == {"key": "attendance.month", "params": {"metric": "leave", "month": "2026-10"}}
+    assert run("att.overtime", ctx)["target"] == {"key": "attendance.month", "params": {"metric": "ot", "month": "2026-10"}}
+    assert run("att.leave", make_ctx(period="2026-09"))["target"]["params"] == {"metric": "leave", "month": "2026-09"}   # 看板选了别的月份就带过去
+    assert run("att.trip", ctx)["target"] == {"key": "attendance.away", "params": {"tile": "trip"}}
+    for key in ("att.leave", "att.overtime", "att.trip", "att.rate"):
+        assert run(key, ctx)["target"]["key"] != "drill", key
+
+    # 旧链接（按部门的清单）照样能打开，合计还是和卡片同一份数；每一行进考勤中心的同一块概览
+    detail = core.get_detail_for(ctx, "att.leave")
     assert [row["cells"] for row in detail["rows"]] == [["研发软件部", "3 张", "16 天"], ["研发算法部", "2 张", "9 天"]]
-    assert detail["summary"] == "共 5 张，合计 25 天" and card["value"] == "25"
-    card, detail = open_list("att.overtime")
+    assert detail["summary"] == "共 5 张，合计 25 天" and run("att.leave", ctx)["value"] == "25"
+    assert detail["rows"][0]["target"] == {"key": "attendance.month", "params": {"metric": "leave", "month": "2026-10"}}
+    detail = core.get_detail_for(ctx, "att.overtime")
     assert [row["cells"] for row in detail["rows"]] == [["研发软件部", "2 张", "5 天"], ["客服部", "1 张", "2 天"], ["研发算法部", "1 张", "1 天"]]
-    assert detail["summary"] == "共 4 张，合计 8 天" and card["value"] == "8"
+    assert detail["summary"] == "共 4 张，合计 8 天" and run("att.overtime", ctx)["value"] == "8"
     # 出差：一人一行，每一行进那张出差申请（出差申请在考勤中心里）；条数和卡片上的人数一样。
-    card, detail = open_list("att.trip")
+    detail = core.get_detail_for(ctx, "att.trip")
+    card = run("att.trip", ctx)
     assert [row["cells"] for row in detail["rows"]] == [["演示员工117", "研发软件部", "上海", "10-12 ～ 10-13", "OA-T1"], ["演示员工172", "客服部", "杭州", "10-12", "OA-T2"]]
     assert detail["summary"] == f"共 {card['value']} 人" and len(detail["rows"]) == int(card["value"]) == 2
     assert [row["target"] for row in detail["rows"]] == [{"key": "attendance.detail", "params": {"request": "OA-T1"}}, {"key": "attendance.detail", "params": {"request": "OA-T2"}}]
+
+
+def test_hr_users_without_a_company_position_still_open_the_old_lists(state):
+    """只有 HR 角色、没有人事经理 / 副总 / 总经理岗位的人：考勤中心首页只看到自己，卡片仍然进按部门 / 一人一行的清单。"""
+    ctx = make_ctx(positions=frozenset())
+    assert run("att.leave", ctx)["target"] == {"key": "drill", "params": {"item": "att.leave", "period": "2026-10"}}
+    assert run("att.overtime", ctx)["target"] == {"key": "drill", "params": {"item": "att.overtime", "period": "2026-10"}}
+    assert run("att.trip", ctx)["target"] == {"key": "drill", "params": {"item": "att.trip", "period": "2026-10"}}
+    assert core.get_detail_for(ctx, "att.leave")["rows"][0]["target"] == {"key": "attendance.home", "params": {}}
+    for position in ("hr_manager", "vice_manager", "general_manager"):
+        assert run("att.leave", make_ctx(positions=frozenset({position})))["target"]["key"] == "attendance.month", position
+    assert run("att.leave", make_ctx(user="Administrator", positions=frozenset()))["target"]["key"] == "attendance.month"
+
+
+def test_month_figures_on_the_cards_have_one_decimal_like_the_attendance_centre(state):
+    """卡片上的天数保留一位小数（四舍五入），和考勤中心「N 月」概览的写法一样：0.25 天 → 0.3，1.38 → 1.4，2.5 → 2.5。"""
+    state["stats"] = {**state["stats"], "totals": {"leave_days": 1.38, "leave_count": 2, "overtime_days": 0.25, "comp_days": 0.06}}
+    ctx = make_ctx()
+    leave = run("att.leave", ctx)
+    assert (leave["value"], leave["sub"]) == ("1.4", "另有调休 0.1 天")
+    assert run("att.overtime", ctx)["value"] == "0.3"
+    assert [attendance._d1(value) for value in (0, 2.5, 10, 0.05, 0.94, 12.25)] == ["0", "2.5", "10", "0.1", "0.9", "12.3"]
 
 
 def test_the_waiting_numbers_cover_trip_requests_like_the_attendance_centre_list(monkeypatch):
@@ -191,7 +223,8 @@ def test_the_company_summary_is_fetched_once(state):
 def test_departments_bars_rank_by_leave_days_and_hide_departments_without_leave(state):
     block = run("block.att_depts", make_ctx())
     assert [(r["label"], r["value"], r["pct"]) for r in block["rows"]] == [("研发软件部", "16 天", 100.0), ("研发算法部", "9 天", 56.2)]
-    assert "没有人名" in block["sub"] and block["target"] == {"key": "drill", "params": {"item": "att.leave", "period": "2026-10"}}
+    # 2026-10-14：点进去是考勤中心「N 月」概览的请假，在那里按部门点开就是人名
+    assert block["sub"] == "天 · 按部门" and block["target"] == {"key": "attendance.month", "params": {"metric": "leave", "month": "2026-10"}}
     state["stats"] = {**state["stats"], "by_department": []}
     assert run("block.att_depts", make_ctx()) is None
 

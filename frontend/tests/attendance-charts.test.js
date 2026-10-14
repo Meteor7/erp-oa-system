@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
-  CHARTS_KEY, attendanceRate, avatarKind, awayList, cellClass, cellTitle, donutArcs, hoursByKind, longDate, monthBars, offPerDay,
-  quotaRows, rankDepartments, topDepartments, rateTone, ratePercent, readChartsOpen, rowKind, sparklinePoints, stackColumns, stripTitle, todayParts,
-  totalHours, waitBuckets, writeChartsOpen,
+  CHARTS_KEY, attendanceRate, avatarKind, cellClass, cellTitle, donutArcs, hoursByKind, monthBars, offPerDay,
+  quotaRows, rateTone, ratePercent, readChartsOpen, rowKind, sparklinePoints, stripTitle, todayParts,
+  totalHours, writeChartsOpen,
 } from "../src/lib/attendanceCharts.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -31,46 +31,9 @@ test("leave hours by type keep the fixed order and drop the empty types", () => 
   assert.deepEqual(hoursByKind(undefined), []);
 });
 
-test("people off per day, and the stacked columns scale to the busiest day", () => {
-  const days = [
-    { date: "2026-10-15", day: 15, label: "10/15", weekday: "四", off_day: false, off: 1, by_kind: { annual: 1, trip: 1 } },
-    { date: "2026-10-16", day: 16, label: "10/16", weekday: "五", off_day: false, off: 2, by_kind: { personal: 2 } },
-    { date: "2026-10-17", day: 17, label: "10/17", weekday: "六", off_day: true, off: 0, by_kind: {} },
-  ];
+test("people off per day", () => {
+  const days = [{ off: 1 }, { off: 2 }, { off: 0 }];
   assert.deepEqual(offPerDay(days), [1, 2, 0]);
-  const columns = stackColumns(days, 76);
-  assert.deepEqual(columns[0].segments.map((item) => [item.kind, item.count, item.height]), [["annual", 1, 38], ["trip", 1, 38]]);   // 从下到上：请假在下，出差在上
-  assert.deepEqual(columns[1].segments.map((item) => [item.kind, item.height]), [["personal", 76]]);
-  assert.equal(columns[0].title, "10/15 周四：年假 1 人，出差 1 人");
-  assert.equal(columns[2].title, "10/17 周六：全员在岗");
-  assert.equal(columns[2].offDay, true);
-  assert.deepEqual(columns[2].segments, []);
-  assert.deepEqual(stackColumns([], 76), []);
-});
-
-test("pending requests are bucketed by how long they have waited", () => {
-  const now = Date.parse("2026-10-15T12:00:00");
-  const rows = [
-    { submitted_on: "2026-10-15 08:00:00" },          // 4 小时
-    { submitted_on: "2026-10-14 12:00:00" },          // 正好 1 天
-    { submitted_on: "2026-10-13 12:00:00" },          // 2 天
-    { submitted_on: "2026-10-12 11:00:00" },          // 3 天多
-    {},
-  ];
-  const result = waitBuckets(rows, now);
-  assert.deepEqual(result.buckets.map((item) => [item.key, item.count]), [["fresh", 1], ["mid", 2], ["late", 1]]);
-  assert.equal(result.late, 1);
-  assert.equal(result.average, 1.6);
-  assert.deepEqual(waitBuckets([], now), { buckets: [{ key: "fresh", label: "不到 1 天", count: 0 }, { key: "mid", label: "1–3 天", count: 0 }, { key: "late", label: "超过 3 天", count: 0 }], average: 0, late: 0 });
-});
-
-test("departments rank by the month's leave hours, then headcount, then name", () => {
-  const list = [{ label: "乙", month_hours: 8, headcount: 3 }, { label: "甲", month_hours: 16, headcount: 2 }, { label: "丙", month_hours: 8, headcount: 5 }];
-  assert.deepEqual(rankDepartments(list).map((item) => item.label), ["甲", "丙", "乙"]);
-  assert.deepEqual(rankDepartments(list, "headcount").map((item) => item.label), ["丙", "乙", "甲"]);
-  assert.deepEqual(list.map((item) => item.label), ["乙", "甲", "丙"]);       // 不改原数组
-  assert.deepEqual(topDepartments(list, 2).map((item) => item.label), ["甲", "丙"]);   // 柱状图只列前几个
-  assert.equal(topDepartments(Array.from({ length: 20 }, (_, index) => ({ label: String(index), month_hours: index })), 8).length, 8);
 });
 
 test("donut arcs fill the circle in order, the sparkline and the month bars scale", () => {
@@ -99,19 +62,6 @@ test("the quota rows: bars for annual leave and comp time, words for personal le
 test("today's bar: in / off / trip as shares of the headcount", () => {
   assert.deepEqual(todayParts({ in: 2, off: 1, trip: 1 }, 4).map((part) => [part.key, part.count, part.pct]), [["in", 2, 50], ["off", 1, 25], ["trip", 1, 25]]);
   assert.deepEqual(todayParts({ in: 0, off: 0, trip: 0 }, 0).map((part) => part.pct), [0, 0, 0]);
-  assert.equal(longDate("2026-10-05"), "10 月 5 日");
-  assert.equal(longDate(""), "");
-});
-
-test("who is away in the next five days: approved leave, comp time and trips only, most days first", () => {
-  const leave = (kind, pending = false) => ({ kind, pending, hours: 8 });
-  const members = [
-    { id: "A", name: "甲", cells: [leave("annual"), leave("annual"), null, null, null, leave("sick")] },
-    { id: "B", name: "乙", cells: [null, leave("sick", true), leave("ot"), leave("trip"), null] },
-    { id: "C", name: "丙", cells: [null, null, null, null, null, leave("comp")] },
-  ];
-  assert.deepEqual(awayList(members, 0, 5), [{ id: "A", name: "甲", kinds: ["annual"], days: 2 }, { id: "B", name: "乙", kinds: ["trip"], days: 1 }]);
-  assert.deepEqual(awayList([], 0, 5), []);
 });
 
 test("calendar cells: weekend tint, type colour, dashed-looking pending, and readable titles", () => {
@@ -161,58 +111,82 @@ const section = (text, from, to) => {
   return text.slice(start, end);
 };
 
-test("the employee view has no team calendar and no department table; the company home renders no calendar", () => {
+test("the employee view is unchanged and has no team data; the team and company views get the new panels, the calendar stays where it was", () => {
   const home = read("../src/components/attendance/AttendanceHome.vue");
-  const employee = section(home, "<!-- 员工：", "<!-- 部门主管：");
+  const employee = section(home, "<!-- 员工：", "<template v-else>");
+  const shared = section(home, "<!-- 顶上的筛选：", "<!-- 部门主管：");
   const manager = section(home, "<!-- 部门主管：", "<!-- 人事 / 领导：");
   const company = section(home, "<!-- 人事 / 领导：", "<!-- 点进某个部门：");
   const dept = section(home, "<!-- 点进某个部门：", "");
-  for (const name of ["AttendanceCalendar", "AttendanceDeptTable", "AttendanceAway"]) assert.doesNotMatch(employee, new RegExp(name), `employee: ${name}`);
-  assert.match(employee, /<AttendanceMyStrip/);
-  assert.match(employee, /<AttendanceMineCard/);
-  assert.match(manager, /<AttendanceCalendar/);
-  assert.doesNotMatch(manager, /AttendanceDeptTable/);
-  for (const name of ["AttendanceCalendar", "AttendanceAway", "AttendanceMyStrip"]) assert.doesNotMatch(company, new RegExp(name), `company: ${name}`);
-  assert.match(company, /<AttendanceDeptTable/);
-  assert.match(dept, /<AttendanceCalendar/);
-  assert.match(dept, /<AttendanceAway/);
-  // 员工用的是 personal，没有任何团队数据；部门概况只传汇总，日历只吃 detail 里的成员
+  // 员工：和原来一样（指标栏、可收起的图表、我的申请、我未来 14 天），没有任何团队的东西
+  for (const name of ["AttendanceCalendar", "AttendanceDeptTable", "AttendanceAwayPanel", "AttendanceAwayChart", "AttendanceMonthPanel", "AttendanceNearList", "requests"]) {
+    assert.doesNotMatch(employee, new RegExp(name), `employee: ${name}`);
+  }
+  for (const name of ["<AttendanceMetrics", "<AttendanceCharts", "<AttendanceMyStrip", "<AttendanceMineCard"]) assert.match(employee, new RegExp(name), name);
+  // 团队 / 全公司 / 部门：谁不在 + 未来 14 天 + N 月，都吃按部门 / 姓名筛过的明细
+  for (const name of ["AttendanceAwayPanel", "AttendanceAwayChart", "AttendanceMonthPanel"]) assert.match(shared, new RegExp(`<${name}\\s+:rows="scoped"`), name);
+  assert.match(home, /const scoped = computed\(\(\) => scopeRows\(props\.requests\?\.rows, \{ dept: view\.value === 'dept' \? props\.drillDept : '', q: state\.value\.q \}\)\);/);
+  // 部门主管：待我审批、近 5 个工作日、团队日历（日历还在右边，和原来一样）；还留着他自己的年假可用和待我审批
+  assert.match(manager, /<AttendanceQueue[\s\S]*<AttendanceNearList[\s\S]*<AttendanceCalendar title="我的团队 · 未来 14 天"/);
+  assert.match(home, /if \(view\.value === 'manager'\) return \[\.\.\.\(props\.hasEmployee \? \[annualItem\.value\] : \[\]\), todoItem\.value\];/);
+  // 全公司：部门概况（和原来一样）+ 待我审批；没有日历
+  assert.match(company, /<AttendanceDeptTable :departments="summary\?\.departments \|\| \[\]"/);
+  assert.match(company, /<AttendanceQueue/);
+  assert.doesNotMatch(company, /AttendanceCalendar|members/);
+  // 部门：谁在哪天不在（日历在左边，和原来一样）+ 这个部门的待审批 + 近 5 个工作日（换掉原来的近 5 天不在岗）
+  assert.match(dept, /<AttendanceCalendar title="谁在哪天不在" :note="`\$\{detail\?\.headcount \|\| 0\} 人`" :days="stats\?\.days \|\| \[\]" :members="detail\?\.members \|\| \[\]" \/>/);
+  assert.match(dept, /title="这个部门的待审批"/);
+  assert.match(dept, /<AttendanceNearList/);
+  assert.doesNotMatch(home, /AttendanceAway\b|AttendanceAway\.vue|awayList/);
+  // 员工用的是 personal，没有任何团队数据；部门概况只传汇总
   assert.match(home, /const personal = computed\(\(\) => props\.board\?\.personal/);
-  assert.match(company, /:departments="summary\?\.departments/);
-  assert.doesNotMatch(company, /members/);
   const table = read("../src/components/attendance/AttendanceDeptTable.vue");
   assert.doesNotMatch(table, /members|employee_name|\.cells/);
   assert.match(table, /@click="emit\('pick', item\.department\)"/);
+  // 日历组件没有改：所有成员、同样的列和图例
+  const calendar = read("../src/components/attendance/AttendanceCalendar.vue");
+  assert.match(calendar, /<span>淡色 = 审批中（不计入统计）<\/span><span class="t0">橙色日期是今天<\/span>/);
+  assert.match(calendar, /<tr v-for="member in members" :key="member\.id">/);
 });
 
-test("the charts are plain SVG and CSS, remembered open/closed, and each identity gets its own three columns", () => {
-  for (const name of ["AttendanceCharts", "AttendanceDonut", "AttendanceDayStack", "AttendanceCalendar", "AttendanceDeptTable", "AttendanceMyStrip", "AttendanceMetrics", "AttendanceQueue", "AttendanceAway"]) {
+test("the charts are plain SVG and CSS; the employee panel is remembered open/closed", () => {
+  for (const name of ["AttendanceCharts", "AttendanceDonut", "AttendanceCalendar", "AttendanceDeptTable", "AttendanceMyStrip", "AttendanceMetrics", "AttendanceQueue",
+    "AttendanceAwayPanel", "AttendanceAwayChart", "AttendanceMonthPanel", "AttendanceNearList"]) {
     const source = read(`../src/components/attendance/${name}.vue`);
     assert.doesNotMatch(source, /from ['"](echarts|chart\.js|d3|apexcharts)/i, name);
   }
   const charts = read("../src/components/attendance/AttendanceCharts.vue");
-  for (const text of ["我的额度", "我今年的请假构成", "近 6 个月请假", "待我审批等了多久", "各部门本月请假", "本月请假类型", "14 天"]) assert.ok(charts.includes(text), text);
-  assert.match(charts, /kind === 'employee'/);
-  assert.match(charts, /kind === 'company'/);
-  assert.match(charts, /topDepartments\(props\.departments\)/);
+  for (const text of ["我的额度", "我今年的请假构成", "近 6 个月请假"]) assert.ok(charts.includes(text), text);
+  // 原来给部门主管 / 人事的三栏（待我审批等了多久、各部门本月请假、请假类型、14 天堆叠）换成了新的几块
+  for (const text of ["待我审批等了多久", "各部门本月请假", "AttendanceDayStack", "topDepartments"]) assert.ok(!charts.includes(text), text);
   const home = read("../src/components/attendance/AttendanceHome.vue");
   assert.match(home, /readChartsOpen\(\)/);
   assert.match(home, /writeChartsOpen\(chartsOpen\.value\)/);
-  for (const text of ["收起图表", "展开图表", "仅显示你自己的数据", "先看部门汇总；点进某个部门才显示具体的人", "图表只统计这个部门"]) assert.ok(home.includes(text), text);
-  assert.match(home, /@dept="|emit\('dept'/);
+  for (const text of ["收起图表", "展开图表", "仅显示你自己的数据", "只显示你的团队：汇报关系向下的在职员工", "搜姓名"]) assert.ok(home.includes(text), text);
+  assert.match(home, /<select v-if="view !== 'manager'" v-model="deptChoice"/);   // 部门选择 = 点进部门（部门主管没有）
+  assert.match(home, /set: \(department\) => emit\('dept', department\)/);
+  const chart = read("../src/components/attendance/AttendanceAwayChart.vue");
+  assert.match(chart, /col\.offDay \? '休' : col\.weekday/);
+  assert.match(chart, /\['dl', \{ t0: col\.today \}\]/);
+  assert.match(chart, /v-if="col\.total"/);                                   // 一根柱子上面只写一个数，0 不写
+  assert.doesNotMatch(chart, /\+\{\{|pending/);                               // 审批中的不画，也没有 +N
 });
 
-test("the page loads the board and the drilled department with latest-wins tokens, and clears the drill on a refusal", () => {
+test("the page loads the board, the request rows and the chosen department with latest-wins tokens", () => {
   const page = read("../src/pages/AttendanceCenter.vue");
   assert.match(page, /api\.board\(\)/);
   assert.match(page, /api\.department\(department\)/);
+  assert.match(page, /api\.requests\(\{ month: homeState\.value\.month \}\)/);
   assert.match(page, /latest\.drill\.isCurrent\(token\)/);
-  assert.match(page, /drillDept\.value = '';\s*drill\.value = null;/);
-  assert.match(page, /:board="board" :drill-dept="drillDept" :drill="drill"/);
-  assert.match(page, /@dept="pickDept"/);
+  // 选的部门在地址里（dept）：取不到就回到全公司
+  assert.match(page, /const drillDept = computed\(\(\) => \(board\.value\?\.level === 'company' \? homeState\.value\.dept : ''\)\);/);
+  assert.match(page, /drill\.value = null;\s*setHome\(\{ dept: '' \}\);/);
+  assert.match(page, /:board="board" :drill-dept="drillDept" :drill="drill" :requests="requests" :home-state="homeState"/);
+  assert.match(page, /@dept="pickDept" @home="onHome"/);
+  assert.match(page, /if \(view\.value === 'home'\) return \{ kind: 'home', scope: '', filter: 'all', home: page\.value\.home \};/);
   assert.match(page, /attendanceBoardUi\.css/);
   const view = read("../src/lib/attendanceView.js");
-  for (const name of ["get_attendance_board", "get_department_attendance"]) assert.match(view, new RegExp(`attendance_board_entry\\.${name}`));
+  for (const name of ["get_attendance_board", "get_department_attendance", "get_attendance_requests"]) assert.match(view, new RegExp(`attendance_board_entry\\.${name}`));
 });
 
 test("the style sheet covers the type colours and a dark theme, scoped under .acx", () => {
@@ -224,7 +198,7 @@ test("the style sheet covers the type colours and a dark theme, scoped under .ac
   assert.doesNotMatch(css, /\.ac-cal [^{]*t0[^{]*\{[^}]*(outline|border)/);                     // 不描边
   assert.match(css, /\.ac-cal td\.we \{ background: var\(--ac-we\); \}/);                        // 周末格子很浅的底色
   // expenseUi.css 里 .xp .r 是右对齐、.xp .bar 是 6px 高的进度条：这一页的布局类名不能撞上（部门表的数字列要右对齐，故意用 .r）
-  for (const name of ["AttendanceCharts", "AttendanceQueue", "AttendanceCalendar", "AttendanceHome"]) {
+  for (const name of ["AttendanceCharts", "AttendanceQueue", "AttendanceCalendar", "AttendanceHome", "AttendanceAwayPanel", "AttendanceAwayChart", "AttendanceMonthPanel", "AttendanceNearList"]) {
     assert.doesNotMatch(read(`../src/components/attendance/${name}.vue`), /class="(bar|r)"/, name);
   }
   const bare = css.split("\n").filter((line) => /^\s*\.[a-z]/.test(line) && !line.includes(".acx"));

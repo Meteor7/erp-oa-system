@@ -1,11 +1,12 @@
 <script setup>
 // 请假 · 加班 · 调休 · 出差（考勤中心）：同一个页面四个视图，用路径和查询参数区分（2026-10-08 按确认的原型改版）。
 //   路径决定类型：/approval/leave | overtime | comp-time | travel（侧栏高亮跟着走；出差申请 2026-10-13 并进考勤中心，地址不变）；
-//   ?view=home 首页；?view=list&scope=todo|mine|done|all&type=请假|加班|调休|all 列表；
+//   ?view=home 首页（首页自己的状态也在地址里：dept / q / period / day / tile / chart / metric / month / odept / opart / oweek / section，
+//   见 attendanceHome.HOME_KEYS；看板的卡片靠它直接点进「谁不在」「N 月」）；?view=list&scope=todo|mine|done|all&type=请假|加班|调休|all 列表；
 //   ?request=单号（或 /approval/<类型>/<单号>）详情；?view=new&type=…[&draft=单号] 新建（缺类型先让用户选）。
-//   来源用 from=list&fscope=&ftype= / from=home 带着走，详情和新建页的"返回"、取消回到原处。
-// 提交、审批、驳回、撤回沿用 oa_entry 的接口，数据取自 attendance_entry；首页的图表和团队日历取自 attendance_board_entry
-// （服务端按身份只给能看的范围：员工只有自己、部门主管只有本部门、人事和管理层先是各部门汇总，点进部门才有人名）。
+//   来源用 from=list&fscope=&ftype= / from=home（加上 fdept、fperiod……首页的状态）带着走，详情和新建页的"返回"、取消回到原处。
+// 提交、审批、驳回、撤回沿用 oa_entry 的接口，数据取自 attendance_entry；首页的图表、团队日历和申请明细取自 attendance_board_entry
+// （服务端按身份只给能看的范围：员工只有自己、部门主管只有自己的团队、人事和管理层是全公司，决定 2026-10-14 起首页直接有人名）。
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import '../styles/expenseUi.css';
@@ -39,10 +40,15 @@ const reviewed = ref([]);
 const everyone = reactive({ items: [], names: {} });
 // 看板「今天不在岗」点进来的那批人（服务端按今天查，一人一张）。
 const awayNow = reactive({ items: [], names: {} });
-const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false, board: false, today: false });
+const loaded = reactive({ home: false, mine: false, review: false, reviewed: false, all: false, board: false, today: false, rows: false });
 const board = ref(null);
-// 人事 / 领导在首页点进的部门（服务端的部门名）和它的明细。
-const drillDept = ref('');
+// 部门主管、人事和管理层首页一张申请一行的明细（谁不在、未来 14 天、N 月、近 5 个工作日都从它算）。
+const requests = ref(null);
+// 人事 / 领导在首页选的部门（服务端的部门名，在地址的 dept 里）和它的明细（日历）。
+// 只在首页上跟着地址走：点进申请详情时保留首页的状态，返回时不用重新取部门、也不会闪一下“正在加载”。
+const homeState = ref(page.value.home);
+watch(page, (value) => { if (value.view === 'home') homeState.value = value.home; });
+const drillDept = computed(() => (board.value?.level === 'company' ? homeState.value.dept : ''));
 const drill = ref(null);
 const approval = ref(null);
 const banner = reactive({ ok: '', err: '' });
@@ -54,7 +60,7 @@ const now = ref(Date.now());
 let timer = null;
 let alive = true;
 let keepBanner = false;
-const latest = { home: createLatest(), mine: createLatest(), review: createLatest(), reviewed: createLatest(), all: createLatest(), today: createLatest(), board: createLatest(), drill: createLatest(), route: createLatest() };
+const latest = { home: createLatest(), mine: createLatest(), review: createLatest(), reviewed: createLatest(), all: createLatest(), today: createLatest(), board: createLatest(), rows: createLatest(), drill: createLatest(), route: createLatest() };
 
 const availableTypes = computed(() => home.value?.types || TYPE_ORDER);
 const hasEmployee = computed(() => Boolean(home.value?.employee));
@@ -91,6 +97,12 @@ const loadBoard = () => guarded('board', () => api.board(), (data) => { board.va
 const loadEveryone = () => guarded('all', () => api.all(), (data) => { everyone.items = data?.items || []; everyone.names = data?.names || {}; });
 const loadToday = () => guarded('today', () => api.today(), (data) => { awayNow.items = data?.items || []; awayNow.names = data?.names || {}; });
 
+// 申请明细只给部门主管、人事和管理层（员工调用会被服务端拒绝，也用不上）；部门的筛选在页面上做，换部门不用重新取。
+const canSeeRows = () => ['company', 'manager'].includes(board.value?.level);
+const loadRequests = () => (canSeeRows()
+  ? guarded('rows', () => api.requests({ month: homeState.value.month }), (data) => { requests.value = data || null; })
+  : Promise.resolve());
+
 async function loadDrill() {
   const department = drillDept.value;
   if (!department) return;
@@ -101,17 +113,19 @@ async function loadDrill() {
   } catch (failure) {
     if (latest.drill.isCurrent(token)) {
       flash('', messageOf(failure));
-      drillDept.value = '';
       drill.value = null;
+      setHome({ dept: '' });
     }
   }
 }
 
+// 首页的状态都在地址里：换筛选替换历史记录（返回键不会在筛选之间来回跳），换部门算一次跳转（返回键回到全公司）。
+function setHome(patch, { push = false } = {}) {
+  go(homeLocation(homePath, { ...homeState.value, ...patch }), { replace: !push });
+}
+
 function pickDept(department) {
-  drillDept.value = department || '';
-  drill.value = null;
-  latest.drill.begin();
-  if (department) loadDrill();
+  setHome({ dept: department || '', tile: '', odept: '', opart: '', oweek: '', section: '' }, { push: true });
 }
 
 async function loadRoute(requestType, from = '', to = '') {
@@ -127,7 +141,7 @@ async function loadRoute(requestType, from = '', to = '') {
 }
 
 function refreshLists() {
-  const jobs = [loadHome(), loadMine(), loadReview(), loadReviewed(), loadBoard()];
+  const jobs = [loadHome(), loadMine(), loadReview(), loadReviewed(), loadBoard(), loadRequests()];
   if (drillDept.value) jobs.push(loadDrill());
   if (page.value.scope === 'all' && canViewAll.value) jobs.push(loadEveryone());
   if (page.value.today && canViewAll.value) jobs.push(loadToday());
@@ -165,13 +179,15 @@ const stopGuard = router.beforeEach((to) => {
 
 function currentOrigin() {
   if (view.value === 'list') return { kind: 'list', scope: page.value.scope || 'mine', filter: page.value.filter };
-  if (view.value === 'home') return { kind: 'home', scope: '', filter: 'all' };
+  // 首页：带上它的状态（部门、谁不在的时间和类型、N 月的选择……），从申请返回时原样恢复。
+  if (view.value === 'home') return { kind: 'home', scope: '', filter: 'all', home: page.value.home };
   return null;
 }
 
 const goHome = () => go(homeLocation(homePath));
 const goList = (scope, filter) => go(listLocation({ scope, filter }, homePath));
 const goNew = (type = '') => go(newLocation({ type }, currentOrigin() || origin.value));
+const onHome = (patch) => setHome(patch || {});
 const openRow = (row) => go(detailLocation({ name: row.name, type: rowLabel(row) }, currentOrigin()));
 const continueDraft = (row) => go(newLocation({ type: rowLabel(row), draft: row.name }, currentOrigin() || origin.value));
 const goBack = () => go(backLocation(origin.value, { filter: page.value.newType || 'all', homePath }));
@@ -338,6 +354,23 @@ watch(view, (next, previous) => {
   if (['home', 'list'].includes(next) && previous && previous !== next) refreshLists();
 });
 
+// 首页：知道身份以后取申请明细；「N 月」换了月份重新取（部门、姓名的筛选在页面上做，不重新取）。
+watch(() => [board.value?.level, homeState.value.month], (next, previous) => {
+  if (!previous || next[0] !== previous[0] || next[1] !== previous[1]) loadRequests();
+});
+// 人事 / 领导选了部门（地址里的 dept）：取那个部门的日历；回到全公司就清掉。
+watch(drillDept, (department) => {
+  drill.value = null;
+  latest.drill.begin();
+  if (department) loadDrill();
+}, { immediate: true });
+// 看板的链接（section=away | month）给了只看得到自己的人：说一声，不悄悄地什么都不显示。
+watch(() => [view.value, homeState.value.section, board.value?.level], () => {
+  if (view.value === 'home' && homeState.value.section && board.value?.level === 'employee') {
+    notice.value = '「谁不在」和「N 月」概览只有部门主管、人事经理、副总经理和总经理看得到；这里只显示你自己的数据。';
+  }
+}, { immediate: true });
+
 // 新建页：审批路线按类型取；类型一换，旧类型的路线先清掉再重取（快速来回切也只认最后一次）。
 watch(newTypeRequest, (type) => {
   if (view.value === 'new') loadRoute(type);
@@ -387,8 +420,8 @@ const noEmployeeText = computed(() => home.value?.reason || '当前账号没有�
     <AttendanceHome
       v-if="view === 'home'" :home="home" :mine="mine" :review="review" :reviewed="reviewed" :loaded="loaded" :now="now" :busy="busy"
       :has-employee="hasEmployee" :is-approver="isApprover" :available-types="availableTypes" :no-employee-text="noEmployeeText" :reject-row="rejectNow"
-      :board="board" :drill-dept="drillDept" :drill="drill"
-      @dept="pickDept" @new="goNew" @list="goList" @open="openRow" @approve="approveRow" @withdraw="withdrawRow"
+      :board="board" :drill-dept="drillDept" :drill="drill" :requests="requests" :home-state="homeState"
+      @dept="pickDept" @home="onHome" @new="goNew" @list="goList" @open="openRow" @approve="approveRow" @withdraw="withdrawRow"
       @continue="continueDraft" />
 
     <AttendanceList

@@ -1,4 +1,5 @@
-"""考勤中心图表接口的权限：员工只拿到自己的，部门主管只拿到自己的团队（汇报关系向下），人事和管理层的汇总里没有人名。
+"""考勤中心图表接口的权限：员工只拿到自己的，部门主管只拿到自己的团队（汇报关系向下），
+人事和管理层看全公司——决定 2026-10-14 起首页的申请明细（get_attendance_requests）直接带人名，部门概况表仍然只有数字。
 
 这里不碰数据库：用一张内存里的员工表和申请表代替，看接口在不同身份下取了什么、返回了什么。
 """
@@ -173,7 +174,8 @@ def test_the_team_follows_the_reporting_line_not_the_department(api, monkeypatch
     assert [member["name"] for member in board(api, "x7@tests-x.example.invalid")["detail"]["members"]] == ["演示员工180", "演示员工123"]
 
 
-def test_the_company_summary_has_no_names_at_all(api):
+def test_the_department_overview_table_is_numbers_only(api):
+    # 2026-10-14 起人事和管理层在首页直接看到人名，但人名只在 get_attendance_requests 里；get_attendance_board 的部门概况表仍然只有数字。
     for user in ("hr@tests-x.example.invalid", "person014@tests-x.example.invalid", "Administrator"):
         result = board(api, user)
         assert result["level"] == "company" and set(result) == {"level", "summary"}
@@ -298,3 +300,59 @@ def test_today_trips_lists_the_people_the_company_summary_counts_as_on_a_trip(ap
     assert [(item["employee_name"], item["destination"], item["name"]) for item in trips] == [("杨员工", "上海", "OA-T1")]
     summary = entry._company_summary(TODAY)
     assert sum(int(item["today_trip"]) for item in summary["departments"]) == len(trips) == summary["stats"]["today"]["trip"]
+
+
+# ---------------------------------------------------------------- 首页的申请明细（get_attendance_requests，决定 2026-10-14）
+def requests(api, user, **kwargs):
+    entry, _scope, state = api
+    state.login(user)
+    raw = getattr(entry.get_attendance_requests, "__wrapped__", entry.get_attendance_requests)
+    return raw(**kwargs)
+
+
+def test_an_employee_gets_no_request_rows_at_all(api):
+    _entry, _scope, state = api
+    for user in ("emp@tests-x.example.invalid", "fin@tests-x.example.invalid", "nobody@tests-x.example.invalid"):
+        with pytest.raises(api[0].frappe.PermissionError, match="只有部门主管、人事和管理层"):
+            requests(api, user)
+        with pytest.raises(api[0].frappe.PermissionError):
+            requests(api, user, department="研发软件部 - RAY")
+    assert state.sql == []                                                                  # 连库都不查
+
+
+def test_a_manager_gets_only_the_team_rows_and_is_refused_other_departments(api):
+    _entry, _scope, state = api
+    result = requests(api, "mgr@tests-x.example.invalid")
+    assert (result["level"], result["label"], result["headcount"], result["department"]) == ("manager", "我的团队", 3, "")
+    assert sorted(row["employee_name"] for row in result["rows"]) == ["演示员工120", "杨员工"]
+    rows_queries = [args for query, args in state.sql if "FROM `tabOA Approval Request`" in query]
+    assert rows_queries and all(set(args["employees"]) <= {"E1", "E2", "E3"} for args in rows_queries)   # 只查了团队的人
+    assert "演示员工144" not in json.dumps(result, ensure_ascii=False)
+    assert requests(api, "mgr@tests-x.example.invalid", department="研发软件部 - RAY")["label"] == "我的团队"           # 自己的部门 = 自己的团队
+    for other in ("财务部 - RAY", "总经办 - RAY"):
+        with pytest.raises(api[0].frappe.PermissionError, match="只能查看自己团队"):
+            requests(api, "mgr@tests-x.example.invalid", department=other)
+
+
+def test_the_company_levels_get_every_name_on_the_home_page(api):
+    for user in ("hr@tests-x.example.invalid", "person014@tests-x.example.invalid", "Administrator"):
+        result = requests(api, user)
+        assert result["level"] == "company" and result["label"] == "全公司" and result["headcount"] == len(EMPLOYEES)
+        rows = {row["employee_name"]: row for row in result["rows"]}
+        assert set(rows) == {"杨员工", "演示员工120", "演示员工144"}, user                                # 不用先点进部门
+        assert rows["杨员工"]["department_label"] == "研发软件部" and rows["杨员工"]["kind"] == "annual" and rows["杨员工"]["approved"] is True
+        assert rows["杨员工"]["days"] == [[IN_TWO_DAYS, 8]]
+        assert rows["演示员工144"]["approved"] is False and rows["演示员工144"]["workflow_status"] == "待审批"  # 审批中的列出来，标好
+    finance = requests(api, "hr@tests-x.example.invalid", department="财务部 - RAY")
+    assert (finance["label"], finance["department"], [row["employee_name"] for row in finance["rows"]]) == ("财务部", "财务部 - RAY", ["演示员工144"])
+    with pytest.raises(Exception, match="找不到这个部门"):
+        requests(api, "hr@tests-x.example.invalid", department="不存在的部门")
+    with pytest.raises(Exception, match="月份格式不对"):
+        requests(api, "hr@tests-x.example.invalid", month="2026-1")
+
+
+def test_the_request_rows_follow_the_feature_gate(api, monkeypatch):
+    entry, _scope, _state = api
+    monkeypatch.setattr(entry, "can_access_request_type", lambda _type: False)
+    with pytest.raises(Exception, match="暂未开放"):
+        requests(api, "hr@tests-x.example.invalid")

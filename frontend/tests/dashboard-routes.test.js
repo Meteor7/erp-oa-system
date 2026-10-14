@@ -35,9 +35,23 @@ test("the attendance center home is a real route that reuses the attendance page
   assert.match(router, /path: '\/approval\/attendance', component: attendancePage/);
   assert.match(router, /const attendancePage = \(\) => import\('\.\/pages\/AttendanceCenter\.vue'\)/);
   // 看板的考勤目标全部落在它上面
-  for (const key of ["attendance.home", "attendance.todo", "attendance.mine", "attendance.all", "attendance.today", "attendance.detail"]) {
+  for (const key of ["attendance.home", "attendance.month", "attendance.away", "attendance.todo", "attendance.mine", "attendance.all", "attendance.today", "attendance.detail"]) {
     assert.equal(targets[key].path, ATTENDANCE_HOME_PATH, key);
   }
+});
+
+test("the attendance cards land directly on a block of the attendance home, which reads the same parameters from the address", () => {
+  // 2026-10-14：本月请假 / 加班 → 「N 月」概览（选好类型和月份）；出差中 / 今天不在岗 → 「谁不在」（出差中选好出差）
+  assert.deepEqual(targets["attendance.month"].query, { view: "home", section: "month" });
+  assert.deepEqual(targets["attendance.month"].params, ["metric", "month"]);
+  assert.deepEqual(targets["attendance.away"].query, { view: "home", section: "away" });
+  assert.deepEqual(targets["attendance.away"].params, ["tile"]);
+  const home = read("../src/lib/attendanceHome.js");
+  for (const key of ["section", "metric", "month", "tile"]) assert.match(home, new RegExp(`'${key}'`), key);
+  const page = read("../src/components/attendance/AttendanceHome.vue");
+  assert.match(page, /id="ac-month"|getElementById\(section === 'month' \? 'ac-month' : 'ac-away'\)/);
+  assert.match(read("../src/components/attendance/AttendanceMonthPanel.vue"), /id="ac-month"/);
+  assert.match(read("../src/components/attendance/AttendanceAwayPanel.vue"), /id="ac-away"/);
 });
 
 test("the attendance home opens for exactly the people who can open leave, and follows the same switch", () => {

@@ -2,8 +2,9 @@
 
 三种身份看到的东西不一样，范围由 api/attendance_board_entry.py 按身份定好以后才调用这里：
 - 员工只看自己：额度以外的"我今年请假构成""近 6 个月""未来 14 天我的安排"（build_personal）；
-- 部门主管看自己的部门：每个人 14 天的日历（build_members）和部门的汇总数字（build_stats）；
-- 人事和管理层先看各部门的汇总数字，不带人名（summarize_departments），点进某个部门才取到人名。
+- 部门主管看自己的团队：每个人 14 天的日历（build_members）、团队的汇总数字（build_stats）和一张申请一行的明细（request_rows）；
+- 人事和管理层看全公司：各部门的汇总数字（summarize_departments，部门概况表），和全公司一张申请一行的明细（request_rows，带人名，
+  决定 2026-10-14：首页直接显示是谁，不再先看部门数字、点进部门才有人名）；点进某个部门再看那个部门的日历。
 统计只算已通过的请假、调休、出差、加班；日历上审批中的也显示（虚线），但不进统计。
 """
 from __future__ import annotations
@@ -103,6 +104,20 @@ def _legacy_month_hours(row, month_first, month_last):
     return hours if month_first <= start <= month_last else ZERO
 
 
+def month_hours(row, month_first, month_last, work_dates=None):
+    """一张申请落在 [month_first, month_last] 里的小时：请假 / 调休 / 加班按逐日明细，没有明细的旧申请按 _legacy_month_hours；
+    出差没有小时数，按出发到返回之间落在这个月里的工作日、每天 8 小时（work_dates 要覆盖出差的日期）。别的类型是 0。
+    month_window（看板和考勤中心的“本月请假 / 加班”）和首页明细（request_rows）都用它，所以两边的数一定对得上。"""
+    request_type = value(row, "request_type")
+    if request_type == REQUEST_TRAVEL:
+        return sum((hours for day, hours in days_of(row, work_dates) if month_first <= day <= month_last), ZERO)
+    if request_type not in (REQUEST_LEAVE, REQUEST_COMP_TIME, REQUEST_OVERTIME):
+        return ZERO
+    if value(row, "attendance_days"):
+        return sum((hours for day, hours in days_of(row) if month_first <= day <= month_last), ZERO)
+    return _legacy_month_hours(row, month_first, month_last)
+
+
 def month_window(rows, month_first, month_last):
     """请假 / 调休 / 加班按天拆到 [month_first, month_last]：每张申请只留落在这段日期里的小时（duration_hours 换成这个数），
     一点都不落在里面的丢掉。调用方只传已批准的。
@@ -112,10 +127,7 @@ def month_window(rows, month_first, month_last):
     for row in rows:
         if value(row, "request_type") not in (REQUEST_LEAVE, REQUEST_COMP_TIME, REQUEST_OVERTIME):
             continue
-        if value(row, "attendance_days"):
-            hours = sum((hours for day, hours in days_of(row) if month_first <= day <= month_last), ZERO)
-        else:
-            hours = _legacy_month_hours(row, month_first, month_last)
+        hours = month_hours(row, month_first, month_last)
         if hours > 0:
             result.append({**dict(row), "duration_hours": float(hours)})
     return result
@@ -349,8 +361,56 @@ def department_labels(departments):
     return {name: (short[name] if counts[short[name]] == 1 else name) for name in departments}
 
 
+def _iso(raw):
+    return str(raw or "")[:10]
+
+
+def request_rows(employees, rows, *, month_first, month_last, work_dates, labels=None):
+    """考勤中心首页的明细：一张申请一行，带人名（“谁不在”“未来 14 天”“N 月概览”“近 5 个工作日”都从这一份算）。
+    只给调用方已经校验过范围的人用：人事和管理层是全公司（或选中的部门），部门主管是自己的团队。
+
+    employees：[{name, employee_name, department}]（在职的；不在里面的人的申请丢掉）；rows：这些人的申请。
+    只留审批中和已批准的（ACTIVE；草稿、撤回、驳回不要）。approved 的口径见 is_approved（出差到前台待办理算已批准），
+    没批准的前端只列出来、标“审批中”，不进人数和合计。
+    days：每天的小时 [[日期, 小时]]（出差只算工作日、每天 8 小时，work_dates 要覆盖出差的日期）；
+    month_hours：落在 [month_first, month_last] 里的小时，算法是 month_hours（和 month_window / leave_figures 同一个），
+    所以把已批准的按类型加起来，一定等于看板的“本月请假 / 本月加班”和“另有调休”。
+    返回按开始日期、部门、姓名、单号排好的 [{name, employee, employee_name, department, department_label, request_type, kind,
+    leave_type, workflow_status, approved, current_step_label, from_date, to_date, travel_destination, days, month_hours}]。
+    """
+    known = {value(employee, "name"): employee for employee in employees}
+    if labels is None:
+        labels = department_labels(sorted({value(employee, "department") or "" for employee in employees} - {""}))
+    result = []
+    for row in rows:
+        employee = value(row, "employee")
+        kind = kind_of(row)
+        if employee not in known or not kind or value(row, "workflow_status") not in ACTIVE:
+            continue
+        person = known[employee]
+        trip = kind == "trip"
+        start = value(row, "travel_start_date") if trip else value(row, "from_date")
+        end = (value(row, "travel_end_date") if trip else value(row, "to_date")) or start
+        department = value(person, "department") or ""
+        result.append({
+            "name": value(row, "name") or "", "employee": employee,
+            "employee_name": value(person, "employee_name") or value(row, "employee_name") or employee,
+            "department": department, "department_label": labels.get(department, "未分配部门") if department else "未分配部门",
+            "request_type": value(row, "request_type"), "kind": kind,
+            "leave_type": (value(row, "leave_type") or "") if value(row, "request_type") == REQUEST_LEAVE else "",
+            "workflow_status": value(row, "workflow_status"), "approved": is_approved(row),
+            "current_step_label": value(row, "current_step_label") or "",
+            "from_date": _iso(start), "to_date": _iso(end),
+            "travel_destination": (value(row, "travel_destination") or "") if trip else "",
+            "days": [[day.isoformat(), _num(hours)] for day, hours in days_of(row, work_dates)],
+            "month_hours": _num(month_hours(row, month_first, month_last, work_dates)),
+        })
+    result.sort(key=lambda item: (item["from_date"], item["department_label"], item["employee_name"], item["name"]))
+    return result
+
+
 def summarize_departments(employees, rows, pending, *, first, work_dates, month_first, month_last):
-    """公司汇总：全公司的统计 + 每个部门一行（只有数字，没有人名）。
+    """公司汇总：全公司的统计 + 每个部门一行（只有数字，部门概况表用；人名在 request_rows 里，接口另外给）。
 
     employees：[{name, department}]（在职）；rows：这些人的申请；pending：{部门: 待审批的申请张数}。
     """

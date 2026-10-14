@@ -1,7 +1,7 @@
 // 考勤中心首页图表和日历的计算（不依赖界面，便于单元测试）。
-// 数据来自 attendance_board_entry：员工拿到自己的 personal，部门主管拿到自己部门的 detail，人事和管理层先拿到各部门汇总 summary
-// （只有数字），点进部门才拿到该部门的 detail（有人名）。这里只做展示用的计算，谁能看到什么由服务端决定。
-import { waitMinutes } from './attendanceView.js';
+// 数据来自 attendance_board_entry：员工拿到自己的 personal，部门主管拿到自己团队的 detail（日历），人事和管理层拿到各部门汇总 summary
+// （部门概况表），选了某个部门再拿到那个部门的 detail。这里只做展示用的计算，谁能看到什么由服务端决定。
+// 2026-10-14：部门主管、人事和管理层首页的「谁不在」「未来 14 天」「N 月」「近 5 个工作日」在 attendanceHome.js 里算。
 
 export const HOURS_PER_DAY = 8;
 export const KINDS = Object.freeze({
@@ -9,8 +9,6 @@ export const KINDS = Object.freeze({
 });
 // 请假和调休（算不在岗）；出差、加班不算。
 export const ABSENCE_KINDS = Object.freeze(['annual', 'personal', 'sick', 'comp', 'other']);
-// 柱状图里从下到上的顺序。
-export const STACK_ORDER = Object.freeze(['annual', 'personal', 'sick', 'comp', 'other', 'trip', 'ot']);
 // 头像的底色在这六种柔色里挑（和请假类型同一套），同一个名字永远是同一种。
 const AVATAR_KINDS = ['annual', 'personal', 'sick', 'comp', 'ot', 'trip'];
 
@@ -37,12 +35,6 @@ export function attendanceRate(absentHours, headcount, workDays) {
   return Math.min(1, Math.max(0, 1 - Number(absentHours || 0) / capacity));
 }
 
-// "2026-10-15" → "10 月 15 日"
-export function longDate(iso) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
-  return match ? `${Number(match[2])} 月 ${Number(match[3])} 日` : '';
-}
-
 // 0.9156 → "91.6"
 export function ratePercent(rate) {
   return (Math.round(Number(rate || 0) * 1000) / 10).toFixed(1);
@@ -62,49 +54,6 @@ export function totalHours(items) {
 // 14 天每天不在岗（请假 + 调休）的人数。
 export function offPerDay(days) {
   return (days || []).map((day) => Number(day.off || 0));
-}
-
-// 每天一根柱子：按类型从下到上堆叠，高度按当天最多的那天缩放（maxPx 是最高柱子的像素）。
-export function stackColumns(days, maxPx = 76) {
-  const totals = (days || []).map((day) => STACK_ORDER.reduce((sum, kind) => sum + Number(day.by_kind?.[kind] || 0), 0));
-  const biggest = Math.max(1, ...totals);
-  return (days || []).map((day, index) => ({
-    date: day.date,
-    label: String(day.day ?? day.label ?? ''),
-    offDay: Boolean(day.off_day),
-    total: totals[index],
-    segments: STACK_ORDER.filter((kind) => Number(day.by_kind?.[kind] || 0) > 0)
-      .map((kind) => ({ kind, count: Number(day.by_kind[kind]), height: Math.round(Number(day.by_kind[kind]) / biggest * maxPx * 10) / 10 })),
-    title: dayTitle(day),
-  }));
-}
-
-export function dayTitle(day) {
-  const parts = STACK_ORDER.filter((kind) => Number(day?.by_kind?.[kind] || 0) > 0).map((kind) => `${KINDS[kind]} ${day.by_kind[kind]} 人`);
-  return `${day?.label || ''}${day?.weekday ? ` 周${day.weekday}` : ''}：${parts.join('，') || '全员在岗'}`;
-}
-
-// 待我审批等了多久：不到 1 天 / 1–3 天 / 超过 3 天，另给平均天数。
-export function waitBuckets(rows, now = Date.now()) {
-  const days = (rows || []).map((row) => waitMinutes(row, now)).filter((minutes) => minutes !== null).map((minutes) => minutes / 1440);
-  const buckets = [
-    { key: 'fresh', label: '不到 1 天', count: days.filter((day) => day < 1).length },
-    { key: 'mid', label: '1–3 天', count: days.filter((day) => day >= 1 && day <= 3).length },
-    { key: 'late', label: '超过 3 天', count: days.filter((day) => day > 3).length },
-  ];
-  const average = days.length ? Math.round(days.reduce((sum, day) => sum + day, 0) / days.length * 10) / 10 : 0;
-  return { buckets, average, late: buckets[2].count };
-}
-
-// 部门汇总排序：默认按本月请假小时从多到少，同样多的人多的在前，再按名字。
-export function rankDepartments(departments, key = 'month_hours') {
-  return [...(departments || [])].sort((left, right) => (Number(right[key]) || 0) - (Number(left[key]) || 0)
-    || (Number(right.headcount) || 0) - (Number(left.headcount) || 0) || String(left.label).localeCompare(String(right.label), 'zh'));
-}
-
-// 各部门柱状图只列本月请假最多的前 limit 个（部门很多时图不会拉得太长；全部部门在下面的部门概况表里）。
-export function topDepartments(departments, limit = 8) {
-  return rankDepartments(departments).slice(0, limit);
 }
 
 // 环形图：每段的 stroke-dasharray / dashoffset（半径 radius，从 12 点方向顺时针）。
@@ -176,15 +125,6 @@ export function todayParts(today, headcount) {
     { key: 'off', label: '请假', count: Number(today?.off || 0), pct: share(today?.off), color: 'personal' },
     { key: 'trip', label: '出差', count: Number(today?.trip || 0), pct: share(today?.trip), color: 'trip' },
   ];
-}
-
-// 部门日历里每个人从第 start 天起 count 天内的不在岗情况（请假、调休、出差；已通过的；加班和审批中的不算）：
-// [{id, name, kinds, days}]，按不在的天数多的在前。
-export function awayList(members, start = 0, count = 5) {
-  return (members || []).map((member) => {
-    const cells = (member.cells || []).slice(start, start + count).filter((cell) => cell && !cell.pending && cell.kind !== 'ot');
-    return { id: member.id, name: member.name, kinds: [...new Set(cells.map((cell) => cell.kind))], days: cells.length };
-  }).filter((item) => item.days > 0).sort((left, right) => right.days - left.days || String(left.name).localeCompare(String(right.name), 'zh'));
 }
 
 // 日历格子的类名：休息日浅底色；有记录按类型上色，审批中的画成虚线。

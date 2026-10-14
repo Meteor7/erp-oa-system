@@ -2,10 +2,11 @@
 
 谁能看到什么由服务端按身份定（attendance_scope.resolve_scope），页面上隐藏只是展示：
 - 员工：只返回自己的数据（额度以外的请假构成、近 6 个月、未来 14 天的安排），不返回任何同事；
-- 部门主管（有在职直接下属的人）：只返回自己的团队——汇报关系向下的在职员工，含每个人 14 天的日历；取别的部门被拒绝；
-- 人事经理 / 副总经理 / 总经理：get_attendance_board 只返回各部门的汇总数字，没有人名；
-  点进某个部门（get_department_attendance）才返回这个部门的人名和日历。
-员工调用 get_department_attendance 一律拒绝。
+- 部门主管（有在职直接下属的人）：只返回自己的团队——汇报关系向下的在职员工，含每个人 14 天的日历和一张申请一行的明细
+  （get_attendance_requests）；取别的部门被拒绝；
+- 人事经理 / 副总经理 / 总经理：决定 2026-10-14 起首页直接看到全公司的人名——get_attendance_requests 返回全公司（或选中的部门）
+  一张申请一行的明细；get_attendance_board 仍然给各部门的汇总数字（部门概况表）；点进某个部门（get_department_attendance）给那个部门的日历。
+员工调用 get_department_attendance、get_attendance_requests 一律拒绝（员工首页只看自己的）。
 审批时的"同期谁不在"（get_request_overlap）同样按身份：部门主管只有申请人在自己团队时给团队里的人名，人事和管理层给人名，其他人只给空列表。
 """
 from __future__ import annotations
@@ -42,10 +43,21 @@ def _require_open():
         frappe.throw(frappe._("当前审批功能暂未开放。"), frappe.PermissionError)
 
 
+def _months(first, last):
+    """[first, last] 经过的每个月 [(年, 月)]（first 晚于 last 时是空的）。"""
+    result = []
+    year, month = first.year, first.month
+    while (year, month) <= (last.year, last.month):
+        result.append((year, month))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return result
+
+
 def _work_dates(first, last):
-    """公司日历上 [first, last] 里的工作日。"""
+    """公司日历上 [first, last] 里的工作日。
+    修复（2026-10-14）：原来只取首尾两个月的日历，跨三个月以上的范围中间的月份一个工作日都没有；现在每个月都取。"""
     result = set()
-    for year, month in sorted({(first.year, first.month), (last.year, last.month)}):
+    for year, month in _months(first, last):
         result |= set(resolve_monthly_calendar(year, month)["work_dates"])
     return {day for day in result if first <= day <= last}
 
@@ -64,8 +76,8 @@ def _rows(employees, start, end, statuses=None):
     if not employees:
         return []
     return frappe.db.sql(
-        "SELECT name, employee, request_type, leave_type, workflow_status, from_date, to_date, attendance_days, duration_hours, "
-        "travel_start_date, travel_end_date, travel_destination FROM `tabOA Approval Request` "
+        "SELECT name, employee, employee_name, request_type, leave_type, workflow_status, current_step_label, from_date, to_date, "
+        "attendance_days, duration_hours, travel_start_date, travel_end_date, travel_destination FROM `tabOA Approval Request` "
         "WHERE employee IN %(employees)s AND request_type IN %(types)s AND workflow_status IN %(statuses)s "
         "AND ((request_type <> %(travel)s AND from_date <= %(end)s AND to_date >= %(start)s) "
         "OR (request_type = %(travel)s AND travel_start_date <= %(end)s AND travel_end_date >= %(start)s))",
@@ -171,7 +183,7 @@ def today_away(today=None, employees=None):
 
 
 def _company_summary(today):
-    """全公司和各部门的汇总数字：只有人数、小时、比例，没有人名。"""
+    """全公司和各部门的汇总数字（部门概况表、看板的考勤卡片）：只有人数、小时、比例；人名由 get_attendance_requests 另外给。"""
     window = _window(today)
     employees = frappe.get_all("Employee", filters={"status": "Active"}, fields=["name", "department"], limit_page_length=0)
     rows = _rows([employee.get("name") for employee in employees], window["start"], window["end"], APPROVED)
@@ -222,6 +234,91 @@ def get_department_attendance(department=""):
     if not detail["headcount"]:
         frappe.throw(frappe._("找不到这个部门，或部门里没有在职员工。"), frappe.DoesNotExistError)
     return {"level": scope["level"], "detail": detail}
+
+
+def _month_bounds(month, today):
+    """"YYYY-MM" → 这个月的第一天和最后一天；空就是 today 所在的月。格式不对报错。"""
+    text = str(month or "").strip()
+    if not text:
+        return board.month_start_end(today)
+    try:
+        if len(text) != 7 or text[4] != "-":
+            raise ValueError(text)
+        first = date(int(text[:4]), int(text[5:]), 1)
+    except ValueError:
+        frappe.throw(frappe._("月份格式不对，应为 YYYY-MM。"))
+    return board.month_start_end(first)
+
+
+def home_window(today):
+    """首页“谁不在（今天 / 本周）”“未来 14 天”“近 5 个工作日”要用到的日期：本周一（或今天）到今天起第 14 天（或本周日）。"""
+    monday = today - timedelta(days=today.weekday())
+    return min(today, monday), max(today + timedelta(days=board.WINDOW_DAYS - 1), monday + timedelta(days=6))
+
+
+def _scope_staff(scope, department):
+    """按身份定好的人：部门主管 = 自己的团队（department 只能空着或是自己的部门）；人事和管理层 = 全公司，或选中的那个部门。
+    返回 (在职员工 [{name, employee_name, department}], 标签)。员工不该走到这里。"""
+    if scope["level"] == MANAGER:
+        if department and department != scope["department"]:
+            frappe.throw(frappe._("部门主管只能查看自己团队的出勤。"), frappe.PermissionError)
+        return team_members(scope["employee"], include_self=True), "我的团队"
+    filters = {"status": "Active"}
+    if department:
+        filters["department"] = department
+    staff = frappe.get_all("Employee", filters=filters, fields=["name", "employee_name", "department"], order_by="name asc", limit_page_length=0)
+    if department and not staff:
+        frappe.throw(frappe._("找不到这个部门，或部门里没有在职员工。"), frappe.DoesNotExistError)
+    return staff, (board.department_labels([department])[department] if department else "全公司")
+
+
+@frappe.whitelist()
+def get_attendance_requests(month="", department=""):
+    """考勤中心首页（人事 / 领导、部门主管）的申请明细：一张申请一行，带人名。
+    “谁不在”“未来 14 天”“N 月概览”“近 5 个工作日”都在页面上从这一份算，人数和合计的口径见 attendance_board.request_rows。
+
+    范围由服务端按身份定：员工一律拒绝；部门主管只有自己的团队（汇报关系向下的在职员工，department 只能空着或是自己的部门）；
+    人事经理 / 副总经理 / 总经理看全公司（决定 2026-10-14：首页直接显示人名），department 给了就只看这个部门。
+    month 是 "YYYY-MM"，空就是站点今天所在的月（看板点进来带它所选的期间）。取的申请：和这个月重叠的，加上和
+    home_window（本周一到今天起 14 天）重叠的，按单号去重。
+    返回 {level, today, month, start, end, department, label, headcount, work_dates（start 到 end 的工作日）, rows}。
+    """
+    scope = resolve_scope()
+    _require_open()
+    if scope["level"] == EMPLOYEE:
+        frappe.throw(frappe._("只有部门主管、人事和管理层可以查看团队的申请。"), frappe.PermissionError)
+    today = site_time.today()
+    month_first, month_last = _month_bounds(month, today)
+    department = str(department or "").strip()
+    staff, label = _scope_staff(scope, department)
+    ids = [member.get("name") for member in staff]
+    start, end = home_window(today)
+    found = {}
+    for first, last in ((month_first, month_last), (start, end)):
+        for row in _rows(ids, first, last):
+            found.setdefault(row.get("name"), row)
+    rows = list(found.values())
+    # 出差按工作日算天：工作日要覆盖每张出差的日期（太长的坏数据 days_of 本来就不算）。
+    ranges = [(month_first, month_last), (start, end)]
+    for row in rows:
+        if row.get("request_type") == REQUEST_TRAVEL:
+            try:
+                first, last = att.as_date(row.get("travel_start_date")), att.as_date(row.get("travel_end_date") or row.get("travel_start_date"))
+            except ValueError:
+                continue
+            if first <= last and (last - first).days <= 366:
+                ranges.append((first, last))
+    months = sorted({key for first, last in ranges for key in _months(first, last)})
+    work_dates = set()
+    for year, number in months:
+        work_dates |= set(resolve_monthly_calendar(year, number)["work_dates"])
+    return {
+        "level": scope["level"], "today": today.isoformat(), "month": month_first.strftime("%Y-%m"),
+        "start": start.isoformat(), "end": end.isoformat(), "department": department if scope["level"] == COMPANY else "",
+        "label": label, "headcount": len(ids),
+        "work_dates": sorted(day.isoformat() for day in work_dates if start <= day <= end),
+        "rows": board.request_rows(staff, rows, month_first=month_first, month_last=month_last, work_dates=work_dates),
+    }
 
 
 @frappe.whitelist()

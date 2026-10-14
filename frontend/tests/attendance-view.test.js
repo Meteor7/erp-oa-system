@@ -524,7 +524,10 @@ test("the four views are wired: home buttons, list header, detail actions and th
   assert.match(home, /v-for="\(type, index\) in availableTypes"/);
   assert.match(home, /emit\('new', TYPES\[type\]\.label\)/);
   assert.match(home, /＋ 新建\{\{ TYPES\[type\]\.label \}\}/);
-  for (const text of ["年假可用", "调休可用", "我的申请", "待我审批", "本月已请假", "团队今日请假", "团队本月请假", "今日在岗", "出勤率", "今日请假"]) assert.ok(home.includes(text), text);
+  for (const text of ["年假可用", "调休可用", "我的申请", "待我审批", "本月已请假", "出勤率"]) assert.ok(home.includes(text), text);
+  // 2026-10-14：部门主管、人事和管理层的指标栏换成了「谁不在」「N 月」几块（数字在那里），不再重复写一遍
+  for (const text of ["团队今日请假", "团队本月请假", "今日在岗", "今日请假"]) assert.ok(!home.includes(text), text);
+  for (const name of ["AttendanceAwayPanel", "AttendanceAwayChart", "AttendanceMonthPanel", "AttendanceNearList"]) assert.match(home, new RegExp(`<${name}`), name);
   assert.match(home, /emit\('list', 'done', 'all'\)/);
   // 待我审批是一人一行的紧凑列表：驳回在行内完成（原因必填、可以选退回给谁），点一行才展开影响，按钮不会同时触发进详情
   const queue = read("../src/components/attendance/AttendanceQueue.vue");
@@ -605,6 +608,10 @@ test("the routes stay as they were, and the replaced components are gone", () =>
   assert.match(router, /path: '\/approval\/reimbursement', component: approvalPage/);
   assert.equal(exists("../src/components/attendance/AttendanceCards.vue"), false);
   assert.equal(exists("../src/components/attendance/AttendanceReview.vue"), false);
-  for (const name of ["AttendanceHome", "AttendanceList", "AttendanceDetail", "AttendanceForm", "AttendanceMineCard", "AttendanceQueue", "AttendanceCalendar", "AttendanceDeptTable", "AttendanceMyStrip", "AttendanceCharts", "AttendanceMetrics"]) assert.equal(exists(`../src/components/attendance/${name}.vue`), true, name);
+  for (const name of ["AttendanceHome", "AttendanceList", "AttendanceDetail", "AttendanceForm", "AttendanceMineCard", "AttendanceQueue", "AttendanceCalendar", "AttendanceDeptTable", "AttendanceMyStrip", "AttendanceCharts", "AttendanceMetrics",
+    "AttendanceAwayPanel", "AttendanceAwayChart", "AttendanceMonthPanel", "AttendanceNearList"]) assert.equal(exists(`../src/components/attendance/${name}.vue`), true, name);
+  // 2026-10-14：近 5 天不在岗换成近 5 个工作日，14 天堆叠图换成未来 14 天
+  assert.equal(exists("../src/components/attendance/AttendanceAway.vue"), false);
+  assert.equal(exists("../src/components/attendance/AttendanceDayStack.vue"), false);
   assert.equal(exists("../src/components/attendance/AttendanceTeamGrid.vue"), false);   // 两周网格换成了团队日历
 });

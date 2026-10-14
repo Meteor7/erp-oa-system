@@ -33,6 +33,8 @@
     "timesheet.board": {"label": "研发工时填报 · 填报进度", "path": "/entry", "query": {"tab": "board"}, "params": ["status", "dept", "period"]},
     "timesheet.mine": {"label": "研发工时填报", "path": "/entry", "query": {"tab": "sheet"}, "params": ["period"]},
     "attendance.home": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "home"}, "params": []},
+    "attendance.month": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "home", "section": "month"}, "params": ["metric", "month"]},
+    "attendance.away": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "home", "section": "away"}, "params": ["tile"]},
     "attendance.todo": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "list", "scope": "todo"}, "params": ["type"]},
     "attendance.mine": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "list", "scope": "mine"}, "params": ["type"]},
     "attendance.all": {"label": "考勤中心", "path": "/approval/attendance", "query": {"view": "list", "scope": "all"}, "params": ["type"]},

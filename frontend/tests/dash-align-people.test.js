@@ -39,14 +39,18 @@ test("考勤中心的“今天不在岗”用服务端按今天查好的那批�
 });
 
 // ---------------------------------------------------------------- 本月请假：按天，只算请假，调休单独
-test("考勤中心首页的“本月请假”按天、只算请假，调休单独写在副标题里（和看板同一个算法）", () => {
+test("考勤中心首页的「N 月」按天、请假和调休分开两格，数字是服务端 month_hours 加起来（和看板同一个算法）", () => {
+  // 2026-10-14：原来指标栏里的“本月请假”换成「N 月」概览的四格（请假 / 调休 / 加班 / 出差）
   const home = read("../src/components/attendance/AttendanceHome.vue");
-  assert.match(home, /function monthItem\(data, label\)/);
-  assert.match(home, /value: numText\(month\.leave_days \?\? 0\), unit: '天'/);
-  assert.match(home, /另有调休 \$\{numText\(comp\)\} 天/);
-  assert.doesNotMatch(home, /data\.month\.hours/);                  // 不再显示请假 + 调休混在一起的小时数
-  assert.doesNotMatch(home, /人天/);
-  assert.equal((home.match(/monthItem\(data, '/g) || []).length, 3);   // 团队、部门、全公司三处都用它
+  assert.doesNotMatch(home, /monthItem|data\.month\.hours|人天/);
+  const lib = read("../src/lib/attendanceHome.js");
+  assert.match(lib, /monthRows\(rows, item\.key, month\)\.reduce\(\(sum, row\) => sum \+ Number\(row\.month_hours \|\| 0\), 0\)/);
+  // 看板卡片上的天数用同一个写法（四舍五入一位小数）
+  assert.match(lib, /Math\.round\(Number\(hours \|\| 0\) \/ HOURS_PER_DAY \* 10\) \/ 10/);
+  const dashboard = readFileSync(new URL("../../rayher_hr_payroll/dashboard/attendance.py", import.meta.url), "utf8");
+  assert.match(dashboard, /ROUND_HALF_UP/);
+  assert.match(dashboard, /_d1\(stats\["leave_days"\]\)/);
+  assert.match(dashboard, /另有调休 \{_d1\(stats\['comp_days'\]\)\} 天/);
 });
 
 // ---------------------------------------------------------------- 团队日历的图例

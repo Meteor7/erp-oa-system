@@ -1,7 +1,8 @@
 """看板：公司考勤（人事 / 副总 / 总经理，放在“人事”页签的“考勤”一段里）。
 
-请假的数字只有人数、小时和比例，没有人名；要看是谁，点进考勤中心：先看各部门汇总，点进某个部门才看到那个部门的日历和人名。
-出差不一样：“出差中”点进去一人一行，直接进出差申请（出差申请现在在考勤中心里，人事、副总、总经理都能看到）。
+看板上只有人数、天数和比例；要看是谁，点卡片直接进考勤中心首页对应的那一块（决定 2026-10-14，人事、副总、总经理在首页就看到人名）：
+“本月请假 / 本月加班”落在「N 月」概览、已经选好类型和月份，“出差中”落在「谁不在」、选好出差，出勤率和未来 14 天进考勤中心首页。
+原来按部门列天数的明细（drill.att.leave / overtime / trip）留着给旧链接用，卡片不再指向它们。
 数字复用考勤中心的公司汇总（`attendance_board_entry._company_summary`），和考勤中心首页对得上；
 本月请假 / 加班 / 部门排行用 `overview_entry.month_leave`（按所选期间；和考勤中心首页的“本月请假”是同一个算法
 `attendance_board.leave_figures`：只算在职员工、只算请假，调休单独算，部门按员工档案）。
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 
 from rayher_hr_payroll import attendance_requests as att
 from rayher_hr_payroll.dashboard import people
@@ -24,7 +26,7 @@ STUCK_DAYS = 3
 CENTER_TYPES = (*att.ATTENDANCE_TYPES, REQUEST_TRAVEL)
 MAX_ROWS = 8
 HOURS_PER_DAY = 8
-HINT = "只有人数、小时和比例，没有人名；点进考勤中心，先看各部门汇总，点进某个部门才看到那个部门的日历和人名。"
+HINT = "看板上只有人数和天数；点进考勤中心就能看到是谁（人事、副总、总经理看全公司，可以按部门筛）。"
 
 
 # ---------------------------------------------------------------- 取数（单独成函数，测试里替换）
@@ -98,6 +100,11 @@ def _n(value):
     return f"{round(float(value or 0), 2):g}"
 
 
+def _d1(days):
+    """天数保留一位小数（四舍五入，和考勤中心「N 月」概览的 attendanceHome.daysText 同一个写法，两边显示的数字一样）。"""
+    return f"{Decimal(str(float(days or 0))).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP):f}".rstrip("0").rstrip(".") or "0"
+
+
 def _month_word(ctx):
     return "本月" if ctx.period == ctx.today[:7] else f"{int(ctx.period[5:])} 月"
 
@@ -110,8 +117,9 @@ def _visible(ctx):
 @provider("att.trip", "kpi", visible=_visible, title="出差中")
 def att_trip(ctx):
     today = _summary(ctx)["stats"]["today"]
-    return kpi("att.trip", "出差中", today["trip"], "人", "不算请假，不进出勤率", to=drill_to("att.trip", ctx) if today["trip"] else None,
-               hint="今天在已批准的出差申请期间的人数（已在请假的不重复算；周末和节假日不算）。点进去一人一行，每一行进出差申请。")
+    return kpi("att.trip", "出差中", today["trip"], "人", "不算请假，不进出勤率", to=(target("attendance.away", tile="trip") if people.company_attendance(ctx) else drill_to("att.trip", ctx)) if today["trip"] else None,
+               hint="今天在已批准的出差申请期间的人数（已在请假的不重复算；周末和节假日不算）。"
+                    "点进去是考勤中心的「谁不在 · 今天」，已经选好出差，一人一行，每一行进出差申请。")
 
 
 @provider("att.pending", "kpi", visible=_visible, title="考勤待审批")
@@ -124,24 +132,36 @@ def att_pending(ctx):
                     "点进去一演示员工128行，每一行进申请详情。")
 
 
-LEAVE_HINT = ("在职员工已批准的请假天数（只算请假，调休不是请假、单独算；跨月申请按天拆到各月；小时 ÷ 8），"
-              "和考勤中心首页的“本月请假”是同一个算法。点进去按员工档案里的部门看，合计等于这里。")
+LEAVE_HINT = ("在职员工已批准的请假天数（只算请假，调休不是请假、单独算；跨月申请按天拆到各月；小时 ÷ 8，保留一位小数），"
+              "和考勤中心首页「N 月」概览的“请假”是同一个算法。点进去就是那一块，已经选好请假和这个月份，按部门、按假别都能点开看是谁；"
+              "调休在旁边一格，点一下就是。")
+
+
+def month_target(ctx, metric):
+    """本月请假 / 加班点进去：考勤中心首页的「N 月」概览，选好类型和看板所选的月份。
+    只有 HR 角色、没有人事经理 / 副总 / 总经理岗位的人在考勤中心首页只看到自己，仍然进原来按部门列的明细。"""
+    if people.company_attendance(ctx):
+        return target("attendance.month", metric=metric, month=ctx.period)
+    if metric == "leave":
+        return drill_to("att.leave", ctx)
+    return drill_to("att.overtime", ctx)
 
 
 @provider("att.leave", "kpi", visible=_visible, title="本月请假")
 def att_leave(ctx):
     stats = people._leave_stats(ctx)["totals"]
-    return kpi("att.leave", f"{_month_word(ctx)}请假", _n(stats["leave_days"]), "天",
-               f"另有调休 {_n(stats['comp_days'])} 天", to=drill_to("att.leave", ctx) if stats["leave_days"] else None,
+    return kpi("att.leave", f"{_month_word(ctx)}请假", _d1(stats["leave_days"]), "天",
+               f"另有调休 {_d1(stats['comp_days'])} 天", to=month_target(ctx, "leave") if stats["leave_days"] or stats.get("comp_days") else None,
                hint=LEAVE_HINT + HINT)
 
 
 @provider("att.overtime", "kpi", visible=_visible, title="本月加班")
 def att_overtime(ctx):
     stats = people._leave_stats(ctx)["totals"]
-    return kpi("att.overtime", f"{_month_word(ctx)}加班", _n(stats["overtime_days"]), "天", "提交后按 1:1 计入调休额度",
-               to=drill_to("att.overtime", ctx) if stats["overtime_days"] else None,
-               hint="在职员工已批准的加班天数（小时 ÷ 8；跨月申请按天拆到各月）。点进去按员工档案里的部门看，合计等于这里。")
+    return kpi("att.overtime", f"{_month_word(ctx)}加班", _d1(stats["overtime_days"]), "天", "提交后按 1:1 计入调休额度",
+               to=month_target(ctx, "ot") if stats["overtime_days"] else None,
+               hint="在职员工已批准的加班天数（小时 ÷ 8，保留一位小数；跨月申请按天拆到各月）。"
+                    "点进去是考勤中心「N 月」概览的“加班”，按部门、按周都能点开看是谁，合计等于这里。")
 
 
 @provider("att.rate", "kpi", visible=_visible, title="出勤率")
@@ -191,17 +211,21 @@ def drill_att_pending_old(ctx):
 
 
 def _department_drill(ctx, key, title, field, noun, note):
-    """按部门列出本月请假 / 加班：和卡片同一份数（people._leave_stats），合计等于卡片上的数字。"""
+    """按部门列出本月请假 / 加班：和卡片同一份数（people._leave_stats），合计等于卡片上的数字。
+    2026-10-14 起卡片不再指向这里（直接进考勤中心「N 月」概览），留着给旧链接；每一行进同一块概览（选好类型和月份）。"""
     stats = people._leave_stats(ctx)
     ranked = sorted((row for row in stats.get("by_department") or [] if float(row.get(field) or 0) > 0),
                     key=lambda row: (-float(row.get(field) or 0), row.get("label") or ""))
+    names = people.company_attendance(ctx)
     current = ctx.period == ctx.today[:7]
-    rows = [drill_row([row.get("label") or "未分配部门", f"{int(row.get(f'{field}_count') or 0)} 张", f"{_n(row.get(field))} 天"],
-                      target("attendance.home") if current else None) for row in ranked]
+    go = (target("attendance.month", metric="leave" if field == "leave" else "ot", month=ctx.period) if names
+          else target("attendance.home") if current else None)
+    rows = [drill_row([row.get("label") or "未分配部门", f"{int(row.get(f'{field}_count') or 0)} 张", f"{_n(row.get(field))} 天"], go)
+            for row in ranked]
     total_count = sum(int(row.get(f"{field}_count") or 0) for row in ranked)
     total_days = float((stats.get("totals") or {}).get(f"{field}_days") or 0)
     return drill(key, title, [("部门",), (noun, "r"), ("天数", "r")], rows, summary=f"共 {total_count} 张，合计 {_n(total_days)} 天",
-                 note=note + ("" if current else "考勤中心只看当月，所以看别的月份时这里的行不能再点。"))
+                 note=note + ("点一行进考勤中心的「N 月」概览，按部门点开就能看到是谁。" if names else ""))
 
 
 @provider("drill.att.leave", "drill", visible=_visible, title="本月请假")
@@ -242,11 +266,11 @@ def block_att_depts(ctx):
     ordered = sorted(rows, key=lambda row: (-row["leave"], row["label"]))
     ranked = ordered[:MAX_ROWS]
     biggest = ranked[0]["leave"] or 1
-    sub = "天 · 只有部门汇总，没有人名" + (f" · 只列最多的 {MAX_ROWS} 个部门" if len(ordered) > MAX_ROWS else "")
+    sub = "天 · 按部门" + (f" · 只列最多的 {MAX_ROWS} 个部门" if len(ordered) > MAX_ROWS else "")
     return bars("block.att_depts", f"各部门{_month_word(ctx)}请假", [bar_row(row["label"], f"{_n(row['leave'])} 天", row["leave"] / biggest * 100) for row in ranked],
-                sub=sub, more="按部门明细", to=drill_to("att.leave", ctx),
+                sub=sub, more="看是谁", to=month_target(ctx, "leave"),
                 hint="在职员工已批准的请假天数（不含调休），按员工档案里的部门；各部门加起来等于“本月请假”。"
-                     "点进去是同一份数的部门清单；要看人名，到考勤中心的部门概况再点某个部门。")
+                     "点进去是考勤中心「N 月」概览的“请假”，点一个部门就列出这个部门是谁请的假。")
 
 
 @provider("block.att_trend", "block", visible=_visible, title="全公司未来 14 天")
@@ -257,4 +281,4 @@ def block_att_trend(ctx):
     biggest = max(int(day.get("off") or 0) for day in days) or 1
     rows = [col_row(str(day["day"]), int(day.get("off") or 0), int(day.get("off") or 0) / biggest * 100, index == 0) for index, day in enumerate(days)]
     return cols("block.att_trend", "全公司未来 14 天", rows, sub="每天请假或调休的人数", more="考勤中心", to=target("attendance.home"),
-                hint="已批准的请假和调休，周末和节假日为 0。" + HINT)
+                hint="已批准的请假和调休，周末和节假日为 0。考勤中心首页有同一张图，点某一天的柱子就列出那天是谁。" + HINT)

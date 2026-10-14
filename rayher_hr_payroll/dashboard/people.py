@@ -55,6 +55,14 @@ def _hr_view(ctx):
     return _hr(ctx) or ctx.holds(*LEADER_POSITIONS)
 
 
+def company_attendance(ctx):
+    """考勤中心首页能不能看全公司的人名（和 attendance_scope 的 company 一档同一个判断：人事经理 / 副总 / 总经理岗位，或 Administrator）。
+    看板的考勤卡片据此决定点进去落在首页的哪一块；只有 HR 角色的人首页只看到自己，卡片仍然进原来的清单。"""
+    from rayher_hr_payroll.attendance_scope import COMPANY_POSITIONS
+
+    return ctx.holds(*COMPANY_POSITIONS) or str(ctx.user or "").strip().lower() == "administrator"
+
+
 def _sensitive_hidden(ctx):
     return str(ctx.user or "").strip().lower() in _guards.HR_SENSITIVE_HIDDEN_USERS
 
@@ -453,10 +461,12 @@ def hr_away_today(ctx):
     if away.get("trip"):
         parts.append(f"另有出差 {away['trip']}")
     count = int(away.get("count") or 0)
-    return kpi("hr.away_today", "今天不在岗", count, "人", " · ".join(parts),
-               to=target("attendance.today") if count else None,
+    # 考勤中心首页看全公司人名的（人事经理、副总、总经理）落在「谁不在 · 今天」；只有 HR 角色、没有这些岗位的人首页只有自己，
+    # 仍然进“今天不在岗”的列表（全部申请里筛今天，权限和“全部”一样）。
+    to = (target("attendance.away") if company_attendance(ctx) else target("attendance.today")) if count else None
+    return kpi("hr.away_today", "今天不在岗", count, "人", " · ".join(parts), to=to,
                hint="今天（工作日）有已批准的请假或调休的在职员工，一人只算一次（一个人有几张单只算一人）；出差不算不在岗，单独看“出差中”。"
-                    "点进去是考勤中心的“今天不在岗”，一人一行，人数和这里一样。")
+                    "点进去是考勤中心的「谁不在 · 今天」（请假、调休各是一格，人数加起来可能多于这里：同一个人两样都有），每一行进那张申请。")
 
 
 @provider("hr.expiring", "kpi", visible=_hr_view, title="60 天内到期")
@@ -833,9 +843,13 @@ def block_leave_types(ctx):
     sub = f"{_month_label(ctx)} · 天" if rows else f"{_month_label(ctx)}没有已批准的请假"
     if comp:
         sub += f" · 另有调休 {round(comp, 2):g} 天"
-    return bars("block.leave_types", "请假类型", rows, sub, to=drill_to("att.leave", ctx) if rows else None,
+    to = None
+    if rows:
+        to = target("attendance.month", metric="leave", month=ctx.period) if company_attendance(ctx) else drill_to("att.leave", ctx)
+    return bars("block.leave_types", "请假类型", rows, sub, to=to,
                 hint="所选月份在职员工已批准的请假按假别合计的天数（小时 ÷ 8；跨月的申请只算落在这个月里的天），合计等于“本月请假”；"
-                     "调休不是请假，单独写在副标题里。「其他」= 第 6 名及以后的假别合计。点进去按部门看同一份数。")
+                     "调休不是请假，单独写在副标题里。「其他」= 第 6 名及以后的假别合计。"
+                     "点进去是考勤中心「N 月」概览的“请假”，点一个假别就列出是谁。")
 
 
 @provider("block.expiring_list", "block", visible=_hr_view, title="即将到期")

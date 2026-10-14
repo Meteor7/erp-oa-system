@@ -4,6 +4,7 @@
 // 这里只放不依赖界面的计算：查询参数解析、跳转目标、筛选和计数、每天的时段与小时、汇总和影响、审批进度。
 // 服务端仍是权威校验（额度、日期冲突、每天上限），这里只做即时提示。
 import { callApi } from './expenseClaims.js';
+import { hasHomeOrigin, homeOriginQuery, homeOriginState, homeQuery, homeStateOf } from './attendanceHome.js';
 import { fromValue, originLabel as pageLabel, splitPath } from './navContext.js';
 
 export const HOURS_PER_DAY = 8;
@@ -102,13 +103,16 @@ function one(value) {
 }
 
 // 页面是从哪来的：列表（带范围和类型筛选）或首页；详情和新建页的"返回"、面包屑靠它回到原处。
+// 首页有自己的状态（部门、今天 / 本周、选中的类型、N 月的选择……，见 attendanceHome.HOME_KEYS）：带在 f 开头的参数里，返回时原样恢复。
 export function originOf(query = {}) {
   const from = one(query.from);
   if (from === 'list') {
     const scope = one(query.fscope);
     return { kind: 'list', scope: SCOPE_KEYS.includes(scope) ? scope : 'mine', filter: filterOf(one(query.ftype)) };
   }
-  if (from === 'home') return { kind: 'home', scope: '', filter: FILTER_ALL };
+  if (from === 'home') {
+    return hasHomeOrigin(query) ? { kind: 'home', scope: '', filter: FILTER_ALL, home: homeOriginState(query) } : { kind: 'home', scope: '', filter: FILTER_ALL };
+  }
   // 别的页面（数据看板、报销、付款……）点进来的：from 是那个页面的站内地址，返回就回到那里。
   const page = fromValue(query);
   if (page && page !== 'list') return { kind: 'page', from: page, label: pageLabel(query), scope: '', filter: FILTER_ALL };
@@ -117,7 +121,7 @@ export function originOf(query = {}) {
 
 export function originQuery(origin) {
   if (origin?.kind === 'list') return { from: 'list', fscope: origin.scope || 'mine', ftype: origin.filter || FILTER_ALL };
-  if (origin?.kind === 'home') return { from: 'home' };
+  if (origin?.kind === 'home') return { from: 'home', ...(origin.home ? homeOriginQuery(origin.home) : {}) };
   if (origin?.kind === 'page' && origin.from) return { from: origin.from };
   return {};
 }
@@ -149,6 +153,8 @@ export function parseLocation({ path = '', params = {}, query = {} } = {}) {
     newType: TYPE_LABELS.includes(typeQuery) ? typeQuery : (draft || (queryView === 'new' && pathType === REQUEST_TRIP) ? pathLabel : ''),
     reject: one(query.reject) === '1',
     origin: originOf(query),
+    // 首页的状态（部门、谁不在的时间和类型、N 月的页签和选择……），只在首页用；看板也靠它直接点进某一块。
+    home: homeStateOf(query),
     pathType,
   };
 }
@@ -162,8 +168,9 @@ function clean(query) {
   return Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== ''));
 }
 
-export function homeLocation(homePath = FALLBACK_HOME_PATH) {
-  return { path: homePath, query: { view: 'home' } };
+// state：首页的状态（attendanceHome.homeStateOf 的形状），给了就写进地址（默认值不写）。
+export function homeLocation(homePath = FALLBACK_HOME_PATH, state = null) {
+  return { path: homePath, query: { view: 'home', ...(state ? homeQuery(state) : {}) } };
 }
 
 // today：只看今天在休假 / 调休的人（看板的「今天不在岗」），只有「全部」范围有这个筛选，别的范围不带。
@@ -189,7 +196,7 @@ export function newLocation({ type = '', draft = '' } = {}, origin = null) {
 
 // 取消 / 返回：回到从哪来的；没有来源时回到该类型"我的"列表。
 export function backLocation(origin, { filter = FILTER_ALL, homePath = FALLBACK_HOME_PATH } = {}) {
-  if (origin?.kind === 'home') return homeLocation(homePath);
+  if (origin?.kind === 'home') return homeLocation(homePath, origin.home || null);
   if (origin?.kind === 'page' && origin.from) return splitPath(origin.from);
   if (origin?.kind === 'list') return listLocation({ scope: origin.scope || 'mine', filter: origin.filter || FILTER_ALL }, homePath);
   return listLocation({ scope: 'mine', filter }, homePath);
@@ -900,6 +907,8 @@ export const api = {
   reviewed: () => callApi('attendance_entry.list_attendance_reviewed', { limit: 100 }, { method: 'GET' }),
   board: () => callApi('attendance_board_entry.get_attendance_board', {}, { method: 'GET' }),
   department: (department) => callApi('attendance_board_entry.get_department_attendance', { department }, { method: 'GET' }),
+  // 首页（人事 / 领导、部门主管）一张申请一行的明细：谁不在、未来 14 天、N 月概览、近 5 个工作日都从它算；month 是 N 月看哪个月。
+  requests: ({ month = '', department = '' } = {}) => callApi('attendance_board_entry.get_attendance_requests', { month, department }, { method: 'GET' }),
   overlap: (name) => callApi('attendance_board_entry.get_request_overlap', { name }, { method: 'GET' }),
   all: (requestType = '') => callApi('attendance_entry.list_attendance_all', { request_type: requestType, limit: 100 }, { method: 'GET' }),
   // 今天不在岗（请假 / 调休）的人，一人一张单：服务端按今天查（不是从最近 100 张里筛），和看板“今天不在岗”同一个口径。

@@ -1,4 +1,5 @@
-"""考勤中心图表 / 日历的统计（attendance_board.py）：只算已通过的，日历上审批中的也画，汇总里没有人名。"""
+"""考勤中心图表 / 日历的统计（attendance_board.py）：只算已通过的，日历上审批中的也画；部门概况表只有数字，
+首页一张申请一行的明细（request_rows）带人名（决定 2026-10-14：人事和管理层在首页直接看到是谁）。"""
 import json
 from datetime import date, timedelta
 
@@ -34,6 +35,25 @@ ROWS = [
     row("X", att.REQUEST_LEAVE, "已完成", [("2026-10-15", 8)], "年假"),                       # 不在这批人里
     row("A", att.REQUEST_OVERTIME, "已完成", [("2026-10-17", 6)]),
 ]
+
+
+def test_request_rows_one_per_request_with_names_days_and_month_hours():
+    employees = [{"name": key, "employee_name": f"员工{key}", "department": "研发软件部 - RAY" if key != "C" else "财务部 - RAY"} for key in "ABCD"]
+    rows = {item["name"]: item for item in board.request_rows(employees, ROWS, month_first=MONTH[0], month_last=MONTH[1], work_dates=WORK)}
+    assert set(rows) == {"OA-A-2026-10-15", "OA-B-2026-10-16", "OA-C-2026-10-19", "T-D", "OA-A-2026-10-20", "OA-A-2026-10-17"}   # X 不在这批人里
+    first = rows["OA-A-2026-10-15"]
+    assert (first["employee_name"], first["department_label"], first["kind"], first["leave_type"], first["approved"]) == ("员工A", "研发软件部", "annual", "年假", True)
+    assert first["days"] == [["2026-10-15", 8], ["2026-10-16", 8]] and first["month_hours"] == 16
+    assert rows["OA-A-2026-10-20"]["approved"] is False                                       # 审批中：列出来，标好
+    assert (rows["T-D"]["from_date"], rows["T-D"]["to_date"], rows["T-D"]["month_hours"]) == ("2026-10-15", "2026-10-16", 16)
+    assert rows["OA-A-2026-10-17"]["kind"] == "ot" and rows["OA-A-2026-10-17"]["leave_type"] == ""
+    # 已批准的按类型加起来 = leave_figures（看板的本月请假 / 调休 / 加班）
+    figures = board.leave_figures(board.month_window([item for item in ROWS if board.is_approved(item)], *MONTH), [item["name"] for item in employees])
+    total = lambda request_type: sum(item["month_hours"] for item in rows.values() if item["approved"] and item["request_type"] == request_type)
+    assert (total(att.REQUEST_LEAVE), total(att.REQUEST_COMP_TIME), total(att.REQUEST_OVERTIME)) == (figures["leave_hours"], figures["comp_hours"], figures["overtime_hours"]) == (19, 8, 6)
+    # 草稿、撤回的不要
+    dropped = [row("A", att.REQUEST_LEAVE, "草稿", [("2026-10-21", 8)], "事假"), row("B", att.REQUEST_LEAVE, "已撤回", [("2026-10-21", 8)], "事假")]
+    assert board.request_rows(employees, dropped, month_first=MONTH[0], month_last=MONTH[1], work_dates=WORK) == []
 
 
 def test_kinds_follow_the_request_type_and_the_leave_type():
