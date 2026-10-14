@@ -24,7 +24,8 @@ param(
     [switch]$Migrate,
     [switch]$SkipBuild,
     [switch]$Force,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$InitializeLocal
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,6 +104,25 @@ Write-Host "checking $localShort for TipRay ciphertext and non-UTF-8 text..."
 & python (Join-Path $script:RepoRoot "scripts\check_plaintext.py") --commit $localSha
 if ($LASTEXITCODE -ne 0) {
     throw "commit $localShort contains encrypted or non-UTF-8 files. Fix them locally, commit, then deploy again. Never patch them inside Docker."
+}
+
+if ($InitializeLocal) {
+    if ($FromGitHub -or $Force -or $Commit -ne "HEAD") {
+        throw "InitializeLocal requires current local HEAD, without FromGitHub or Force."
+    }
+    if ((Invoke-GitLocal -GitArgs @("status", "--porcelain") | Out-String).Trim()) {
+        throw "Commit local deployment files before initializing Docker."
+    }
+    if ($PSBoundParameters.ContainsKey("Container") -or $PSBoundParameters.ContainsKey("Site")) {
+        throw "InitializeLocal uses isolated planck-logistics-bench / logistics.localhost targets."
+    }
+    $Container = "planck-logistics-bench"
+    $Site = "logistics.localhost"
+    $initializeArgs = @("--commit", $localSha)
+    if ($DryRun) { $initializeArgs += "--dry-run" }
+    & python (Join-Path $script:RepoRoot "scripts\initialize_local_docker.py") @initializeArgs
+    if ($LASTEXITCODE -ne 0) { throw "Local Docker initialization failed; volumes were preserved." }
+    if ($DryRun) { exit 0 }
 }
 
 $dockerSha = Get-DockerOutput -Cmd @("exec", "-w", $AppPath, $Container, "git", "rev-parse", "HEAD")
@@ -302,6 +322,10 @@ Write-Host "==== deploy done ===="
 Write-Host ("Docker Git : {0} {1} (matches local {2})" -f $dockerBranch, $finalSha, $localShort)
 Write-Host "Ping       : $ping"
 Write-Host "OCR        : $ocr"
-Write-Host "Site       : http://rayher.localhost:8000"
+if ($Container -eq "planck-logistics-bench") {
+    Write-Host "Site       : http://localhost:8082/planck-semicon"
+} else {
+    Write-Host ("Site       : http://{0}:8000 (check container port mapping)" -f $Site)
+}
 Write-Host "Note       : frontend build output may stay uncommitted in Docker; do not edit product source inside the container."
 Write-Host ""

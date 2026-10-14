@@ -21,3 +21,7 @@ dist/
 # Reviewed rosters and HR-supplied values contain personal data; keep them outside the repository.
 rayher_hr_payroll/maintenance/*_alignment_manifest.json
 household_registration_backfill.json
+
+# Local deployment credentials, bundles and generated Python metadata
+.local/
+*.egg-info/

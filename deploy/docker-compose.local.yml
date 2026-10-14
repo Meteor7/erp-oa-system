@@ -1,0 +1,69 @@
+name: planck-logistics-local
+services:
+  mariadb:
+    image: mariadb:10.6
+    restart: unless-stopped
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --skip-character-set-client-handshake]
+    environment:
+      MARIADB_ROOT_PASSWORD: ${LOCAL_DB_ROOT_PASSWORD:?Create .local/logistics.env first}
+      MARIADB_ROOT_HOST: "%"
+    volumes: [database:/var/lib/mysql]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: [queue:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  bench:
+    image: frappe/bench:v5.31.0@sha256:ae0977264445117c04eaad43bf97b0898cd859a0973eb9be64910d1e722c5a16
+    container_name: planck-logistics-bench
+    init: true
+    restart: unless-stopped
+    command:
+      - bash
+      - -c
+      - |
+        until test -f /workspace/development/frappe-bench/.local-ready; do sleep 2; done
+        cd /workspace/development/frappe-bench
+        source "$$NVM_DIR/nvm.sh"
+        nvm use 22
+        exec bench start
+    working_dir: /workspace/development
+    environment:
+      LOCAL_SITE: logistics.localhost
+      LOCAL_DB_ROOT_PASSWORD: ${LOCAL_DB_ROOT_PASSWORD:?Create .local/logistics.env first}
+      LOCAL_ADMIN_PASSWORD: ${LOCAL_ADMIN_PASSWORD:?Create .local/logistics.env first}
+      HTTP_PROXY: ${LOCAL_HTTP_PROXY:-}
+      HTTPS_PROXY: ${LOCAL_HTTPS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,mariadb,redis-cache,redis-queue,invoice-ocr
+    ports:
+      - "127.0.0.1:8082:8000"
+      - "127.0.0.1:9082:9082"
+    volumes: [bench:/workspace/development]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+volumes:
+  database:
+  queue:
+  bench:
