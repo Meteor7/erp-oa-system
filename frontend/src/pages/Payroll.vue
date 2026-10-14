@@ -1,6 +1,7 @@
 <script setup>
 // 薪酬计算：计算前检查 → 计算链（应付 − 社保公积金 − 个税 − 宿舍及已发放 = 实发）→ 三张小图 → 员工工资表 → 本月对账。
-// 点一行在右侧抽屉里按五步看和改；金额的算法没有变（payrollAmounts.js / 后端 _calculate_amounts）。
+// 点一行在右侧抽屉里按五步看和改。算法（决定 2026-10-14）：基本工资按实际工时 ÷ 当月总工时折算，社保公积金没有账单就按档案基数算，
+// 个税按累计预扣法自动算（可以手动改，要写原因）；前端 payrollAmounts.js / payrollTax.js 和后端同一个算法。
 import { computed, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { createResource } from "frappe-ui";
@@ -15,6 +16,7 @@ import PayrollDrawer from "../components/payroll/PayrollDrawer.vue";
 import PayrollRecon from "../components/payroll/PayrollRecon.vue";
 import PayrollSummary from "../components/payroll/PayrollSummary.vue";
 import PayrollTable from "../components/payroll/PayrollTable.vue";
+import PayrollTaxProfiles from "../components/payroll/PayrollTaxProfiles.vue";
 
 // 期间和「只看草稿 / 只看已确认」放在地址里（?period=&status=draft|submitted），要在下面的请求发出前读好，否则会先查一次错误的月份。
 const statusFilter = ref("");
@@ -77,11 +79,23 @@ const bulkTargets = computed(() => scoped.value.filter((row) => rowState(row).ke
 const lockTargets = computed(() => confirmTargets(scoped.value));
 const emptyText = computed(() => (chip.value === "draft" ? "本期没有草稿工资条" : chip.value === "submitted" ? "本期没有已确认的工资条" : "本期没有符合任职期间的员工"));
 const go = (path) => router.push(path);
+// 保存草稿要传的数：实际工时只有手动改过才传；个税只有手动改过才用传的数（要写原因），否则后端按累计预扣法算。
+const draftParams = (row) => ({
+  employee: row.employee, period: period.value, base_salary: n(row.base_salary), salary_adjustment: n(row.salary_adjustment),
+  company_subsidy: n(row.company_subsidy), bonus: n(row.bonus), other_adjustment: n(row.other_adjustment), advanced_paid: n(row.advanced_paid),
+  hours_manual: row.hours_manual ? 1 : 0, actual_hours: row.hours_manual ? n(row.actual_hours) : undefined,
+  tax_manual: row.tax_manual ? 1 : 0, income_tax: row.tax_manual ? n(row.income_tax) : 0, tax_manual_reason: row.tax_manual ? String(row.tax_manual_reason || "") : "",
+  bonus_separate: row.bonus_separate ? 1 : 0,
+});
+// 个税资料按个税年度（工资次月发：12 月工资算进下一年）
+const taxYear = computed(() => { const [y, m] = String(period.value || "").split("-").map(Number); return m === 12 ? y + 1 : y; });
+const taxOpen = ref(readFlag("payroll.tax", false));
+function toggleTax() { taxOpen.value = !taxOpen.value; writeFlag("payroll.tax", taxOpen.value); }
 
 async function saveRow(row) {
   saving[row.employee] = true; errors[row.employee] = ""; messages[row.employee] = "";
   try {
-    await saver.submit({ employee: row.employee, period: period.value, payment_days: n(row.payment_days), base_salary: n(row.base_salary), salary_adjustment: n(row.salary_adjustment), company_subsidy: n(row.company_subsidy), bonus: n(row.bonus), other_adjustment: n(row.other_adjustment), income_tax: n(row.income_tax), advanced_paid: n(row.advanced_paid) });
+    await saver.submit(draftParams(row));
     messages[row.employee] = "草稿已保存"; await rows.reload();
   } catch (e) { errors[row.employee] = e?.message || "保存失败"; } finally { saving[row.employee] = false; }
 }
@@ -92,13 +106,13 @@ async function applyAdjustment(row) {
     messages[row.employee] = "调薪已应用至后续月份"; await rows.reload();
   } catch (e) { errors[row.employee] = e?.message || "应用调薪失败"; } finally { applying[row.employee] = false; }
 }
-// 批量生成草稿：逐人用页面上现有的数字保存（个税是 0，需要再逐人填），先确认一次。
+// 批量生成草稿：逐人用页面上现有的数字保存（个税按累计预扣法自动算），先确认一次。
 async function generateAll() {
   const targets = bulkTargets.value.map((row) => ({ ...row }));
   Object.assign(bulk, { confirming: false, running: true, done: 0, total: targets.length, failed: [] });
   for (const row of targets) {
     try {
-      await saver.submit({ employee: row.employee, period: period.value, payment_days: n(row.payment_days), base_salary: n(row.base_salary), salary_adjustment: n(row.salary_adjustment), company_subsidy: n(row.company_subsidy), bonus: n(row.bonus), other_adjustment: n(row.other_adjustment), income_tax: n(row.income_tax), advanced_paid: n(row.advanced_paid) });
+      await saver.submit(draftParams(row));
     } catch (e) { bulk.failed.push(`${row.employee_name}：${e?.message || "保存失败"}`); }
     bulk.done += 1;
   }
@@ -167,21 +181,27 @@ async function withdrawRow(row, reason) {
           </span>
         </div>
         <div v-if="lock.asking && !dirty.length" class="lock" role="alertdialog" aria-label="确认本月工资">
-          <span class="k">确认 {{ lockTargets.length }} 人的工资条</span><span class="muted">确认后锁定，不能再改，要改先撤回确认；看板和研发人工成本只算已确认的。个税目前是手填的，请先核对。</span>
+          <span class="k">确认 {{ lockTargets.length }} 人的工资条</span><span class="muted">确认后锁定，不能再改，要改先撤回确认；看板和研发人工成本只算已确认的。确认前按现在的工时、社保公积金重算一遍，个税按累计预扣法重算（手动改过的保留）。</span>
           <span style="margin-left:auto;display:flex;gap:8px"><button type="button" class="btn sm" @click="lock.asking = false">取消</button><button type="button" class="btn pri sm" @click="confirmAll">确认</button></span>
         </div>
         <div v-if="lock.running" class="lock" role="status"><span class="k">正在确认…</span></div>
         <div v-if="lock.done != null && !lock.running" class="banner" role="status">已确认 {{ lock.done }} 人<template v-if="lock.skipped.length">；{{ lock.skipped.length }} 人没有确认：{{ lock.skipped.slice(0, 3).map((item) => `${item.employee_name}（${item.reason}）`).join("；") }}<template v-if="lock.skipped.length > 3"> 等</template></template></div>
         <div v-if="lock.error" class="banner err" role="alert">确认失败：{{ lock.error }}</div>
         <div v-if="bulk.confirming" class="lock" role="alertdialog" aria-label="确认批量生成">
-          <span class="k">将为 {{ bulkTargets.length }} 人生成草稿工资条</span><span class="muted">用页面上现有的数字保存；个税目前是 0，生成后需要逐人填写。</span>
+          <span class="k">将为 {{ bulkTargets.length }} 人生成草稿工资条</span><span class="muted">用页面上现有的数字保存；个税按累计预扣法自动算，社保公积金没有账单的按档案基数算。</span>
           <span style="margin-left:auto;display:flex;gap:8px"><button type="button" class="btn sm" @click="bulk.confirming = false">取消</button><button type="button" class="btn pri sm" @click="generateAll">确认生成</button></span>
         </div>
         <div v-if="bulk.running" class="lock" role="status"><span class="k">正在生成 {{ bulk.done }} / {{ bulk.total }}</span><span class="bar wide"><i :style="{ width: (bulk.done / Math.max(bulk.total, 1) * 100) + '%' }"></i></span></div>
         <div v-if="bulk.failed.length" class="banner err" role="alert">有 {{ bulk.failed.length }} 人没有生成：{{ bulk.failed.slice(0, 3).join("；") }}<template v-if="bulk.failed.length > 3"> 等</template></div>
         <PayrollTable :rows="shown" :wide="wide" :empty-text="emptyText" @open="(row) => (openEmployee = row.employee)" />
-        <div class="pr-note">点一行，在右侧按五步查看和修改这个人的工资；已确认的工资条不能改，要改先撤回确认。没有社保或公积金月度记录的员工不能保存工资草稿；已确认金额以工资单为准，未留存的社保分项显示为 —。</div>
+        <div class="pr-note">点一行，在右侧按五步查看和修改这个人的工资；已确认的工资条不能改，要改先撤回确认。社保或公积金算不出来（档案没有基数、公司当年政策没配置）的员工不能保存工资草稿；已确认金额以工资单为准，未留存的社保分项显示为 —。</div>
       </section>
+
+      <div class="pr-tools">
+        <span class="pr-note">个税按累计预扣法算，要用每个人的专项附加扣除和系统上线前的期初累计</span>
+        <button type="button" class="btn sm" :aria-expanded="taxOpen" @click="toggleTax">{{ taxOpen ? "收起个税资料 ▴" : `${taxYear} 年个税资料 ▾` }}</button>
+      </div>
+      <PayrollTaxProfiles v-if="taxOpen" :year="taxYear" :read-only="!canEdit" @saved="rows.reload()" />
 
       <PayrollRecon :total="total" :social="currentBatchTotal(social.data)" :fund="currentBatchTotal(fund.data)" @go="go" />
     </template>

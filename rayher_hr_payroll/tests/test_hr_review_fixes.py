@@ -140,13 +140,42 @@ class DraftSlip:
     def submit(self): self.events.append("submit")
 
 
+class FakeInputs:
+    """payroll_inputs 的替身：工时、社保公积金、个税累计都给固定的数（个税用真的累计预扣算法）。"""
+
+    def __init__(self, social=None, fund=None, total=176.0, actual=176.0, leave=0.0, basis=None):
+        self.social = {"employee_total": 300, "company_total": 900, "source": "社保月度记录"} if social is None else social
+        self.fund = {"employee_amount": 200, "company_amount": 200, "source": "公积金月度记录"} if fund is None else fund
+        self.hours = {"total_hours": total, "employed_hours": actual + leave, "personal_leave_hours": leave, "actual_hours": actual,
+                      "work_days": int(total // 8), "calendar_source": "company_holiday_list"}
+        self.basis = basis or {"tax_period": "2026-11", "year": 2026, "prior": {}, "low_income": False, "special_additional": 0,
+                               "other": 0, "bonus_used": False, "has_profile": True, "warnings": []}
+        self.materialized = []
+
+    def contributions(self, employee_row, period):
+        return {"social": dict(self.social), "fund": dict(self.fund)}
+
+    def work_hours(self, employee, company, period, calendars=None):
+        return dict(self.hours)
+
+    def tax_basis(self, employee, company, period, exclude=None):
+        return dict(self.basis)
+
+    def compute_tax(self, basis, payable, social, fund, bonus, bonus_separate):
+        import importlib
+        return importlib.import_module("rayher_hr_payroll.payroll_inputs").compute_tax(basis, payable, social, fund, bonus, bonus_separate)
+
+    def materialize(self, employee_row, period, found):
+        self.materialized.append(period)
+
+
 def _payroll_world(monkeypatch, module, frappe, slip, social):
     frappe.get_all = lambda *args, **kwargs: [{"name": "SAL-1", "employee": "E1", "employee_name": "演示员工128", "hr_spa_managed": 1}]
     frappe.get_doc = lambda doctype, name: slip
     monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher", "employee_name": "演示员工128"})
-    monkeypatch.setattr(module, "_social_record", lambda *args: social)
-    monkeypatch.setattr(module, "_monthly_record", lambda *args: {"employee_amount": 200})
-    monkeypatch.setattr(module, "_working_days", lambda *args: (22.0, 22.0, "hrms"))
+    # 本月总工时 176、实际 160（请了 16 小时事假）：8800 × 160 / 176 = 8000
+    monkeypatch.setattr(module, "_inputs", lambda: FakeInputs(social=social, fund={"employee_amount": 200, "company_amount": 200, "source": "公积金月度记录"},
+                                                              total=176, actual=160, leave=16))
     monkeypatch.setattr(module, "_accommodation", lambda *args: 150)
     monkeypatch.setattr(module, "_slip", lambda *args: slip)
     monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - Rayher"})
@@ -159,7 +188,7 @@ def test_confirm_resaves_each_draft_with_current_contributions_before_submitting
     result = module.confirm_payroll("2026-10")
     assert result["confirmed"] == 1 and result["skipped"] == []
     assert slip.events == ["save", "submit"], "先按现在的数重存，再确认"
-    # 人事填的数原样保留，社保 / 公积金 / 宿舍取现在的
+    # 人事填的数原样保留，社保 / 公积金 / 宿舍 / 工时取现在的；新算法之前手填的个税当手动保留
     assert (slip.payment_days, slip.hr_base_salary, slip.hr_company_subsidy, slip.hr_income_tax) == (20.0, 8800.0, 500.0, 100.0)
     assert {line["salary_component"]: line["amount"] for line in slip.deductions} == {"社保个人": 300, "公积金个人": 200, "宿舍扣款": 150, "个税": 100}
     assert {line["salary_component"]: line["amount"] for line in slip.earnings} == {"基本工资": 8000.0, "公司补贴": 500}
@@ -168,10 +197,10 @@ def test_confirm_resaves_each_draft_with_current_contributions_before_submitting
 def test_confirm_skips_a_draft_that_can_no_longer_be_recalculated(monkeypatch):
     module, frappe = _load_payroll(monkeypatch)
     slip = DraftSlip()
-    _payroll_world(monkeypatch, module, frappe, slip, None)   # 社保记录没了
+    _payroll_world(monkeypatch, module, frappe, slip, {"missing": "员工档案里没有社保基数"})   # 社保算不出来了
     result = module.confirm_payroll("2026-10")
     assert result["confirmed"] == 0 and slip.events == []
-    assert result["skipped"] == [{"employee": "E1", "employee_name": "演示员工128", "reason": module.RESAVE_FAILED + "该员工尚未维护本月社保记录。"}]
+    assert result["skipped"] == [{"employee": "E1", "employee_name": "演示员工128", "reason": module.RESAVE_FAILED + "社保算不出来：员工档案里没有社保基数。"}]
     assert frappe.db.rollbacks == ["confirm_payroll"]
 
 

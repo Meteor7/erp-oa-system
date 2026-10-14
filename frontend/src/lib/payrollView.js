@@ -1,6 +1,6 @@
 // 薪酬计算页的纯函数：每行的状态和金额、合计、图表数据、计算前检查、对账。
-// 金额沿用 payrollAmounts.js（未保存的行按页面上正在改的数字现算，已保存的行以工资单为准）。
-import { isSavedPayroll, payrollAdjusted, payrollNet, payrollPayable, payrollProrated } from './payrollAmounts.js';
+// 金额沿用 payrollAmounts.js（未保存的行按页面上正在改的数字现算，已保存的行以工资单为准）；个税按累计预扣法现算（payrollTax.js）。
+import { isSavedPayroll, payrollAdjusted, payrollHours, payrollNet, payrollPayable, payrollProrated, payrollTax, payrollTaxDetail } from './payrollAmounts.js';
 import { displayDepartment } from './displayBrand.js';
 
 const n = (value) => Number(value || 0);
@@ -25,15 +25,19 @@ export function rowState(row) {
 export const canSave = (row) => !rowLocked(row) && Boolean(row?.social_record_exists) && Boolean(row?.housing_record_exists);
 
 export function figures(row) {
-  const social = n(row?.social_insurance), fund = n(row?.housing_fund), tax = n(row?.income_tax), dorm = n(row?.accommodation), advanced = n(row?.advanced_paid);
+  const social = n(row?.social_insurance), fund = n(row?.housing_fund), tax = n(payrollTax(row || {})), dorm = n(row?.accommodation), advanced = n(row?.advanced_paid);
   return {
     saved: isSavedPayroll(row || {}), adjusted: n(payrollAdjusted(row)), prorated: n(payrollProrated(row)), payable: n(payrollPayable(row)),
     social, fund, tax, dorm, advanced, other: dorm + advanced, deductions: social + fund + tax + dorm + advanced, net: n(payrollNet(row)),
+    taxDetail: payrollTaxDetail(row || {}) || row?.tax || null,
   };
 }
 
-// 本月按天折算（入职、离职当月）：计薪天数少于应计薪天数。
-export const isProrated = (row) => n(row?.total_working_days) > 0 && n(row?.payment_days) < n(row?.total_working_days);
+// 本月按工时折算（入职、离职当月，或者请了事假）：实际工时少于当月总工时。
+export const isProrated = (row) => { const hours = payrollHours(row || {}); return hours.total > 0 && hours.actual < hours.total; };
+
+// 按考勤算出来的实际工时（在职工时 − 事假），人事手动改过以后点“按考勤重算”恢复成它。
+export const autoHours = (row) => Math.max(n(row?.employed_hours) - n(row?.personal_leave_hours), 0);
 
 // ---------------------------------------------------------------- 筛选
 export const CHIPS = Object.freeze([
@@ -45,7 +49,7 @@ export const confirmTargets = (rows) => (rows || []).filter((row) => rowState(ro
 
 // ---------------------------------------------------------------- 改了还没保存（审查 2026-10-13）
 // 抽屉里的输入框直接改这一行的数字；确认本月工资锁定的是已保存的草稿，所以有人改了没保存时不让确认。
-export const EDITABLE_FIELDS = Object.freeze(['payment_days', 'base_salary', 'salary_adjustment', 'company_subsidy', 'bonus', 'other_adjustment', 'income_tax', 'advanced_paid']);
+export const EDITABLE_FIELDS = Object.freeze(['actual_hours', 'hours_manual', 'base_salary', 'salary_adjustment', 'company_subsidy', 'bonus', 'other_adjustment', 'income_tax', 'tax_manual', 'bonus_separate', 'advanced_paid']);
 
 // 行加载时记下每个人可改的输入：{员工: {字段: 数字}}。
 export function editSnapshot(rows) {
@@ -156,7 +160,12 @@ export function readiness(rows) {
     dormPeople: list.filter((row) => n(row.accommodation) > 0).length,
     prorated: list.filter(isProrated).length,
     workingDays: list.length ? Math.max(...list.map((row) => n(row.total_working_days))) : 0,
-    calendarFallback: list.filter((row) => row.working_days_source === 'calendar_fallback').length,
+    workHours: list.length ? Math.max(...list.map((row) => n(payrollHours(row).total))) : 0,
+    leavePeople: list.filter((row) => n(row.personal_leave_hours) > 0).length,
+    calendarFallback: list.filter((row) => row.working_days_source === 'calendar_fallback' || row.calendar_source === 'weekday_fallback').length,
+    autoContributions: list.filter((row) => /按档案基数/.test(`${row.social_source || ''}${row.fund_source || ''}`)).length,
+    taxWarnings: list.filter((row) => (row.tax_warnings || []).length).length,
+    taxManual: list.filter((row) => row.tax_manual && !isSavedPayroll(row)).length,
   };
 }
 

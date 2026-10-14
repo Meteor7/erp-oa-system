@@ -79,6 +79,8 @@ def test_period_company_contributions_reads_confirmed_records_only(monkeypatch):
 
     def get_all(doctype, filters=None, fields=None, **kwargs):
         calls.append((doctype, filters))
+        if doctype == "Salary Slip":
+            return []
         if doctype == "Employee Social Insurance":
             return [{"employee": "E1", "company_total": 3000}, {"employee": "E1", "company_total": 10}]
         return [{"employee": "E1", "company_amount": 1000}, {"employee": "E2", "company_amount": 500}]
@@ -86,4 +88,20 @@ def test_period_company_contributions_reads_confirmed_records_only(monkeypatch):
     monkeypatch.setattr(bridge.frappe, "get_all", get_all, raising=False)
 
     assert bridge.period_company_contributions("2026-06") == {"E1": {"si": 3010.0, "hf": 1000.0}, "E2": {"si": 0.0, "hf": 500.0}}
-    assert all(filters == {"status": "Confirmed", "period": "2026-06"} for _doctype, filters in calls)
+    assert all(filters == {"status": "Confirmed", "period": "2026-06"} for doctype, filters in calls if doctype != "Salary Slip")
+
+
+def test_company_contributions_come_from_the_confirmed_slip_snapshot_first(monkeypatch):
+    # 2026-10-14：确认的工资条存着当时用的单位社保 / 公积金；有快照的人不再读月度记录（社保账单生效时不写记录，会漏）
+    from rayher_hr_payroll import payroll_bridge as bridge
+
+    def get_all(doctype, filters=None, fields=None, **kwargs):
+        if doctype == "Salary Slip":
+            assert filters == {"docstatus": 1, "start_date": ["between", ["2026-10-01", "2026-10-31"]], "hr_amounts_v2": 1}
+            return [{"employee": "E1", "hr_social_company": 3000, "hr_fund_company": 700}]
+        if doctype == "Employee Social Insurance":
+            return [{"employee": "E1", "company_total": 99999}, {"employee": "E2", "company_total": 2000}]
+        return [{"employee": "E2", "company_amount": 500}]
+
+    monkeypatch.setattr(bridge.frappe, "get_all", get_all, raising=False)
+    assert bridge.period_company_contributions("2026-10") == {"E1": {"si": 3000.0, "hf": 700.0}, "E2": {"si": 2000.0, "hf": 500.0}}

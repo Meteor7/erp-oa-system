@@ -25,10 +25,9 @@ def household_classification(value):
     return None
 
 
-def social_policy(company, period):
-    if str(company or "").strip() != "Rayher" or not str(period or "").startswith("2026-"):
-        return None
-    return {
+# 示例总部 2026 年的社保政策：数据库里没有配置“社保公积金政策”时用它（原来写死在这里，决定 2026-10-14 改成可配置）。
+BUILTIN_POLICIES = {
+    ("Rayher", 2026): {
         "version": "示例总部-2026",
         "medical_floor": Decimal("6727"),
         "employee_pension_rate": Decimal("8"),
@@ -40,7 +39,57 @@ def social_policy(company, period):
         "employee_unemployment_rate": Decimal("0.2"),
         "company_unemployment_rate": Decimal("0.8"),
         "local_pension_rate": Decimal("1"),
-    }
+        "fund_employee_rate": Decimal("7"),
+        "fund_company_rate": Decimal("7"),
+    },
+}
+POLICY_RATE_FIELDS = (
+    "medical_floor", "employee_pension_rate", "company_pension_rate", "employee_medical_rate", "company_medical_rate",
+    "company_maternity_rate", "company_injury_rate", "employee_unemployment_rate", "company_unemployment_rate",
+    "local_pension_rate", "fund_employee_rate", "fund_company_rate",
+)
+DEFAULT_FUND_RATE = Decimal("7")
+
+
+def _year(period):
+    try:
+        return int(str(period or "")[:4])
+    except ValueError:
+        return None
+
+
+def _configured_policy(company, year):
+    """“社保公积金政策”里启用的这家公司这一年的政策；没有 frappe / 没连数据库（纯函数测试）或还没迁移出这张表时给 None。"""
+    try:
+        import frappe
+        if not frappe.db.table_exists("Contribution Policy"):
+            return None
+        rows = frappe.get_all(
+            "Contribution Policy", filters={"company": company, "year": year, "enabled": 1},
+            fields=["name", "version", *POLICY_RATE_FIELDS], limit_page_length=1,
+        )
+    except (ImportError, AttributeError, RuntimeError):   # RuntimeError：frappe.db 还没连上（本地代理没绑定）
+        return None
+    if not rows:
+        return None
+    row = rows[0]
+    policy = {key: Decimal(str(row.get(key) or 0)) for key in POLICY_RATE_FIELDS}
+    policy["version"] = row.get("version") or row.get("name")
+    return policy
+
+
+def social_policy(company, period):
+    company, year = str(company or "").strip(), _year(period)
+    if not company or not year:
+        return None
+    return _configured_policy(company, year) or (dict(BUILTIN_POLICIES[(company, year)]) if (company, year) in BUILTIN_POLICIES else None)
+
+
+def fund_rates(company, period):
+    """公积金个人、单位比例（%）：公司当年政策里配的，没有就各 7%。"""
+    policy = social_policy(company, period) or {}
+    return (Decimal(str(policy.get("fund_employee_rate") or DEFAULT_FUND_RATE)),
+            Decimal(str(policy.get("fund_company_rate") or DEFAULT_FUND_RATE)))
 
 SOCIAL_COMPONENTS = (
     "employee_pension", "company_pension", "employee_medical", "company_medical",

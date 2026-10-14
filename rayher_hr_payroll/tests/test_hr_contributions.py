@@ -76,3 +76,11 @@ def test_social_policy_is_scoped_by_company_and_period():
     from rayher_hr_payroll.hr_contributions import social_policy
     assert social_policy("Rayher", "2026-07")["version"] == "示例总部-2026"
     assert social_policy("示例研发中心", "2026-07") is None
+    assert social_policy("Rayher", "2027-01") is None   # 每年的政策要单独配置（社保公积金政策）
+
+
+def test_fund_rates_come_from_the_company_policy_with_a_seven_percent_default():
+    from decimal import Decimal
+    from rayher_hr_payroll.hr_contributions import fund_rates
+    assert fund_rates("Rayher", "2026-10") == (Decimal("7"), Decimal("7"))
+    assert fund_rates("示例研发中心", "2026-10") == (Decimal("7"), Decimal("7"))

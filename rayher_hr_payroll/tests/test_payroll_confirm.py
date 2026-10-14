@@ -13,6 +13,35 @@ class PayrollRuleError(Exception):
     pass
 
 
+class FakeInputs:
+    """payroll_inputs 的替身：工时、社保公积金、个税累计都给固定的数（个税用真的累计预扣算法）。"""
+
+    def __init__(self, social=None, fund=None, total=176.0, actual=176.0, leave=0.0, basis=None):
+        self.social = {"employee_total": 300, "company_total": 900, "source": "社保月度记录"} if social is None else social
+        self.fund = {"employee_amount": 200, "company_amount": 200, "source": "公积金月度记录"} if fund is None else fund
+        self.hours = {"total_hours": total, "employed_hours": actual + leave, "personal_leave_hours": leave, "actual_hours": actual,
+                      "work_days": int(total // 8), "calendar_source": "company_holiday_list"}
+        self.basis = basis or {"tax_period": "2026-11", "year": 2026, "prior": {}, "low_income": False, "special_additional": 0,
+                               "other": 0, "bonus_used": False, "has_profile": True, "warnings": []}
+        self.materialized = []
+
+    def contributions(self, employee_row, period):
+        return {"social": dict(self.social), "fund": dict(self.fund)}
+
+    def work_hours(self, employee, company, period, calendars=None):
+        return dict(self.hours)
+
+    def tax_basis(self, employee, company, period, exclude=None):
+        return dict(self.basis)
+
+    def compute_tax(self, basis, payable, social, fund, bonus, bonus_separate):
+        import importlib
+        return importlib.import_module("rayher_hr_payroll.payroll_inputs").compute_tax(basis, payable, social, fund, bonus, bonus_separate)
+
+    def materialize(self, employee_row, period, found):
+        self.materialized.append(period)
+
+
 def _load(monkeypatch, positions=()):
     frappe = types.ModuleType("frappe")
     frappe._ = lambda text: text
@@ -109,6 +138,7 @@ def test_confirm_can_be_limited_to_chosen_people(monkeypatch):
 class Confirmed:
     def __init__(self, managed=1):
         self.name, self.hr_spa_managed, self.docstatus = "SAL-9", managed, 1
+        self.hr_amounts_v2 = 1   # 新算法存的：复制出来的草稿金额由钩子保持，不用重存
         self.flags = SimpleNamespace(ignore_permissions=False)
         self.events = []
 
@@ -173,9 +203,7 @@ def test_a_new_draft_is_numbered_after_its_employee(monkeypatch):
     """新草稿的编号带员工号（Sal Slip/HR-EMP-1/…），不是 Sal Slip/None/…。"""
     module, frappe, _ = _load(monkeypatch)
     monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher", "employee_name": "演示员工128"})
-    monkeypatch.setattr(module, "_social_record", lambda *args: {"employee_total": 100})
-    monkeypatch.setattr(module, "_monthly_record", lambda *args: {"employee_amount": 50})
-    monkeypatch.setattr(module, "_working_days", lambda *args: (22.0, 22.0, "hrms"))
+    monkeypatch.setattr(module, "_inputs", lambda: FakeInputs())
     monkeypatch.setattr(module, "_accommodation", lambda *args: 0)
     monkeypatch.setattr(module, "_slip", lambda *args: None)
     monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - Rayher"})
@@ -185,6 +213,7 @@ def test_a_new_draft_is_numbered_after_its_employee(monkeypatch):
         name = "NEW"
         def update(self, values): self.__dict__.update(values)
         def set(self, table, rows): setattr(self, table, list(rows))
+        def get(self, key, default=None): return self.__dict__.get(key, default)
         def append(self, table, row): getattr(self, table).append(row)
         def insert(self, ignore_permissions=False): self.inserted_series = self.default_series
 

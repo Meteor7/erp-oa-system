@@ -1,0 +1,195 @@
+{
+ "doctype": "DocType",
+ "name": "Employee Tax Profile",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "format:{employee}-{year}",
+ "title_field": "employee_name",
+ "fields": [
+  {
+   "fieldname": "employee",
+   "label": "员工",
+   "fieldtype": "Link",
+   "options": "Employee",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "label": "姓名",
+   "fieldtype": "Data",
+   "fetch_from": "employee.employee_name",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "year",
+   "label": "个税年度",
+   "fieldtype": "Int",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "low_income_rule",
+   "label": "上年每月都在本单位领工资、全年不超过 6 万（减除费用从 1 月起按 6 万扣）",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "special_section",
+   "label": "每月专项附加扣除",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "special_child_education",
+   "label": "子女教育",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "special_infant_care",
+   "label": "3 岁以下婴幼儿照护",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "special_continuing_education",
+   "label": "继续教育",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "column_special",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "special_housing_loan",
+   "label": "住房贷款利息",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "special_housing_rent",
+   "label": "住房租金",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "special_elderly_support",
+   "label": "赡养老人",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "special_total",
+   "label": "每月专项附加扣除合计",
+   "fieldtype": "Currency",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "other_deduction",
+   "label": "每月其他扣除（个人养老金等）",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_section",
+   "label": "期初累计（系统上线前、本单位已经申报过的月份）",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "opening_to_period",
+   "label": "期初累计截至的个税所属期（YYYY-MM）",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "opening_months",
+   "label": "期初月数",
+   "fieldtype": "Int",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_income",
+   "label": "累计收入",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_tax_free",
+   "label": "累计免税收入",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_special",
+   "label": "累计专项扣除（社保公积金个人）",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "column_opening",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "opening_special_additional",
+   "label": "累计专项附加扣除",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_other",
+   "label": "累计其他扣除",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_tax",
+   "label": "累计已预扣个税",
+   "fieldtype": "Currency",
+   "default": "0"
+  },
+  {
+   "fieldname": "opening_bonus_used",
+   "label": "今年已经用过年终奖单独计税",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "remark",
+   "label": "备注",
+   "fieldtype": "Small Text"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  }
+ ]
+}

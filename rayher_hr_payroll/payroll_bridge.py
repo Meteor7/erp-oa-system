@@ -38,13 +38,30 @@ def period_salaries(ym):
 
 
 def period_company_contributions(ym):
-    """{employee: {"si": 单位社保合计, "hf": 单位公积金合计}}，只读已确认的记录。
+    """{employee: {"si": 单位社保合计, "hf": 单位公积金合计}}，只读已确认的数。
 
     修复（2026-09-29，审查 X2-2，决定 D1）：研发人工原来只有工资单应发，单位承担的社保和公积金
-    进不了研发成本（总账里的同类行又和工资单冲突）。这里只读取人事模块里已确认的记录，
-    不改社保、公积金模块本身。
+    进不了研发成本（总账里的同类行又和工资单冲突）。
+    2026-10-14：已确认的工资条（新算法）存着当时用的单位社保 / 公积金（hr_social_company / hr_fund_company），
+    和工资、研发分摊同一张单据，优先用它；社保账单生效后不写月度记录，原来按记录读会漏掉。
+    没有快照的旧工资条、没有工资条的人，仍读人事模块里已确认的月度记录。
     """
     out = {}
+    start, end = month_bounds(ym)
+    slips = frappe.get_all(
+        "Salary Slip",
+        filters={"docstatus": 1, "start_date": ["between", [start, end]], "hr_amounts_v2": 1},
+        fields=["employee", "hr_social_company", "hr_fund_company"],
+        limit_page_length=0,
+    )
+    from_slips = set()
+    for r in slips:
+        if not r.get("employee"):
+            continue
+        from_slips.add(r.get("employee"))
+        entry = out.setdefault(r.get("employee"), {"si": 0.0, "hf": 0.0})
+        entry["si"] += float(r.get("hr_social_company") or 0)
+        entry["hf"] += float(r.get("hr_fund_company") or 0)
     for doctype, field, key in (
         ("Employee Social Insurance", "company_total", "si"),
         ("Employee Housing Fund", "company_amount", "hf"),
@@ -56,7 +73,7 @@ def period_company_contributions(ym):
             limit_page_length=0,
         )
         for r in rows:
-            if not r.get("employee"):
+            if not r.get("employee") or r.get("employee") in from_slips:
                 continue
             entry = out.setdefault(r.get("employee"), {"si": 0.0, "hf": 0.0})
             entry[key] += float(r.get(field) or 0)

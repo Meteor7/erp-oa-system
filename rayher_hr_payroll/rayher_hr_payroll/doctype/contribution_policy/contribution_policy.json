@@ -1,0 +1,149 @@
+{
+ "doctype": "DocType",
+ "name": "Contribution Policy",
+ "module": "Rayher HR Payroll",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "track_changes": 1,
+ "autoname": "format:{company}-{year}",
+ "title_field": "version",
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "公司",
+   "fieldtype": "Link",
+   "options": "Company",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "year",
+   "label": "年度",
+   "fieldtype": "Int",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "version",
+   "label": "政策名称",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "enabled",
+   "label": "启用",
+   "fieldtype": "Check",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "social_section",
+   "label": "社保（%）",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "medical_floor",
+   "label": "医疗保险最低基数",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "employee_pension_rate",
+   "label": "养老 个人",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "company_pension_rate",
+   "label": "养老 单位",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "employee_medical_rate",
+   "label": "医疗 个人",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "company_medical_rate",
+   "label": "医疗 单位",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "column_social",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_maternity_rate",
+   "label": "生育 单位",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "company_injury_rate",
+   "label": "工伤 单位",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "employee_unemployment_rate",
+   "label": "失业 个人",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "company_unemployment_rate",
+   "label": "失业 单位",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "local_pension_rate",
+   "label": "地方补充养老 单位（仅深户）",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "fund_section",
+   "label": "公积金（%）",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "fund_employee_rate",
+   "label": "公积金 个人",
+   "fieldtype": "Float",
+   "default": "7"
+  },
+  {
+   "fieldname": "fund_company_rate",
+   "label": "公积金 单位",
+   "fieldtype": "Float",
+   "default": "7"
+  },
+  {
+   "fieldname": "remark",
+   "label": "备注",
+   "fieldtype": "Small Text"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "report": 1
+  }
+ ]
+}

@@ -74,7 +74,10 @@ doc_events = {
         "on_submit": "rayher_hr_payroll.approval_config.notify_applicant_on_decision",
     },
     "Salary Slip": {
-        "validate": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
+        "validate": [
+            "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
+            "rayher_hr_payroll.payroll_slip.keep_hr_amounts",
+        ],
         "before_cancel": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
         "on_trash": "rayher_hr_payroll.payroll_bridge.block_locked_salary_slip_change",
     },

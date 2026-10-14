@@ -13,6 +13,7 @@ from rayher_hr_payroll.hr_contributions import (
     calculate_social_snapshot,
     household_classification,
     housing_fund_amounts,
+    fund_rates,
     social_policy,
 )
 from rayher_hr_payroll.housing_fund_import import DEFAULT_COMPANY_RATE, DEFAULT_EMPLOYEE_RATE, canonical_period
@@ -90,7 +91,8 @@ def get_base_table(kind, period, company=None):
         }
         if base and float(base) > 0:
             if kind == "fund":
-                amounts = housing_fund_amounts(base, (record or {}).get("employee_rate") or DEFAULT_EMPLOYEE_RATE, (record or {}).get("company_rate") or DEFAULT_COMPANY_RATE)
+                policy_employee, policy_company = fund_rates(employee["company"], period)
+                amounts = housing_fund_amounts(base, (record or {}).get("employee_rate") or policy_employee, (record or {}).get("company_rate") or policy_company)
                 item.update({"employee_amount": float(amounts["employee_amount"]), "company_amount": float(amounts["company_amount"])})
             else:
                 policy = social_policy(employee["company"], period)
@@ -125,6 +127,11 @@ def save_employee_base(kind, employee, base, period=None):
         frappe.throw(frappe._("基数不能为负数。"))
     period = canonical_period(period) if period else None
     old = frappe.db.get_value("Employee", employee, BASE_FIELD[kind])
+    if period:
+        # 按档案基数自动生成的本月记录跟着基数走：删掉，下次算工资按新基数重算
+        from rayher_hr_payroll.payroll_inputs import drop_auto_records
+
+        drop_auto_records(employee, period, (kind,))
     if kind == "si" and period and frappe.db.exists("Employee Social Insurance", {"employee": employee, "period": period}):
         frappe.throw(frappe._("该员工本月已有手工维护的社保月度记录，请先在月度记录里处理。"))
     frappe.db.set_value("Employee", employee, BASE_FIELD[kind], value)
@@ -155,20 +162,27 @@ def save_employee_household(employee, household):
 
 @frappe.whitelist()
 def get_payroll_readiness(period):
-    """薪酬计算要求每个在职员工本月都有社保和公积金记录；这里告诉 HR 还差谁。"""
+    """薪酬计算要每个在职员工本月的社保、公积金都有数：账单 / 月度记录，或者按档案基数 × 公司当年政策能算出来
+    （决定 2026-10-14）。这里告诉 HR 还差谁、为什么。"""
     require_hr_read(ROLES, require_rd_access)
     require_hr_sensitive_access()
     period = canonical_period(period)
-    employees = _employees(None)
-    fund_ready = {r["employee"] for r in frappe.get_all("Employee Housing Fund", filters={"period": period}, fields=["employee"])}
-    social_ready = {r["employee"] for r in frappe.get_all("Employee Social Insurance", filters={"period": period}, fields=["employee"])}
-    batch = frappe.db.get_value("Social Insurance Import Batch", {"period": period, "is_current": 1}, "name")
-    if batch:
-        social_ready |= {r["employee"] for r in frappe.get_all(
-            "Social Insurance Import Row", filters={"batch": batch, "status": ["in", ["Matched", "Confirmed Difference"]]}, fields=["employee"]) if r.get("employee")}
+    from rayher_hr_payroll.payroll_inputs import contributions
+
+    employees = frappe.get_all(
+        "Employee", filters={"status": "Active", "company": ["in", list(SUPPORTED_COMPANIES)]}, order_by="company, employee_name",
+        fields=["name", "employee_name", "company", "household_registration", "default_social_insurance_base", "default_housing_fund_base"],
+    )
+    reasons = {"si": {}, "fund": {}}
+    for employee in employees:
+        found = contributions(employee, period)
+        for kind, key in (("si", "social"), ("fund", "fund")):
+            if found[key].get("missing"):
+                reasons[kind][employee["name"]] = found[key]["missing"]
     result = {"period": period, "total": len(employees), "kinds": {}}
-    for kind, ready in (("si", social_ready), ("fund", fund_ready)):
-        missing = [{"employee": e["name"], "employee_name": e["employee_name"], "company": e["company"]} for e in employees if e["name"] not in ready]
+    for kind in ("si", "fund"):
+        missing = [{"employee": e["name"], "employee_name": e["employee_name"], "company": e["company"], "reason": reasons[kind][e["name"]]}
+                   for e in employees if e["name"] in reasons[kind]]
         result["kinds"][kind] = {"label": KIND_LABEL[kind], "ready": len(employees) - len(missing), "missing_count": len(missing), "missing": missing[:MISSING_LIST_LIMIT]}
     result["payroll_ready"] = all(not item["missing_count"] for item in result["kinds"].values())
     return result
