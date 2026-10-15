@@ -166,7 +166,11 @@ def seed_procurement(confirm=""):
         for i,stage in [(0,"待需求审批"),(4,"已生成PO")]:
             marker=existing.PREFIX+stage
             if frappe.db.exists("OA Approval Request", {"subject":["like",marker+"%"]}): continue
-            sources=[existing._create_oa(stage,1,1,i,0 if i==0 else None)]
+            frappe.set_user(user("engineer1"))
+            source = save_draft("采购申请", {"subject": marker, "reason":"[演示]研发设备组件采购", "urgency":"一般", "asset_nature":"非固定资产", "procurement_scope":"项目采购", "project":existing.PROJECTS[i%2], "expected_delivery_date":str(date.today()+timedelta(days=20)), "business_lines":existing._materials(i, count=2)})
+            oa.submit_request(source.name)
+            if i: advance(source.name)
+            sources=[frappe.get_doc("OA Approval Request",source.name)]
             row={"stage":stage,"oa":sources[0].name}
             if i>=2:
                 prs=existing._create_prs(sources); row["pr"]=prs[0]["name"]
