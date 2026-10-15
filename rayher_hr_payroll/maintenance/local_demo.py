@@ -44,6 +44,9 @@ def seed_masters(confirm="", password=None):
     from frappe.utils.password import update_password
     today = date.today()
     frappe.db.set_single_value("System Settings", "time_zone", "Asia/Shanghai")
+    if not frappe.db.exists("Warehouse Type", "Transit"):
+        from erpnext.setup.setup_wizard.operations.install_fixtures import install
+        install(country="China")
     company = ensure("Company", COMPANY, {"company_name": COMPANY, "abbr": "DEMO", "default_currency": "CNY", "country": "China"})
     if not frappe.defaults.get_global_default("company"):
         frappe.defaults.set_global_default("company", company.name)
@@ -69,7 +72,7 @@ def seed_masters(confirm="", password=None):
             allowed = [role for role in ["Employee", *roles] if frappe.db.exists("Role", role)]
             frappe.get_doc({"doctype": "User", "email": email, "first_name": PREFIX+name, "enabled": 1, "send_welcome_email": 0, "roles": [{"role": r} for r in allowed]}).insert(ignore_permissions=True)
             update_password(email, password, logout_all_sessions=False)
-        values = {"first_name": PREFIX+name, "gender": "Male", "date_of_birth": "1994-06-15", "date_of_joining": f"{today.year-2}-01-08", "company": COMPANY, "department": depts[department], "status": "Active", "user_id": email, "holiday_list": holiday.name, "create_user_permission": 0, "rd_personnel_type": "全时研发" if department == "研发部" else "非研发", "archive_status": "未归档"}
+        values = {"first_name": PREFIX+name, "gender": "Male", "date_of_birth": "1994-06-15", "date_of_joining": f"{today.year-2}-01-08", "company": COMPANY, "department": depts[department], "status": "Active", "user_id": email, "holiday_list": holiday.name, "create_user_permission": 0, "rd_personnel_type": "全时研发" if department == "研发部" else "非研发"}
         if key != "manager":
             values["reports_to"] = staff["manager"]
         staff[key] = ensure("Employee", {"user_id": email}, values).name
