@@ -87,7 +87,7 @@ def seed_masters(confirm="", password=None):
     ensure("Activity Type", "Demo Development", {"activity_type": "Demo Development"})
     ensure("OA Procurement Category", "DEMO-ELC", {"category_code":"DEMO-ELC", "category_name":"[演示]电子与光学组件", "full_path":"[演示]电子与光学组件", "level":1, "allow_request":1, "is_active":1, "source":"本地演示"})
     for i, name in enumerate(["工业相机", "远心镜头", "光源控制器"], 1):
-        code = "DEMO-MAT-"+str(i)
+        code = "DEMO.ELC.00"+str(i)
         ensure("OA Procurement Material", code, {"material_code":code, "category_code":"DEMO-ELC", "category_path":"[演示]电子与光学组件", "material_name":PREFIX+name, "specification":"演示标准型", "product_desc":"虚构演示物料", "brand":"DEMO", "material_attr":"外购", "unit":"个", "is_active":1, "source":"本地演示"})
     for label in ["星河精密组件", "云帆光电器件"]:
         ensure("Supplier", {"supplier_name": PREFIX+label}, {"supplier_name":PREFIX+label, "supplier_type":"Company", "supplier_group":"All Supplier Groups", "country":"China"})
@@ -157,7 +157,7 @@ def seed_procurement(confirm=""):
     existing.PREFIX = "[演示]采购链·"
     existing.APPLICANT = frappe.db.get_value("Employee", {"user_id":user("engineer1")}, "name")
     existing.PROJECTS = tuple(frappe.get_all("Project", filters={"project_name":["like",PREFIX+"%"]},pluck="name",order_by="name")[:2])
-    existing.MATERIAL_CODES = tuple("DEMO-MAT-"+str(i) for i in range(1,4))
+    existing.MATERIAL_CODES = tuple("DEMO.ELC.00"+str(i) for i in range(1,4))
     existing.SUPPLIERS = tuple(frappe.get_all("Supplier",filters={"supplier_name":["like",PREFIX+"%"]},pluck="name",order_by="name"))
     existing.PRICE_APPROVER_USER = user("manager")
     existing.SEAL_USER = user("buyer")
