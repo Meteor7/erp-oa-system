@@ -165,25 +165,35 @@ def seed_procurement(confirm=""):
     try:
         for i,stage in [(0,"待需求审批"),(4,"已生成PO")]:
             marker=existing.PREFIX+stage
-            if frappe.db.exists("OA Approval Request", {"subject":["like",marker+"%"]}): continue
+            source_name = frappe.db.get_value("OA Approval Request", {"subject":marker}, "name")
+            if source_name and (not i or frappe.db.exists("OA Purchase Order Line", {"source_request":source_name})):
+                continue
             frappe.set_user(user("engineer1"))
-            source = save_draft("采购申请", {"subject": marker, "reason":"[演示]研发设备组件采购", "urgency":"一般", "asset_nature":"非固定资产", "procurement_scope":"项目采购", "project":existing.PROJECTS[i%2], "expected_delivery_date":str(date.today()+timedelta(days=20)), "business_lines":existing._materials(i, count=2)})
-            oa.submit_request(source.name)
+            if source_name:
+                source = frappe.get_doc("OA Approval Request",source_name)
+            else:
+                source = save_draft("采购申请", {"subject": marker, "reason":"[演示]研发设备组件采购", "urgency":"一般", "asset_nature":"非固定资产", "procurement_scope":"项目采购", "project":existing.PROJECTS[i%2], "expected_delivery_date":str(date.today()+timedelta(days=20)), "business_lines":existing._materials(i, count=2)})
+            if source.workflow_status == "草稿": oa.submit_request(source.name)
             if i: advance(source.name)
             sources=[frappe.get_doc("OA Approval Request",source.name)]
             row={"stage":stage,"oa":sources[0].name}
             if i>=2:
-                prs=existing._create_prs(sources); row["pr"]=prs[0]["name"]
+                pr_name=frappe.db.get_value("OA Procurement Request Line",{"source_request":source.name},"parent")
+                prs=[frappe.get_doc("OA Procurement Request",pr_name).as_dict()] if pr_name else existing._create_prs(sources)
+                row["pr"]=prs[0]["name"]
             if i>=3:
-                price=existing._create_price(prs); row["price"]=price["name"]
                 frappe.set_user(user("buyer"))
-                for j,supplier in enumerate(existing.SUPPLIERS):
+                price_name=frappe.db.get_value("OA Price Approval Line",{"source_pr":row["pr"]},"parent")
+                price=chain.get_price_approval(price_name) if price_name else existing._create_price(prs)
+                row["price"]=price["name"]
+                for j,supplier in enumerate(existing.SUPPLIERS if price["status"] == "草稿" else []):
                     prices=[{"price_line":line["name"],"unit_price":360+50*k+30*j,"delivery_date":str(date.today()+timedelta(days=14+j))} for k,line in enumerate(price["lines"])]
                     total=sum(p["unit_price"]*float(line["quantity"]) for p,line in zip(prices,price["lines"]))
                     plan=[{"installment_name":"验收后全额付款","payment_stage":"到货后全额付款","percentage":100,"amount":total,"planned_date":str(date.today()+timedelta(days=30)),"trigger_condition":"全部到货并验收通过","invoice_requirement":"付款前提供"}]
                     chain.save_supplier_comparison(price["name"],supplier,json.dumps(prices),payment_method="验收合格后付款",currency="CNY",tax_rate=13,contract_entity=COMPANY,is_recommended=int(j==0),note="[演示]供应商比价",payment_plan=json.dumps(plan))
-                chain.update_price_approval_summary(price["name"],"[演示]比较价格、交期与付款条件")
-                price=chain.submit_price_approval(price["name"])
+                if price["status"] == "草稿":
+                    chain.update_price_approval_summary(price["name"],"[演示]比较价格、交期与付款条件")
+                    price=chain.submit_price_approval(price["name"])
                 if i==4:
                     row["po"]=existing._approve_price_to_po(price)
             frappe.db.commit(); results.append(row)
