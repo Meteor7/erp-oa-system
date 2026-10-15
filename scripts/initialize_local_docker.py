@@ -64,7 +64,7 @@ if [[ ! -s sites/apps.txt ]] || ! ./env/bin/python -c 'import frappe' >/dev/null
         echo 'Incomplete framework checkout or Python environment; inspect the preserved bench.' >&2
         exit 1
     fi
-    python -c 'from bench.app import install_app; install_app("frappe", bench_path=".", skip_assets=True, restart_bench=False)'
+    bench setup requirements frappe
 fi
 if [[ ! -d apps/rayher_hr_payroll/.git ]]; then
     git clone --branch local-bootstrap-deploy /tmp/logistics-source.bundle apps/rayher_hr_payroll
