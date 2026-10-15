@@ -29,10 +29,50 @@ procfile.write_text('\n'.join(line for line in lines if not line.startswith(('re
 PY
 (cd apps/rayher_hr_payroll/frontend && yarn install --frozen-lockfile)
 bench build
-if [[ ! -f "sites/$LOCAL_SITE/site_config.json" ]]; then
+# The bench image ships a MariaDB 11.8 client, while this isolated local
+# network uses MariaDB 10.6 without TLS. This generated client setting is
+# confined to the local bench container; database ports are not published.
+./env/bin/python - <<'PY'
+from pathlib import Path
+client_config = Path.home() / '.my.cnf'
+expected = '[client]\nskip-ssl\n'
+if client_config.exists() and client_config.read_text() != expected:
+    raise SystemExit('Unexpected existing MariaDB client config; preserving it for inspection.')
+client_config.write_text(expected)
+client_config.chmod(0o600)
+PY
+site_state=$(./env/bin/python - <<'PY'
+import json
+import os
+from pathlib import Path
+import pymysql
+site_config = Path('sites') / os.environ['LOCAL_SITE'] / 'site_config.json'
+if not site_config.exists():
+    print('missing')
+else:
+    config = json.loads(site_config.read_text())
+    with pymysql.connect(host='mariadb', user=config.get('db_user') or config['db_name'],
+                         password=config['db_password'], database=config['db_name']) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute('SHOW TABLES')
+            tables = {row[0] for row in cursor.fetchall()}
+    if not tables and not Path('.local-ready').exists():
+        print('empty')
+    elif {'tabDocType', 'tabSingles', 'tabUser'} <= tables:
+        print('initialized')
+    else:
+        raise SystemExit('Partially initialized database contains tables; preserving it for inspection.')
+PY
+)
+if [[ "$site_state" == missing || "$site_state" == empty ]]; then
+    site_options=()
+    if [[ "$site_state" == empty ]]; then
+        echo 'Recovering verified empty database left by interrupted site creation.'
+        site_options+=(--force)
+    fi
     bench new-site "$LOCAL_SITE" --db-type mariadb --db-host mariadb \
         --db-root-password "$LOCAL_DB_ROOT_PASSWORD" \
-        --mariadb-user-host-login-scope '%' --admin-password "$LOCAL_ADMIN_PASSWORD"
+        --mariadb-user-host-login-scope '%' --admin-password "$LOCAL_ADMIN_PASSWORD" "${site_options[@]}"
 fi
 # Only framework and app metadata is installed; no production or demo business data.
 bench --site "$LOCAL_SITE" set-config mute_emails 1
