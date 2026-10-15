@@ -1,4 +1,4 @@
-﻿# 把本地已经 commit 的版本部署进 Docker 卷（含卷上的 Git 检出）。
+# 把本地已经 commit 的版本部署进 Docker 卷（含卷上的 Git 检出）。
 # 不拷源码文件，避免天锐密文进入容器。
 #
 # 在仓库根目录 rayher-logistics-main 执行:
@@ -301,8 +301,8 @@ Invoke-Docker -Cmd @("exec", "-w", $BenchPath, $Container, "bench", "--site", $S
 # 内部网络，之后上传的发票都识别不了，直到 9 月 24 日才发现。每次部署顺便检查，连不上就接上并提示。
 $OcrNetwork = "rayher-ocr-internal"
 $ocr = "skipped (no $OcrNetwork network)"
-& docker network inspect $OcrNetwork *> $null
-if ($LASTEXITCODE -eq 0) {
+$ocrNetworks = Get-DockerOutput -Cmd @("network", "ls", "--filter", ("name=^" + $OcrNetwork + "$") , "--format", "{{.Name}}")
+if (($ocrNetworks -split "`n") -contains $OcrNetwork) {
     & docker exec $Container getent hosts invoice-ocr *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "OCR sidecar not reachable from $Container; connecting it to $OcrNetwork ..."
