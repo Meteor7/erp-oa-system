@@ -1,4 +1,4 @@
-# 把本地已经 commit 的版本部署进 Docker 卷（含卷上的 Git 检出）。
+﻿# 把本地已经 commit 的版本部署进 Docker 卷（含卷上的 Git 检出）。
 # 不拷源码文件，避免天锐密文进入容器。
 #
 # 在仓库根目录 rayher-logistics-main 执行:
