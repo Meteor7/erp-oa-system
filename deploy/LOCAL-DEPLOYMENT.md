@@ -2,7 +2,7 @@
 
 This creates an isolated development site using Frappe/ERPNext/HRMS version-15 and the locally committed custom app. It does not restore production backups or load employee/payroll data. The official bench v5.31.0 image is pinned by digest; Python 3.12 and Node 22 are selected for v15.
 
-Prerequisites: firmware virtualization enabled, WSL 2 installed, Docker Desktop Linux engine healthy (`docker info`), Git and Python in PATH. All frontend dependency installation and builds run in Docker.
+Prerequisites: firmware virtualization enabled, Docker Desktop Linux engine healthy using WSL 2 or Docker VMM (`docker info`), Git and Python in PATH. All frontend dependency installation and builds run in Docker.
 
 ## First initialization
 
