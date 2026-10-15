@@ -180,7 +180,7 @@ def seed_procurement(confirm=""):
                 for j,supplier in enumerate(existing.SUPPLIERS):
                     prices=[{"price_line":line["name"],"unit_price":360+50*k+30*j,"delivery_date":str(date.today()+timedelta(days=14+j))} for k,line in enumerate(price["lines"])]
                     total=sum(p["unit_price"]*float(line["quantity"]) for p,line in zip(prices,price["lines"]))
-                    plan=[{"installment_name":"验收后全额付款","payment_stage":"全额付款","percentage":100,"amount":total,"planned_date":str(date.today()+timedelta(days=30)),"trigger_condition":"全部到货并验收通过","invoice_requirement":"付款前提供"}]
+                    plan=[{"installment_name":"验收后全额付款","payment_stage":"到货后全额付款","percentage":100,"amount":total,"planned_date":str(date.today()+timedelta(days=30)),"trigger_condition":"全部到货并验收通过","invoice_requirement":"付款前提供"}]
                     chain.save_supplier_comparison(price["name"],supplier,json.dumps(prices),payment_method="验收合格后付款",currency="CNY",tax_rate=13,contract_entity=COMPANY,is_recommended=int(j==0),note="[演示]供应商比价",payment_plan=json.dumps(plan))
                 chain.update_price_approval_summary(price["name"],"[演示]比较价格、交期与付款条件")
                 price=chain.submit_price_approval(price["name"])
