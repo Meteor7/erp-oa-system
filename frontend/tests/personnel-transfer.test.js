@@ -134,12 +134,12 @@ test("text cells: numbers never turn into scientific notation, leading zeros sur
   const phone = TRANSFER_COLUMNS.find((column) => column.key === "cell_number");
   const bank = TRANSFER_COLUMNS.find((column) => column.key === "bank_ac_no");
   const salary = TRANSFER_COLUMNS.find((column) => column.key === "default_monthly_salary");
-  assert.equal(numberToText(13800000002), "13800000002");
+  assert.equal(numberToText(13800000001), "13800000001");
   assert.equal(numberToText(123456789012345), "123456789012345");
   assert.equal(numberToText(12000.5), "12000.5");
   assert.equal(numberToText(0.1 + 0.2), "0.3");
   assert.equal(numberToText(NaN), "");
-  assert.deepEqual(convertCell(13800000002, phone), { text: "13800000002" });
+  assert.deepEqual(convertCell(13800000001, phone), { text: "13800000001" });
   assert.deepEqual(convertCell("0012345", bank), { text: "0012345" });
   assert.deepEqual(convertCell("  6222 0000  ", bank), { text: "6222 0000" });
   assert.deepEqual(convertCell(" A001​", phone), { text: "A001" });
@@ -156,7 +156,7 @@ test("parsing: reordered columns, unknown columns, blank rows, row numbers and b
     [],
     ["人员花名册（2026-10）"],
     ["姓名", "*员工号", "多余的列", "入职时间", "手机号", "所属单位", "部门"],
-    ["南通工厂9", "A001", "x", serialOf(2026, 1, 5), 13800000002, "栖衡科技", "研发软件部"],
+    ["南通工厂9", "A001", "x", serialOf(2026, 1, 5), 13800000001, "栖衡科技", "研发软件部"],
     ["", "", "", "", "", "", ""],
     ["演示员工146", "007", "", "2026/2/3", "", "示例研发中心", ""],
   ];
@@ -166,7 +166,7 @@ test("parsing: reordered columns, unknown columns, blank rows, row numbers and b
   assert.deepEqual(parsed.unknownHeaders, ["多余的列"]);
   assert.equal(parsed.dataRows, 2);
   assert.deepEqual(parsed.rows, [
-    { _row: 4, employee_name: "南通工厂9", employee_number: "A001", date_of_joining: "2026-01-05", cell_number: "13800000002", company: "栖衡科技", department: "研发软件部" },
+    { _row: 4, employee_name: "南通工厂9", employee_number: "A001", date_of_joining: "2026-01-05", cell_number: "13800000001", company: "栖衡科技", department: "研发软件部" },
     { _row: 6, employee_name: "演示员工146", employee_number: "007", date_of_joining: "2026-02-03", company: "示例研发中心" },
   ]);
   assert.deepEqual(parsed.problems, []);
@@ -262,7 +262,7 @@ test("only roles that can save employees see the import button", () => {
 // ---------- 导出 ----------
 const sampleRow = (extra = {}) => ({
   name: "HR-EMP-90001", company: "QIHENG Demo", employee_number: "007", employee_name: "南通工厂9", english_name: "Zhang San", gender: "Male",
-  date_of_birth: "1995-01-15", cell_number: "13800000002", household_registration: "深圳", date_of_joining: "2026-01-05", relieving_date: null,
+  date_of_birth: "1995-01-15", cell_number: "13800000001", household_registration: "深圳", date_of_joining: "2026-01-05", relieving_date: null,
   department: "研发软件部 - RAY", designation: "工程师", reports_to: "HR-EMP-90009", employment_type: "劳动合同", rd_personnel_type: "全时研发",
   expense_account_category: "研发费用", archive_status: "待完善", probation_months: 3, first_contract_period_years: 0, status: "Active",
   default_monthly_salary: 12000.5, salary_months: 13, default_social_insurance_base: 0, default_housing_fund_base: 8000, social_insurance_number: "0012345",
@@ -315,7 +315,7 @@ test("export cells: ids and bank numbers are text, zeros are blank, names are sh
   assert.equal(typeof cell("employee_number"), "string");
   assert.equal(cell("bank_ac_no"), "0622000011112222");
   assert.equal(typeof cell("id_card_number_cn"), "string");
-  assert.equal(cell("cell_number"), "13800000002");
+  assert.equal(cell("cell_number"), "13800000001");
   assert.equal(cell("company"), "栖衡科技");
   assert.equal(cell("gender"), "男");
   assert.equal(cell("department"), "研发软件部");
@@ -405,14 +405,14 @@ test("the downloaded template workbook is read back from its 员工信息 sheet 
 
 test("a real date cell and a numeric phone cell are read the way the page expects", async () => {
   const XLSX = await loadXlsx();
-  const sheet = XLSX.utils.aoa_to_sheet([["员工号", "入职日期", "联系电话", "银行卡号"], ["A001", "x", 13800000002, "0001"]]);
+  const sheet = XLSX.utils.aoa_to_sheet([["员工号", "入职日期", "联系电话", "银行卡号"], ["A001", "x", 13800000001, "0001"]]);
   sheet.B2 = { t: "n", v: serialOf(2026, 10, 1), z: "yyyy-mm-dd" };
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
   const parsed = readEmployeeWorkbook(XLSX, XLSX.write(workbook, { type: "array", bookType: "xlsx", cellStyles: true }));
   assert.deepEqual(parsed.errors, []);
   assert.equal(parsed.sheetName, "Sheet1");
-  assert.deepEqual(parsed.rows[0], { _row: 2, employee_number: "A001", date_of_joining: "2026-10-01", cell_number: "13800000002", bank_ac_no: "0001" });
+  assert.deepEqual(parsed.rows[0], { _row: 2, employee_number: "A001", date_of_joining: "2026-10-01", cell_number: "13800000001", bank_ac_no: "0001" });
 });
 
 test("a workbook without an employee header is reported, not guessed", async () => {

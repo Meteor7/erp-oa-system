@@ -214,7 +214,7 @@ def test_save_employee_updates_reference_template_fields(monkeypatch):
         default_monthly_salary=10000, salary_months=14,
         first_education_level="本科", first_education_school="A大学", first_education_major="电子",
         education_level_cn="硕士", graduation_school="B大学", major_cn="微电子",
-        cell_number="13800000002", bank_name="中国银行深圳支行", bank_ac_no="62220001",
+        cell_number="13800000001", bank_name="中国银行深圳支行", bank_ac_no="62220001",
         default_social_insurance_base=8000, default_housing_fund_base=9000,
     )
 
@@ -224,7 +224,7 @@ def test_save_employee_updates_reference_template_fields(monkeypatch):
     assert captured["salary_months"] == 14
     assert captured["first_education_school"] == "A大学"
     assert captured["graduation_school"] == "B大学"
-    assert captured["cell_number"] == "13800000002"
+    assert captured["cell_number"] == "13800000001"
     assert captured["bank_ac_no"] == "62220001"
     assert captured["default_social_insurance_base"] == 8000
     assert captured["default_housing_fund_base"] == 9000

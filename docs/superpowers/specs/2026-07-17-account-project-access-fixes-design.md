@@ -58,5 +58,5 @@ Because submitted ERPNext Timesheets reject zero-hour rows, an SPA-managed zero-
 - Run the full frontend and backend test suites and build the SPA.
 - Back up the site before account rename or schema/data changes.
 - Verify database links after rename and authenticate all workbook credentials.
-- Test report download as QIHENG Demo Staff 04, a normal Project Owner on own and unrelated projects, Zhang Jun, and an Employee.
+- Test report download as QIHENG Demo Admin, a normal Project Owner on own and unrelated projects, Zhang Jun, and an Employee.
 - Deploy, migrate only required schema changes, rebuild assets, restart services, and verify the health endpoint.

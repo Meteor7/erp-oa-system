@@ -30,7 +30,7 @@ def _env(monkeypatch, user="Administrator", roles=("System Manager",), allow_cre
         store=[
             _employee(name="HR-EMP-90001", employee_number="A001", employee_name="南通工厂9", department="研发软件部 - RAY",
                       designation="工程师", date_of_joining="2024-01-01", default_monthly_salary=10000.0,
-                      bank_ac_no="6222000011112222", cell_number="13800000002", english_name="Zhang San"),
+                      bank_ac_no="6222000011112222", cell_number="13800000001", english_name="Zhang San"),
             _employee(name="HR-EMP-90002", employee_number="B002", employee_name="演示员工146", company="示例研发中心"),
             _employee(name="HR-EMP-90003", employee_number="C003", employee_name="演示员工157", status="Left"),
         ],
@@ -410,11 +410,11 @@ def test_blank_cells_never_clear_existing_values(monkeypatch):
     with pytest.raises(RuleError, match="没有需要导入"):
         mod.import_employees(rows)
     a001 = next(r for r in env.store if r["employee_number"] == "A001")
-    assert a001["designation"] == "工程师" and a001["cell_number"] == "13800000002" and a001["default_monthly_salary"] == 10000.0
+    assert a001["designation"] == "工程师" and a001["cell_number"] == "13800000001" and a001["default_monthly_salary"] == 10000.0
 
     mod.import_employees([{"_row": 2, "employee_number": "A001", "designation": "财务主管", "cell_number": ""}])
     a001 = next(r for r in env.store if r["employee_number"] == "A001")
-    assert a001["designation"] == "财务主管" and a001["cell_number"] == "13800000002"
+    assert a001["designation"] == "财务主管" and a001["cell_number"] == "13800000001"
     assert env.saved == ["HR-EMP-90001"]
 
 
@@ -578,7 +578,7 @@ def test_failure_on_the_second_write_rolls_everything_back(monkeypatch):
     assert env.rollbacks == 1
     assert env.commits == 0
     assert env.store == before          # 第一行已经 insert 过，回滚后不见了
-    assert env.inserted == ["HR-EMP-90004"]  # 确实写过一行，说明回滚是真的在撤销
+    assert env.inserted == ["HR-EMP-00004"]  # 确实写过一行，说明回滚是真的在撤销
 
 
 def test_failure_on_an_update_also_rolls_back_earlier_updates(monkeypatch):
@@ -597,7 +597,7 @@ def test_failure_on_an_update_also_rolls_back_earlier_updates(monkeypatch):
 def test_save_employee_still_uses_the_shared_write_path(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     result = mod.save_employee(employee_number="Z9", employee_name="手工新增", company="QIHENG Demo", date_of_joining="2026-10-02")
-    assert result == {"name": "HR-EMP-90004"} and env.commits == 1
+    assert result == {"name": "HR-EMP-00004"} and env.commits == 1
     row = env.store[-1]
     assert row["gender"] == "Male" and row["date_of_birth"] == "1990-01-01" and row["first_name"] == "手工新增"
     mod.save_employee(name="HR-EMP-90001", designation="财务主管")

@@ -22,7 +22,7 @@ export const TRANSFER_COLUMNS = [
   { key: "english_name", label: "英文名", kind: "text", width: 14, aliases: [], required: "选填", format: "文本", values: "", blank: KEEP, examples: ["Demo A", ""] },
   { key: "gender", label: "性别", kind: "gender", width: 8, aliases: [], required: "选填", format: "文本", values: "男、女", blank: "新增时留空按“男”；已有员工保持原值", examples: ["男", "女"] },
   { key: "date_of_birth", label: "出生日期", kind: "date", width: 13, aliases: ["生日"], required: "选填", format: "YYYY-MM-DD，或 Excel 日期格式", values: "", blank: "新增时留空且没填身份证号，按 1990-01-01；已有员工保持原值", examples: ["1995-01-15", ""] },
-  { key: "cell_number", label: "联系电话", kind: "text", width: 14, aliases: ["手机号", "手机", "电话", "联系方式"], required: "选填", format: "文本", values: "", blank: KEEP, examples: ["13800000002", ""] },
+  { key: "cell_number", label: "联系电话", kind: "text", width: 14, aliases: ["手机号", "手机", "电话", "联系方式"], required: "选填", format: "文本", values: "", blank: KEEP, examples: ["13800000001", ""] },
   { key: "household_registration", label: "户口信息", kind: "household", width: 16, aliases: ["户口", "户籍", "户籍信息"], required: "选填", format: "文本", values: "深圳、广东省内城镇、广东省内农村、广东省外城镇、广东省外农村，或明确的户籍地（如“湖北省襄阳市”）；无法判断深户/非深户的不接受", blank: KEEP, examples: ["深圳", ""] },
   { key: "date_of_joining", label: "入职日期", kind: "date", width: 13, aliases: ["入职时间", "入职日"], required: "新增必填", format: "YYYY-MM-DD，或 Excel 日期格式", values: "", blank: KEEP, examples: ["2026-01-05", "2026-02-10"] },
   { key: "relieving_date", label: "离职日期", kind: "date", width: 13, aliases: ["离职时间", "离职日"], required: "选填", format: "YYYY-MM-DD，或 Excel 日期格式", values: "离职日当天仍算在职，第二天起算已离职", blank: "留空不会取消离职；要恢复在职请在页面里编辑", examples: ["", ""] },

@@ -26,7 +26,7 @@ def test_price_snapshot_is_fingerprinted_and_contract_embeds_locked_snapshot():
     price, rows = price_approval_snapshot(supplier="示例企业028",total_amount=10000,business_lines=[{"item_name":"激光器","quantity":1,"unit_price":10000}],tax_included=1,tax_rate=13,delivery_terms="2026-10-01 前交付",warranty_terms="质保一年",invoice_condition="增值税专用发票",payment_plan=plan(),revision=2)
     assert len(price["fingerprint"]) == 64
     assert len(rows) == 2
-    contract = contract_snapshot({"supplier_legal_name":"示例企业028有限公司","credit_code":"910000000000000003","supplier_address":"示例市示例区演示路1号","contract_contact":"王测试 13800000002","contract_bank_name":"测试银行","contract_bank_account":"6200000000000001","contract_entity":"示例企业032有限公司","contract_template":"标准采购合同","seal_user":"finance@example.com","contract_delivery_date":"2026-10-01"}, json.dumps(price, ensure_ascii=False), 1)
+    contract = contract_snapshot({"supplier_legal_name":"示例企业028有限公司","credit_code":"910000000000000003","supplier_address":"示例市示例区演示路1号","contract_contact":"王测试 13800000001","contract_bank_name":"测试银行","contract_bank_account":"6200000000000001","contract_entity":"示例企业032有限公司","contract_template":"标准采购合同","seal_user":"finance@example.com","contract_delivery_date":"2026-10-01"}, json.dumps(price, ensure_ascii=False), 1)
     rendered = render_contract_draft(contract)
     assert contract["price_fingerprint"] == price["fingerprint"]
     assert contract["contract_entity"] == "示例企业032有限公司"

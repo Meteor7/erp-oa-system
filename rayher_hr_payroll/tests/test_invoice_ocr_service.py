@@ -282,7 +282,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(
         client.socket,
         "getaddrinfo",
-        lambda *_args, **_kwargs: [(2, 1, 6, "", ("203.0.113.136", 8080))],
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("172.20.0.10", 8080))],
     )
     frappe_stub_module.local = types.SimpleNamespace(request=None)
     frappe_stub_module.form_dict = types.SimpleNamespace()
@@ -312,7 +312,7 @@ def test_client_uses_internal_multipart_contract_and_timeouts(env, monkeypatch):
     result = client.recognize_document(b"%PDF-1.7", "invoice.pdf", "INV-1")
     assert result["fields"]["invoice_number"] == "000123"
     args, kwargs = post.call_args
-    assert args == ("http://203.0.113.136:8080/v1/recognize",)
+    assert args == ("http://172.20.0.10:8080/v1/recognize",)
     assert kwargs["headers"] == {"Host": "invoice-ocr:8080"}
     assert kwargs["data"] == {"record_id": "INV-1"}
     assert kwargs["files"]["file"][:2] == ("invoice.pdf", b"%PDF-1.7")
@@ -1119,8 +1119,8 @@ def test_get_request_invoices_rejects_unrelated_employee(env):
         "http://169.254.169.254/latest",
         "http://224.0.0.1:8080",
         "http://0.0.0.0:8080",
-        "http://user:pass@203.0.113.73:8080",
-        "http://203.0.113.73:8080/?secret=1",
+        "http://user:pass@10.0.0.2:8080",
+        "http://10.0.0.2:8080/?secret=1",
     ],
 )
 def test_client_rejects_public_metadata_and_ambiguous_roots(env, monkeypatch, url):
@@ -1138,7 +1138,7 @@ def test_client_rejects_hostname_if_any_dns_answer_is_public(env, monkeypatch):
         client.socket,
         "getaddrinfo",
         lambda *_args, **_kwargs: [
-            (2, 1, 6, "", ("203.0.113.73", 8080)),
+            (2, 1, 6, "", ("10.0.0.2", 8080)),
             (2, 1, 6, "", ("8.8.8.8", 8080)),
         ],
     )
@@ -1888,7 +1888,7 @@ def test_client_rejects_non_rfc1918_non_loopback_special_ranges(env, monkeypatch
         client.recognize_document(b"x", "a.pdf", "INV-1")
     post.assert_not_called()
 
-@pytest.mark.parametrize("address", ["127.0.0.1", "203.0.113.73", "203.0.113.154", "203.0.113.11"])
+@pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.2", "172.16.0.2", "192.168.0.2"])
 def test_client_keeps_loopback_and_exact_rfc1918_addresses_available(address):
     assert client._safe_internal_address(address) is True
 
@@ -2245,7 +2245,7 @@ def test_client_http_hostname_is_resolved_once_pinned_and_proxy_free(env, monkey
 
     def two_phase_dns(*_args, **_kwargs):
         dns_calls.append(True)
-        address = "203.0.113.177" if len(dns_calls) == 1 else "8.8.8.8"
+        address = "10.44.0.8" if len(dns_calls) == 1 else "8.8.8.8"
         return [(2, 1, 6, "", (address, 8080))]
 
     monkeypatch.setattr(client.socket, "getaddrinfo", two_phase_dns)
@@ -2255,7 +2255,7 @@ def test_client_http_hostname_is_resolved_once_pinned_and_proxy_free(env, monkey
     assert result["record_id"] == "INV-1"
     assert len(dns_calls) == 1
     assert session.trust_env is False
-    assert session.calls[0][0] == ("http://203.0.113.177:8080/v1/recognize",)
+    assert session.calls[0][0] == ("http://10.44.0.8:8080/v1/recognize",)
     assert session.calls[0][1]["headers"] == {"Host": "ocr.internal:8080"}
 
 
@@ -2277,7 +2277,7 @@ def test_client_default_docker_hostname_public_dns_is_rejected(env, monkeypatch)
 
 def test_client_https_dns_hostname_is_explicitly_rejected(env, monkeypatch):
     frappe_stub_module.conf.invoice_ocr_url = "https://ocr.internal:8443"
-    dns = Mock(return_value=[(2, 1, 6, "", ("203.0.113.177", 8443))])
+    dns = Mock(return_value=[(2, 1, 6, "", ("10.44.0.8", 8443))])
     monkeypatch.setattr(client.socket, "getaddrinfo", dns)
     session_factory = Mock()
     monkeypatch.setattr(client.requests, "Session", session_factory)
@@ -2290,7 +2290,7 @@ def test_client_https_dns_hostname_is_explicitly_rejected(env, monkeypatch):
 
 
 def test_client_https_private_literal_keeps_tls_verification_and_no_proxy(env, monkeypatch):
-    frappe_stub_module.conf.invoice_ocr_url = "https://203.0.113.177:8443"
+    frappe_stub_module.conf.invoice_ocr_url = "https://10.44.0.8:8443"
     response = Response(payload=_valid_payload())
     session = RecordingSession(response)
     monkeypatch.setattr(client.requests, "Session", lambda: session)
@@ -2298,7 +2298,7 @@ def test_client_https_private_literal_keeps_tls_verification_and_no_proxy(env, m
     client.recognize_document(b"%PDF", "invoice.pdf", "INV-1")
 
     assert session.trust_env is False
-    assert session.calls[0][0] == ("https://203.0.113.177:8443/v1/recognize",)
+    assert session.calls[0][0] == ("https://10.44.0.8:8443/v1/recognize",)
     assert "verify" not in session.calls[0][1]
     assert "headers" not in session.calls[0][1]
 

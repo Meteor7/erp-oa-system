@@ -323,7 +323,7 @@ Use the spreadsheet skill and @oai/artifact-tool to read the current workbook wi
 - [ ] **Step 7: Perform role-based runtime checks**
 
 Verify:
-- QIHENG Demo Staff 04 downloads all available reports;
+- QIHENG Demo Admin downloads all available reports;
 - a normal owner downloads an own-project report and receives denial for another project;
 - Zhang Jun lists all 19 projects, downloads reports, and opens /foreign-rd;
 - an Employee cannot access /projects or a report URL;

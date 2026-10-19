@@ -32,7 +32,7 @@ const TODAY = "2026-10-08";
 
 const full = (extra = {}) => ({
   name: "HR-EMP-1", company: "QIHENG Demo", employee_number: "A001", employee_name: "演示员工186", english_name: "Chunlin Huang",
-  date_of_birth: "1990-02-03", cell_number: "13800000002", household_registration: "深圳",
+  date_of_birth: "1990-02-03", cell_number: "13800000001", household_registration: "深圳",
   department: "研发软件部 - RAY", designation: "软件工程师", reports_to: "HR-EMP-9", employment_type: "全职",
   labour_contract_start_date: "2023-03-06", rd_personnel_type: "全时研发", education_level_cn: "本科", graduation_school: "示例大学",
   default_monthly_salary: 20000, default_social_insurance_base: 8000, default_housing_fund_base: 8000,
