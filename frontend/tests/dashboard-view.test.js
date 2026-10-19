@@ -158,7 +158,7 @@ test("cols rows mark the last column and size by percentage", () => {
 test("stack rows keep every legend entry but only coloured safe values", () => {
   const rows = stackRows(STACK.rows);
   assert.equal(rows.length, 4);
-  assert.equal(rows[0].color, "#8A5A1C");
+  assert.equal(rows[0].color, "#D9731F");
   assert.equal(rows[2].color, STACK_PALETTE[2], "an unsafe colour falls back to the palette");
   assert.equal(rows[3].width, 0);
   assert.equal(rows[0].value, "79.2 万");
