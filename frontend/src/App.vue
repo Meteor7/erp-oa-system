@@ -252,7 +252,7 @@ function logout() {
 }
 </script>
 <template>
-  <div class='qh-workspace flex min-h-screen min-w-0 overflow-x-hidden bg-[#F2F6F5] text-[#1A2130]'>
+  <div class='qh-workspace flex min-h-screen min-w-0 overflow-x-clip bg-[#F2F6F5] text-[#1A2130]'>
     <aside class='qh-sidebar fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white text-gray-700 transition-transform duration-200 md:static md:translate-x-0' :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'">
       <div class='qh-brand border-b border-gray-100 px-4 py-4'>
         <img :src='companyLogo' alt='栖衡 QIHENG' class='mb-2.5 h-9 w-auto object-contain' />
