@@ -1,0 +1,13 @@
+body[data-path="login"] { background: #f2f6f5; color: #26364e; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; --primary: #147b73; }
+body[data-path="login"] ::selection { background: #dcebe6; color: #173e3a; }
+body[data-path="login"] :focus-visible { outline: 2px solid #147b73; outline-offset: 3px; }
+body[data-path="login"] .page-card-head .app-logo { width: 200px; max-width: 70vw; height: 50px; max-height: none; margin-bottom: 28px; }
+body[data-path="login"] .page-card-head h4 { font-size: 22px; font-weight: 600; color: #20324c; }
+body[data-path="login"] .page-card { border: 1px solid #dce4e8; border-radius: 14px; box-shadow: none; padding: 32px; }
+body[data-path="login"] .form-control { min-height: 42px; border: 1px solid #ccd7df; background: #fff; border-radius: 7px; caret-color: #147b73; }
+body[data-path="login"] .form-control::placeholder { color: #65758b; }
+body[data-path="login"] .btn-primary { background: #147b73; border-color: #147b73; color: #fff; min-height: 40px; border-radius: 7px; }
+body[data-path="login"] .btn-primary:hover { filter: brightness(.9); }
+body[data-path="login"] .btn-primary:disabled { opacity: .55; }
+body[data-path="login"] a { color: #147b73; text-underline-offset: 3px; }
+@media (max-width: 480px) { body[data-path="login"] .page-card { padding: 24px 20px; } }

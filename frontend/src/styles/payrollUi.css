@@ -23,7 +23,7 @@
 .xp.pr .pr-step::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
 .xp.pr .pr-step .l { font-size: 12px; color: var(--xp-ink3); } .xp.pr .pr-step .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .xp.pr .pr-step .s { font-size: 12px; color: var(--xp-ink3); }
-.xp.pr .pr-step.net { background: var(--xp-brand-bg); border-color: #F0D3A6; }
+.xp.pr .pr-step.net { background: var(--xp-brand-bg); border-color: #C0DFD7; }
 @media (max-width: 1180px) { .xp.pr .pr-chain { grid-template-columns: repeat(2, minmax(0, 1fr)); } .xp.pr .pr-chain .op { display: none; } }
 /* 图表 */
 .xp.pr .pr-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }

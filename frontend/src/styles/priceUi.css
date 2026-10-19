@@ -21,7 +21,7 @@
 .xp .pa-pr-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .xp .pa-pr-meta { margin-left: auto; }
 .xp .pa-dim td { opacity: .55; }
-.xp .pa-src tr.on td { background: #FFFAF3; opacity: 1; }
+.xp .pa-src tr.on td { background: #F3F9F7; opacity: 1; }
 .xp .pa-usedby { font-size: 11px; max-width: 220px; margin-left: auto; }
 .xp .pa-free { color: var(--xp-jade); font-weight: 600; }
 .xp .pa-batch-hint { color: #B3B9C4; flex: 1; min-width: 160px; }
@@ -38,7 +38,7 @@
 .xp .pa-guide.g-jade { background: var(--xp-jade-bg); color: var(--xp-jade); }
 .xp .pa-guide.g-gray { background: var(--xp-soft); color: var(--xp-ink2); }
 .xp .pa-po-link { margin-right: 12px; }
-.xp .pa-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding: 10px 14px; border: 1px solid #FDD9A8; border-radius: 10px; background: var(--xp-brand-bg); font-size: 13px; }
+.xp .pa-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding: 10px 14px; border: 1px solid #AED6CC; border-radius: 10px; background: var(--xp-brand-bg); font-size: 13px; }
 .xp .pa-confirm > span { flex: 1; min-width: 200px; }
 .xp .pa-confirm-text { font-size: 12px; color: var(--xp-red); }
 
@@ -50,19 +50,19 @@
 .xp .pa-matrix thead th.pa-mat-col, .xp .pa-matrix tfoot th.pa-mat-col { background: var(--xp-soft); }
 .xp .pa-matrix thead th { color: var(--xp-ink); font-weight: 400; }
 .xp .pa-sup-head { min-width: 190px; background: var(--xp-soft); }
-.xp .pa-sup-head.chosen { background: #FBEFE3; box-shadow: inset 0 3px 0 var(--xp-brand); }
+.xp .pa-sup-head.chosen { background: #E7F4F0; box-shadow: inset 0 3px 0 var(--xp-brand); }
 .xp .pa-sup-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
 .xp .pa-sup-name .pill { padding: 2px 6px; font-size: 11px; }
 .xp .pa-chosen { background: var(--xp-brand); color: #fff; }
 .xp .pa-sup-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; }
 .xp .pa-empty-head { text-align: center; color: var(--xp-ink3); }
 .xp .pa-empty-cell { background: #FCFCFD; }
-.xp .pa-matrix td.chosen { background: #FFFAF3; }
+.xp .pa-matrix td.chosen { background: #F3F9F7; }
 .xp .pa-price { font-size: 14px; font-weight: 600; }
 .xp .pa-none { font-size: 13px; color: #B3B9C4; }
 .xp .pa-best { color: var(--xp-jade); font-weight: 500; }
 .xp .pa-matrix tfoot th { font-size: 14px; font-weight: 600; color: var(--xp-ink); border-bottom: 0; }
-.xp .pa-matrix tfoot th.pa-total.chosen { background: #FBEFE3; }
+.xp .pa-matrix tfoot th.pa-total.chosen { background: #E7F4F0; }
 .xp .pa-total-note { font-size: 12px; font-weight: 400; min-height: 18px; }
 .xp .pa-total-note.ok { color: var(--xp-jade); margin: 0; }
 .xp .pa-total-note.warn { color: var(--xp-sun); font-weight: 400; }
@@ -71,7 +71,7 @@
 .xp table.pa-terms { min-width: 640px; }
 .xp .pa-terms th[scope="row"] { width: 130px; font-weight: 500; vertical-align: top; }
 .xp .pa-terms td { vertical-align: top; line-height: 1.6; border-left: 1px solid #EEF0F4; }
-.xp .pa-terms td.chosen { background: #FFFAF3; }
+.xp .pa-terms td.chosen { background: #F3F9F7; }
 .xp .pa-plan-line + .pa-plan-line { margin-top: 6px; }
 .xp .pa-term-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
@@ -150,7 +150,7 @@
 .xp .pa-missing { font-size: 12px; font-weight: 400; }
 .xp .pa-plan-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid #EEF0F4; border-radius: 8px; font-size: 13px; }
 .xp .pa-plan-item .muted { font-size: 12px; }
-.xp .pa-pay-link { display: block; margin-top: 4px; padding: 9px 0; border-radius: 8px; background: var(--xp-brand-bg); color: #7A4210; font-size: 13px; text-align: center; text-decoration: none; }
+.xp .pa-pay-link { display: block; margin-top: 4px; padding: 9px 0; border-radius: 8px; background: var(--xp-brand-bg); color: #174B45; font-size: 13px; text-align: center; text-decoration: none; }
 .xp .pa-pay-link:hover { background: #F8E3CC; }
 .xp .pa-source-links { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .xp .pa-trail-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 4px 0; font-size: 12px; }

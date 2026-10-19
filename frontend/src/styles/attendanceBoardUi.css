@@ -3,7 +3,7 @@
    标签用浅底深字，橙色只给主要按钮和重点数字。暗色：系统是暗色模式、或页面根上 data-theme="dark" 时换一套变量（整页其他部分目前没有暗色，暗色时这一块自带深色底）。 */
 .xp.at .acx {
   --ac-bg: transparent; --ac-panel: #ffffff; --ac-ink: #1b2130; --ac-ink2: #4a5368; --ac-muted: #8a93a5; --ac-line: #edf0f5; --ac-line2: #d9dee8; --ac-soft: #f4f6fa;
-  --ac-accent: #d9741a; --ac-accent-ink: #ffffff; --ac-accent-soft: #fdf1e4;
+  --ac-accent: #147B73; --ac-accent-ink: #ffffff; --ac-accent-soft: #E7F4F0;
   --ac-ok: #1f8a4c; --ac-ok-soft: #e4f4ea; --ac-warn: #b4741a; --ac-warn-soft: #fcf1da; --ac-bad: #c23b2c; --ac-bad-soft: #fbe6e2; --ac-info: #2f6fb5; --ac-info-soft: #e5eefa;
   --ac-t-annual: #78c3a2; --ac-b-annual: #e3f5ec; --ac-x-annual: #1f6a4d;
   --ac-t-personal: #8db4ee; --ac-b-personal: #e6eefc; --ac-x-personal: #2b5aa6;

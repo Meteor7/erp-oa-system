@@ -1,5 +1,5 @@
 app_name = "rayher_hr_payroll"
-app_title = "QIHENG DEMO HR Payroll"
+app_title = "栖衡 ERP / OA"
 app_publisher = "QIHENG DEMO"
 app_description = "QIHENG DEMO HR, R&D timesheet, and R&D cost allocation customizations"
 app_email = "admin@example.com"
@@ -12,8 +12,8 @@ app_include_js = "/assets/rayher_hr_payroll/js/language_switcher.js"
 add_to_apps_screen = [
     {
         "name": "rayher_hr_payroll",
-        "logo": "/assets/rayher_hr_payroll/images/planck-semicon-logo.png",
-        "title": "QIHENG DEMO",
+        "logo": "/assets/rayher_hr_payroll/images/qiheng-icon.svg",
+        "title": "栖衡 ERP / OA",
         "route": "/planck-semicon",
     }
 ]
@@ -128,3 +128,8 @@ scheduler_events = {
 
 # Synchronize current holders of a position permission template.
 doc_events["Role Profile"] = {"on_update": "rayher_hr_payroll.position_handover.on_profile_update"}
+
+# Portfolio identity for the native Frappe sign-in page.
+app_logo_url = "/assets/rayher_hr_payroll/images/qiheng-logo-light.svg"
+web_include_css = ["/assets/rayher_hr_payroll/css/qiheng-login.css"]
+update_website_context = "rayher_hr_payroll.branding.update_website_context"

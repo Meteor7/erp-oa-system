@@ -5,7 +5,14 @@ import { FeatherIcon, createResource } from 'frappe-ui';
 import { canSee, currentUser, inMenu, roleLabel } from './lib/access';
 import { deniedNoticeText, groupOwning, ownerOfPath, splitPath, stripAppPrefix } from './lib/navContext';
 import { clearRouteNotice, routeNotice } from './lib/routeNotice';
-const companyLogo = '/assets/' + 'rayher_hr_payroll/images/planck-semicon-logo-mark.png';
+const companyLogo = '/assets/' + 'rayher_hr_payroll/images/qiheng-logo.svg';
+
+function navIcon(item) {
+  const key = String(item.to || item.label || '').toLowerCase();
+  const icons = [['attendance', 'calendar'], ['procurement', 'shopping-cart'], ['price', 'tag'], ['payment', 'credit-card'], ['personnel', 'users'], ['social', 'shield'], ['housing', 'home'], ['accommodation', 'key'], ['payroll', 'dollar-sign'], ['project', 'layers'], ['timesheet', 'clock'], ['expense', 'file-text'], ['allocation', 'pie-chart'], ['dashboard', 'grid']];
+  return icons.find(([part]) => key.includes(part))?.[1] || 'folder';
+}
+
 
 const groups = [
   { label: '\u603b\u89c8', items: [{ to: '/dashboard', step: '', label: '\u6570\u636e\u770b\u677f' }] },
@@ -101,7 +108,7 @@ const groupedItems = groups.flatMap((g) => g.items.filter((n) => n.children));
 const allNavTargets = groups.flatMap((g) => g.items.flatMap((n) => (n.children ? [...n.children.map((child) => child.to), ...(n.to ? [n.to] : [])] : [n.to])));
 const navLabels = Object.fromEntries(groups.flatMap((g) => g.items.flatMap((n) => [...(n.children || []), ...(!n.children || n.to ? [n] : [])].map((item) => [splitPath(item.to).path, item.label]))));
 const activeNavPath = computed(() => ownerOfPath(route.path, allNavTargets));
-const NAV_ACTIVE_CLASS = 'bg-[#FFF4E6] font-semibold text-[#E57A00]';
+const NAV_ACTIVE_CLASS = 'bg-[#E7F4F0] font-semibold text-[#0E615B]';
 function isNavActive(to) { return splitPath(to).path === activeNavPath.value; }
 watch(() => route.path, (path) => {
   const owner = groupOwning(path, groupedItems);
@@ -245,11 +252,11 @@ function logout() {
 }
 </script>
 <template>
-  <div class='flex min-h-screen min-w-0 overflow-x-hidden bg-[#F5F6F9] text-[#1A2130]'>
-    <aside class='fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white text-gray-700 transition-transform duration-200 md:static md:translate-x-0' :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'">
-      <div class='border-b border-gray-100 px-4 py-4'>
-        <img :src='companyLogo' alt='示例企业032有限公司' class='mb-2.5 h-9 w-auto object-contain' />
-        <div class='text-xs text-gray-400'>研发成本管理 · 示例企业032有限公司</div>
+  <div class='qh-workspace flex min-h-screen min-w-0 overflow-x-hidden bg-[#F2F6F5] text-[#1A2130]'>
+    <aside class='qh-sidebar fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white text-gray-700 transition-transform duration-200 md:static md:translate-x-0' :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'">
+      <div class='qh-brand border-b border-gray-100 px-4 py-4'>
+        <img :src='companyLogo' alt='栖衡 QIHENG' class='mb-2.5 h-9 w-auto object-contain' />
+        <div class='text-xs text-gray-400'>ERP / OA · 运营协同工作台</div>
       </div>
       <nav class='p-2 flex-1 overflow-y-auto'>
         <div v-for='g in visibleGroups' :key='g.label' class='mb-2'>
@@ -258,7 +265,7 @@ function logout() {
             <div v-if='n.children'>
               <div v-if='n.to' class='flex items-center rounded-lg hover:bg-gray-50'>
                 <router-link :to='n.to' class='flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-gray-700' :class='isNavActive(n.to) ? NAV_ACTIVE_CLASS : ""' @click='openNavGroups.add(n.label)'>
-                  <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>
+                  <FeatherIcon :name='navIcon(n)' class='qh-nav-icon' />
                   <span class='flex-1'>{{ n.label }}</span>
                 </router-link>
                 <button type='button' class='px-2 py-2 text-xs text-gray-400 hover:text-gray-700' :aria-expanded='isNavGroupOpen(n)' :aria-label="'展开或收起' + n.label" @click='toggleNavGroup(n)'>{{ isNavGroupOpen(n) ? '▾' : '▸' }}</button>
@@ -266,7 +273,7 @@ function logout() {
               <button v-else type='button'
                 class='flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left text-sm font-medium text-gray-700 hover:bg-gray-50'
                 :aria-expanded='isNavGroupOpen(n)' @click='toggleNavGroup(n)'>
-                <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>
+                <FeatherIcon :name='navIcon(n)' class='qh-nav-icon' />
                 <span class='flex-1'>{{ n.label }}</span>
                 <span class='text-xs text-gray-400'>{{ isNavGroupOpen(n) ? '▾' : '▸' }}</span>
               </button>
@@ -279,7 +286,7 @@ function logout() {
             <router-link v-else :to='n.to'
               class='flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50'
               :class='isNavActive(n.to) ? NAV_ACTIVE_CLASS : ""' :aria-current='isNavActive(n.to) ? "page" : undefined'>
-              <span class='w-5 text-center text-[10px] text-gray-400'>{{ n.step }}</span>{{ n.label }}
+              <FeatherIcon :name='navIcon(n)' class='qh-nav-icon' />{{ n.label }}
             </router-link>
           </template>
         </div>
@@ -287,9 +294,9 @@ function logout() {
     </aside>
     <button v-if='mobileNavOpen' type='button' class='fixed inset-0 z-30 bg-black/40 md:hidden' aria-label='关闭导航' @click='mobileNavOpen = false'></button>
     <main class='flex min-w-0 flex-1 flex-col'>
-      <header class='flex min-h-14 items-center gap-3 border-b border-gray-200 bg-white px-3 py-2 sm:px-4 md:px-6'>
+      <header class='qh-topbar flex min-h-14 items-center gap-3 border-b border-gray-200 bg-white px-3 py-2 sm:px-4 md:px-6'>
         <button type='button' class='inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-700 md:hidden' aria-label='打开导航' @click='mobileNavOpen = true'><FeatherIcon name='menu' class='h-4 w-4' /></button>
-        <div class='hidden flex-1 text-sm text-gray-500 lg:block'>&#x7814;&#x53d1;&#x6210;&#x672c;&#x4e00;&#x4f53;&#x5316; &middot; &#x4eba;&#x4e8b; / &#x5ba1;&#x6279; / &#x5de5;&#x65f6; / &#x8d39;&#x7528; / &#x85aa;&#x916c;</div>
+        <div class='hidden flex-1 text-sm text-gray-500 lg:block'><strong>栖衡 ERP / OA</strong><span class="qh-topbar-subtitle">人员 · 审批 · 采购 · 研发</span></div>
         <div class='relative ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-3'>
           <div class='relative'>
             <button type='button' class='relative inline-flex h-9 w-9 items-center justify-center rounded border border-gray-300 text-gray-700 hover:bg-gray-50' aria-label='消息通知' :aria-expanded='notificationsOpen' @click='notificationsOpen = !notificationsOpen'>
@@ -313,10 +320,10 @@ function logout() {
               </div>
             </div>
           </div>
-          <span class='inline-flex items-center rounded-lg bg-[#FFF4E6] px-2 py-1 font-medium text-[#E57A00]'>{{ roleLabel() }}</span>
+          <span class='inline-flex items-center rounded-lg bg-[#E7F4F0] px-2 py-1 font-medium text-[#0E615B]'>{{ roleLabel() }}</span>
           <span class='hidden max-w-[220px] truncate text-gray-600 sm:inline'>{{ currentUser() }}</span>
-          <button type='button' class='hidden rounded-lg border border-gray-200 px-3 py-1.5 text-gray-700 hover:border-[#FF8F00] hover:text-[#E57A00] sm:inline-flex' @click='openPasswordDialog'>修改密码</button>
-          <button type='button' class='rounded-lg border border-gray-200 px-2 py-1.5 text-gray-700 hover:border-[#FF8F00] hover:text-[#E57A00] sm:px-3' @click='logout'>&#x9000;&#x51fa;&#x767b;&#x5f55;</button>
+          <button type='button' class='hidden rounded-lg border border-gray-200 px-3 py-1.5 text-gray-700 hover:border-[#147B73] hover:text-[#0E615B] sm:inline-flex' @click='openPasswordDialog'>修改密码</button>
+          <button type='button' class='rounded-lg border border-gray-200 px-2 py-1.5 text-gray-700 hover:border-[#147B73] hover:text-[#0E615B] sm:px-3' @click='logout'>&#x9000;&#x51fa;&#x767b;&#x5f55;</button>
         </div>
       </header>
       <div :class="['w-full min-w-0 flex-1 p-3 sm:p-4 md:p-7', isWidePage ? 'max-w-[1900px]' : 'mx-auto max-w-6xl']">

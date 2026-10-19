@@ -860,10 +860,10 @@ onBeforeUnmount(()=>{
 .rd .pd-name { font-size: 18px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .rd .pd-name .muted { font-weight: 400; }
 .rd .pd-tags { margin-top: 4px; }
-.rd .pd-comp { padding: 12px 20px; background: var(--rd-warn-soft); border-bottom: 1px solid #E8C48A; font-size: 13px; display: grid; gap: 6px; }
+.rd .pd-comp { padding: 12px 20px; background: var(--rd-warn-soft); border-bottom: 1px solid #9FCFC4; font-size: 13px; display: grid; gap: 6px; }
 .rd .pd-comp.full { background: var(--rd-ok-soft); border-bottom-color: var(--rd-line); }
 .rd .pd-miss { gap: 5px; }
-.rd .pd-missbtn { border: 1px solid #E8C48A; background: #fff; color: var(--rd-warn); border-radius: 6px; padding: 0 8px; font-size: 12px; height: 22px; }
+.rd .pd-missbtn { border: 1px solid #9FCFC4; background: #fff; color: var(--rd-warn); border-radius: 6px; padding: 0 8px; font-size: 12px; height: 22px; }
 .rd .pd-missbtn:hover { border-color: var(--rd-warn); }
 .rd .pd-tabs { display: flex; gap: 2px; padding: 0 20px; border-bottom: 1px solid var(--rd-line); overflow-x: auto; }
 .rd .pd-tab { display: inline-flex; align-items: center; gap: 4px; border: 0; border-bottom: 2px solid transparent; background: none; padding: 10px 11px; font-size: 13px; color: var(--rd-ink3); white-space: nowrap; }

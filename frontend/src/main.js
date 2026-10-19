@@ -4,6 +4,7 @@ import App from "./App.vue";
 import router from "./router";
 import { enforceCanonicalLocalHost, guardedFrappeRequest, installSessionGuard } from "./lib/sessionGuard";
 import "./index.css";
+import "./styles/qiheng.css";
 
 if (!enforceCanonicalLocalHost()) {
   setConfig("resourceFetcher", guardedFrappeRequest);

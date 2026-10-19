@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { displayCompany } from '../lib/displayBrand';
 import { Spinner, createResource } from 'frappe-ui';
 import { period, periodScope, PERIOD_SCOPES, setPeriodScope, periodScopeLabel } from '../lib/period';
 import { importForeignRdWorkbookFile, parseForeignRdPaste } from '../lib/foreignRdImport';
@@ -315,16 +316,16 @@ load();
       </div>
 
       <div class="card foreign-rd-entry">
-        <div class="hd"><b>{{ TEXT.entry }}</b><span class="muted">{{ TEXT.entity }} {{ DEFAULT_ENTITY }} · 填小时，天数 = 小时 ÷ 8 · 每行不超过当月自然日数 × 8 小时</span></div>
+        <div class="hd"><b>{{ TEXT.entry }}</b><span class="muted">{{ TEXT.entity }} {{ displayCompany(DEFAULT_ENTITY) }} · 填小时，天数 = 小时 ÷ 8 · 每行不超过当月自然日数 × 8 小时</span></div>
         <div v-for="(row, index) in rows" :key="`${row.period || period}-${index}`" class="line">
           <div style="min-width:0">
             <div style="font-weight:500">{{ row.project_name || row.project }}</div>
             <div class="muted">
               {{ row.project_code }}<template v-if="isYearScope && row.period"> · {{ row.period }}</template>
               <select v-if="!readonly && foreignEntities.length > 1" v-model="row.foreign_entity" class="field" style="width:auto;padding:1px 6px;margin-left:6px" aria-label="研发主体">
-                <option v-for="entity in foreignEntities" :key="entity" :value="entity">{{ entity }}</option>
+                <option v-for="entity in foreignEntities" :key="entity" :value="entity">{{ displayCompany(entity) }}</option>
               </select>
-              <template v-else-if="foreignEntities.length > 1"> · {{ row.foreign_entity }}</template>
+              <template v-else-if="foreignEntities.length > 1"> · {{ displayCompany(row.foreign_entity) }}</template>
             </div>
           </div>
           <div v-if="readonly" class="num" style="font-weight:700">{{ fmtNum(row.hours) }} h</div>
@@ -375,7 +376,7 @@ load();
         <header>批量导入境外工时<button type="button" class="btn quiet sm" aria-label="关闭" @click="closeBatch"><RdIcon name="x" /></button></header>
         <div class="body">
           <div class="muted">每行一条：主体、项目代码、项目名称、工时（小时）、备注。支持制表符、逗号或多个空格分隔，也可以直接选择 Excel；老模板里只有“发生天数”的，按 1 天 = 8 小时换算。</div>
-          <textarea v-model="batchPasteText" class="field" rows="5" placeholder="QIHENG DEMO OVERSEAS  RD16  EFEM-8-2LP-EG-A  12  验收"></textarea>
+          <textarea v-model="batchPasteText" class="field" rows="5" placeholder="研发主体  项目编号  项目名称  工时  备注"></textarea>
           <div class="row">
             <button type="button" class="btn" @click="chooseWorkbook"><RdIcon name="upload" />选择 Excel</button>
             <input ref="batchWorkbookInput" type="file" accept=".xlsx,.xls" style="display:none" @change="importWorkbook" />

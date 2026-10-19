@@ -30,7 +30,7 @@ const total = computed(() => totalsOf(props.rows));
     <div class="pr-step" style="--c:#34489A"><div class="l">应付工资合计</div><div class="v">{{ money(total.payable) }}</div><div class="s">{{ total.people }} 人</div></div><div class="op">−</div>
     <div class="pr-step" style="--c:#7A56B8"><div class="l">社保 + 公积金（个人）</div><div class="v">{{ money(total.contrib) }}</div><div class="s">社保 {{ money(total.social) }} · 公积金 {{ money(total.fund) }}</div></div><div class="op">−</div>
     <div class="pr-step" style="--c:#B42318"><div class="l">个人所得税</div><div class="v">{{ money(total.tax) }}</div><div class="s">累计预扣法<template v-if="info.taxManual"> · {{ info.taxManual }} 人手动</template><template v-if="info.taxWarnings"> · {{ info.taxWarnings }} 人要核对</template></div></div><div class="op">−</div>
-    <div class="pr-step" style="--c:#D9731F"><div class="l">宿舍代扣 + 已发放</div><div class="v">{{ money(total.other) }}</div><div class="s">宿舍 {{ total.dormPeople }} 人 · 已发 {{ total.advancedPeople }} 人</div></div><div class="op">=</div>
-    <div class="pr-step net" style="--c:#D9731F"><div class="l">实发工资合计</div><div class="v">{{ money(total.net) }}</div><div class="s">按页面上现有数字计算</div></div>
+    <div class="pr-step" style="--c:#147B73"><div class="l">宿舍代扣 + 已发放</div><div class="v">{{ money(total.other) }}</div><div class="s">宿舍 {{ total.dormPeople }} 人 · 已发 {{ total.advancedPeople }} 人</div></div><div class="op">=</div>
+    <div class="pr-step net" style="--c:#147B73"><div class="l">实发工资合计</div><div class="v">{{ money(total.net) }}</div><div class="s">按页面上现有数字计算</div></div>
   </div>
 </template>

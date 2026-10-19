@@ -139,11 +139,11 @@ const stats = computed(() => {
   const mine = (key) => home.mine.filter((doc) => bucketOf(doc) === key);
   const todoLongest = Math.max(0, ...home.todo.map((doc) => waitedDays(doc, now) || 0));
   return [
-    { key: 'todo', label: '待我处理', count: home.todo.length, amount: sumDocs(home.todo), hint: home.todo.length ? `最久的等了 ${todoLongest} 天` : '没有要处理的', tone: '#D98C4A', query: { view: 'list', scope: 'todo' } },
+    { key: 'todo', label: '待我处理', count: home.todo.length, amount: sumDocs(home.todo), hint: home.todo.length ? `最久的等了 ${todoLongest} 天` : '没有要处理的', tone: '#4B9E91', query: { view: 'list', scope: 'todo' } },
     // 指标卡带着状态（bucket）点进列表，列表只显示这一类；不再是"我的"全部单据。
     { key: 'draft', label: '我的草稿', count: mine('draft').length, amount: sumDocs(mine('draft')), hint: '继续编辑后提交', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', bucket: 'draft' } },
     { key: 'review', label: '我的 · 审批中', count: mine('review').length, amount: sumDocs(mine('review')), hint: '点进去看卡在谁那里', tone: '#5470C6', query: { view: 'list', scope: 'mine', bucket: 'review' } },
-    { key: 'topay', label: '我的 · 待付款', count: mine('topay').length, amount: sumDocs(mine('topay')), hint: '出纳付款后会通知你', tone: '#E3B26B', query: { view: 'list', scope: 'mine', bucket: 'topay' } },
+    { key: 'topay', label: '我的 · 待付款', count: mine('topay').length, amount: sumDocs(mine('topay')), hint: '出纳付款后会通知你', tone: '#78B8AD', query: { view: 'list', scope: 'mine', bucket: 'topay' } },
   ];
 });
 const scopes = computed(() => [
@@ -1059,7 +1059,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
             <div class="panel">
               <div class="pt">单据信息</div>
               <div class="form">
-                <div class="f"><label>付款单位<b>*</b></label><select disabled><option>{{ defaults.companies?.[0] || '示例企业032有限公司' }}</option></select></div>
+                <div class="f"><label>付款单位<b>*</b></label><select disabled><option>{{ defaults.companies?.[0] || '栖衡科技（演示）' }}</option></select></div>
                 <div class="f"><label>主题<b>*</b></label><input v-model="form.subject" :placeholder="isClaim ? '如：北京出差住宿费' : '如：设备尾款'" /></div>
                 <div class="f"><label>紧急程度</label><select v-model="form.urgency"><option v-for="item in defaults.urgencies" :key="item">{{ item }}</option></select></div>
                 <div class="f"><label>单据类型<b>*</b></label><select v-model="form.doc_type"><option>非固定资产</option><option>固定资产</option></select></div>

@@ -25,7 +25,7 @@ const canEdit = canEditHr();
 // 看板链接带 ?period=YYYY-MM：先读好期间，再建下面的数据请求。
 usePeriodFromRoute(useRoute(), useRouter());
 const company = ref('all');
-const companyOptions = [{ value: 'all', label: '全部公司' }, { value: 'Rayher', label: '示例总部' }, { value: '示例研发中心', label: '示例研发中心' }];
+const companyOptions = [{ value: 'all', label: '全部公司' }, { value: 'Rayher', label: '栖衡科技' }, { value: '示例研发中心', label: '栖衡研发' }];
 const step = ref(1);
 const filter = ref('pending');
 const file = ref(null);
@@ -209,11 +209,11 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
       <div class="cw-card c3"><span class="l">个人承担合计</span><span class="v">{{ money(dashboard.employee_total) }}</span><span class="s">按 Excel 申报</span></div>
       <div class="cw-card c3"><span class="l">单位承担合计</span><span class="v">{{ money(dashboard.company_total) }}</span><span class="s">按 Excel 申报</span></div>
       <div v-if="kind === 'si'" class="cw-card c7">
-        <div class="pt"><span>险种构成 <span class="muted">按 Excel 申报</span></span><span class="cw-legend"><span><i style="background:#34489A"></i>个人</span><span><i style="background:#D9731F"></i>单位</span></span></div>
+        <div class="pt"><span>险种构成 <span class="muted">按 Excel 申报</span></span><span class="cw-legend"><span><i style="background:#34489A"></i>个人</span><span><i style="background:#147B73"></i>单位</span></span></div>
         <div class="cw-mix">
           <div v-for="item in mix" :key="item.label" class="cw-mixrow">
             <span>{{ item.label }}</span>
-            <div class="cw-bars"><div class="cw-track"><i :style="{ width: item.pw + '%', background: '#34489A' }"></i></div><div class="cw-track"><i :style="{ width: item.cw + '%', background: '#D9731F' }"></i></div></div>
+            <div class="cw-bars"><div class="cw-track"><i :style="{ width: item.pw + '%', background: '#34489A' }"></i></div><div class="cw-track"><i :style="{ width: item.cw + '%', background: '#147B73' }"></i></div></div>
             <span class="num r">{{ item.personal ? money(item.personal) : '—' }}<br>{{ item.company ? money(item.company) : '—' }}</span>
           </div>
         </div>
@@ -245,7 +245,7 @@ const missingNames = (kind) => (readiness.data?.kinds?.[kind]?.missing || []).sl
       <div v-if="canEdit" class="cw-foot"><span class="muted">{{ unmatchedHint }}</span><button type="button" class="btn pri" data-cw-upload :disabled="busy || !file" @click="upload">{{ busy ? '处理中…' : '上传并核对' }}</button></div>
       <div class="cw-hint">
         <b>怎么认人：</b>先用证件号码，认不出再按姓名（姓名唯一才自动关联），都认不出的放进差异让人确认。<br>
-        <b>怎么复算：</b>{{ kind === 'si' ? '示例总部按 2026 政策：养老 个人 8% / 单位 16%；医疗 个人 2% / 单位 6%（基数不低于 6,727）；生育 单位 0.5%；工伤 单位 0.8%；失业 个人 0.2% / 单位 0.8%；地方补充养老 1% 仅深户。户口取员工档案。' : '公积金 = 档案公积金基数 × 比例（默认个人 7%、单位 7%）；本月已有月度记录的按记录里的基数和比例。社保和公积金基数各自维护，不要求一致。' }}<br>
+        <b>怎么复算：</b>{{ kind === 'si' ? '深圳地区按 2026 政策：养老 个人 8% / 单位 16%；医疗 个人 2% / 单位 6%（基数不低于 6,727）；生育 单位 0.5%；工伤 单位 0.8%；失业 个人 0.2% / 单位 0.8%；地方补充养老 1% 仅深户。户口取员工档案。' : '公积金 = 档案公积金基数 × 比例（默认个人 7%、单位 7%）；本月已有月度记录的按记录里的基数和比例。社保和公积金基数各自维护，不要求一致。' }}<br>
         <b>怎么对差异：</b>基数不一致、金额对不上、档案缺基数{{ kind === 'si' ? '、户口未维护' : '' }}、人关联不上，以及档案里有基数却不在申报表里的人，都会列出来。
       </div>
       <div v-if="data.batches && data.batches.length" class="tbl">

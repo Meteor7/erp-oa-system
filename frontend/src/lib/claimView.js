@@ -30,9 +30,9 @@ export function canQuickApprove(doc = {}) {
 const BUCKETS = [
   { key: 'draft', label: '草稿', color: '#C3CAD6', match: (status) => status === '草稿' },
   { key: 'review', label: '审批中', color: '#5470C6', match: (status) => status === '审批中' },
-  { key: 'topay', label: '待付款', color: '#E3B26B', match: (status) => ['待付款', '部分付款', '待办理'].includes(status) },
+  { key: 'topay', label: '待付款', color: '#78B8AD', match: (status) => ['待付款', '部分付款', '待办理'].includes(status) },
   { key: 'paid', label: '已付款', color: '#7FA38E', match: (status) => ['已付款', '已完结', '已完成', '已付款·待补票', '待核验', '已通过'].includes(status) },
-  { key: 'back', label: '驳回 / 撤回', color: '#D98C4A', match: (status) => ['已拒绝', '已撤回'].includes(status) },
+  { key: 'back', label: '驳回 / 撤回', color: '#4B9E91', match: (status) => ['已拒绝', '已撤回'].includes(status) },
 ];
 
 // "我的"栏目的状态条：按单据张数。

@@ -42,7 +42,7 @@ const access = createResource({ url: api + "get_payroll_access", method: "GET", 
 const canEdit = computed(() => Boolean(access.data?.can_edit));
 
 const company = ref("all");
-const companyOptions = [{ value: "all", label: "全部公司" }, { value: "Rayher", label: "示例总部" }, { value: "示例研发中心", label: "示例研发中心" }];
+const companyOptions = [{ value: "all", label: "全部公司" }, { value: "Rayher", label: "栖衡科技" }, { value: "示例研发中心", label: "栖衡研发" }];
 const chip = ref(statusFilter.value || "all");
 const query = ref("");
 const wide = ref(false);

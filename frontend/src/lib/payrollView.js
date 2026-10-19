@@ -109,7 +109,7 @@ export function totalsOf(rows) {
   return total;
 }
 
-export const DONUT_COLORS = Object.freeze({ net: '#2F7A55', contrib: '#7A56B8', tax: '#B42318', other: '#D9731F' });
+export const DONUT_COLORS = Object.freeze({ net: '#2F7A55', contrib: '#7A56B8', tax: '#B42318', other: '#147B73' });
 
 export function chartParts(total) {
   const parts = [

@@ -31,7 +31,7 @@ export function requestKpis(data = {}, access = boardAccess()) {
   const s = data.summary || {};
   return withAccess([
     { key: 'month', label: '本月通过的购买申请', value: yuan(s.month_approved_amount), sub: `${s.month_approved_count || 0} 张`, to: page('/approval/direct-purchase', { view: 'list', scope: 'all' }) },
-    { key: 'unpaid', label: '已批准未付出的额度', value: yuan(s.unpaid_amount), sub: '已通过但还没付出去的钱', tone: '#A35A17', to: { anchor: 'bd-budget' } },
+    { key: 'unpaid', label: '已批准未付出的额度', value: yuan(s.unpaid_amount), sub: '已通过但还没付出去的钱', tone: '#0E615B', to: { anchor: 'bd-budget' } },
     { key: 'pending', label: '审批中', value: `${s.pending_count || 0} 张`, sub: `最久已等 ${s.longest_wait_days || 0} 天`, tone: (s.longest_wait_days || 0) > 3 ? '#B42318' : '', to: { anchor: 'bd-stuck' } },
     { key: 'trip', label: '出差中 / 本月出差', value: `${s.on_trip_count || 0} 人 / ${s.month_trip_count || 0} 次`, sub: '按出发、返回日期', to: page('/approval/travel', { view: 'list', scope: 'all' }) },
   ], access);
@@ -42,7 +42,7 @@ export function paymentKpis(data = {}, access = boardAccess()) {
   return withAccess([
     { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期', to: page('/approval/claim', { view: 'list', scope: 'all', bucket: 'paid' }) },
     { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付', to: page('/approval/payment', { view: 'list', scope: 'all', bucket: 'paid' }) },
-    { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#A35A17', to: { anchor: 'bd-cashier' } },
+    { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#0E615B', to: { anchor: 'bd-cashier' } },
     { key: 'inv', label: '待补票', value: yuan(s.invoice_pending_amount), sub: `${s.invoice_pending_count || 0} 张，逾期 ${s.invoice_overdue_count || 0} 张`, tone: (s.invoice_overdue_count || 0) ? '#B42318' : '', to: { anchor: 'bd-invoices' } },
   ], access);
 }
@@ -61,7 +61,7 @@ export function procurementKpis(data = {}, part = 'request') {
   // 旧口径没有按期次的数据：按页面认得的状态筛选（PayWorkTab 读 ?status=）。
   return [
     { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `采购付款共 ${s.payment_count || 0} 张`, to: page('/approval/procurement-payment', { status: '已付款' }) },
-    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#E57A00' : '', to: page('/approval/procurement-payment', { status: '待到货资料' }) },
+    { key: 'arrival', label: '待到货', value: `${s.pending_arrival || 0} 张`, sub: '已付款未到货', tone: (s.pending_arrival || 0) ? '#0E615B' : '', to: page('/approval/procurement-payment', { status: '待到货资料' }) },
     { key: 'inspect', label: '待验收', value: `${s.pending_inspection || 0} 张`, sub: '已付款未验收', to: page('/approval/procurement-payment', { status: '待验收' }) },
   ];
 }
@@ -83,7 +83,7 @@ export function poWorkKpis(work = {}) {
   const path = '/approval/procurement-payment';
   return [
     { key: 'paid', label: '本月采购已付', value: yuan(s.month_paid_amount), sub: `${s.paid_count || 0} 期`, to: page(path, { status: '已付款' }) },
-    { key: 'final', label: '等总经理确认付款', value: yuan(s.waiting_final_amount), sub: `${s.waiting_final_count || 0} 张 · 在总经理付款这一步`, tone: '#A35A17', to: page(path, { tab: 'approvals' }) },
+    { key: 'final', label: '等总经理确认付款', value: yuan(s.waiting_final_amount), sub: `${s.waiting_final_count || 0} 张 · 在总经理付款这一步`, tone: '#0E615B', to: page(path, { tab: 'approvals' }) },
     { key: 'approval', label: '付款审批中', value: yuan(s.in_approval_amount), sub: `${s.in_approval_count || 0} 张`, to: page(path, { tab: 'approvals' }) },
     { key: 'ready', label: '待提交付款审批', value: yuan(s.ready_amount), sub: `${s.ready_count || 0} 期 · 采购还没提交`, to: page(path, { status: '可提交付款审批' }) },
   ];
@@ -235,7 +235,7 @@ export function bottomColumns(data = {}) {
 // ---------------------------------------------------------------- 图表（2026-09-30 看板改版）
 
 // 看板统一用的低饱和配色：蓝、沙、绿灰、石板灰、浅灰。
-export const CHART_COLORS = Object.freeze(['#5470C6', '#E3B26B', '#7FA38E', '#8C96A8', '#C3CAD6', '#B7A6CF']);
+export const CHART_COLORS = Object.freeze(['#5470C6', '#78B8AD', '#7FA38E', '#8C96A8', '#C3CAD6', '#B7A6CF']);
 
 function pairs(rows = []) {
   return (rows || []).map((row) => (Array.isArray(row) ? { label: row[0], value: Number(row[1] || 0) } : { label: row.label, value: Number(row.value || 0) }))
@@ -270,8 +270,8 @@ export function donutSegments(rows = [], max = 5) {
 export function agingColumns(queue = []) {
   const buckets = [
     { label: '今天', test: (days) => days <= 0, color: '#C3CAD6' },
-    { label: `1–${STUCK_AFTER_DAYS} 天`, test: (days) => days > 0 && !isWaitingTooLong(days), color: '#E3B26B' },
-    { label: `超过 ${STUCK_AFTER_DAYS} 天`, test: (days) => isWaitingTooLong(days), color: '#D98C4A' },
+    { label: `1–${STUCK_AFTER_DAYS} 天`, test: (days) => days > 0 && !isWaitingTooLong(days), color: '#78B8AD' },
+    { label: `超过 ${STUCK_AFTER_DAYS} 天`, test: (days) => isWaitingTooLong(days), color: '#4B9E91' },
   ];
   return buckets.map((bucket) => {
     const rows = (queue || []).filter((row) => bucket.test(Number(row.waited_days || 0)));
@@ -299,7 +299,7 @@ export function agingTiles(queue = []) {
 
 // "申请走到哪一步了"：各步按本月提交的张数算宽度。
 export function flowBars(flow = []) {
-  const colors = { submitted: '#C3CAD6', approved: '#8C96A8', executed: '#5470C6', pending: '#E3B26B' };
+  const colors = { submitted: '#C3CAD6', approved: '#8C96A8', executed: '#5470C6', pending: '#78B8AD' };
   const base = Math.max(1, Number(flow[0]?.count || 0));
   return (flow || []).map((step) => ({ ...step, color: colors[step.key] || '#8C96A8', width: `${Math.min(100, (Number(step.count || 0) / base) * 100).toFixed(1)}%` }));
 }

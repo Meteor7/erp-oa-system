@@ -99,18 +99,18 @@ const sealItems = computed(() => work.po.filter((item) => item.tag === '电子�
 const stats = computed(() => {
   const todo = home.pending;
   const cards = [{
-    key: 'todo', label: '待我审批', count: todo.length, unit: '张', tone: '#D98C4A', query: { view: 'list', scope: 'todo' },
+    key: 'todo', label: '待我审批', count: todo.length, unit: '张', tone: '#4B9E91', query: { view: 'list', scope: 'todo' },
     hint: todo.length ? `最久等了 ${longestWait(todo, now)} 天` : '没有要你审批的',
   }];
   if (isPmc) {
-    cards.push({ key: 'pr', label: '待提 PR', count: sumItems(work.pr), unit: '项物料', tone: '#E3B26B', to: { path: '/approval/material-progress' }, hint: prRequests.value ? `来自 ${prRequests.value} 张申请，去物料看板提` : '没有要提 PR 的物料' });
+    cards.push({ key: 'pr', label: '待提 PR', count: sumItems(work.pr), unit: '项物料', tone: '#78B8AD', to: { path: '/approval/material-progress' }, hint: prRequests.value ? `来自 ${prRequests.value} 张申请，去物料看板提` : '没有要提 PR 的物料' });
   }
   if (isBuyer) {
-    cards.push({ key: 'quote', label: '待比价', count: sumItems(quotePending.value), unit: '项物料', tone: '#E3B26B', to: { name: 'procurement-price-approvals', query: { view: 'source' } }, hint: quotePending.value.length ? `${quotePending.value.length} 张 PR 还没比价` : '没有要比价的物料' });
-    cards.push({ key: 'pay', label: '待提交付款审批', count: work.payment.length, unit: '期', tone: '#D98C4A', to: { path: '/approval/procurement-payment' }, hint: work.payment[0]?.subject || '没有可提交的期次' });
+    cards.push({ key: 'quote', label: '待比价', count: sumItems(quotePending.value), unit: '项物料', tone: '#78B8AD', to: { name: 'procurement-price-approvals', query: { view: 'source' } }, hint: quotePending.value.length ? `${quotePending.value.length} 张 PR 还没比价` : '没有要比价的物料' });
+    cards.push({ key: 'pay', label: '待提交付款审批', count: work.payment.length, unit: '期', tone: '#4B9E91', to: { path: '/approval/procurement-payment' }, hint: work.payment[0]?.subject || '没有可提交的期次' });
   }
   if (isVice) {
-    cards.push({ key: 'price', label: '待审批 · 价格', count: work.approvals.length, unit: '张', tone: '#D98C4A', to: { name: 'procurement-price-approvals' }, hint: work.approvals[0]?.subject || '没有要你审批的价格审批' });
+    cards.push({ key: 'price', label: '待审批 · 价格', count: work.approvals.length, unit: '张', tone: '#4B9E91', to: { name: 'procurement-price-approvals' }, hint: work.approvals[0]?.subject || '没有要你审批的价格审批' });
     cards.push({ key: 'seal', label: '待电子用印', count: sealItems.value.length, unit: '份', tone: '#C3CAD6', to: { name: 'procurement-price-approvals', query: { tab: 'po' } }, hint: sealItems.value[0]?.subject || '' });
   }
   if (ctx.globalAccess) {
@@ -124,7 +124,7 @@ const stats = computed(() => {
     }
     cards.push({ key: 'back', label: '退回 / 已撤回', count: mineGroups.value.back, unit: '张', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', stage: 'back' }, hint: mineGroups.value.back ? '修改后重新提交' : '没有要处理的' });
     cards.push({ key: 'demand', label: '我的 · 需求审批中', count: mineGroups.value.demand, unit: '张', tone: '#5470C6', query: { view: 'list', scope: 'mine', stage: 'demand' }, hint: '点进去看卡在谁那里' });
-    cards.push({ key: 'exec', label: '我的 · 采购执行中', count: mineGroups.value.exec, unit: '张', tone: '#E3B26B', query: { view: 'list', scope: 'mine', stage: 'exec' }, hint: '可以看到数量和进度' });
+    cards.push({ key: 'exec', label: '我的 · 采购执行中', count: mineGroups.value.exec, unit: '张', tone: '#78B8AD', query: { view: 'list', scope: 'mine', stage: 'exec' }, hint: '可以看到数量和进度' });
   }
   return cards;
 });

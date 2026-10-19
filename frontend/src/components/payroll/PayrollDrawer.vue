@@ -106,7 +106,7 @@ const needReason = computed(() => props.row.tax_manual && !String(props.row.tax_
         </template>
         <div v-else-if="locked && !t" class="pr-line"><span class="k">个税（代扣）</span><span class="num" style="text-align:right">{{ money(f.tax) }}</span></div>
       </div>
-      <div class="pr-sec" style="--c:#D9731F"><h5><i>5</i>其他扣款与实发</h5>
+      <div class="pr-sec" style="--c:#147B73"><h5><i>5</i>其他扣款与实发</h5>
         <div class="pr-line"><span class="k">个税（代扣）</span><span class="num" style="text-align:right">{{ money(f.tax) }}</span></div>
         <div class="pr-line"><span class="k">宿舍房租及水电费（代扣）<span class="pr-src">宿舍信息管理</span></span><span class="num" style="text-align:right">{{ money(row.accommodation) }}</span></div>
         <div class="pr-line"><span class="k">已发放<small>本月已经预发的金额</small></span><input v-model="row.advanced_paid" :disabled="locked" type="number" min="0" step="0.01" aria-label="已发放"></div>

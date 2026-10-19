@@ -132,7 +132,7 @@ onMounted(async () => {
           <span class="num strong">{{ row.name }}</span>
           <span class="grow">{{ row.subject }} <span class="muted">{{ row.request_type }} · {{ row.employee_name }}</span></span>
           <span class="muted">卡在：{{ row.current_step_label || '—' }}</span>
-          <div class="track"><div class="fill" :style="{ width: row.width, background: row.overdue ? '#D98C4A' : '#C3CAD6' }"></div></div>
+          <div class="track"><div class="fill" :style="{ width: row.width, background: row.overdue ? '#4B9E91' : '#C3CAD6' }"></div></div>
           <span :class="['days', { warn: row.overdue }]">{{ row.waited_days }} 天</span>
         </div>
         <div v-if="!stuck.length" class="empty">没有审批中的申请</div>

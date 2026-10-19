@@ -12,8 +12,8 @@ export const EMPTY_PAGE_TEXT = '这里暂时没有可看的内容';
 
 const ALERT_LABELS = Object.freeze({ bad: '需处理', warn: '注意', info: '提示' });
 // 堆叠条后端没给颜色（或给了不认识的写法）时按顺序用这组，和系统里其他图表的低饱和配色一致。
-export const STACK_PALETTE = Object.freeze(['#D9731F', '#34489A', '#2F7A55', '#8A5A1C', '#8A93A3', '#B42318']);
-const TONE_COLORS = Object.freeze({ ok: '#2F7A55', info: '#34489A', warn: '#D9731F', bad: '#B42318', hot: '#D9731F' });
+export const STACK_PALETTE = Object.freeze(['#147B73', '#34489A', '#2F7A55', '#8A5A1C', '#65788B', '#B42318']);
+const TONE_COLORS = Object.freeze({ ok: '#2F7A55', info: '#34489A', warn: '#8A5A1C', bad: '#B42318', hot: '#147B73' });
 
 // ---------------------------------------------------------------- 问候 / 期间
 export function greetingFor(hour) {

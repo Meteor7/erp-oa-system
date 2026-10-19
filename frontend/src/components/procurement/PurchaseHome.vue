@@ -74,10 +74,10 @@ const stats = computed(() => {
   const wait = longestWait(todo.value, now);
   // 每张卡带着范围和状态：点进去只看这一类（原来只切到"我的"，草稿、审批中、待付款都是同一份列表）。
   return [
-    { key: 'todo', label: '待我审批', count: todo.value.length, amount: sum(todo.value), tone: '#D98C4A', scope: 'todo', status: '', hint: todo.value.length ? `最久等了 ${wait} 天` : '没有要你审批的' },
+    { key: 'todo', label: '待我审批', count: todo.value.length, amount: sum(todo.value), tone: '#4B9E91', scope: 'todo', status: '', hint: todo.value.length ? `最久等了 ${wait} 天` : '没有要你审批的' },
     { key: 'back', label: '我的草稿 / 退回', count: back.length, amount: sum(back), tone: '#C3CAD6', scope: 'mine', status: 'draft', hint: back.length ? '继续编辑后重新提交' : '没有要处理的' },
     { key: 'review', label: '我的 · 审批中', count: review.length, amount: sum(review), tone: '#5470C6', scope: 'mine', status: 'review', hint: review.length ? '审批中还可以撤回' : '' },
-    { key: 'pay', label: '已批准 · 待付款', count: pendingPay.value.length, amount: sum(pendingPay.value), tone: '#E3B26B', scope: 'mine', status: 'topay', hint: pendingPay.value.length ? '可以用它发起报销或付款' : '' },
+    { key: 'pay', label: '已批准 · 待付款', count: pendingPay.value.length, amount: sum(pendingPay.value), tone: '#78B8AD', scope: 'mine', status: 'topay', hint: pendingPay.value.length ? '可以用它发起报销或付款' : '' },
   ];
 });
 

@@ -134,14 +134,14 @@ function registerFee(item) {
     <template v-if="data">
       <div v-if="lease || leavers.length" role="status" class="divide-y divide-[#F1E0C6] rounded-xl border border-[#F1E0C6] bg-[#FFFAF2] text-[13px] text-[#6E4718]">
         <div v-if="lease" class="flex flex-col gap-1 px-4 py-2.5 md:flex-row md:items-center md:gap-3">
-          <span class="hidden h-1.5 w-1.5 shrink-0 rounded-full bg-[#D98C4A] md:block"></span>
+          <span class="hidden h-1.5 w-1.5 shrink-0 rounded-full bg-[#4B9E91] md:block"></span>
           <span class="flex-1"><b class="font-semibold">{{ lease.title }}</b> {{ lease.detail }}</span>
-          <router-link :to="{ path: '/accommodation/master', query: { lease: 'expiring' } }" class="shrink-0 font-medium text-[#A35A17] hover:underline">查看续租清单 →</router-link>
+          <router-link :to="{ path: '/accommodation/master', query: { lease: 'expiring' } }" class="shrink-0 font-medium text-[#0E615B] hover:underline">查看续租清单 →</router-link>
         </div>
         <div v-if="leavers.length" class="flex flex-col gap-1 px-4 py-2.5 md:flex-row md:items-center md:gap-3">
           <span class="hidden h-1.5 w-1.5 shrink-0 rounded-full md:block" :style="{ background: COLORS.leaver }"></span>
           <span class="flex-1"><b class="font-semibold">{{ leavers.length }} 位已离职员工还登记在住：</b>{{ leavers.map((item) => `${item.room_no} ${item.employee_name}`).join('、') }}</span>
-          <router-link :to="{ path: '/accommodation/master', query: { leaver: '1' } }" class="shrink-0 font-medium text-[#A35A17] hover:underline">{{ canEdit ? '去填写退宿日期 →' : '查看这些房间 →' }}</router-link>
+          <router-link :to="{ path: '/accommodation/master', query: { leaver: '1' } }" class="shrink-0 font-medium text-[#0E615B] hover:underline">{{ canEdit ? '去填写退宿日期 →' : '查看这些房间 →' }}</router-link>
         </div>
       </div>
 
@@ -188,7 +188,7 @@ function registerFee(item) {
           </div>
           <div v-else class="dorm-empty">
             <div>{{ title }}还没有登记宿舍费用</div>
-            <button v-if="canEdit" type="button" class="font-medium text-[#A35A17] hover:underline" data-board-register @click="registerFee(null)">去登记本月费用 →</button>
+            <button v-if="canEdit" type="button" class="font-medium text-[#0E615B] hover:underline" data-board-register @click="registerFee(null)">去登记本月费用 →</button>
           </div>
         </section>
 
@@ -273,7 +273,7 @@ function registerFee(item) {
             <div class="grid grid-cols-[64px_minmax(0,1fr)] gap-y-2 text-[13px]">
               <span class="text-[#6B7385]">房型</span><span>{{ room.room_type || '—' }}</span>
               <span class="text-[#6B7385]">月租</span><span>{{ whole(room.monthly_rent) }} 元</span>
-              <span class="text-[#6B7385]">租约</span><span :class="room.lease_days_left !== null && room.lease_days_left <= 60 ? 'text-[#A35A17]' : ''">{{ leaseText(room) }}</span>
+              <span class="text-[#6B7385]">租约</span><span :class="room.lease_days_left !== null && room.lease_days_left <= 60 ? 'text-[#0E615B]' : ''">{{ leaseText(room) }}</span>
               <span class="text-[#6B7385]">入住人</span>
               <span>{{ room.employee_name || '—' }}<span v-if="room.employee_left" class="ml-1.5 text-xs" :style="{ color: COLORS.leaver }">已离职</span></span>
             </div>
@@ -330,7 +330,7 @@ function registerFee(item) {
           <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#6B7385]">
             <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :style="{ background: COLORS.company }"></span>公司承担</span>
             <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :style="{ background: COLORS.personal }"></span>个人承担</span>
-            <span v-if="unregisteredMonths.length" class="text-[#A35A17]">{{ unregisteredMonths.join('、') }}还没登记</span>
+            <span v-if="unregisteredMonths.length" class="text-[#0E615B]">{{ unregisteredMonths.join('、') }}还没登记</span>
           </div>
         </section>
       </div>

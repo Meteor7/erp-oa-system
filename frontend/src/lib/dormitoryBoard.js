@@ -3,9 +3,9 @@
 export const COLORS = {
   company: '#5470C6',
   companyText: '#34489A',
-  personal: '#E3B26B',
+  personal: '#78B8AD',
   personalText: '#8A5A1C',
-  vacant: '#D98C4A',
+  vacant: '#4B9E91',
   vacantText: '#9A5A1F',
   guest: '#8C96A8',
   nap: '#C3CAD6',

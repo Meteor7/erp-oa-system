@@ -1,11 +1,11 @@
 /* 出差申请 / 发票夹 / 报销 / 付款 / 两个看板共用的样式，取自已确认的设计稿（第 5 版）。
    全部挂在 .xp 下面，不影响其他页面。 */
 .xp {
-  --xp-page: #F5F6F9; --xp-card: #FFFFFF; --xp-soft: #F8F9FB;
-  --xp-ink: #1A2130; --xp-ink2: #4A5365; --xp-ink3: #8A93A3;
+  --xp-page: #F2F6F5; --xp-card: #FFFFFF; --xp-soft: #F8F9FB;
+  --xp-ink: #1A2130; --xp-ink2: #4A5365; --xp-ink3: #65788B;
   --xp-line: #E5E7EB; --xp-line2: #D1D5DB;
   /* 2026-09-30：颜色整体压低饱和度（用户反馈太亮）。 */
-  --xp-brand: #D9731F; --xp-brand-d: #A35A17; --xp-brand-bg: #FBEFE3;
+  --xp-brand: #147B73; --xp-brand-d: #0E615B; --xp-brand-bg: #E7F4F0;
   --xp-cobalt: #34489A; --xp-cobalt-bg: #EEF1F8; --xp-jade: #2F7A55; --xp-jade-bg: #EAF4EE;
   --xp-sun: #8A5A1C; --xp-sun-bg: #FBF1DF; --xp-red: #B42318; --xp-red-bg: #FBEAE8;
   color: var(--xp-ink);
@@ -38,7 +38,7 @@
 .xp .panel.flush { padding: 0; overflow: hidden; }
 .xp .panel .pt { font-size: 14px; font-weight: 600; margin: 0 0 10px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; }
 .xp .panel .pt .muted { font-weight: 400; }
-.xp .panel.focus { border-color: #FDD9A8; box-shadow: 0 0 0 3px var(--xp-brand-bg); }
+.xp .panel.focus { border-color: #AED6CC; box-shadow: 0 0 0 3px var(--xp-brand-bg); }
 .xp h4 { font-size: 13px; margin: 16px 0 8px; font-weight: 600; color: var(--xp-ink2); }
 .xp .form { display: grid; gap: 10px 14px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .xp .f label { display: block; font-size: 12px; color: #6B7280; margin-bottom: 3px; }
@@ -55,7 +55,7 @@
 .xp .banner { border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
 .xp .banner.ok { background: var(--xp-jade-bg); color: var(--xp-jade); margin: 0 0 12px; }
 .xp .banner.err { background: var(--xp-red-bg); color: var(--xp-red); margin: 0 0 12px; }
-.xp .lock { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border: 1px solid #FDD9A8; border-radius: 10px; background: var(--xp-brand-bg); margin-bottom: 12px; font-size: 13px; }
+.xp .lock { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border: 1px solid #AED6CC; border-radius: 10px; background: var(--xp-brand-bg); margin-bottom: 12px; font-size: 13px; }
 .xp .lock .k { color: var(--xp-brand-d); font-weight: 600; }
 .xp .bar { flex: 1; min-width: 120px; max-width: 260px; height: 6px; border-radius: 3px; background: #FBE3C2; overflow: hidden; }
 .xp .bar.wide { max-width: none; }
@@ -84,7 +84,7 @@
 .xp th.r, .xp td.r { text-align: right; }
 .xp tr:last-child td { border-bottom: 0; }
 .xp .row-sel { cursor: pointer; }
-.xp .row-sel:hover td { background: #FFFAF3; }
+.xp .row-sel:hover td { background: #F3F9F7; }
 .xp .row-sel.on td { background: var(--xp-brand-bg); }
 .xp .pill { display: inline-flex; align-items: center; font-size: 12px; line-height: 1; padding: 4px 8px; border-radius: 6px; white-space: nowrap; font-weight: 500; }
 .xp .p-brand { background: var(--xp-brand-bg); color: var(--xp-brand-d); }

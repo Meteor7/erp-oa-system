@@ -59,8 +59,8 @@
 .xp .pay-po-list { margin-bottom: 0; }
 .xp .pay-po-title { padding: 12px 14px; margin: 0; border-bottom: 1px solid var(--xp-line); }
 .xp .pay-po { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--xp-line); background: #fff; font: inherit; font-size: 12px; text-align: left; cursor: pointer; color: var(--xp-ink); }
-.xp .pay-po:hover { background: #FFFAF3; }
-.xp .pay-po.on { background: #FFFAF3; box-shadow: inset 3px 0 0 var(--xp-brand); }
+.xp .pay-po:hover { background: #F3F9F7; }
+.xp .pay-po.on { background: #F3F9F7; box-shadow: inset 3px 0 0 var(--xp-brand); }
 .xp .pay-po .split { width: 100%; }
 .xp .pay-po b { font-size: 13px; }
 .xp .pay-po-sup { color: var(--xp-ink2); }
@@ -83,7 +83,7 @@
 .xp .pay-approval-head .detail-head { margin-bottom: 10px; }
 .xp .pay-banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; background: #F7F8FA; color: var(--xp-ink2); margin-bottom: 10px; }
 .xp .pay-banner.is-warn { background: var(--xp-sun-bg); color: var(--xp-sun); }
-.xp .pay-banner.is-act { background: var(--xp-brand-bg); color: #7A4210; }
+.xp .pay-banner.is-act { background: var(--xp-brand-bg); color: #174B45; }
 .xp .pay-act-form { display: grid; grid-template-columns: minmax(0, 1.4fr) 220px minmax(0, 1fr); gap: 12px; padding: 14px; background: var(--xp-soft); border-radius: 10px; align-items: end; }
 .xp .pay-act-form.pay-withdraw { grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 10px; }
 .xp .pay-act-form.pay-withdraw .s2 { grid-column: auto; }

@@ -28,7 +28,7 @@ const pct = (share) => (share * 100).toFixed(1) + '%';
           <circle cx="52" cy="52" :r="R" fill="none" stroke="#EEF1F6" stroke-width="14" />
           <circle v-for="arc in arcs" :key="arc.key" cx="52" cy="52" :r="R" fill="none" :stroke="arc.color" stroke-width="14" :stroke-dasharray="arc.dash" :stroke-dashoffset="arc.offset" transform="rotate(-90 52 52)"><title>{{ arc.label }} {{ money(arc.value) }}</title></circle>
           <text x="52" y="50" text-anchor="middle" font-size="17" font-weight="700" fill="#1A2130">{{ netShare }}%</text>
-          <text x="52" y="65" text-anchor="middle" font-size="9" fill="#8A93A3">实发占比</text>
+          <text x="52" y="65" text-anchor="middle" font-size="9" fill="#65788B">实发占比</text>
         </svg>
         <div class="pr-lg"><div v-for="part in parts" :key="part.key"><span class="l"><i :style="{ background: part.color }"></i>{{ part.label }}</span><b>{{ pct(part.share) }}</b></div></div>
       </div>

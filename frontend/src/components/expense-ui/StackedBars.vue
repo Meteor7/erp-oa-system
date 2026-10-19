@@ -44,7 +44,7 @@ const chart = computed(() => stackedChart(props.trend, {
     <svg v-if="hasData" :viewBox="`0 0 ${chart.width} ${chart.height}`" :width="chart.width" :height="chart.height" role="img" aria-label="近 6 个月报销与付款金额" style="display:block;max-width:100%">
       <g v-for="tick in ticks" :key="tick.value">
         <line :x1="chart.pad" :x2="chart.width - 8" :y1="tick.y" :y2="tick.y" stroke="#EEF0F4" />
-        <text :x="chart.pad - 8" :y="tick.y + 4" text-anchor="end" font-size="12" fill="#8A93A3">{{ tick.label }}</text>
+        <text :x="chart.pad - 8" :y="tick.y + 4" text-anchor="end" font-size="12" fill="#65788B">{{ tick.label }}</text>
       </g>
       <g v-for="bar in chart.bars" :key="bar.month">
         <rect :x="bar.x" :y="bar.reimbursementY" :width="bar.width" :height="bar.reimbursementHeight" :fill="REIMBURSEMENT" rx="2">

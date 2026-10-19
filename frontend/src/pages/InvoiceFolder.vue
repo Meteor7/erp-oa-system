@@ -354,7 +354,7 @@ onBeforeUnmount(() => {
     <!-- ============================== 首页（2026-09-30 改版） ============================== -->
     <template v-if="view === 'home'">
       <label class="drop-zone" :class="{ disabled: busy }">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#8A93A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"></path><path d="M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"></path></svg>
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#65788B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"></path><path d="M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"></path></svg>
         <span class="grow-col"><b>点这里选择发票上传</b><span class="muted">PDF 或照片，一次最多 20 个文件；识别完会自动刷新</span></span>
         <span v-if="homeCount('识别中')" class="recognizing"><span class="muted">正在识别 {{ homeCount('识别中') }} 张</span><span class="pulse"><i></i></span></span>
         <span class="btn">选择文件</span>
