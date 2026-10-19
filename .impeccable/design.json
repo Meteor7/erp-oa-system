@@ -1,0 +1,556 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-19T05:09:12.514217+00:00",
+  "title": "Design System: 栖衡 QIHENG ERP / OA",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "协作青绿",
+        "canonical": "#147b73",
+        "tonalRamp": [
+          "oklch(15% 0.08751 186.62)",
+          "oklch(26% 0.08751 186.62)",
+          "oklch(38% 0.08751 186.62)",
+          "oklch(49% 0.08751 186.62)",
+          "oklch(61% 0.08751 186.62)",
+          "oklch(72% 0.08751 186.62)",
+          "oklch(84% 0.08751 186.62)",
+          "oklch(95% 0.08751 186.62)"
+        ]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "深青绿",
+        "canonical": "#0e615b",
+        "tonalRamp": [
+          "oklch(15% 0.07365 187.21)",
+          "oklch(26% 0.07365 187.21)",
+          "oklch(38% 0.07365 187.21)",
+          "oklch(49% 0.07365 187.21)",
+          "oklch(61% 0.07365 187.21)",
+          "oklch(72% 0.07365 187.21)",
+          "oklch(84% 0.07365 187.21)",
+          "oklch(95% 0.07365 187.21)"
+        ]
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "浅青绿",
+        "canonical": "#e7f4f0",
+        "tonalRamp": [
+          "oklch(15% 0.01472 175.72)",
+          "oklch(26% 0.01472 175.72)",
+          "oklch(38% 0.01472 175.72)",
+          "oklch(49% 0.01472 175.72)",
+          "oklch(61% 0.01472 175.72)",
+          "oklch(72% 0.01472 175.72)",
+          "oklch(84% 0.01472 175.72)",
+          "oklch(95% 0.01472 175.72)"
+        ]
+      },
+      "page": {
+        "role": "neutral",
+        "displayName": "page",
+        "canonical": "#f2f6f5",
+        "tonalRamp": [
+          "oklch(15% 0.00444 179.73)",
+          "oklch(26% 0.00444 179.73)",
+          "oklch(38% 0.00444 179.73)",
+          "oklch(49% 0.00444 179.73)",
+          "oklch(61% 0.00444 179.73)",
+          "oklch(72% 0.00444 179.73)",
+          "oklch(84% 0.00444 179.73)",
+          "oklch(95% 0.00444 179.73)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "surface",
+        "canonical": "#fff",
+        "tonalRamp": [
+          "oklch(15% 0.00000 89.88)",
+          "oklch(26% 0.00000 89.88)",
+          "oklch(38% 0.00000 89.88)",
+          "oklch(49% 0.00000 89.88)",
+          "oklch(61% 0.00000 89.88)",
+          "oklch(72% 0.00000 89.88)",
+          "oklch(84% 0.00000 89.88)",
+          "oklch(95% 0.00000 89.88)"
+        ]
+      },
+      "soft": {
+        "role": "neutral",
+        "displayName": "soft",
+        "canonical": "#f4f8f6",
+        "tonalRamp": [
+          "oklch(15% 0.00498 165.01)",
+          "oklch(26% 0.00498 165.01)",
+          "oklch(38% 0.00498 165.01)",
+          "oklch(49% 0.00498 165.01)",
+          "oklch(61% 0.00498 165.01)",
+          "oklch(72% 0.00498 165.01)",
+          "oklch(84% 0.00498 165.01)",
+          "oklch(95% 0.00498 165.01)"
+        ]
+      },
+      "heading": {
+        "role": "neutral",
+        "displayName": "heading",
+        "canonical": "#223e39",
+        "tonalRamp": [
+          "oklch(15% 0.03533 181.44)",
+          "oklch(26% 0.03533 181.44)",
+          "oklch(38% 0.03533 181.44)",
+          "oklch(49% 0.03533 181.44)",
+          "oklch(61% 0.03533 181.44)",
+          "oklch(72% 0.03533 181.44)",
+          "oklch(84% 0.03533 181.44)",
+          "oklch(95% 0.03533 181.44)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "text",
+        "canonical": "#243a35",
+        "tonalRamp": [
+          "oklch(15% 0.02930 178.53)",
+          "oklch(26% 0.02930 178.53)",
+          "oklch(38% 0.02930 178.53)",
+          "oklch(49% 0.02930 178.53)",
+          "oklch(61% 0.02930 178.53)",
+          "oklch(72% 0.02930 178.53)",
+          "oklch(84% 0.02930 178.53)",
+          "oklch(95% 0.02930 178.53)"
+        ]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "text-secondary",
+        "canonical": "#526a62",
+        "tonalRamp": [
+          "oklch(15% 0.03122 172.63)",
+          "oklch(26% 0.03122 172.63)",
+          "oklch(38% 0.03122 172.63)",
+          "oklch(49% 0.03122 172.63)",
+          "oklch(61% 0.03122 172.63)",
+          "oklch(72% 0.03122 172.63)",
+          "oklch(84% 0.03122 172.63)",
+          "oklch(95% 0.03122 172.63)"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "text-muted",
+        "canonical": "#637970",
+        "tonalRamp": [
+          "oklch(15% 0.02930 168.51)",
+          "oklch(26% 0.02930 168.51)",
+          "oklch(38% 0.02930 168.51)",
+          "oklch(49% 0.02930 168.51)",
+          "oklch(61% 0.02930 168.51)",
+          "oklch(72% 0.02930 168.51)",
+          "oklch(84% 0.02930 168.51)",
+          "oklch(95% 0.02930 168.51)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "line",
+        "canonical": "#dce6e1",
+        "tonalRamp": [
+          "oklch(15% 0.01261 164.78)",
+          "oklch(26% 0.01261 164.78)",
+          "oklch(38% 0.01261 164.78)",
+          "oklch(49% 0.01261 164.78)",
+          "oklch(61% 0.01261 164.78)",
+          "oklch(72% 0.01261 164.78)",
+          "oklch(84% 0.01261 164.78)",
+          "oklch(95% 0.01261 164.78)"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "line-strong",
+        "canonical": "#c8d8d0",
+        "tonalRamp": [
+          "oklch(15% 0.02038 164.51)",
+          "oklch(26% 0.02038 164.51)",
+          "oklch(38% 0.02038 164.51)",
+          "oklch(49% 0.02038 164.51)",
+          "oklch(61% 0.02038 164.51)",
+          "oklch(72% 0.02038 164.51)",
+          "oklch(84% 0.02038 164.51)",
+          "oklch(95% 0.02038 164.51)"
+        ]
+      },
+      "nav-bg": {
+        "role": "neutral",
+        "displayName": "nav-bg",
+        "canonical": "#173e3a",
+        "tonalRamp": [
+          "oklch(15% 0.04457 186.22)",
+          "oklch(26% 0.04457 186.22)",
+          "oklch(38% 0.04457 186.22)",
+          "oklch(49% 0.04457 186.22)",
+          "oklch(61% 0.04457 186.22)",
+          "oklch(72% 0.04457 186.22)",
+          "oklch(84% 0.04457 186.22)",
+          "oklch(95% 0.04457 186.22)"
+        ]
+      },
+      "nav-text": {
+        "role": "neutral",
+        "displayName": "nav-text",
+        "canonical": "#d5e8e2",
+        "tonalRamp": [
+          "oklch(15% 0.02171 174.96)",
+          "oklch(26% 0.02171 174.96)",
+          "oklch(38% 0.02171 174.96)",
+          "oklch(49% 0.02171 174.96)",
+          "oklch(61% 0.02171 174.96)",
+          "oklch(72% 0.02171 174.96)",
+          "oklch(84% 0.02171 174.96)",
+          "oklch(95% 0.02171 174.96)"
+        ]
+      },
+      "nav-hover": {
+        "role": "neutral",
+        "displayName": "nav-hover",
+        "canonical": "#28534b",
+        "tonalRamp": [
+          "oklch(15% 0.05013 180.09)",
+          "oklch(26% 0.05013 180.09)",
+          "oklch(38% 0.05013 180.09)",
+          "oklch(49% 0.05013 180.09)",
+          "oklch(61% 0.05013 180.09)",
+          "oklch(72% 0.05013 180.09)",
+          "oklch(84% 0.05013 180.09)",
+          "oklch(95% 0.05013 180.09)"
+        ]
+      },
+      "nav-active-bg": {
+        "role": "neutral",
+        "displayName": "nav-active-bg",
+        "canonical": "#d9efe7",
+        "tonalRamp": [
+          "oklch(15% 0.02552 171.94)",
+          "oklch(26% 0.02552 171.94)",
+          "oklch(38% 0.02552 171.94)",
+          "oklch(49% 0.02552 171.94)",
+          "oklch(61% 0.02552 171.94)",
+          "oklch(72% 0.02552 171.94)",
+          "oklch(84% 0.02552 171.94)",
+          "oklch(95% 0.02552 171.94)"
+        ]
+      },
+      "nav-active-text": {
+        "role": "neutral",
+        "displayName": "nav-active-text",
+        "canonical": "#184b40",
+        "tonalRamp": [
+          "oklch(15% 0.05737 176.18)",
+          "oklch(26% 0.05737 176.18)",
+          "oklch(38% 0.05737 176.18)",
+          "oklch(49% 0.05737 176.18)",
+          "oklch(61% 0.05737 176.18)",
+          "oklch(72% 0.05737 176.18)",
+          "oklch(84% 0.05737 176.18)",
+          "oklch(95% 0.05737 176.18)"
+        ]
+      },
+      "positive": {
+        "role": "secondary",
+        "displayName": "成功绿",
+        "canonical": "#2F7A55",
+        "tonalRamp": [
+          "oklch(15% 0.09521 158.86)",
+          "oklch(26% 0.09521 158.86)",
+          "oklch(38% 0.09521 158.86)",
+          "oklch(49% 0.09521 158.86)",
+          "oklch(61% 0.09521 158.86)",
+          "oklch(72% 0.09521 158.86)",
+          "oklch(84% 0.09521 158.86)",
+          "oklch(95% 0.09521 158.86)"
+        ]
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "警告褐金",
+        "canonical": "#8A5A1C",
+        "tonalRamp": [
+          "oklch(15% 0.09793 68.48)",
+          "oklch(26% 0.09793 68.48)",
+          "oklch(38% 0.09793 68.48)",
+          "oklch(49% 0.09793 68.48)",
+          "oklch(61% 0.09793 68.48)",
+          "oklch(72% 0.09793 68.48)",
+          "oklch(84% 0.09793 68.48)",
+          "oklch(95% 0.09793 68.48)"
+        ]
+      },
+      "danger": {
+        "role": "secondary",
+        "displayName": "风险红",
+        "canonical": "#B42318",
+        "tonalRamp": [
+          "oklch(15% 0.18205 29.51)",
+          "oklch(26% 0.18205 29.51)",
+          "oklch(38% 0.18205 29.51)",
+          "oklch(49% 0.18205 29.51)",
+          "oklch(61% 0.18205 29.51)",
+          "oklch(72% 0.18205 29.51)",
+          "oklch(84% 0.18205 29.51)",
+          "oklch(95% 0.18205 29.51)"
+        ]
+      },
+      "annual-ink": {
+        "role": "secondary",
+        "displayName": "年假深绿",
+        "canonical": "#1f6a4d",
+        "tonalRamp": [
+          "oklch(15% 0.08714 163.40)",
+          "oklch(26% 0.08714 163.40)",
+          "oklch(38% 0.08714 163.40)",
+          "oklch(49% 0.08714 163.40)",
+          "oklch(61% 0.08714 163.40)",
+          "oklch(72% 0.08714 163.40)",
+          "oklch(84% 0.08714 163.40)",
+          "oklch(95% 0.08714 163.40)"
+        ]
+      },
+      "annual-fill": {
+        "role": "secondary",
+        "displayName": "年假浅绿",
+        "canonical": "#e3f5ec",
+        "tonalRamp": [
+          "oklch(15% 0.02239 164.51)",
+          "oklch(26% 0.02239 164.51)",
+          "oklch(38% 0.02239 164.51)",
+          "oklch(49% 0.02239 164.51)",
+          "oklch(61% 0.02239 164.51)",
+          "oklch(72% 0.02239 164.51)",
+          "oklch(84% 0.02239 164.51)",
+          "oklch(95% 0.02239 164.51)"
+        ]
+      },
+      "personal-chart": {
+        "role": "secondary",
+        "displayName": "事假淡蓝",
+        "canonical": "#8db4ee",
+        "tonalRamp": [
+          "oklch(15% 0.09399 258.13)",
+          "oklch(26% 0.09399 258.13)",
+          "oklch(38% 0.09399 258.13)",
+          "oklch(49% 0.09399 258.13)",
+          "oklch(61% 0.09399 258.13)",
+          "oklch(72% 0.09399 258.13)",
+          "oklch(84% 0.09399 258.13)",
+          "oklch(95% 0.09399 258.13)"
+        ]
+      },
+      "comp-chart": {
+        "role": "secondary",
+        "displayName": "调休淡紫",
+        "canonical": "#b8a6ee",
+        "tonalRamp": [
+          "oklch(15% 0.10299 295.34)",
+          "oklch(26% 0.10299 295.34)",
+          "oklch(38% 0.10299 295.34)",
+          "oklch(49% 0.10299 295.34)",
+          "oklch(61% 0.10299 295.34)",
+          "oklch(72% 0.10299 295.34)",
+          "oklch(84% 0.10299 295.34)",
+          "oklch(95% 0.10299 295.34)"
+        ]
+      },
+      "overtime-chart": {
+        "role": "secondary",
+        "displayName": "加班琥珀",
+        "canonical": "#f4c47a",
+        "tonalRamp": [
+          "oklch(15% 0.10708 77.35)",
+          "oklch(26% 0.10708 77.35)",
+          "oklch(38% 0.10708 77.35)",
+          "oklch(49% 0.10708 77.35)",
+          "oklch(61% 0.10708 77.35)",
+          "oklch(72% 0.10708 77.35)",
+          "oklch(84% 0.10708 77.35)",
+          "oklch(95% 0.10708 77.35)"
+        ]
+      },
+      "trip-chart": {
+        "role": "secondary",
+        "displayName": "出差青蓝",
+        "canonical": "#84cdd6",
+        "tonalRamp": [
+          "oklch(15% 0.07377 205.70)",
+          "oklch(26% 0.07377 205.70)",
+          "oklch(38% 0.07377 205.70)",
+          "oklch(49% 0.07377 205.70)",
+          "oklch(61% 0.07377 205.70)",
+          "oklch(72% 0.07377 205.70)",
+          "oklch(84% 0.07377 205.70)",
+          "oklch(95% 0.07377 205.70)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "headline",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "headline-mobile": {
+        "displayName": "headline-mobile",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "body": {
+        "displayName": "body",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "table": {
+        "displayName": "table",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "label": {
+        "displayName": "label",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "button": {
+        "displayName": "button",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "panel-title": {
+        "displayName": "panel-title",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "navigation": {
+        "displayName": "navigation",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "record-id": {
+        "displayName": "record-id",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      },
+      "attendance-tag": {
+        "displayName": "attendance-tag",
+        "purpose": "通用业务区或名称指定的局部层级，按 DESIGN.md 作用域使用。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "panel-focus",
+        "value": "0 0 0 3px var(--xp-brand-bg)",
+        "purpose": "通用业务面板 focus 状态。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "navigation",
+        "value": "180ms ease",
+        "purpose": "侧栏颜色状态。"
+      },
+      {
+        "name": "drawer",
+        "value": "200ms",
+        "purpose": "App.vue 移动侧栏位移。"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "减少动态效果时的过渡和动画时长。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sidebar-desktop-min",
+        "value": "768px"
+      },
+      {
+        "name": "attendance-stack-max",
+        "value": "1100px"
+      },
+      {
+        "name": "attendance-compact-max",
+        "value": "640px"
+      },
+      {
+        "name": "login-compact-max",
+        "value": "480px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主要业务操作",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "通用 xp 按钮；考勤 ac-btn 有独立局部样式。",
+      "html": "<button class=\"ds-primary\">新建申请</button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;gap:4px;min-height:34px;padding:6px 12px;border:1px solid var(--xp-brand,#147b73);border-radius:7px;background:var(--xp-brand,#147b73);color:#fff;font:13px/1.6 \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;cursor:pointer;white-space:nowrap;}.ds-primary:hover{background:var(--xp-brand-d,#0e615b);color:#fff;}.ds-primary:focus-visible{outline:2px solid var(--xp-brand,#147b73);outline-offset:2px;}.ds-primary:disabled{opacity:.45;cursor:not-allowed;}"
+    },
+    {
+      "name": "业务表单字段",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "expenseUi.css 的通用字段，保留局部焦点偏移。",
+      "html": "<input class=\"ds-input\" aria-label=\"申请事由\" placeholder=\"填写申请事由\" />",
+      "css": ".ds-input{padding:7px 10px;border:1px solid var(--xp-line2,#c8d8d0);border-radius:6px;background:#fff;color:var(--xp-ink,#243a35);font:13px/1.6 \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;caret-color:#147b73;}.ds-input::placeholder{color:#697d79;}.ds-input:focus-visible{outline:2px solid var(--xp-brand,#147b73);outline-offset:2px;}.ds-input:disabled,.ds-input[readonly]{background:var(--xp-soft,#f4f8f6);color:var(--xp-ink3,#637970);}"
+    },
+    {
+      "name": "深青模块导航",
+      "kind": "nav",
+      "refersTo": "nav-active",
+      "description": "App.vue 导航，Tailwind 工具类已展开。",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" href=\"#attendance\" aria-current=\"page\">请假/加班/调休/出差</a><a class=\"ds-nav-link\" href=\"#purchase\">采购/购买申请</a></nav>",
+      "css": ".ds-nav{width:216px;padding:18px 12px;background:#173e3a;}.ds-nav-link{display:flex;align-items:center;padding:8px;border-radius:8px;color:#d5e8e2;font:500 14px/20px \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;text-decoration:none;transition:background-color 180ms ease,color 180ms ease;}.ds-nav-link:hover{color:#fff;background:#28534b;}.ds-nav-link[aria-current=\"page\"]{background:#d9efe7;color:#184b40;font-weight:600;}.ds-nav-link:focus-visible{outline:2px solid #147b73;outline-offset:3px;}@media(prefers-reduced-motion:reduce){.ds-nav-link{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "年假标签",
+      "kind": "chip",
+      "refersTo": "attendance-tag-annual",
+      "description": "考勤 ac-tag 的年假配对，无交互。",
+      "html": "<span class=\"ds-tag\">年假</span>",
+      "css": ".ds-tag{display:inline-block;padding:0 8px;border-radius:6px;background:var(--ac-b-annual,#e3f5ec);color:var(--ac-x-annual,#1f6a4d);font:11px/18px \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;white-space:nowrap;}"
+    },
+    {
+      "name": "业务面板",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "通用 xp panel，细线与浅色分层。",
+      "html": "<section class=\"ds-panel\"><h2>申请记录</h2><p>查看当前业务状态与关联记录。</p></section>",
+      "css": ".ds-panel{padding:16px;margin-bottom:12px;border:1px solid var(--xp-line,#dce6e1);border-radius:12px;background:#fff;color:var(--xp-ink,#243a35);font:14px/1.6 \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;}.ds-panel h2{margin:0 0 10px;font-size:14px;font-weight:600;}.ds-panel p{margin:0;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "研发记录册 / The R&D Notebook",
+    "overview": "栖衡 QIHENG 以研发记录册的索引和对齐组织员工、审批、采购与研发记录。深青侧栏承担稳定定位，浅色主区承托列表、统计与表单；不以具象笔记本或装饰物表达隐喻。\n\n本规范固定已实现的品牌层，并保留业务页面各自的密度与状态语义。依据当前源码以及桌面、移动和原生登录截图记录；方向种子为 41963e97，既有业务流程、权限和路由继续有效。",
+    "keyCharacteristics": [
+      "深青导航、浅色工作区与青绿主要操作。",
+      "面板细线分区，桌面并列、窄屏堆叠。",
+      "考勤类别保留独立颜色，数字、日期与记录标识可扫描。"
+    ],
+    "rules": [
+      {
+        "name": "The Status Rule",
+        "body": "品牌青绿表达操作与位置；考勤类型和业务状态保留各自的文字及色彩映射。",
+        "section": "colors"
+      },
+      {
+        "name": "The Scope Rule",
+        "body": "工作区、通用业务面板、考勤首页与原生登录各有作用域，局部规则优先时按局部实现记录。",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Do 深色侧栏使用亮字标，浅色登录使用深字标，保持 SVG 原始比例。",
+      "Do 沿用业务页面的表格、审批、状态标签与图表映射，并保留文字说明。",
+      "Do 让窄屏操作换行、面板堆叠、表格独立滚动；保留键盘焦点和减少动态效果支持。"
+    ],
+    "donts": [
+      "Don't 将深青侧栏解释为整站暗色主题，或将考勤局部暗色样式推广到全站。",
+      "Don't 把所有局部按钮与字段强制换成同一种圆角、颜色或尺寸。",
+      "Don't 为视觉一致性删除业务状态、审批入口或权限差异，也不要添加具象记录册装饰。"
+    ]
+  }
+}
