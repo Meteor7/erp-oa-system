@@ -4,6 +4,41 @@ This creates an isolated development site using Frappe/ERPNext/HRMS version-15 a
 
 Prerequisites: firmware virtualization enabled, Docker Desktop Linux engine healthy using WSL 2 or Docker VMM (`docker info`), Git and Python in PATH. All frontend dependency installation and builds run in Docker.
 
+## Create local credentials (first clone only)
+
+Run this from the repository root before the first initialization. It generates two random passwords without printing them, preserves any existing file, and follows the plaintext-safe writer required by `AGENTS.md`. Open the generated local file privately when you need the administrator password. Keep the file with the existing Docker volumes; do not regenerate credentials for an initialized site.
+
+```powershell
+@'
+from pathlib import Path
+import hashlib
+import secrets
+import subprocess
+import sys
+
+root = Path.cwd()
+if not (root / "deploy/docker-compose.local.yml").is_file():
+    raise SystemExit("Run from the erp-oa-system repository root.")
+target = root / ".local/logistics.env"
+if target.exists():
+    raise SystemExit("Existing credentials preserved; continue with initialization.")
+target.parent.mkdir(parents=True, exist_ok=True)
+data = (
+    "LOCAL_DB_ROOT_PASSWORD=" + secrets.token_urlsafe(32) + "\n"
+    "LOCAL_ADMIN_PASSWORD=" + secrets.token_urlsafe(32) + "\n"
+).encode("utf-8")
+command = 'cmd.exe /d /s /c ""' + sys.executable + '" -c "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())" > "' + str(target) + '""'
+subprocess.run(command, input=data, check=True)
+expected = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+actual = subprocess.check_output(
+    ["git", "hash-object", "--no-filters", str(target)], text=True
+).strip()
+if actual != expected:
+    raise SystemExit("Raw file verification failed; stop before deployment.")
+print("Created and verified .local/logistics.env; passwords were not printed.")
+'@ | python -
+```
+
 ## First initialization
 
 The ignored `.local/logistics.env` contains generated `LOCAL_DB_ROOT_PASSWORD` and `LOCAL_ADMIN_PASSWORD`. Login is `Administrator` with `LOCAL_ADMIN_PASSWORD`. Preserve these values for the life of the local volumes. Do not commit or share this file.
