@@ -34,3 +34,5 @@ html { color-scheme: light; }
 @media (min-width: 768px) { .qh-workspace .qh-sidebar { position: sticky; top: 0; height: 100dvh; } }
 @media (max-width: 767px) { .qh-sidebar .qh-brand { padding-top: 20px; } .qh-workspace .xp .ph h3 { font-size: 21px; } .qh-topbar { min-height: 60px; } }
 @media (prefers-reduced-motion: reduce) { .qh-workspace *, .qh-workspace *::before, .qh-workspace *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+.qh-workspace .crumb:not(:has(a, button)) { display: none; }
