@@ -7,7 +7,7 @@ const mainSource = readFileSync(new URL('../src/main.js', import.meta.url), 'utf
 
 test('local development traffic is normalized to the canonical Frappe site host', () => {
   assert.match(source, /window\.location\.hostname !== 'localhost'/);
-  assert.match(source, /CANONICAL_LOCAL_HOST = 'legacy\.example\.invalidhost'/);
+  assert.match(source, /CANONICAL_LOCAL_HOST = 'rayher\.localhost'/);
   assert.match(mainSource, /enforceCanonicalLocalHost\(\)/);
 });
 

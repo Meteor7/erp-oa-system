@@ -79,7 +79,7 @@ test("department panel shows grouped nonempty departments with counts and click 
 
 test("employee form limits department ids to the selected company and keeps the current one", () => {
   assert.match(source, /const formDepartmentOptions\s*=\s*computed/);
-  assert.match(source, /tests\-x\.example\.invalidpany===form\.company/);
+  assert.match(source, /x\.company===form\.company/);
   assert.match(source, /clearDepartmentIfOutsideCompany/);
   assert.match(source, /@change="clearDepartmentIfOutsideCompany"/);
 });
