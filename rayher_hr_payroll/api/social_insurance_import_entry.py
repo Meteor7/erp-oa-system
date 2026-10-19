@@ -20,7 +20,7 @@ from rayher_hr_payroll.social_insurance_import import (
 )
 
 ROLES = ("System Manager", "HR User", "HR Manager")
-SUPPORTED_COMPANIES = {"Rayher": "示例总部", "示例研发中心": "示例研发中心"}
+SUPPORTED_COMPANIES = {"QIHENG Demo": "示例总部", "示例研发中心": "示例研发中心"}
 EXCEL_FIELDS = (
     "contribution_base", "employee_pension", "company_pension",
     "employee_medical", "company_medical", "company_maternity",

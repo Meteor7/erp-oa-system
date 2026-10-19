@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate every approved Rayher business login to `@staff.example.invalid`, preserve all account and approval relationships, and enforce/display employee monthly workday and hour limits from the ERP holiday calendar.
+**Goal:** Migrate every approved QIHENG Demo business login to `@staff.example.invalid`, preserve all account and approval relationships, and enforce/display employee monthly workday and hour limits from the ERP holiday calendar.
 
 **Architecture:** Add an idempotent account-domain maintenance module that preflights User rename collisions and repairs OA JSON/text references after Frappe renames. Add a focused working-calendar module that resolves employee/company Holiday Lists with a weekday fallback, then make the monthly timesheet API and Vue page consume the same limit. Deploy only reviewed commits, run a live backup and dry run before mutation, and regenerate credential workbooks after login verification.
 

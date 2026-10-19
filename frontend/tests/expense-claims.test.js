@@ -136,7 +136,7 @@ test("draft payloads only send what the server accepts for that kind", () => {
 
 test("the cashier has to classify every line", () => {
   assert.deepEqual(accountBlockers([{ expense_account_level_1: "管理费用", expense_account_level_2: "办公费" }]), []);
-  assert.deepEqual(accountBlockers([{ expense_account_level_1: "管理费用", expense_account_level_2: "" }]), ["出纳需要为每行明细选择科目（有二级科目的要选到二级）"]);
+  assert.deepEqual(accountBlockers([{ expense_account_level_1: "管理费用", expense_account_level_2: "" }]), ["演示员工110需要为每行明细选择科目（有二级科目的要选到二级）"]);
   // 没有二级科目的一级科目（如办公费）只填一级即可，和服务端 normalize_account_pair 一致
   const tree = [{ level_1: "差旅费", level_2: ["飞机票"] }, { level_1: "办公费", level_2: [] }];
   assert.deepEqual(accountBlockers([{ expense_account_level_1: "办公费", expense_account_level_2: "" }], tree), []);
@@ -212,7 +212,7 @@ test("design helpers: status pills, progress steps, quota bar, masked accounts",
   assert.equal(displayStatus({ workflow_status: "待办理", business_status: "待付款" }), "待付款");
   assert.equal(displayStatus({ workflow_status: "已付款", business_status: "待核验" }), "待核验");
   const chips = stepChips({ workflow_status: "待审批", current_step_index: 2, steps: [
-    { step_index: 1, label: "出纳审核", status: "已通过" },
+    { step_index: 1, label: "演示员工110审核", status: "已通过" },
     { step_index: 2, label: "直属主管：演示员工155", status: "待审批" },
     { step_index: 3, label: "财务主管", status: "待流转" },
   ] });
@@ -341,7 +341,7 @@ test("claim pages: home, list, detail and a separate new page share one address 
   const timeline = stepTimeline({ workflow_status: "待审批", current_step_index: 2, steps: [
     { step_index: 1, label: "直属主管", status: "已通过", acted_on: "2026-09-26 15:40:00", mode: "approve" },
     { step_index: 2, label: "财务主管", status: "待审批" },
-    { step_index: 3, label: "出纳付款", status: "待审批", mode: "handle" },
+    { step_index: 3, label: "演示员工110付款", status: "待审批", mode: "handle" },
   ] });
   assert.deepEqual(timeline.map((item) => item.state), ["done", "now", "todo"]);
   assert.equal(timeline[0].sub, "已同意 · 2026-09-26 15:40");

@@ -24,7 +24,7 @@
 ## File Structure
 
 - `services/invoice_ocr/invoice_ocr/`: 已验证 POC 提炼出的 OCR 核心与 HTTP 服务，不含 Frappe 业务规则。
-- `services/invoice_ocr/tests/`: OCR 解析、文件安全、HTTP 合同和样本指标测试。
+- `services/invoice_ocr/tests/`: OCR 解析、文件安全、HTTP 演示员工116和样本指标测试。
 - `rayher_hr_payroll/invoice_ocr/`: Frappe 领域规则、权限、sidecar 客户端、服务和后台任务。
 - `rayher_hr_payroll/api/invoice_entry.py`: 批次、确认、关联、重试和预览 API。
 - `rayher_hr_payroll/rayher_hr_payroll/doctype/oa_invoice_*`: 批次、记录和查看日志 DocType。
@@ -122,7 +122,7 @@ git commit -m "feat: productionize invoice OCR core"
 - Consumes: Task 1 `recognize_document`。
 - Produces: `GET /health -> {status, engine}`；`POST /v1/recognize` multipart `file`, `record_id` -> `RecognitionResult` JSON。
 
-- [ ] **Step 1: 写失败 HTTP 合同测试**
+- [ ] **Step 1: 写失败 HTTP 演示员工116测试**
 
 ```python
 def test_recognize_endpoint_returns_seven_fields(client, override_engine, invoice_png):
@@ -147,7 +147,7 @@ Expected: FAIL，模块 `invoice_ocr.api` 不存在。
 
 ```python
 MAX_BYTES = 10 * 1024 * 1024
-app = FastAPI(title="Rayher Invoice OCR", docs_url=None, redoc_url=None)
+app = FastAPI(title="QIHENG Demo Invoice OCR", docs_url=None, redoc_url=None)
 
 @lru_cache(maxsize=1)
 def get_engine() -> OCREngine:

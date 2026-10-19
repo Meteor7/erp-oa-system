@@ -170,9 +170,9 @@
     {
       "fieldname": "status",
       "fieldtype": "Select",
-      "options": "正常\n已取消",
+      "options": "演示员工152\n已取消",
       "label": "记录状态",
-      "default": "正常",
+      "default": "演示员工152",
       "read_only": 1,
       "in_list_view": 1
     },

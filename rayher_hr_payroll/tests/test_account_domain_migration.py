@@ -40,7 +40,7 @@ def test_build_domain_mappings_targets_only_approved_legacy_domains(migration_mo
 
 def test_build_domain_mappings_normalizes_case_and_deduplicates(migration_module):
     rows = migration_module.build_domain_mappings(
-        ["history.29d3deeea7@legacy.example.invalid", "person067@legacy.example.invalid"]
+        ["YELIWEI@QIHENG Demo.LOCAL", "person067@legacy.example.invalid"]
     )
 
     assert rows == [

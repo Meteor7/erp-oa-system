@@ -78,7 +78,7 @@ test("the dormitory board is the first dormitory page and links to the other two
   for (const page of [board, master, monthly]) assert.match(page, /<AccommodationTabs \/>/);
   // 房间管理：room= 由 parseRoomsLocation 读（view=edit&room=…，旧的 ?room=… 也打开编辑页）
   assert.match(master, /parseRoomsLocation\(route\.query\)/);
-  // 租约到期清单 / 已离职仍占房、月份：都从地址读（bindRouteFilters），看板链接和数据看板链接共用
+  // 租约到期清单 / 已演示员工166仍占房、月份：都从地址读（bindRouteFilters），看板链接和数据看板链接共用
   assert.match(master, /queryText\(query, 'lease'\) === 'expiring'/);
   assert.match(monthly, /periodRouteSpec\(\)/);
   assert.match(monthly, /route\.query\.room/);

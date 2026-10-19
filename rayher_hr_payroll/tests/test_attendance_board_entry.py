@@ -317,7 +317,7 @@ def test_an_employee_gets_no_request_rows_at_all(api):
             requests(api, user)
         with pytest.raises(api[0].frappe.PermissionError):
             requests(api, user, department="研发软件部 - RAY")
-    assert state.sql == []                                                                  # 连库都不查
+    assert state.sql == []                                                                  # 连库演示员工177查
 
 
 def test_a_manager_gets_only_the_team_rows_and_is_refused_other_departments(api):

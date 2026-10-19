@@ -12,18 +12,18 @@ const deptMeta = [
   { department_name: "销售部 - RAY", group_name: "运营" },
 ];
 const rows = [
-  // 研发一部：试用期 5 天后到期，本月入职，全时研发
-  { name: "E1", employee_name: "演示员工129", company: "Rayher", department: "研发一部 - RAY", status: "Active", date_of_joining: "2026-10-02", probation_end_date: "2026-10-14", rd_personnel_type: "全时研发", archive_status: "待完善" },
+  // 研发一部：演示员工173期 5 天后到期，本月入职，全时研发
+  { name: "E1", employee_name: "演示员工129", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2026-10-02", probation_end_date: "2026-10-14", rd_personnel_type: "全时研发", archive_status: "待完善" },
   // 研发一部：研发类型没设（缺口），档案待确认
-  { name: "E2", employee_name: "演示员工146", company: "Rayher", department: "研发一部 - RAY", status: "Active", date_of_joining: "2025-01-01", rd_personnel_type: "", archive_status: "待确认" },
-  // 销售部：合同 30 天后到期
-  { name: "E3", employee_name: "演示员工157", company: "Rayher", department: "销售部 - RAY", status: "Active", date_of_joining: "2024-05-01", first_contract_end_date: "2026-11-08", rd_personnel_type: "非研发", archive_status: "已归档" },
-  // 研发一部：已离职（离职日早于今天），不该出现在到期提醒里
-  { name: "E4", employee_name: "演示员工175", company: "Rayher", department: "研发一部 - RAY", status: "Active", date_of_joining: "2023-01-01", relieving_date: "2026-09-01", probation_end_date: "2026-10-12", rd_personnel_type: "全时研发", archive_status: "已归档" },
+  { name: "E2", employee_name: "演示员工146", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2025-01-01", rd_personnel_type: "", archive_status: "待确认" },
+  // 销售部：演示员工116 30 天后到期
+  { name: "E3", employee_name: "演示员工157", company: "QIHENG Demo", department: "销售部 - RAY", status: "Active", date_of_joining: "2024-05-01", first_contract_end_date: "2026-11-08", rd_personnel_type: "非研发", archive_status: "已归档" },
+  // 研发一部：已演示员工166（演示员工166日早于今天），不该出现在到期提醒里
+  { name: "E4", employee_name: "演示员工175", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2023-01-01", relieving_date: "2026-09-01", probation_end_date: "2026-10-12", rd_personnel_type: "全时研发", archive_status: "已归档" },
   // 部门不在分组表里：算「其他」
-  { name: "E5", employee_name: "演示员工179", company: "Rayher", department: "后勤部 - RAY", status: "Active", date_of_joining: "2022-01-01", rd_personnel_type: "非研发", archive_status: "已归档" },
+  { name: "E5", employee_name: "演示员工179", company: "QIHENG Demo", department: "后勤部 - RAY", status: "Active", date_of_joining: "2022-01-01", rd_personnel_type: "非研发", archive_status: "已归档" },
   // 没有部门
-  { name: "E6", employee_name: "演示员工124", company: "Rayher", department: "", status: "Active", date_of_joining: "2022-02-01", rd_personnel_type: "", archive_status: "待完善" },
+  { name: "E6", employee_name: "演示员工124", company: "QIHENG Demo", department: "", status: "Active", date_of_joining: "2022-02-01", rd_personnel_type: "", archive_status: "待完善" },
 ];
 const items = decorateEmployees(rows, { today: TODAY, groupOf: departmentGroupMap(deptMeta) });
 const names = (list) => list.map((item) => item.row.employee_name);
@@ -65,7 +65,7 @@ test("address -> state -> address is stable", () => {
 test("reminder=expiring is the 60-day probation / contract reminder, not 'has any reminder'", () => {
   const expiring = filterByUrlExtras(items, { reminder: "expiring" }, TODAY);
   assert.deepEqual(names(expiring), ["演示员工129", "演示员工157"]);
-  // 与指标卡「60 天内合同或试用期到期」同口径：在职、probation 或 contract 提醒
+  // 与指标卡「60 天内演示员工116或演示员工173期到期」同口径：在职、probation 或 contract 提醒
   assert.equal(kpiCounts(items, TODAY).expiring, expiring.length);
   // 「只看有提醒」（alertOnly）更宽：缺资料、研发类型缺口也算
   const alerting = filterEmployees(items, { alertOnly: true });

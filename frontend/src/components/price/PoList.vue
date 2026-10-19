@@ -1,5 +1,5 @@
 <script setup>
-// PO 列表：按合同办理 / 执行 / 关闭筛选，点一行进入 PO 与合同详情。
+// PO 列表：按演示员工116办理 / 执行 / 关闭筛选，点一行进入 PO 与演示员工116详情。
 import { computed, ref } from 'vue';
 import { PO_FILTERS, amountText, filterPos, pillClass, poHeaderDiffers, poLineTotal, poNextStep, poSources, poTone, splitList } from '../../lib/priceView.js';
 

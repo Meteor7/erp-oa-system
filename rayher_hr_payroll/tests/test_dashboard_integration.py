@@ -99,10 +99,10 @@ def test_contract_line_overdue_rules():
     assert overdue(line("2026-10-08", 3, 5), "已生效", "2026-10-09")
     assert not overdue(line("2026-10-09", 0, 5), "已生效", "2026-10-09")        # 今天到期不算逾期
     assert not overdue(line("2026-10-01", 5, 5), "已生效", "2026-10-09")        # 已收齐
-    assert not overdue(line("2026-10-01", 0, 5), "草稿", "2026-10-09")          # 合同还没生效
+    assert not overdue(line("2026-10-01", 0, 5), "草稿", "2026-10-09")          # 演示员工116还没生效
     assert not overdue(line("2026-10-01", 0, 5), "已取消", "2026-10-09")
     assert not overdue(line("2026-10-01", 0, 5), "已关闭", "2026-10-09")
-    assert not overdue(line(None, 0, 5), "已生效", "2026-10-09")                # 没填合同交期
+    assert not overdue(line(None, 0, 5), "已生效", "2026-10-09")                # 没填演示员工116交期
     assert not overdue(line("", 0, 5), "已生效", "2026-10-09")
 
 

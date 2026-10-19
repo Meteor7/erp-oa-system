@@ -62,7 +62,7 @@ SERVER_OWNED_FIELDS = {
     "followup_status",
     "travel_days",
     "invoice_difference_note",
-    # 修复（2026-09-24，审查 R3-52 / #52）：付款计划、PO 来源、价格和合同字段只能由服务端流程写入，
+    # 修复（2026-09-24，审查 R3-52 / #52）：付款计划、PO 来源、价格和演示员工116字段只能由服务端流程写入，
     # 原来可以通过 /api/resource 直接改。
     "payment_plan",
     "source_payment_plan_row",

@@ -11,7 +11,7 @@ const NOW = Date.parse("2026-10-09T10:00:00");
 const row = (overrides = {}) => ({
   name: "OA-1", request_type: "购买申请", subject: "测试工装", employee_name: "演示员工117", department: "研发软件部",
   workflow_status: "待审批", current_step_label: "直属部门主管：演示员工132", amount: 1720, current_step_index: 1,
-  steps: [{ label: "直属部门主管：演示员工132", status: "待审批", step_index: 1 }, { label: "副总经理：演示员工21", status: "待流转", step_index: 2 }],
+  steps: [{ label: "直属部门主管：演示员工132", status: "待审批", step_index: 1 }, { label: "演示员工113经理：演示员工21", status: "待流转", step_index: 2 }],
   creation: "2026-10-07 09:00:00", modified: "2026-10-07 10:00:00", ...overrides,
 });
 

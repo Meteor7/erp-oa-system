@@ -4,7 +4,7 @@
 Stock/Manufacturing 等),与本系统(HR/OA 审批 + 研发成本)无关; 且不同角色需要看到的工作区不同。
 
 ## 1. 现状
-- 自定义工作区已按角色绑定(roles): 
+- 自定义工作区已按角色绑定(roles):
   - 员工工作台: [Employee]
   - 审批中心: [Department Manager, Accounts User, System Manager, Leave Approver, Expense Approver]
   - 研发成本: [System Manager, Accounts User, Projects Manager] (module=Rayher HR Payroll)
@@ -21,7 +21,7 @@ Stock/Manufacturing 等),与本系统(HR/OA 审批 + 研发成本)无关; 且不
 | 总控 Serena (SysMgr+HRMgr+AcctUser) | 审批中心, 研发成本, HR, Payroll, Accounting, Projects, Users, Home, ERPNext Settings | 商贸/制造/集成类 |
 
 ## 3. 三层机制
-### (A) 全局隐藏 - 所有角色都不需要 (is_hidden=1)
+### (A) 全局隐藏 - 所有角色演示员工177需要 (is_hidden=1)
 Buying, Selling, Stock, Assets, Manufacturing, Quality, Support, Website, CRM,
 Integrations, ERPNext Integrations, Welcome Workspace, Build。
 理由: 本部署不做商贸/制造/CRM; 这些对任何角色都是噪音。

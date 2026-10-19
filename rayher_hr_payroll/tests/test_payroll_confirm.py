@@ -1,4 +1,4 @@
-"""确认本月工资（决定 2026-10-13）：草稿核对完一次确认、确认后锁定；要改先撤回确认；总经理、副总经理只读。"""
+"""确认本月工资（决定 2026-10-13）：草稿核对完一次确认、确认后锁定；要改先撤回确认；总经理、演示员工113经理只读。"""
 import importlib
 import json
 import sys
@@ -202,11 +202,11 @@ def test_general_and_vice_manager_can_read_payroll_but_not_change_it(monkeypatch
 def test_a_new_draft_is_numbered_after_its_employee(monkeypatch):
     """新草稿的编号带员工号（Sal Slip/HR-EMP-1/…），不是 Sal Slip/None/…。"""
     module, frappe, _ = _load(monkeypatch)
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "演示员工128"})
     monkeypatch.setattr(module, "_inputs", lambda: FakeInputs())
     monkeypatch.setattr(module, "_accommodation", lambda *args: 0)
     monkeypatch.setattr(module, "_slip", lambda *args: None)
-    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - Rayher"})
+    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - QIHENG Demo"})
 
     class NewSlip:
         default_series = "Sal Slip/None/.#####"

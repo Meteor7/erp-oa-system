@@ -37,14 +37,14 @@ def adapt_common(name, source):
      s=s.replace("PMC_APPROVER_USER.lower()", 'position_user("pmc")').replace("PROCUREMENT_MANAGER_USER.lower()", 'position_user("procurement_manager")')
      for token,expr in {"PMC_USERS":'position_users("pmc")',"PURCHASE_USERS":'position_users("procurement_manager")',"PRODUCTION_RECEIPT_USERS":'position_users("production_asset_owner")',"CHAIN_USERS":'position_users("pmc", "procurement_manager", "vice_manager")'}.items():
       s=re.sub(r"\b"+token+r"\b",expr,s)
-     s=s.replace("演示员工37","副总经理").replace("生产主管演示员工241","生产主管")
+     s=s.replace("演示员工37","演示员工113经理").replace("生产主管演示员工241","生产主管")
     elif name.endswith("api/material_progress.py"):
      s=s.replace("from rayher_hr_payroll.identity_accounts import account_user","from rayher_hr_payroll.position_access import position_user, position_users")
      s=s.replace("from rayher_hr_payroll.oa_approval import PMC_APPROVER_USER, REQUEST_PROCUREMENT, PROCUREMENT_MANAGER_USER","from rayher_hr_payroll.oa_approval import REQUEST_PROCUREMENT")
      s=re.sub(r"^BOARD_USERS = .*\n","",s,flags=re.M)
      s=s.replace("user in BOARD_USERS",'user in position_users("pmc", "procurement_manager", "vice_manager")')
      s=s.replace('PMC_APPROVER_USER, PROCUREMENT_MANAGER_USER, account_user("person046@staff.example.invalid")','position_user("pmc"), position_user("procurement_manager"), position_user("vice_manager")')
-     s=s.replace("演示员工37","副总经理")
+     s=s.replace("演示员工37","演示员工113经理")
     elif name.endswith("api/oa_entry.py"):
      add_import("from rayher_hr_payroll.position_access import position_users, current_supervisors, executive_names")
      s=re.sub(r"PROCUREMENT_PRICE_USERS = \{.*?\}\n","",s,flags=re.S,count=1)
@@ -63,7 +63,7 @@ def adapt_common(name, source):
      add_import("from rayher_hr_payroll.position_access import current_supervisors, executive_names")
      s=s.replace("supervisors = mapping or DIRECT_SUPERVISOR_BY_EMPLOYEE","supervisors = current_supervisors() if mapping is None else mapping")
      s=s.replace("in TOP_EXECUTIVES","in executive_names()")
-     s=s.replace("演示员工37或演示员工28","副总经理或总经理")
+     s=s.replace("演示员工37或演示员工28","演示员工113经理或总经理")
     elif name.endswith("frontend/src/lib/access.js"):
      s=re.sub(r"const PROCUREMENT_PRICE_USERS = new Set\(\[.*?\]\);\n","",s,flags=re.S,count=1)
      s=re.sub(r"const PRODUCTION_RECEIPT_USERS = .*;\n","",s,count=1)

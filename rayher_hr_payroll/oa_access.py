@@ -37,13 +37,13 @@ PRIVILEGED_READ_ROLES = {
     "HR Manager",
     "HR User",
     "Accounts User",
-    "Rayher Business Executive",
+    "QIHENG Demo Business Executive",
 }
 HR_SCOPED_ROLES = {"HR Manager", "HR User"}
 PROCUREMENT_REQUEST_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE, REQUEST_PROCUREMENT_PAYMENT}
 PROCUREMENT_APPLICATION_TYPES = {REQUEST_PROCUREMENT, REQUEST_DIRECT_PURCHASE}
-PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "Rayher Business Executive"}
-GLOBAL_READ_ROLES = {"System Manager", "Rayher Business Executive"}
+PROCUREMENT_GLOBAL_ROLES = {"System Manager", "Purchase User", "Purchase Manager", "QIHENG Demo Business Executive"}
+GLOBAL_READ_ROLES = {"System Manager", "QIHENG Demo Business Executive"}
 PAYMENT_REQUEST_TYPES = {REQUEST_EXPENSE_PAYMENT, REQUEST_PROCUREMENT_PAYMENT}
 # 报销单、付款单：财务只看提交后的单据，草稿只有申请人自己能看。
 CLAIM_REQUEST_TYPES = {REQUEST_REIMBURSEMENT, REQUEST_PAYMENT}

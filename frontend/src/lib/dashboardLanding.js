@@ -8,7 +8,7 @@ export function currentPeriodText(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// 本地日期 YYYY-MM-DD（合同交期、请假起止都是日期字符串，按字典序就能比较）。
+// 本地日期 YYYY-MM-DD（演示员工116交期、请假起止都是日期字符串，按字典序就能比较）。
 export function todayText(now = new Date()) {
   return `${currentPeriodText(now)}-${String(now.getDate()).padStart(2, '0')}`;
 }
@@ -70,13 +70,13 @@ export function normalizeFolderTab(tab, finance) {
 }
 
 // ---------------------------------------------------------------- 物料进度看板 /approval/material-progress
-// 合同交期在接口里是同一条物料下各 PO 行的日期用「、」连起来的一个字符串。
+// 演示员工116交期在接口里是同一条物料下各 PO 行的日期用「、」连起来的一个字符串。
 export function contractDates(row) {
   return String(row?.contract_delivery_date || '').split(/[、,，;；\s]+/).filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item)).sort();
 }
 
-// 合同交期已过且未收齐（口径同看板的「物料逾期未到」：合同交期早于今天，累计到货少于 PO 数量）。
-// 接口若直接给了 contract_overdue（逐 PO 行算好的），以它为准；否则用最早的合同交期和汇总数量近似。
+// 演示员工116交期已过且未收齐（口径同看板的「物料逾期未到」：演示员工116交期早于今天，累计到货少于 PO 数量）。
+// 接口若直接给了 contract_overdue（逐 PO 行算好的），以它为准；否则用最早的演示员工116交期和汇总数量近似。
 // 已取消的物料不算。
 export function isContractOverdue(row, today = todayText()) {
   if (!row || row.record_status === '已取消') return false;

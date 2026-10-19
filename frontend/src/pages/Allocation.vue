@@ -63,7 +63,7 @@ const TEXT = {
   cancelReasonHint: "例如：发现 6 月有一笔费用录错了项目，改完后重新定版",
   yearHint: "年度汇总各月已定版的分摊，只读",
   previewNote: "这是按当前费用和工时算出的预览，还没有定版。财务主管点「定版本月分摊」后，本月的工时和费用都会锁定。",
-  finalizeLock: "定版后本月工时和费用都不能再改，要改需先撤销定版。",
+  finalizeLock: "定版后本月工时和费用演示员工177能再改，要改需先撤销定版。",
   confirmFinalize: "确认定版",
   confirmFinalizeNo: "取消",
   matrixTitle: "分摊明细矩阵",

@@ -28,7 +28,7 @@ const exchanging = (over = {}) => line({ received_quantity: 10, inspection_statu
 const returning = (over = {}) => line({ received_quantity: 10, inspection_status: '退货中', ...over });
 const item = (lines, over = {}) => ({
   key: 'PO1:R1', po: 'PO1', payment_plan_row: 'R1', installment_no: 1, installment_name: '第1期', payment_stage: '预付款',
-  trigger_condition: '合同生效', invoice_requirement: '付款后提供', percentage: 30, amount: 600, paid_amount: 0, currency: 'CNY',
+  trigger_condition: '演示员工116生效', invoice_requirement: '付款后提供', percentage: 30, amount: 600, paid_amount: 0, currency: 'CNY',
   supplier: '供应商甲', po_status: '供应商制作中', contract_status: '已生效', source_price_approvals: 'PA-1',
   payment_request: '', lines, fulfillment_records: [], ...over,
 });
@@ -36,7 +36,7 @@ const item = (lines, over = {}) => ({
 // ------------------------------------------------------------------ 触发条件
 test('trigger text decides whether receipt and inspection are required', () => {
   const rows = [
-    ['合同生效', false, false], ['', false, false], ['到货', true, false], ['全部到货', true, false],
+    ['演示员工116生效', false, false], ['', false, false], ['到货', true, false], ['全部到货', true, false],
     ['验收通过', false, true], ['全部到货并验收通过', true, true], ['到货后验收', true, true],
   ];
   for (const [trigger, receipt, inspection] of rows) {
@@ -48,7 +48,7 @@ test('trigger text decides whether receipt and inspection are required', () => {
 });
 
 test('server requires_* flags win over the text when present', () => {
-  const flags = triggerFlags({ trigger_condition: '合同生效', requires_receipt: 1, requires_inspection: 0 });
+  const flags = triggerFlags({ trigger_condition: '演示员工116生效', requires_receipt: 1, requires_inspection: 0 });
   assert.equal(flags.receipt, true);
   assert.equal(flags.inspection, false);
   assert.equal(triggerFlags({ trigger_condition: '验收通过', requires_inspection: 0 }).inspection, false);
@@ -101,9 +101,9 @@ test('summarizeLines counts received / passed / exchange / return lines', () => 
 
 // ------------------------------------------------------------------ 付款条件 / 工作状态（表驱动）
 const GATE_CASES = [
-  { name: '合同生效 + 什么都没到 -> 可提交', trigger: '合同生效', lines: () => [line(), line()], status: '可提交付款审批', blockers: [] },
-  { name: '合同未生效 -> 待合同生效', trigger: '合同生效', contract: '待电子用印', lines: () => [line()], status: '待合同生效', blockers: ['PO 合同尚未生效'] },
-  { name: 'PO 状态是待合同复核 -> 合同未就绪', trigger: '合同生效', po_status: '待合同复核', lines: () => [line()], status: '待合同生效', blockers: ['PO 合同尚未生效'] },
+  { name: '演示员工116生效 + 什么都没到 -> 可提交', trigger: '演示员工116生效', lines: () => [line(), line()], status: '可提交付款审批', blockers: [] },
+  { name: '演示员工116未生效 -> 待演示员工116生效', trigger: '演示员工116生效', contract: '待电子用印', lines: () => [line()], status: '待演示员工116生效', blockers: ['PO 演示员工116尚未生效'] },
+  { name: 'PO 状态是待演示员工116复核 -> 演示员工116未就绪', trigger: '演示员工116生效', po_status: '待演示员工116复核', lines: () => [line()], status: '待演示员工116生效', blockers: ['PO 演示员工116尚未生效'] },
   { name: '全部到货 + 没到 -> 待到货资料', trigger: '全部到货', lines: () => [line(), line()], status: '待到货资料', blockers: ['本期要求全部到货'] },
   { name: '全部到货 + 到了一半 -> 待到货资料', trigger: '全部到货', lines: () => [received(), line()], status: '待到货资料', blockers: ['本期要求全部到货'] },
   { name: '全部到货 + 部分到货的行 -> 待到货资料', trigger: '全部到货', lines: () => [received(), line({ received_quantity: 4, inspection_status: '待验收' })], status: '待到货资料', blockers: ['本期要求全部到货'] },
@@ -154,11 +154,11 @@ test('work status: paid, in flight (step label decides), blockers, ready', () =>
   const rows = [
     [{ paid: true, paymentRequest: 'OA1' }, '已付款'],
     [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '财务主管：张' } }, '付款审批中'],
-    [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '副总经理：李' } }, '付款审批中'],
+    [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '演示员工113经理：李' } }, '付款审批中'],
     [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '总经理付款：王' } }, '待实际付款'],
     [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '', workflow_status: '已通过' } }, '待实际付款'],
-    [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '出纳', workflow_status: '待审批' } }, '付款审批中'],
-    [{ blockers: ['PO 合同尚未生效'], contractOk: false }, '待合同生效'],
+    [{ paymentRequest: 'OA1', requestSummary: { current_step_label: '演示员工110', workflow_status: '待审批' } }, '付款审批中'],
+    [{ blockers: ['PO 演示员工116尚未生效'], contractOk: false }, '待演示员工116生效'],
     [{ blockers: ['本期要求全部到货'] }, '待到货资料'],
     [{ blockers: ['验收前需全部到货', '本期要求验收通过'] }, '待到货资料'],
     [{ blockers: ['本期要求验收通过'] }, '待验收'],
@@ -205,7 +205,7 @@ test('in-flight regression: only when an OA exists and blockers reappear', () =>
 
 test('installmentView surfaces the regression warning, draft link and push gating', () => {
   const inflightRow = item([passed(), exchanging()], {
-    trigger_condition: '验收通过', payment_request: 'OA9', payment_request_summary: { current_step_label: '出纳：x' }, can_push_payment: 0,
+    trigger_condition: '验收通过', payment_request: 'OA9', payment_request_summary: { current_step_label: '演示员工110：x' }, can_push_payment: 0,
   });
   const view = installmentView(inflightRow, null, { canPurchase: true });
   assert.equal(view.status, '付款审批中');
@@ -214,7 +214,7 @@ test('installmentView surfaces the regression warning, draft link and push gatin
   assert.match(view.regressionText, /本期要求验收通过/);
   assert.equal(view.canPush, false);
   assert.equal(view.paymentRequest, 'OA9');
-  assert.equal(view.waitFor, '审批中：出纳：x');
+  assert.equal(view.waitFor, '审批中：演示员工110：x');
 
   // 被退回的草稿：照常可以提交（沿用这张单据），同时给草稿链接
   const draftRow = item([received()], { trigger_condition: '到货', draft_request: 'OA-DRAFT', can_push_payment: 1 });
@@ -241,7 +241,7 @@ test('installmentView surfaces the regression warning, draft link and push gatin
 test('waiting-for text follows who has to act next', () => {
   const sum = (lines) => summarizeLines(lines);
   const rows = [
-    [{ status: '待合同生效', summary: sum([line()]) }, '等 PO 合同电子用印生效'],
+    [{ status: '待演示员工116生效', summary: sum([line()]) }, '等 PO 演示员工116电子用印生效'],
     [{ status: '待到货资料', summary: sum([line()]) }, '等生产主管登记到货'],
     [{ status: '待到货资料', summary: sum([line(), exchanging()]) }, '等供应商换货到货'],
     [{ status: '待到货资料', summary: sum([line(), returning()]) }, '等退货发出 / 供应商补发'],
@@ -252,7 +252,7 @@ test('waiting-for text follows who has to act next', () => {
     [{ status: '可提交付款审批', summary: sum([passed()]), canPush: false }, '等采购提交付款审批'],
     [{ status: '可提交付款审批', summary: sum([passed()]), canPush: true }, ''],
     [{ status: '可提交付款审批', summary: sum([passed()]), canPush: true, draft: 'OA1' }, ''],
-    [{ status: '付款审批中', summary: sum([passed()]), requestSummary: { current_step_label: '总账会计：x' } }, '审批中：总账会计：x'],
+    [{ status: '付款审批中', summary: sum([passed()]), requestSummary: { current_step_label: '演示员工135：x' } }, '审批中：演示员工135：x'],
     [{ status: '待实际付款', summary: sum([passed()]), requestSummary: { current_step_label: '总经理付款：x' } }, '等 总经理付款：x'],
     [{ status: '已付款', summary: sum([passed()]) }, ''],
   ];
@@ -273,7 +273,7 @@ test('gate tiles: contract, receipt, inspection and invoice with their states', 
   assert.equal(done[1].v, '已满足（2/2 项）');
   assert.equal(done[3].v, '已上传 2 份');
 
-  const notRequired = gateTiles({ contractOk: true, trigger: '合同生效', summary: summarizeLines([passed(), received()]), invoiceRequirement: '付款后提供', invoiceDocs: 0 });
+  const notRequired = gateTiles({ contractOk: true, trigger: '演示员工116生效', summary: summarizeLines([passed(), received()]), invoiceRequirement: '付款后提供', invoiceDocs: 0 });
   assert.deepEqual(notRequired.map((t) => t.state), [1, -1, -1, -1]);
   assert.equal(notRequired[1].v, '本期不要求');
   assert.equal(notRequired[2].v, '本期不要求（已通过 1/2）');
@@ -292,9 +292,9 @@ const worldItems = () => {
   const b = [line(), line()];
   const c = [passed()];
   return [
-    item(a, { po: 'PO-A', key: 'PO-A:R1', payment_plan_row: 'R1', installment_no: 1, installment_name: '第1期', trigger_condition: '合同生效', can_record_inspection: 1, can_record_receipt: 0, can_record_exchange: 1, can_record_return: 0 }),
+    item(a, { po: 'PO-A', key: 'PO-A:R1', payment_plan_row: 'R1', installment_no: 1, installment_name: '第1期', trigger_condition: '演示员工116生效', can_record_inspection: 1, can_record_receipt: 0, can_record_exchange: 1, can_record_return: 0 }),
     item(a, { po: 'PO-A', key: 'PO-A:R2', payment_plan_row: 'R2', installment_no: 2, installment_name: '第2期', payment_stage: '尾款', trigger_condition: '全部到货并验收通过' }),
-    item(b, { po: 'PO-B', key: 'PO-B:R1', payment_plan_row: 'R1', supplier: '供应商乙', trigger_condition: '合同生效', can_push_payment: 1 }),
+    item(b, { po: 'PO-B', key: 'PO-B:R1', payment_plan_row: 'R1', supplier: '供应商乙', trigger_condition: '演示员工116生效', can_push_payment: 1 }),
     item(c, { po: 'PO-C', key: 'PO-C:R1', payment_plan_row: 'R1', supplier: '供应商丙', po_status: '已关闭', trigger_condition: '到货', status: '已付款', paid_amount: 600, amount: 600 }),
   ];
 };
@@ -364,7 +364,7 @@ test('registration modes depend on role, PO status, server flags and the lines',
   assert.deepEqual(modeKeys(groupOf([passed(), line({ inspection_status: '未验收' })])), ['arrive']);
   // 角色
   assert.deepEqual(modeKeys(groupOf([line()]), false), []);
-  // PO 状态：付款中也能登记验收 / 换货 / 退货；已关闭 / 待合同 不行
+  // PO 状态：付款中也能登记验收 / 换货 / 退货；已关闭 / 待演示员工116 不行
   assert.deepEqual(modeKeys(groupOf([received()], { po_status: '付款中' })), ['inspect']);
   assert.deepEqual(modeKeys(groupOf([line()], { po_status: '已关闭' })), []);
   assert.deepEqual(modeKeys(groupOf([line()], { po_status: '待电子用印' })), []);
@@ -521,8 +521,8 @@ test('the reason chip comes from the latest 验收 record of the line', () => {
 // ------------------------------------------------------------------ 审批单
 test('approve button: 审批通过 / 办理完成 / 确认付款 (总经理付款 handle step)', () => {
   const steps = [
-    { step_index: 1, label: '副总经理：甲', mode: 'approve', step_key: 'k1' },
-    { step_index: 4, label: '出纳：乙', mode: 'approve', step_key: 'k4' },
+    { step_index: 1, label: '演示员工113经理：甲', mode: 'approve', step_key: 'k1' },
+    { step_index: 4, label: '演示员工110：乙', mode: 'approve', step_key: 'k4' },
     { step_index: 5, label: '总经理付款：丙', mode: 'handle', step_key: 'k5' },
     { step_index: 6, label: '其他办理', mode: 'handle', step_key: 'k6' },
   ];
@@ -539,8 +539,8 @@ test('approve button: 审批通过 / 办理完成 / 确认付款 (总经理付�
 });
 
 test('directed reject: targets, default, and the required reason', () => {
-  const request = { rejection_targets: [{ target: 'applicant', label: '申请人' }, { target: 'step:1', label: '副总经理' }, { target: 'step:2' }] };
-  assert.deepEqual(rejectionTargets(request).map((t) => t.label), ['申请人', '副总经理', 'step:2']);
+  const request = { rejection_targets: [{ target: 'applicant', label: '申请人' }, { target: 'step:1', label: '演示员工113经理' }, { target: 'step:2' }] };
+  assert.deepEqual(rejectionTargets(request).map((t) => t.label), ['申请人', '演示员工113经理', 'step:2']);
   assert.equal(defaultRejectTarget(request), 'applicant');
   assert.equal(defaultRejectTarget({ rejection_targets: [{ target: 'step:3', label: 'x' }] }), 'step:3');
   assert.equal(defaultRejectTarget({}), 'applicant');
@@ -551,10 +551,10 @@ test('directed reject: targets, default, and the required reason', () => {
 
 test('the five steps render as done / now / todo, and a draft shows none as current', () => {
   const steps = [
-    { step_index: 1, label: '副总经理', status: '已通过', action_by: '甲', acted_on: '2026-09-30 09:40:00', mode: 'approve' },
-    { step_index: 2, label: '总账会计', status: '已审批', mode: 'approve' },
+    { step_index: 1, label: '演示员工113经理', status: '已通过', action_by: '甲', acted_on: '2026-09-30 09:40:00', mode: 'approve' },
+    { step_index: 2, label: '演示员工135', status: '已审批', mode: 'approve' },
     { step_index: 3, label: '财务主管', status: '待审批', mode: 'approve' },
-    { step_index: 4, label: '出纳', status: '', mode: 'approve' },
+    { step_index: 4, label: '演示员工110', status: '', mode: 'approve' },
     { step_index: 5, label: '总经理付款', status: '', mode: 'handle' },
   ];
   const rows = stepRows({ steps, current_step_index: 3, workflow_status: '待审批' });
@@ -582,7 +582,7 @@ test('document checklist for PO payments: only the invoice, only when it must co
   assert.equal(before[0].satisfied, false);
   assert.equal(before[0].state, '待补资料');
   assert.deepEqual(before[0].uploadTypes, ['发票']);
-  // 没有报价 / 合同 / 到货 / 验收 这些旧条目
+  // 没有报价 / 演示员工116 / 到货 / 验收 这些旧条目
   assert.ok(!before.some((c) => ['quote', 'contract', 'arrival', 'inspection'].includes(c.key)));
   const uploaded = poPaymentChecklist([{ name: 'D1', document_type: '发票', version_no: 1, status: '有效' }], '付款前提供');
   assert.equal(uploaded[0].satisfied, true);
@@ -692,7 +692,7 @@ test('legacy lifecycle actions exist only for payments without a source PO', () 
   assert.equal(out.arrival, true);
   assert.equal(out.followup, true);
   assert.equal(out.refund, false);
-  // 来源 PO 的付款：一个都不给（服务端会拒绝）
+  // 来源 PO 的付款：一个演示员工177给（服务端会拒绝）
   assert.deepEqual(legacyActions({ ...legacy, source_purchase_order: 'PO-A' }, docs, { canManageExpense: true }), { show: false });
   assert.equal(isPoSourced(legacy), false);
   assert.equal(isPoSourced({ source_purchase_order: 'PO-A' }), true);

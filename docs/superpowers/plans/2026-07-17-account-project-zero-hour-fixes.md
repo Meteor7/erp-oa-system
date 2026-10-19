@@ -273,7 +273,7 @@ For every planned row call frappe.rename_doc("User", old_user, new_user, force=T
 ### Task 6: Full Verification, Backup, Data Migration, And Workbook
 
 **Files:**
-- Regenerate: D:/rayher/交付文件/Rayher在职研发员工账号密码_2026-07-17.xlsx
+- Regenerate: D:/rayher/交付文件/QIHENG Demo在职研发员工账号密码_2026-07-17.xlsx
 - Build output: rayher_hr_payroll/public/frontend/**
 
 **Interfaces:**
@@ -323,7 +323,7 @@ Use the spreadsheet skill and @oai/artifact-tool to read the current workbook wi
 - [ ] **Step 7: Perform role-based runtime checks**
 
 Verify:
-- Rayher Admin downloads all available reports;
+- QIHENG Demo Staff 04 downloads all available reports;
 - a normal owner downloads an own-project report and receives denial for another project;
 - Zhang Jun lists all 19 projects, downloads reports, and opens /foreign-rd;
 - an Employee cannot access /projects or a report URL;

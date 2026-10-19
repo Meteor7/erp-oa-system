@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64 
 import json
+import secrets
 from datetime import date, timedelta
 
 import frappe
@@ -34,7 +35,7 @@ MATERIAL_CODES = (
     "1.ELC.1.1.99.001", "1.ELC.1.1.99.002",
 )
 SUPPLIERS = ("示例企业030有限公司", "示例企业031有限公司")
-TEST_PASSWORD = __import__("os").environ["DEMO_BOOTSTRAP_PASSWORD"]
+TEST_PASSWORD = secrets.token_urlsafe(24)
 PRICE_APPROVER_USER = "person046@staff.example.invalid"
 SEAL_USER = "person033@staff.example.invalid"
 
@@ -267,7 +268,7 @@ def _prepare_price(approval, seed_index, submit=False, plan_kind="full"):
                 {"installment_name": "第1期预付款", "payment_stage": "预付款", "percentage": 30,
                  "amount": round(supplier_total * 0.30, 2),
                  "planned_date": date.today().isoformat(),
-                 "trigger_condition": "合同生效后", "invoice_requirement": "付款前提供"},
+                 "trigger_condition": "演示员工116生效后", "invoice_requirement": "付款前提供"},
                 {"installment_name": "第2期尾款", "payment_stage": "尾款", "percentage": 70,
                  "amount": round(supplier_total - round(supplier_total * 0.30, 2), 2),
                  "planned_date": (date.today() + timedelta(days=45)).isoformat(),
@@ -324,17 +325,17 @@ def _save_contract(po_name):
         supplier_legal_name=po.supplier, credit_code="91440300TEST202609",
         supplier_address="示例市示例区演示路2号", contract_contact="验收联系人 0755-00000000",
         contract_bank_name="测试银行深圳分行", contract_bank_account="TEST202609070001",
-        contract_template="标准采购合同",
+        contract_template="标准采购演示员工116",
     )
 
 
 def _review_contract(po_name):
     frappe.set_user(resolve_role("procurement_manager")["user"])
-    return review_po_contract(po_name, "正式链路验收合同复核")
+    return review_po_contract(po_name, "正式链路验收演示员工116复核")
 
 
 def _seal_contract(po_name):
-    # 用印人由岗位决定（save_po_contract_information 写在 PO 上），按 PO 上记的人用印，账号改名、换人都不受影响。
+    # 用印人由岗位决定（save_po_contract_information 写在 PO 上），按 PO 上记的人用印，账号改名、换人演示员工177受影响。
     frappe.set_user(frappe.db.get_value("OA Purchase Order", po_name, "contract_seal_user") or SEAL_USER)
     return seal_po_contract(po_name, "正式链路验收电子用印")
 
@@ -630,7 +631,7 @@ def run_payment_condition_acceptance():
         record_po_inspection(
             rejected_po.name, json.dumps(rejected_inspections, ensure_ascii=False),
             inspection_date=date.today().isoformat(), file_ref=rejected_evidence.name,
-            note="首项物料尺寸不符合合同要求",
+            note="首项物料尺寸不符合演示员工116要求",
         )
         _blocked(results, "任一物料验收不合格时70%尾款不可提交",
                  lambda: push_po_payment_request(rejected_po.name, rejected_balance.name), "验收通过")
@@ -664,16 +665,16 @@ def seed(reset_passwords=True):
             ("06 价格审批草稿", "price_draft", None),
             ("07 价格审批待演示员工37审批", "price_pending", None),
             ("08 PO草稿待采购确认", "po_draft", None),
-            ("09 PO合同资料待补充", "contract_info", None),
-            ("10 PO合同草稿待复核", "contract_review", None),
+            ("09 PO演示员工116资料待补充", "contract_info", None),
+            ("10 PO演示员工116草稿待复核", "contract_review", None),
             ("11 PO待电子用印", "seal", None),
             ("12 供应商制作中", "production", None),
             ("13 到货待验收", "inspection", None),
             ("14 验收通过待下推付款", "payment_ready", None),
             ("15 采购付款-演示员工37审批", "payment", 0),
-            ("16 采购付款-总账会计审批", "payment", 1),
+            ("16 采购付款-演示员工135审批", "payment", 1),
             ("17 采购付款-财务主管审批", "payment", 2),
-            ("18 采购付款-出纳审批", "payment", 3),
+            ("18 采购付款-演示员工110审批", "payment", 3),
             ("19 采购付款-总经理确认", "payment", 4),
             ("20 全流程已关闭", "closed", None),
         )

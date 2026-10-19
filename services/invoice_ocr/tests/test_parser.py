@@ -506,7 +506,7 @@ def test_legitimate_repeated_project_rows_are_preserved():
 def test_invoice_title_ignores_business_labels_before_literal_title():
     outcome = parse_invoice(lines(
         "发票抬头：示例企业025有限公司",
-        "发票状态：正常",
+        "发票状态：演示员工152",
         "发票备注：测试",
         "财政电子票据",
     ))
@@ -577,7 +577,7 @@ def test_large_scale_near_duplicate_project_boxes_are_deduplicated():
 
 def test_invoice_title_ignores_business_labels_when_ocr_loses_colon():
     outcome = parse_invoice(lines(
-        "发票状态 正常",
+        "发票状态 演示员工152",
         "发票抬头 示例企业025有限公司",
         "财政电子票据",
     ))
@@ -612,7 +612,7 @@ def test_project_extraction_rejects_vertical_text_just_below_old_height_threshol
 
 def test_invoice_title_ignores_prefixed_business_status_label():
     outcome = parse_invoice(lines(
-        "电子发票状态 正常",
+        "电子发票状态 演示员工152",
         "增值税发票备注 已验收",
         "财政电子票据",
     ))

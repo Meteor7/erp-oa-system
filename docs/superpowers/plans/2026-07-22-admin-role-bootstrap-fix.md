@@ -1,8 +1,8 @@
-# Frappe 管理员角色注入模板修复 Implementation Plan
+# Frappe 演示员工170角色注入模板修复 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 恢复 Frappe 向 Rayher SPA 注入当前用户和角色，使 `admin@legacy-business.example.invalid` 以 System Manager 权限进入页面。
+**Goal:** 恢复 Frappe 向 QIHENG Demo SPA 注入当前用户和角色，使 `admin@legacy-business.example.invalid` 以 System Manager 权限进入页面。
 
 **Architecture:** 保留服务器端 `rayher.py` 生成 `context.boot`、Jinja 模板写入 `window.*`、SPA 从 `window.roles` 判权的既有数据流。只修复 HTML 模板的换行编码，并用源码测试保护该边界。
 
@@ -38,7 +38,7 @@ const template = readFileSync(
   'utf8',
 );
 
-test('Rayher page template uses real newlines so boot role injection executes', () => {
+test('QIHENG Demo page template uses real newlines so boot role injection executes', () => {
   assert.ok(template.includes('\n'));
   assert.ok(!template.includes('\\\\n'));
   assert.match(template, /for key in boot/);

@@ -90,9 +90,9 @@ export const STAGE_GROUP_FILTERS = Object.freeze([
   { key: 'live', label: '有进度的（需求审批 / 采购执行 / 已关闭）' },
 ]);
 
-// 旧版（合同 / 到货 / 验收都在申请单上走）遗留数据的业务状态：这些单据只读展示，归入 PO 执行中。
+// 旧版（演示员工116 / 到货 / 验收都在申请单上走）遗留数据的业务状态：这些单据只读展示，归入 PO 执行中。
 const LEGACY_EXEC = new Set([
-  '价格已批准/待补充合同信息', '待采购复核', '待电子用印', '合同已生效', '付款计划已生成', '采购执行中',
+  '价格已批准/待补充演示员工116信息', '待采购复核', '待电子用印', '演示员工116已生效', '付款计划已生成', '采购执行中',
   '待到货', '部分到货', '待验收', '验收通过', '验收不合格', '预付款逾期', '催办中', '换货中', '供应商退款中', '退货中',
   '待价格审批',
 ]);
@@ -351,11 +351,11 @@ export function filterPurchaseStatus(rows = [], key = '') {
   return filter ? rows.filter(filter.match) : rows;
 }
 
-const PO_ORDER = ['草稿', '待采购确认', '待合同复核', '待电子用印', '已生效', '供应商制作中', '到货验收中', '付款中'];
+const PO_ORDER = ['草稿', '待采购确认', '待演示员工116复核', '待电子用印', '已生效', '供应商制作中', '到货验收中', '付款中'];
 
 export function poSubStatus(status) {
   if (['供应商制作中', '到货验收中', '付款中'].includes(status)) return status;
-  return '合同处理中';
+  return '演示员工116处理中';
 }
 
 // 整张申请取最靠前的 PO 状态（没有 PO 状态数据时返回空）。
@@ -390,7 +390,7 @@ export function stageDistribution(rows = [], poStatus = {}) {
     demand: Object.entries(demandParts).filter(([, n]) => n).map(([label, n]) => `${label} ${n}`).join(' · '),
     await_pr: counts.await_pr ? 'PMC 在物料看板提' : '',
     quote: counts.quote ? '采购在价格审批里比价' : '',
-    price: counts.price ? '物料全部报价、等副总批' : '',
+    price: counts.price ? '物料全部报价、等演示员工113批' : '',
     po: Object.entries(poParts).map(([label, n]) => `${label} ${n}`).join(' · '),
     closed: '',
   };
@@ -681,7 +681,7 @@ export function priceWorkItems({ prs = [], drafts = [] } = {}) {
   return items;
 }
 
-// 采购：PO 需要确认 / 生成合同草稿 / 复核；副总：电子用印。
+// 采购：PO 需要确认 / 生成演示员工116草稿 / 复核；演示员工113：电子用印。
 export function poWorkItems(orders = [], { manage = false, seal = false } = {}) {
   const items = [];
   for (const po of orders) {
@@ -692,14 +692,14 @@ export function poWorkItems(orders = [], { manage = false, seal = false } = {}) 
       items.push({ ...base, key: `${base.key}:seal`, tag: '电子用印', tone: 'p-brand', meta, action: '去用印' });
     } else if (manage && Number(po.can_manage_purchase) === 1) {
       if (['草稿', '待采购确认'].includes(po.status)) items.push({ ...base, tag: '确认 PO', tone: 'p-cobalt', meta, action: '去确认' });
-      else if (po.status === '待合同复核' && po.contract_status === '待补充信息') items.push({ ...base, tag: '合同草稿', tone: 'p-cobalt', meta, action: '生成合同草稿' });
-      else if (po.status === '待合同复核' && po.contract_status === '草稿待复核') items.push({ ...base, tag: '复核合同', tone: 'p-cobalt', meta, action: '去复核' });
+      else if (po.status === '待演示员工116复核' && po.contract_status === '待补充信息') items.push({ ...base, tag: '演示员工116草稿', tone: 'p-cobalt', meta, action: '生成演示员工116草稿' });
+      else if (po.status === '待演示员工116复核' && po.contract_status === '草稿待复核') items.push({ ...base, tag: '复核演示员工116', tone: 'p-cobalt', meta, action: '去复核' });
     }
   }
   return items;
 }
 
-// 副总：价格审批等他选成交供应商。
+// 演示员工113：价格审批等他选成交供应商。
 export function approvalWorkItems(approvals = []) {
   return approvals.filter((item) => Number(item.can_select_quote) === 1 && item.status === '待审批').map((item) => ({
     key: `pa:${item.name}`, tag: '价格审批', tone: 'p-brand', subject: item.name,
@@ -713,7 +713,7 @@ export function paymentWorkItems(items = []) {
   return items.filter((item) => item.work_status === '可提交付款审批' && Number(item.can_push_payment) === 1).map((item) => ({
     key: `pay:${item.key}`, tag: '提交付款', tone: 'p-brand',
     subject: `${item.po} · ${item.installment_name || ''}${item.payment_stage || ''}`.trim(),
-    meta: `${item.supplier || ''} · 合同已生效，付款条件满足`,
+    meta: `${item.supplier || ''} · 演示员工116已生效，付款条件满足`,
     action: '去采购付款', to: { path: '/approval/procurement-payment', query: { po: item.po } }, count: 1,
     since: item.planned_date || '',
   }));

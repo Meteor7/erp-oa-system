@@ -1716,7 +1716,7 @@ def _report_request(
         employee_name=employee_name,
         department=department,
         supervisor="",
-        company="Rayher",
+        company="QIHENG Demo",
         subject=f"报销-{name}",
         doc_type="非固定资产",
         urgency="一般",
@@ -2829,7 +2829,7 @@ def test_only_explicit_administrator_accounts_are_oa_override_users(monkeypatch)
         "get_roles",
         lambda user=None: {
             "admin@staff.example.invalid": ["System Manager"],
-            "executive@example.com": ["Rayher Business Executive"],
+            "executive@example.com": ["QIHENG Demo Business Executive"],
         }.get(user, ["Employee"]),
     )
 
@@ -3034,8 +3034,8 @@ def test_route_context_ignores_caller_supplied_supervisor_for_mapped_employee(mo
     )
 
     context = oa_entry._route_context(
-        department="伪造部门",
-        supervisor="伪造审批人",
+        department="演示员工106部门",
+        supervisor="演示员工106审批人",
         asset_category=oa_entry.OTHER_ASSET,
     )
 
@@ -3177,14 +3177,14 @@ def test_leave_route_ignores_client_department_and_supervisor(monkeypatch):
 
     context = oa_entry._route_context(
         department="财务部 - FORGED",
-        supervisor="伪造审批人",
+        supervisor="演示员工106审批人",
         asset_category=oa_entry.ADMIN_ASSET,
         request_type=oa_entry.REQUEST_LEAVE,
     )
     route = oa_entry.preview_route(
         oa_entry.REQUEST_LEAVE,
         department="财务部 - FORGED",
-        supervisor="伪造审批人",
+        supervisor="演示员工106审批人",
     )
 
     assert context["department"] == "研发部 - RAY"
@@ -3218,7 +3218,7 @@ def test_leave_route_fails_closed_for_unlinked_account(monkeypatch):
         oa_entry.preview_route(
             oa_entry.REQUEST_LEAVE,
             department="财务部 - FORGED",
-            supervisor="伪造审批人",
+            supervisor="演示员工106审批人",
         )
 
 
@@ -3347,7 +3347,7 @@ def _procurement_role_snapshots():
         "pmc": row("pmc", "PMC", "person076@staff.example.invalid", "演示员工178"),
         "production_asset_owner": row("production_asset_owner", "生产设备负责人", "person074@staff.example.invalid", "演示员工241"),
         "finance_auditor": row("finance_auditor", "财务审核", "person067@staff.example.invalid", "演示员工13"),
-        "vice_manager": row("vice_manager", "副总经理", "person046@staff.example.invalid", "演示员工21"),
+        "vice_manager": row("vice_manager", "演示员工113经理", "person046@staff.example.invalid", "演示员工21"),
         "general_manager": row("general_manager", "总经理", "person060@staff.example.invalid", "演示员工29"),
         "hr_manager": row("hr_manager", "人事经理", "person047@staff.example.invalid", "演示员工10"),
         "finance_manager": row("finance_manager", "财务主管", "person072@staff.example.invalid", "演示员工16"),
@@ -3405,7 +3405,7 @@ def test_procurement_submit_uses_existing_engine_and_builds_real_steps(monkeypat
     assert [row.label for row in doc.steps] == [
         "直属主管：直属领导、项目主管：项目主管（会签）",
         "PMC：演示员工178",
-        "需求终审：副总经理：演示员工21",
+        "需求终审：演示员工113经理：演示员工21",
     ]
     assert doc.steps[0].mode == "all"
     assert set(json.loads(doc.steps[0].approvers)) == {"boss@example.com", "owner@example.com"}
@@ -3569,7 +3569,7 @@ def test_procurement_payment_submit_reserves_source_amount_in_same_request_trans
         },
     )
     monkeypatch.setattr(oa_entry, "validate_payment_submission", lambda *_args, **_kwargs: "预付款")
-    monkeypatch.setattr(oa_entry, "_request_business_document_types", lambda *_args, **_kwargs: {"合同", "付款计划"})
+    monkeypatch.setattr(oa_entry, "_request_business_document_types", lambda *_args, **_kwargs: {"演示员工116", "付款计划"})
     reserved = []
     monkeypatch.setattr(oa_entry, "_reserve_procurement_payment", lambda current: reserved.append((current.source_request, current.name)))
 
@@ -3891,7 +3891,7 @@ def _handle_step(index, key, label, status, approver):
 
 def test_payment_step_allows_add_sign_before_only_and_the_new_step_is_pending():
     # 决定 D6：付款节点只能前加签；前加签的节点是审批节点，状态为待审批。
-    base = _handle_step(1, "pay", "出纳确认付款", oa_entry.STATUS_WAIT_HANDLE, "cashier@example.com")
+    base = _handle_step(1, "pay", "演示员工110确认付款", oa_entry.STATUS_WAIT_HANDLE, "cashier@example.com")
     doc = _dynamic_workflow_doc([base], 1)
     with pytest.raises(ValidationError, match="前面加签"):
         oa_entry._insert_add_sign_step(doc, base, "user-a@example.com", "after", "check", "cashier@example.com")
@@ -3903,9 +3903,9 @@ def test_payment_step_allows_add_sign_before_only_and_the_new_step_is_pending():
 
 def test_contract_delivery_step_cannot_add_sign():
     # 审查 E1（决定 D9）。
-    base = _workflow_step(1, "delivery", "合同交期确认", oa_entry.STATUS_PENDING, "pmc@example.com", origin="contract_delivery")
+    base = _workflow_step(1, "delivery", "演示员工116交期确认", oa_entry.STATUS_PENDING, "pmc@example.com", origin="contract_delivery")
     doc = _dynamic_workflow_doc([base], 1)
-    with pytest.raises(ValidationError, match="合同交期"):
+    with pytest.raises(ValidationError, match="演示员工116交期"):
         oa_entry._insert_add_sign_step(doc, base, "user-a@example.com", "before", "check", "pmc@example.com")
     assert oa_entry._is_contract_delivery_step(base) is True
 
@@ -3913,7 +3913,7 @@ def test_contract_delivery_step_cannot_add_sign():
 def test_payment_is_refused_while_an_old_after_sign_step_is_open(monkeypatch):
     # 审查 X1-5：旧数据里付款节点后面挂着加签节点时，不能直接置为已付款。
     environment = _install_request_environment(monkeypatch)
-    pay = _handle_step(1, "pay", "出纳确认付款", oa_entry.STATUS_WAIT_HANDLE, "cashier@example.com")
+    pay = _handle_step(1, "pay", "演示员工110确认付款", oa_entry.STATUS_WAIT_HANDLE, "cashier@example.com")
     orphan = _workflow_step(2, "added", "加签：x", oa_entry.STATUS_WAIT_FLOW, "x@example.com", origin="add_sign")
     doc = _dynamic_workflow_doc([pay, orphan], 1)
     doc.workflow_status = oa_entry.STATUS_WAIT_HANDLE
@@ -4057,9 +4057,9 @@ def test_submitting_without_an_active_employee_is_refused(monkeypatch):
         "upper_supervisor": "", "upper_supervisor_user": "",
     })
     with pytest.raises(ValidationError, match="在职员工档案"):
-        oa_entry._route_context("财务部", "副总", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, require_employee=True)
-    ctx = oa_entry._route_context("财务部", "副总", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT)
-    assert ctx["supervisor"] == "副总"
+        oa_entry._route_context("财务部", "演示员工113", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT, require_employee=True)
+    ctx = oa_entry._route_context("财务部", "演示员工113", request_type=oa_entry.REQUEST_EXPENSE_PAYMENT)
+    assert ctx["supervisor"] == "演示员工113"
 
 
 

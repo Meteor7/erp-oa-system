@@ -32,7 +32,7 @@ def _workbook(rows, header=("姓名", "证件号码", "缴存基数", "个人缴
 
 def _employee(**overrides):
     base = {
-        "name": "EMP-1", "employee_name": "员工甲", "company": "Rayher", "id_card_number_cn": "110101199001010070",
+        "name": "EMP-1", "employee_name": "员工甲", "company": "QIHENG Demo", "id_card_number_cn": "110101199001010070",
         "housing_fund_base": Decimal("10000.00"), "housing_base_source": "员工默认基数",
         "employee_rate": Decimal("7"), "company_rate": Decimal("7"),
     }
@@ -122,7 +122,7 @@ def test_an_employee_paid_at_a_different_rate_is_flagged_even_when_the_base_matc
 
 def test_a_monthly_record_with_its_own_rate_is_what_the_excel_is_compared_with():
     employee = resolve_fund_employees(
-        [{"name": "EMP-1", "employee_name": "员工甲", "company": "Rayher", "default_housing_fund_base": 9000}],
+        [{"name": "EMP-1", "employee_name": "员工甲", "company": "QIHENG Demo", "default_housing_fund_base": 9000}],
         [{"employee": "EMP-1", "contribution_base": 10000, "employee_rate": 5, "company_rate": 7}], "2026-10",
     )[0]
     assert employee["housing_base_source"] == "2026-10月度公积金记录"
@@ -130,7 +130,7 @@ def test_a_monthly_record_with_its_own_rate_is_what_the_excel_is_compared_with()
 
 
 def test_an_employee_without_an_archive_base_cannot_be_compared():
-    employee = resolve_fund_employees([{"name": "EMP-1", "employee_name": "员工甲", "company": "Rayher"}], [], "2026-10")[0]
+    employee = resolve_fund_employees([{"name": "EMP-1", "employee_name": "员工甲", "company": "QIHENG Demo"}], [], "2026-10")[0]
     result = reconcile_fund_row(_row(), employee)
     assert result["status"] == "Pending"
     assert result["difference_reasons"] == "员工档案公积金基数未维护"

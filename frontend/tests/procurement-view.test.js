@@ -95,7 +95,7 @@ test('approval actions: button label, PMC block, local hide after acting on the 
   assert.equal(approvalButtonLabel(pmc), '需求审批通过');
   assert.equal(approvalButtonLabel({ request_type: REQUEST_DIRECT, workflow_status: '待审批' }, { mode: 'approve', label: '会签' }), '审批通过');
   assert.equal(approvalButtonLabel({}, { mode: 'handle', label: '总经理付款' }), '确认付款');
-  assert.equal(approvalButtonLabel({}, { mode: 'handle', label: '出纳' }), '办理完成');
+  assert.equal(approvalButtonLabel({}, { mode: 'handle', label: '演示员工110' }), '办理完成');
   assert.equal(currentStepKey(pmc), 'k1');
   assert.equal(canActOn(pmc, {}), true);
   assert.equal(canActOn(pmc, { 'OA-1': 'k1' }), false);
@@ -228,12 +228,12 @@ test('home work groups: PMC, buyer and vice manager items come from PR, price ap
   assert.deepEqual(price.map((item) => item.tag), ['待比价', '价格审批']);
   const orders = [
     { name: 'PO-1', status: '草稿', can_manage_purchase: 1 },
-    { name: 'PO-2', status: '待合同复核', contract_status: '待补充信息', can_manage_purchase: 1 },
-    { name: 'PO-3', status: '待合同复核', contract_status: '草稿待复核', can_manage_purchase: 1 },
+    { name: 'PO-2', status: '待演示员工116复核', contract_status: '待补充信息', can_manage_purchase: 1 },
+    { name: 'PO-3', status: '待演示员工116复核', contract_status: '草稿待复核', can_manage_purchase: 1 },
     { name: 'PO-4', status: '待电子用印', can_seal_contract: 1, can_manage_purchase: 0 },
     { name: 'PO-5', status: '供应商制作中', can_manage_purchase: 1 },
   ];
-  assert.deepEqual(poWorkItems(orders, { manage: true, seal: false }).map((item) => item.tag), ['确认 PO', '合同草稿', '复核合同']);
+  assert.deepEqual(poWorkItems(orders, { manage: true, seal: false }).map((item) => item.tag), ['确认 PO', '演示员工116草稿', '复核演示员工116']);
   assert.deepEqual(poWorkItems(orders, { manage: false, seal: true }).map((item) => item.tag), ['电子用印']);
   assert.equal(approvalWorkItems([{ name: 'PA-2', status: '待审批', can_select_quote: 1 }, { name: 'PA-3', status: '待审批', can_select_quote: 0 }]).length, 1);
   const pay = paymentWorkItems([

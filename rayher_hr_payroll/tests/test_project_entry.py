@@ -51,7 +51,7 @@ def test_save_project_creates_timesheet_enabled_project(monkeypatch):
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: captured.setdefault("roles", roles))
     frappe.db.exists = lambda doctype, name_or_filters=None: False
-    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.db.get_single_value = lambda *args, **kwargs: "QIHENG Demo"
     frappe.db.commit = lambda: captured.setdefault("committed", True)
 
     def get_doc(arg, name=None):
@@ -64,7 +64,7 @@ def test_save_project_creates_timesheet_enabled_project(monkeypatch):
         raise AssertionError(arg)
 
     frappe.get_doc = get_doc
-    frappe.get_all = lambda *args, **kwargs: ["Rayher"]
+    frappe.get_all = lambda *args, **kwargs: ["QIHENG Demo"]
 
     result = mod.save_project(
         project_code="RD18",
@@ -84,7 +84,7 @@ def test_save_project_creates_timesheet_enabled_project(monkeypatch):
         "rd_project_code": "RD18",
         "rd_project_key": "RD18 | NEW PROJECT",
         "status": "Open",
-        "company": "Rayher",
+        "company": "QIHENG Demo",
         "allow_rd_timesheet": 1,
         "rd_stage": "费用化",
         "capitalization_start_date": "2026-07-01",
@@ -178,11 +178,11 @@ def test_save_project_keeps_owner_and_project_document_links(monkeypatch):
 
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     frappe.db.exists = lambda *args, **kwargs: False
-    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.db.get_single_value = lambda *args, **kwargs: "QIHENG Demo"
     frappe.db.commit = lambda: None
     # 报告附件要是本人上传、尚未挂到别处的私有文件（2026-09-29）。
     frappe.get_all = lambda doctype, *args, **kwargs: (
-        [{"owner": "Administrator", "attached_to_doctype": None, "attached_to_name": None}] if doctype == "File" else ["Rayher"]
+        [{"owner": "Administrator", "attached_to_doctype": None, "attached_to_name": None}] if doctype == "File" else ["QIHENG Demo"]
     )
 
     def get_doc(arg, name=None):
@@ -213,8 +213,8 @@ def test_default_project_sync_preserves_optional_owner_and_document_fields(monke
     captured = {}
 
     frappe.db.exists = lambda *args, **kwargs: True
-    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
-    frappe.get_all = lambda *args, **kwargs: ["Rayher"]
+    frappe.db.get_single_value = lambda *args, **kwargs: "QIHENG Demo"
+    frappe.get_all = lambda *args, **kwargs: ["QIHENG Demo"]
 
     class Doc:
         name = "RD01"

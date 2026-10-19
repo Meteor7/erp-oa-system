@@ -1,7 +1,7 @@
-# Rayher Frappe 三语 i18n 设计
+# QIHENG Demo Frappe 三语 i18n 设计
 
 日期：2026-06-16
-范围：Rayher 自定义 Frappe App 第一版语言切换，支持中文、英文、法文。
+范围：QIHENG Demo 自定义 Frappe App 第一版语言切换，支持中文、英文、法文。
 
 ## 决策
 
@@ -18,7 +18,7 @@
 1. 支持 `zh`、`en`、`fr` 三个语言代码。
 2. 新增后端白名单方法：当前用户选择语言后，写入 `User.language`，更新当前 request/session 的语言，并清理翻译缓存。
 3. 新增 `rayher_hr_payroll/translations/zh.csv` 与 `fr.csv`。
-4. 把 Rayher 自定义报表列名、异常类型、校验/报错消息接入 `_()`。
+4. 把 QIHENG Demo 自定义报表列名、异常类型、校验/报错消息接入 `_()`。
 5. 保留现有中文业务枚举值，例如 `全时研发`、`资本化`、`待复核`，本版不做数据迁移。
 6. 文档注明：项目名称、部门名称、岗位名称、费用科目等业务数据不会自动翻译，后续如要三语业务数据，需要主数据翻译表或多语言显示字段。
 
@@ -48,7 +48,7 @@
 ## 验收标准
 
 1. `python -m pytest rayher_hr_payroll/tests -q` 通过。
-2. 翻译文件存在且含 Rayher 关键字符串的 zh/fr 翻译。
+2. 翻译文件存在且含 QIHENG Demo 关键字符串的 zh/fr 翻译。
 3. 语言 API 拒绝不支持语言，允许 `zh`、`en`、`fr` 和常见地区码。
 4. 报表列名和异常类型可通过注入翻译函数被翻译。
 5. `bench migrate` 通过，demo 分摊仍为 RD-CAP 720 / RD-EXP 480。

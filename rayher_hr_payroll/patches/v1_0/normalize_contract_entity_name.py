@@ -4,8 +4,8 @@ OFFICIAL_ENTITY = "示例企业032有限公司"
 WRONG_ENTITIES = (
     "普朗克半导体",
     "示例企业022有限公司",
-    "Rayher",
-    "Rayher Technology Co., Ltd.",
+    "QIHENG Demo",
+    "QIHENG Demo Technology Co., Ltd.",
 )
 
 

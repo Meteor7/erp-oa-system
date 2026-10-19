@@ -139,7 +139,7 @@ def test_the_exempt_account_is_left_out_of_the_timesheet_list_and_cannot_be_fill
     staff = [
         {"name": "E1", "employee_name": "演示员工181", "user_id": "e1@example.com", "status": "Active"},
         {"name": "E9", "employee_name": "演示员工21", "user_id": "person046@staff.example.invalid", "status": "Active"},
-        {"name": "E8", "employee_name": "没有账号", "user_id": None, "status": "Active"},
+        {"name": "E8", "employee_name": "演示员工154", "user_id": None, "status": "Active"},
     ]
     frappe.get_all = lambda doctype, filters=None, fields=None, order_by=None, **kw: [
         dict(row) for row in staff if not isinstance((filters or {}).get("name"), str) or row["name"] == filters["name"]

@@ -1,8 +1,8 @@
-# Serena HR/OA Platform — P3 Lifecycle (入职/离职/职位变动) Implementation Plan
+# Serena HR/OA Platform — P3 Lifecycle (入职/演示员工166/职位变动) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Make onboarding auto-create a login account, separation disable it, and position changes (promotion/transfer) re-route approvals — needs #4 (入职/离职信息维护) + #6 (职位变动).
+**Goal:** Make onboarding auto-create a login account, separation disable it, and position changes (promotion/transfer) re-route approvals — needs #4 (入职/演示员工166信息维护) + #6 (职位变动).
 
 **Architecture:** HRMS provides Employee Onboarding / Separation / Promotion / Transfer natively. The only custom code is `lifecycle_controls.py`: an `Employee` doc-event that creates+binds a `User` (Employee role) when an employee becomes Active and disables it when they become Left. Promotion/Transfer routing needs no code — it updates Department/Designation which the approver lookup already reads.
 
@@ -100,7 +100,7 @@ def sync_user_for_employee(doc, method=None):
 
 - [ ] **Step 5: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/lifecycle_controls.py rayher_hr_payroll/tests/test_lifecycle_controls.py
 git commit -m "feat: sync Employee to a least-privilege User account on lifecycle change
 
@@ -134,7 +134,7 @@ def test_hooks_register_user_sync():
 - [ ] **Step 4: Run test → PASS; `bench migrate`.**
 - [ ] **Step 5: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/hooks.py rayher_hr_payroll/tests/test_lifecycle_controls.py
 git commit -m "feat: register Employee lifecycle user-sync events
 
@@ -148,7 +148,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - [ ] **Step 1: Onboarding auto-creates a bound, least-privilege account** — author `/tmp/e2e_onboard.py`:
 ```python
 import frappe
-e = frappe.get_doc({"doctype": "Employee", "first_name": "新人甲", "status": "Active",
+e = frappe.get_doc({"doctype": "Employee", "first_name": "演示员工138甲", "status": "Active",
     "company_email": "newhire1@test", "date_of_joining": "2026-07-01", "gender": "Male",
     "company": frappe.defaults.get_global_default("company"),
     "department": frappe.get_all("Department", filters={"department_name": ["like","%研发%"]}, pluck="name")[0],
@@ -192,7 +192,7 @@ Run via bench console. Expected: `USER_ENABLED: 0` (login disabled) but the empl
 
 ## Self-Review
 
-**Spec coverage:** 入职建号 → Task 1/3 Step 1; 离职停用+留档 → Task 1 (`_should_disable`) + Task 3 Step 3; 调岗改路由 → Task 3 Step 2 (native Department/Designation update, no code); 入职只给"员工"角色 → `DEFAULT_EMPLOYEE_ROLES=["Employee"]` (Task 1). Promotion/Transfer/Onboarding/Separation forms themselves are HRMS-native and need no build — only the account-sync hook is custom.
+**Spec coverage:** 入职建号 → Task 1/3 Step 1; 演示员工166停用+留档 → Task 1 (`_should_disable`) + Task 3 Step 3; 调岗改路由 → Task 3 Step 2 (native Department/Designation update, no code); 入职只给"员工"角色 → `DEFAULT_EMPLOYEE_ROLES=["Employee"]` (Task 1). Promotion/Transfer/Onboarding/Separation forms themselves are HRMS-native and need no build — only the account-sync hook is custom.
 
 **Placeholder scan:** none.
 

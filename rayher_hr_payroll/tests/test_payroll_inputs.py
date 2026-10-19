@@ -30,7 +30,7 @@ def _load(monkeypatch, get_value=None, get_all=None):
     return module, frappe
 
 
-EMPLOYEE = {"name": "E1", "employee_name": "演示员工128", "company": "Rayher", "default_social_insurance_base": 5000,
+EMPLOYEE = {"name": "E1", "employee_name": "演示员工128", "company": "QIHENG Demo", "default_social_insurance_base": 5000,
             "default_housing_fund_base": 6000, "household_registration": "湖南省长沙市"}
 
 
@@ -42,7 +42,7 @@ def test_social_prefers_the_current_bill_then_the_monthly_record(monkeypatch):
         if doctype == "Social Insurance Import Batch":
             return "SIB-1"
         if doctype == "Social Insurance Import Row":
-            assert filters["status"] == ["in", ["Matched", "Confirmed Difference"]] and filters["company"] == "Rayher"
+            assert filters["status"] == ["in", ["Matched", "Confirmed Difference"]] and filters["company"] == "QIHENG Demo"
             return {"name": "SIR-1", "employee_total": 1020, "company_total": 3000}
         if doctype == "Employee Housing Fund":
             return {"name": "EHF-1", "employee_amount": 700, "company_amount": 700, "remark": "公积金导入 HFB-1", "contribution_base": 10000}
@@ -72,7 +72,7 @@ def test_without_bill_or_record_social_and_fund_come_from_the_archive_base_and_p
 
 
 @pytest.mark.parametrize("employee, company, missing", [
-    ({**EMPLOYEE, "default_social_insurance_base": 0}, "Rayher", "员工档案里没有社保基数"),
+    ({**EMPLOYEE, "default_social_insurance_base": 0}, "QIHENG Demo", "员工档案里没有社保基数"),
     ({**EMPLOYEE, "company": "示例研发中心"}, "示例研发中心", "示例研发中心 2026 年的社保政策还没配置"),
 ])
 def test_missing_inputs_are_reported_not_treated_as_zero(monkeypatch, employee, company, missing):
@@ -94,7 +94,7 @@ def test_work_hours_cut_only_approved_personal_leave(monkeypatch):
     calendar.resolve_monthly_calendar = lambda year, month, employee=None, company=None: {
         "work_dates": [d for d in work if not employee or d >= date(2026, 10, 12)], "calendar_source": "company_holiday_list"}
     monkeypatch.setitem(sys.modules, "rayher_hr_payroll.working_calendar", calendar)
-    hours = module.work_hours("E1", "Rayher", "2026-10")
+    hours = module.work_hours("E1", "QIHENG Demo", "2026-10")
     assert seen["filters"]["leave_type"] == "事假" and sorted(seen["filters"]["workflow_status"][1]) == ["已完成", "已通过"]
     # 10 月 22 个工作日 = 176 小时；10/12 入职 → 在职 15 天 = 120 小时；事假 11 小时
     assert (hours["total_hours"], hours["employed_hours"], hours["personal_leave_hours"], hours["actual_hours"]) == (176.0, 120.0, 11.0, 109.0)
@@ -117,7 +117,7 @@ def test_tax_basis_adds_opening_balance_and_confirmed_slips_of_the_same_tax_year
         return []
 
     module, _ = _load(monkeypatch, get_value, get_all)
-    basis = module.tax_basis("E1", "Rayher", "2026-10")   # 10 月工资 → 11 月个税
+    basis = module.tax_basis("E1", "QIHENG Demo", "2026-10")   # 10 月工资 → 11 月个税
     assert basis["tax_period"] == "2026-11"
     assert basis["prior"] == {"months": 10, "income": 100000.0, "tax_free": 0.0, "special": 17200.0,
                               "special_additional": 30000.0, "other": 0.0, "tax": 170.0}
@@ -129,7 +129,7 @@ def test_tax_basis_adds_opening_balance_and_confirmed_slips_of_the_same_tax_year
 
 def test_a_missing_opening_balance_late_in_the_year_is_flagged(monkeypatch):
     module, _ = _load(monkeypatch)
-    basis = module.tax_basis("E1", "Rayher", "2026-10")
+    basis = module.tax_basis("E1", "QIHENG Demo", "2026-10")
     assert basis["prior"]["months"] == 0 and basis["warnings"] and "累计数没有录入" in basis["warnings"][0]
 
 

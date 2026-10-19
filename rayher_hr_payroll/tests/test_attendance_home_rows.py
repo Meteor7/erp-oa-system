@@ -22,7 +22,7 @@ TODAY = date(2026, 10, 15)   # 周四
 STAFF = [
     {"name": "A", "employee_name": "甲", "department": "研发软件部 - RAY", "status": "Active"},
     {"name": "B", "employee_name": "乙", "department": "客服部 - RAY", "status": "Active"},
-    {"name": "C", "employee_name": "丙", "department": "客服部 - RAY", "status": "Left"},          # 已离职：哪边都不算
+    {"name": "C", "employee_name": "丙", "department": "客服部 - RAY", "status": "Left"},          # 已演示员工166：哪边演示员工177算
 ]
 
 
@@ -51,7 +51,7 @@ REQUESTS = [
     leave("L3", "A", att.REQUEST_LEAVE, [("2026-10-20", 8)], "病假", status="待审批"),                  # 审批中：列出来，不算数
     legacy("L4", "B", "2026-10-28", "2026-11-02", 32),                                                   # 旧申请：32 小时都在 10 月
     legacy("L5", "A", "2026-09-29", "2026-10-02", 16),                                                   # 旧申请：开始在 9 月，10 月是 0
-    leave("L6", "C", att.REQUEST_LEAVE, [("2026-10-15", 8)], "年假"),                                    # 已离职
+    leave("L6", "C", att.REQUEST_LEAVE, [("2026-10-15", 8)], "年假"),                                    # 已演示员工166
     leave("L7", "B", att.REQUEST_LEAVE, [("2026-10-16", 8)], "事假", status="草稿"),                    # 草稿：不要
     leave("L8", "A", att.REQUEST_LEAVE, [("2026-10-16", 8)], "事假", status="已撤回"),                  # 撤回：不要
     leave("C1", "B", att.REQUEST_COMP_TIME, [("2026-10-16", 8)]),
@@ -153,7 +153,7 @@ def test_each_row_carries_names_dates_days_and_its_month_hours(db):
     assert (result["level"], result["month"], result["today"], result["label"], result["headcount"]) == ("company", "2026-10", "2026-10-15", "全公司", 2)
     assert (result["start"], result["end"]) == ("2026-10-12", "2026-10-28")                  # 本周一到今天起第 14 天
     rows = {row["name"]: row for row in result["rows"]}
-    assert set(rows) == {"L1", "L2", "L3", "L4", "L5", "C1", "O1", "O2", "T1", "T2", "T3"}    # 草稿、撤回、离职的人不要
+    assert set(rows) == {"L1", "L2", "L3", "L4", "L5", "C1", "O1", "O2", "T1", "T2", "T3"}    # 草稿、撤回、演示员工166的人不要
     assert rows["L1"]["employee_name"] == "甲" and rows["L1"]["department_label"] == "研发软件部" and rows["L1"]["kind"] == "annual"
     assert rows["L1"]["days"] == [["2026-09-30", 8], ["2026-10-01", 8]] and rows["L1"]["month_hours"] == 8
     assert (rows["L3"]["approved"], rows["L3"]["current_step_label"], rows["L3"]["kind"]) == (False, "人事经理", "sick")

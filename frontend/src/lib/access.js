@@ -14,11 +14,11 @@ const TIME_ENTRY = [...TIME_MANAGE, 'Employee'];
 const TIME_VIEW = [...TIME_ENTRY, 'Accounts User', 'Employee'];
 const APPROVAL = ['System Manager', 'Accounts User', 'HR User', 'HR Manager', 'Department Manager', 'Employee'];
 // 看板：财务和管理层看全公司，部门主管看本部门，普通员工不开放（服务端同样限制）。
-const BOARD = ['System Manager', 'Accounts User', 'Rayher Business Executive', 'Department Manager'];
-// 岗位也能看全公司看板（与服务端 expense_boards.SCOPE_ALL_POSITIONS 一致），比如没有看板角色的副总。
+const BOARD = ['System Manager', 'Accounts User', 'QIHENG Demo Business Executive', 'Department Manager'];
+// 岗位也能看全公司看板（与服务端 expense_boards.SCOPE_ALL_POSITIONS 一致），比如没有看板角色的演示员工113。
 const BOARD_POSITIONS = ['finance_manager', 'finance_auditor', 'vice_manager', 'general_manager'];
 const BOARD_PATHS = new Set(['/approval/expense-request-board', '/approval/expense-payment-board']);
-// 总经理、副总经理岗位只读打开看板数字背后的页面（决定 2026-10-13）：人事、薪酬、社保公积金、宿舍、研发费用汇总。
+// 总经理、演示员工113经理岗位只读打开看板数字背后的页面（决定 2026-10-13）：人事、薪酬、社保公积金、宿舍、研发费用汇总。
 // 服务端只放开读接口（hr_read_access.require_hr_read、allocation_entry._require_read_access），写接口仍只认原来的角色。
 const LEADER_POSITIONS = ['vice_manager', 'general_manager'];
 const LEADER_READ_PATHS = new Set(['/personnel', '/payroll', '/social-insurance', '/housing-fund', '/accommodation', '/accommodation/master', '/allocation-dashboard']);
@@ -78,7 +78,7 @@ function myRoles() {
 }
 
 // 与服务端 procurement_chain._require_po_view 一致（修复 2026-09-24，补上 Finance User）。
-const PROCUREMENT_PO_ROLES = [...FINANCE, 'Finance User', 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'];
+const PROCUREMENT_PO_ROLES = [...FINANCE, 'Finance User', 'Purchase User', 'Purchase Manager', 'QIHENG Demo Business Executive'];
 
 function holdsPosition(...keys) {
   const positions = (typeof window !== 'undefined' && window.position_access) || {};
@@ -93,14 +93,14 @@ export function isHrSensitiveHidden() {
   return HR_SENSITIVE_HIDDEN_USERS.has(currentLogin());
 }
 
-// 人事页面能不能改（新增、编辑、导入、删除、确认）：只有人事角色；总经理、副总经理能打开，但只读。
+// 人事页面能不能改（新增、编辑、导入、删除、确认）：只有人事角色；总经理、演示员工113经理能打开，但只读。
 export function canEditHr() {
   return myRoles().some((role) => HR.includes(role));
 }
 
 export function canSeeProcurementPrice() {
   return holdsPosition('pmc', 'procurement_manager', 'vice_manager')
-    || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager', 'Rayher Business Executive'].includes(role));
+    || myRoles().some((role) => ['System Manager', 'Purchase User', 'Purchase Manager', 'QIHENG Demo Business Executive'].includes(role));
 }
 
 export function canSeeProcurementPO() {
@@ -120,7 +120,7 @@ export function canEditProcurementPrice() {
 }
 
 // 到货、验收、换货到货、退货发出都由生产主管登记（决定 2026-10-01；服务端 _require_production_receipt）。
-// 采购不再登记验收，采购只负责合同、PO 和提交付款审批。
+// 采购不再登记验收，采购只负责演示员工116、PO 和提交付款审批。
 export function canRecordPoFulfilment() {
   return holdsPosition('production_asset_owner') || myRoles().includes('System Manager');
 }
@@ -147,7 +147,7 @@ function canSeeMaterialProgress() {
   return myRoles().includes('System Manager') || holdsPosition('pmc', 'procurement_manager', 'vice_manager', 'general_manager');
 }
 
-// 物料进度看板只对 PMC、采购经理、副总经理和系统管理员开放（服务端 material_progress._board_user）。
+// 物料进度看板只对 PMC、采购经理、演示员工113经理和系统演示员工170开放（服务端 material_progress._board_user）。
 export function canOpenMaterialBoard() {
   return canSeeMaterialProgress();
 }

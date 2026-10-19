@@ -23,7 +23,7 @@ def test_employees_prefers_exact_period_social_base(monkeypatch):
     mod, frappe = _load(monkeypatch)
     def get_all(doctype, **kwargs):
         if doctype == "Employee":
-            return [{"name": "EMP-1", "employee_name": "员工", "company": "Rayher", "default_social_insurance_base": 5000}]
+            return [{"name": "EMP-1", "employee_name": "员工", "company": "QIHENG Demo", "default_social_insurance_base": 5000}]
         if doctype == "Employee Social Insurance":
             assert kwargs["filters"] == {"period": "2026-07"}
             return [{"employee": "EMP-1", "contribution_base": 6000}]
@@ -39,7 +39,7 @@ def test_row_values_store_reconciliation_snapshot(monkeypatch):
     batch = SimpleNamespace(name="BATCH-1", period="2026-07")
     row = {"row_number": 1, "excel_name": "员工", "identity_number": "123", **{field: 0 for field in mod.EXCEL_FIELDS}}
     result = {
-        "employee": "EMP-1", "employee_name": "员工", "company": "Rayher",
+        "employee": "EMP-1", "employee_name": "员工", "company": "QIHENG Demo",
         "status": "Matched", "original_match_status": "Matched",
         "reference_base": Decimal("5000"), "base_source": "员工默认基数",
         "household_source": "深圳", "household_classification": "深户",
@@ -82,7 +82,7 @@ def test_confirm_social_row_accepts_resolved_employee_dict(monkeypatch):
     frappe.db = SimpleNamespace(exists=lambda *args, **kwargs: False, commit=lambda: None)
     frappe.utils = SimpleNamespace(now=lambda: "2026-08-05 12:00:00")
     monkeypatch.setattr(mod, "_employees", lambda period: [{
-        "name": "EMP-1", "employee_name": "员工", "company": "Rayher",
+        "name": "EMP-1", "employee_name": "员工", "company": "QIHENG Demo",
         "id_card_number_cn": "123", "household_registration": "深圳",
         "social_insurance_base": Decimal("10000"), "social_base_source": "员工默认基数",
     }])

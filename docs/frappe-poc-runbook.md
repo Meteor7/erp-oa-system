@@ -1,4 +1,4 @@
-# Rayher Frappe PoC Runbook
+# QIHENG Demo Frappe PoC Runbook
 
 ## What This PoC Proves
 
@@ -83,7 +83,7 @@ total = 1200.00
 
 ## I18n Verification
 
-Rayher custom app i18n uses Frappe native User.language and app translation CSV files.
+QIHENG Demo custom app i18n uses Frappe native User.language and app translation CSV files.
 
 Verified on 2026-06-16 from the WSL worktree branch rayher-i18n:
 

@@ -1,5 +1,5 @@
 """PR #79 审查（采购 + PMC / 生产主管不看金额）：
-PMC、生产主管（procurement_chain._amounts_hidden）从看板能点到的地方都拿不到金额——合同草稿正文 / 合同快照、
+PMC、生产主管（procurement_chain._amounts_hidden）从看板能点到的地方都拿不到金额——演示员工116草稿正文 / 演示员工116快照、
 物料看板的已付 / PO 总额 / 付款单金额、首页采购概览的金额也一样；采购经理等照常。隐藏的金额是 None，不是 0，
 报没报价、付清没有这些非金额判断由服务端另给标志。采购申请列表「我负责的项目」按项目负责人在服务端取全部。
 """
@@ -27,7 +27,7 @@ def chain_env(monkeypatch, positions, roles):
 
 
 def make_po(paid=1000.0, row_paid=(300.0, 700.0), status="付款中"):
-    draft = "示例企业032有限公司采购合同\nPO：PO-1\n供应商：甲\n合同金额：CNY 1,000.00\n合同交期：2026-10-20\n付款方式：预付"
+    draft = "示例企业032有限公司采购演示员工116\nPO：PO-1\n供应商：甲\n演示员工116金额：CNY 1,000.00\n演示员工116交期：2026-10-20\n付款方式：预付"
     snapshot = json.dumps({"po": "PO-1", "supplier": "甲", "total_amount": 1000.0, "currency": "CNY"}, ensure_ascii=False)
     lines = [pc._Row(name="L1", item_name="镜片", quantity=2, received_quantity=2, inspection_status="已通过",
                      unit_price=500.0, amount=1000.0, source_request="OA-1")]
@@ -39,7 +39,7 @@ def make_po(paid=1000.0, row_paid=(300.0, 700.0), status="付款中"):
                    contract_draft_content=draft, contract_snapshot=snapshot, lines=lines, payment_plan=plan)
 
 
-# ---------------------------------------------------------------- #79-1 合同草稿 / 合同快照
+# ---------------------------------------------------------------- #79-1 演示员工116草稿 / 演示员工116快照
 @pytest.mark.parametrize("who", [PMC, PRODUCTION])
 def test_79_1_po_summary_withholds_contract_text_and_snapshot_when_amounts_hidden(monkeypatch, who):
     chain_env(monkeypatch, *who)
@@ -47,7 +47,7 @@ def test_79_1_po_summary_withholds_contract_text_and_snapshot_when_amounts_hidde
     assert result["amounts_hidden"] == 1
     assert result["contract_draft_content"] is None and result["contract_snapshot"] is None
     text = json.dumps(result, ensure_ascii=False, default=str)
-    assert "合同金额" not in text and "1,000.00" not in text and "1000.0" not in text
+    assert "演示员工116金额" not in text and "1,000.00" not in text and "1000.0" not in text
     assert result["total_amount"] is None and result["paid_amount"] is None and result["outstanding_amount"] is None
     assert result["lines"][0]["amount"] is None and result["lines"][0]["unit_price"] is None
     assert result["payment_plan"][0]["amount"] is None and result["payment_plan"][0]["paid_amount"] is None
@@ -60,7 +60,7 @@ def test_79_1_procurement_manager_keeps_contract_text_and_amounts(monkeypatch):
     chain_env(monkeypatch, *MANAGER)
     result = pc._po_summary(make_po(), steps=[])
     assert "amounts_hidden" not in result
-    assert "合同金额：CNY 1,000.00" in result["contract_draft_content"]
+    assert "演示员工116金额：CNY 1,000.00" in result["contract_draft_content"]
     assert json.loads(result["contract_snapshot"])["total_amount"] == 1000.0
     assert result["total_amount"] == 1000.0 and result["lines"][0]["amount"] == 1000.0
 
@@ -73,7 +73,7 @@ def test_79_1_list_purchase_orders_sends_no_contract_money_to_pmc(monkeypatch):
     monkeypatch.setattr(pc, "_approval_steps_bulk", lambda names: {})
     rows = getattr(pc.list_purchase_orders, "__wrapped__", pc.list_purchase_orders)()
     assert rows[0]["contract_draft_content"] is None and rows[0]["contract_snapshot"] is None
-    assert "合同金额" not in json.dumps(rows, ensure_ascii=False, default=str)
+    assert "演示员工116金额" not in json.dumps(rows, ensure_ascii=False, default=str)
 
 
 def test_79_1_every_money_carrying_po_field_is_in_money_keys():

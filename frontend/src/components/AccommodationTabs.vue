@@ -9,7 +9,7 @@ const tabs = [
   { to: '/accommodation', label: '宿舍看板' },
   { to: '/accommodation/master', label: '宿舍基本信息管理' },
   { to: '/accommodation/monthly', label: '当月费用管理' },
-].filter((tab) => canSee(tab.to));   // 总经理、副总经理打不开当月费用管理，就不显示这个标签
+].filter((tab) => canSee(tab.to));   // 总经理、演示员工113经理打不开当月费用管理，就不显示这个标签
 </script>
 
 <template>

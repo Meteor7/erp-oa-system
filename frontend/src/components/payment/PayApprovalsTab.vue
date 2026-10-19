@@ -26,7 +26,7 @@ const router = useRouter();
 const pageSize = 50;
 const page = ref(0);
 const params = (view) => () => ({ view, request_type: PAYMENT_REQUEST_TYPE, limit: pageSize, offset: page.value * pageSize });
-// 队列加载器都不自动加载：等 get_options 回来知道有没有全局权限后再加载（避免重复请求）。
+// 队列加载器演示员工177自动加载：等 get_options 回来知道有没有全局权限后再加载（避免重复请求）。
 const exactLoader = createResource({ url: OA_API + 'list_requests', method: 'GET' });
 const mineLoader = createResource({ url: OA_API + 'list_requests', method: 'GET', makeParams: params('mine') });
 const pendingLoader = createResource({ url: OA_API + 'list_requests', method: 'GET', makeParams: params('pending') });

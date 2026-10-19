@@ -127,7 +127,7 @@ def price_approval_snapshot(*, supplier, total_amount, business_lines, tax_inclu
 
 
 OFFICIAL_CONTRACT_ENTITY = "示例企业032有限公司"
-LEGACY_CONTRACT_ENTITIES = {"普朗克半导体", "示例企业022有限公司", "Rayher", "Rayher Technology Co., Ltd."}
+LEGACY_CONTRACT_ENTITIES = {"普朗克半导体", "示例企业022有限公司", "QIHENG Demo", "QIHENG Demo Technology Co., Ltd."}
 
 
 def contract_snapshot(values, approved_price_snapshot, version):
@@ -143,15 +143,15 @@ def contract_snapshot(values, approved_price_snapshot, version):
             raise ProcurementContractError("已批准的价格审批快照无效")
     required = {
         "supplier_legal_name": ("供应商法定名称", 140), "credit_code": ("统一社会信用代码", 40),
-        "supplier_address": ("供应商地址", 500), "contract_contact": ("合同联系人", 140),
+        "supplier_address": ("供应商地址", 500), "contract_contact": ("演示员工116联系人", 140),
         "contract_bank_name": ("收款银行", 140), "contract_bank_account": ("收款账号", 80),
-        "contract_entity": ("我方签约主体", 140), "contract_template": ("合同模板", 140),
+        "contract_entity": ("我方签约主体", 140), "contract_template": ("演示员工116模板", 140),
         "seal_user": ("用印账号", 140),
     }
     result = {"version": int(version or 1), "price_fingerprint": approved_price_snapshot.get("fingerprint")}
     for key, (label, limit) in required.items():
         result[key] = _text(values.get(key), label, limit, True)
-    result["contract_delivery_date"] = _date(values.get("contract_delivery_date"), "合同交付日期", True)
+    result["contract_delivery_date"] = _date(values.get("contract_delivery_date"), "演示员工116交付日期", True)
     result["price"] = approved_price_snapshot
     return result
 
@@ -159,11 +159,11 @@ def contract_snapshot(values, approved_price_snapshot, version):
 def render_contract_draft(snapshot):
     price = snapshot["price"]
     lines = [
-        f"电子采购合同（测试模板 V{snapshot['version']}）", f"我方主体：{snapshot['contract_entity']}",
+        f"电子采购演示员工116（测试模板 V{snapshot['version']}）", f"我方主体：{snapshot['contract_entity']}",
         f"供应商：{snapshot['supplier_legal_name']}", f"统一社会信用代码：{snapshot['credit_code']}",
-        f"供应商地址：{snapshot['supplier_address']}", f"合同联系人：{snapshot['contract_contact']}",
+        f"供应商地址：{snapshot['supplier_address']}", f"演示员工116联系人：{snapshot['contract_contact']}",
         f"收款银行：{snapshot['contract_bank_name']}", f"收款账号：{snapshot['contract_bank_account']}",
-        f"合同总额：CNY {price['amount']:.2f}", f"交付日期：{snapshot['contract_delivery_date']}",
+        f"演示员工116总额：CNY {price['amount']:.2f}", f"交付日期：{snapshot['contract_delivery_date']}",
         f"交付条件：{price['delivery_terms']}", f"质保条件：{price['warranty_terms']}",
         f"开票条件：{price['invoice_condition']}", "付款计划：",
     ]

@@ -1,7 +1,7 @@
 """看板：研发工时填报进度。
 
 数据来源和权限，都跟着现有接口走，不放宽：
-- 工时填报：`monthly_timesheet_entry.get_fill_progress(period)`。它自己按身份限定范围——HR / 管理员 / 财务看全公司（kind=all），
+- 工时填报：`monthly_timesheet_entry.get_fill_progress(period)`。它自己按身份限定范围——HR / 演示员工170 / 财务看全公司（kind=all），
   部门主管看自己的团队（kind=team，汇报关系向下的研发人员，和 `team_scope` 一致），纯员工拿到空名单。
   所以这里用返回的 kind 决定标签（"本部门" 还是 "全公司"），不另外猜范围。
 团队的出勤 / 请假 / 加班在 `dashboard/team.py`。
@@ -17,7 +17,7 @@ FILL_ALL_ROLES = ("System Manager", "HR User", "HR Manager", "Accounts User")
 FILL_ROLES = (*FILL_ALL_ROLES, "Department Manager")
 MAX_ROWS = 8
 TREND_MONTHS = 6
-FILL_HINT = "按工时填报名单统计：研发类型为全时 / 非全时 / 辅助的人员（含本月离职的、不含免填账号）。已填满 = 已填天数达到当月可填上限；超过上限的不算已填满。"
+FILL_HINT = "按工时填报名单统计：研发类型为全时 / 非全时 / 辅助的人员（含本月演示员工166的、不含免填账号）。已填满 = 已填天数达到当月可填上限；超过上限的不算已填满。"
 
 
 # ---------------------------------------------------------------- 取数（单独成函数，测试里替换）
@@ -107,8 +107,8 @@ def ts_rd_count(ctx):
     # 卡片上的数字 = 点进去填报进度里的名单人数；档案里的“研发在册”人数放在副标题里，不同的原因在说明里。
     return kpi("ts.rd_count", "需要填工时的人", data["summary"]["total"], "人", f"研发在册 {_load_rd_headcount()} 人，其余免填或不在名单",
                to=_board(ctx),
-               hint="本月工时填报名单人数（含本月离职的、不含免填账号），点进去就是这份名单。研发在册 = 研发类型是全时 / 非全时 / 辅助的在职人数，"
-                    "和名单人数可能不同（免填账号、本月离职的）。")
+               hint="本月工时填报名单人数（含本月演示员工166的、不含免填账号），点进去就是这份名单。研发在册 = 研发类型是全时 / 非全时 / 辅助的在职人数，"
+                    "和名单人数可能不同（免填账号、本月演示员工166的）。")
 
 
 @provider("ts.team", "kpi", visible=_fill_visible, title="工时已填满")
@@ -232,7 +232,7 @@ def _project_hours(entries, roster=None):
 
 
 def _projects(ctx, data):
-    """填报名单里的人这个月的工时按项目（范围和填报进度一样：含本月离职的、不含免填账号）。"""
+    """填报名单里的人这个月的工时按项目（范围和填报进度一样：含本月演示员工166的、不含免填账号）。"""
     roster = {row["employee"] for row in data["employees"]}
     return _project_hours(ctx.memo("ts.entries", lambda: _load_entries(ctx.period))["entries"], roster)
 

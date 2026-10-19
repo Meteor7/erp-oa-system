@@ -1,11 +1,11 @@
-// 价格审批 / PO 工作台的纯函数：页面选择、PR 占用、比价矩阵、供应商报价草稿校验、PO 合同阶段与关闭条件。
+// 价格审批 / PO 工作台的纯函数：页面选择、PR 占用、比价矩阵、供应商报价草稿校验、PO 演示员工116阶段与关闭条件。
 // 页面只做展示和调用接口，业务判断都放在这里，方便单测。
 
 export const API = 'rayher_hr_payroll.api.procurement_chain.';
 export const DEFAULT_CONTRACT_ENTITY = '示例企业032有限公司';
 export const PAYMENT_STAGES = ['预付款', '到货款', '尾款', '到货后全额付款'];
 export const INVOICE_REQUIREMENTS = ['付款前提供', '付款后提供', '无需发票'];
-export const TRIGGER_SUGGESTIONS = ['合同生效', '全部到货', '全部到货并验收通过', '验收通过'];
+export const TRIGGER_SUGGESTIONS = ['演示员工116生效', '全部到货', '全部到货并验收通过', '验收通过'];
 export const MIN_SUPPLIER_SLOTS = 3;
 export const PO_EDITABLE = ['草稿', '待采购确认'];
 export const PAYMENT_PAGE = '/approval/procurement-payment';
@@ -82,7 +82,7 @@ export function approvalTone(status) {
 export function poTone(status) {
   if (status === '已关闭') return 'jade';
   if (status === '已取消') return 'red';
-  if (['草稿', '待采购确认', '待合同复核'].includes(status)) return 'sun';
+  if (['草稿', '待采购确认', '待演示员工116复核'].includes(status)) return 'sun';
   if (['待电子用印', '到货验收中', '付款中'].includes(status)) return 'cobalt';
   if (['已生效', '供应商制作中'].includes(status)) return 'brand';
   return 'gray';
@@ -131,7 +131,7 @@ export function tabsFor({ canPrice, canPo, counts = {} }) {
   return [
     ...(canPrice ? [{ key: 'source', label: 'PR 待比价物料', count: counts.source || 0 }] : []),
     ...(canPrice ? [{ key: 'approvals', label: '价格审批单', count: counts.approvals || 0 }] : []),
-    ...(canPo ? [{ key: 'po', label: 'PO 与合同', count: counts.po || 0 }] : []),
+    ...(canPo ? [{ key: 'po', label: 'PO 与演示员工116', count: counts.po || 0 }] : []),
   ];
 }
 
@@ -328,7 +328,7 @@ export function latestDelivery(group) {
   return dates.length ? dates[dates.length - 1] : '';
 }
 
-// 副总经理选定供应商后的后果：没报价的物料退回 PR；一张价格审批单只生成一张 PO。
+// 演示员工113经理选定供应商后的后果：没报价的物料退回 PR；一张价格审批单只生成一张 PO。
 export function selectionConsequence(approval, group) {
   if (!group) return null;
   const lines = approval?.lines || [];
@@ -345,7 +345,7 @@ export function approvalGuide(approval, { canEdit = false } = {}) {
       tone: 'sun',
       text: canEdit
         ? '草稿：录入各家报价和商务条件，写好"采购比价总结"后提交。提交会重新占用 PR 数量，如果这期间数量被别人用了，会提交失败。'
-        : '草稿：采购正在录入各家报价，提交后才进入副总经理审批。',
+        : '草稿：采购正在录入各家报价，提交后才进入演示员工113经理审批。',
     };
   }
   if (status === '待审批' && approval?.can_select_quote) {
@@ -359,7 +359,7 @@ export function approvalGuide(approval, { canEdit = false } = {}) {
     };
   }
   if (status === '待审批') {
-    return { tone: 'cobalt', text: '已提交，等待副总经理审批。撤回修改会释放占用的 PR 数量，退回草稿；之后重新提交时数量如被占用会失败。' };
+    return { tone: 'cobalt', text: '已提交，等待演示员工113经理审批。撤回修改会释放占用的 PR 数量，退回草稿；之后重新提交时数量如被占用会失败。' };
   }
   if (status === '已取消') return { tone: 'gray', text: '价格审批单已取消，物料数量已释放回 PR。' };
   if (status === '已通过' || status === '已转PO') return { tone: 'jade', text: '价格审批已通过，已按成交供应商生成 PO；没报价的物料已退回 PR。' };
@@ -382,7 +382,7 @@ export function approvalTimeline(approval) {
   }];
   const steps = approval?.steps || [];
   if (!steps.length) {
-    items.push({ key: 'vp', label: '价格审批：副总经理', state: 'todo', sub: draft ? '未开始' : '', note: '' });
+    items.push({ key: 'vp', label: '价格审批：演示员工113经理', state: 'todo', sub: draft ? '未开始' : '', note: '' });
     return items;
   }
   steps.forEach((step) => {
@@ -561,7 +561,7 @@ export function isPoDraft(po) {
   return PO_EDITABLE.includes(po?.status);
 }
 
-// 合同办理走到哪：draft(PO 草稿) -> fill(补充合同信息) -> review(草稿待复核) -> seal(待电子用印) -> effective(已生效)。
+// 演示员工116办理走到哪：draft(PO 草稿) -> fill(补充演示员工116信息) -> review(草稿待复核) -> seal(待电子用印) -> effective(已生效)。
 export function contractMode(po) {
   if (!po) return 'draft';
   if (po.status === '已取消') return 'cancelled';
@@ -574,10 +574,10 @@ export function contractMode(po) {
 }
 
 export const CONTRACT_STEPS = [
-  { label: '补充信息', sub: '供应商全称、合同交期' },
-  { label: '复核合同', sub: '采购核对合同草稿' },
-  { label: '电子用印', sub: '副总经理用印' },
-  { label: '合同生效', sub: '制作 · 到货 · 验收 · 付款' },
+  { label: '补充信息', sub: '供应商全称、演示员工116交期' },
+  { label: '复核演示员工116', sub: '采购核对演示员工116草稿' },
+  { label: '电子用印', sub: '演示员工113经理用印' },
+  { label: '演示员工116生效', sub: '制作 · 到货 · 验收 · 付款' },
 ];
 
 export function contractStepper(po) {
@@ -596,9 +596,9 @@ export function poMainAction(po) {
   const mode = contractMode(po);
   const manage = Boolean(po?.can_manage_purchase);
   if (mode === 'draft') return manage ? { key: 'confirm', text: '确认 PO' } : { key: '', wait: '等待采购确认 PO' };
-  if (mode === 'fill') return manage ? { key: 'generate', text: '生成合同草稿' } : { key: '', wait: '等待采购补充合同信息' };
-  if (mode === 'review') return manage ? { key: 'review', text: '复核合同' } : { key: '', wait: '等待采购复核合同' };
-  if (mode === 'seal') return po.can_seal_contract ? { key: 'seal', text: '电子用印' } : { key: '', wait: '等待副总经理电子用印' };
+  if (mode === 'fill') return manage ? { key: 'generate', text: '生成演示员工116草稿' } : { key: '', wait: '等待采购补充演示员工116信息' };
+  if (mode === 'review') return manage ? { key: 'review', text: '复核演示员工116' } : { key: '', wait: '等待采购复核演示员工116' };
+  if (mode === 'seal') return po.can_seal_contract ? { key: 'seal', text: '电子用印' } : { key: '', wait: '等待演示员工113经理电子用印' };
   return { key: '', wait: '' };
 }
 
@@ -606,10 +606,10 @@ export function poNextStep(po) {
   const mode = contractMode(po);
   if (po?.status === '已关闭') return '已关闭';
   if (mode === 'cancelled') return '已取消';
-  if (mode === 'draft') return '确认合同交期，确认 PO';
-  if (mode === 'fill') return '补充合同信息，生成合同草稿';
-  if (mode === 'review') return '复核合同草稿';
-  if (mode === 'seal') return '副总经理电子用印';
+  if (mode === 'draft') return '确认演示员工116交期，确认 PO';
+  if (mode === 'fill') return '补充演示员工116信息，生成演示员工116草稿';
+  if (mode === 'review') return '复核演示员工116草稿';
+  if (mode === 'seal') return '演示员工113经理电子用印';
   return poCloseBlockers(po).length ? '到货 / 验收 / 付款进行中' : '可校验并关闭';
 }
 
@@ -664,9 +664,9 @@ export function paymentPoLink(po) {
   return name ? { path: PAYMENT_PAGE, query: { po: name } } : { path: PAYMENT_PAGE };
 }
 
-// 价格审批工作台的页面标题：三个页签共用一个页面，PO 页签要说清楚是"采购订单与合同"，不是价格审批本身。
+// 价格审批工作台的页面标题：三个页签共用一个页面，PO 页签要说清楚是"采购订单与演示员工116"，不是价格审批本身。
 export function pageTitle(tab = '') {
-  if (tab === 'po') return '价格审批 · 采购订单与合同';
+  if (tab === 'po') return '价格审批 · 采购订单与演示员工116';
   if (tab === 'source') return '价格审批 · PR 待比价物料';
   return '价格审批';
 }
@@ -679,7 +679,7 @@ export function contractFields(po) {
     { key: 'contract_contact', label: '联系人 / 电话', value: po?.contract_contact || '' },
     { key: 'contract_bank_name', label: '开户行', value: po?.contract_bank_name || '' },
     { key: 'contract_bank_account', label: '银行账号', value: po?.contract_bank_account || '', secret: true },
-    { key: 'contract_delivery_date', label: '合同交期', value: po?.contract_delivery_date || '', date: true },
+    { key: 'contract_delivery_date', label: '演示员工116交期', value: po?.contract_delivery_date || '', date: true },
   ];
 }
 
@@ -689,7 +689,7 @@ export function contractDraftFor(po) {
   return draft;
 }
 
-// 生成合同草稿接口收到的参数；没填的字段不传，服务端只更新有传入的字段。
+// 生成演示员工116草稿接口收到的参数；没填的字段不传，服务端只更新有传入的字段。
 export function contractPayload(po, draft) {
   const payload = { name: po.name, supplier_legal_name: String(draft.supplier_legal_name || '').trim() };
   ['credit_code', 'supplier_address', 'contract_contact', 'contract_bank_name', 'contract_bank_account'].forEach((key) => {
@@ -714,14 +714,14 @@ export function poTrail(po) {
   (po?.steps || []).forEach((step) => {
     if (step.acted_on) trail.push({ key: `step-${step.name || step.label}`, time: dateTime(step.acted_on), text: `${step.action_by || ''} ${step.label || ''} ${step.status || ''}`.trim() });
   });
-  if (po?.contract_reviewed_on) trail.push({ key: 'review', time: dateTime(po.contract_reviewed_on), text: `${po.contract_reviewed_by || '采购'} 复核合同` });
-  if (po?.contract_sealed_on) trail.push({ key: 'seal', time: dateTime(po.contract_sealed_on), text: `${po.contract_sealed_by || '副总经理'} 电子用印，合同生效` });
+  if (po?.contract_reviewed_on) trail.push({ key: 'review', time: dateTime(po.contract_reviewed_on), text: `${po.contract_reviewed_by || '采购'} 复核演示员工116` });
+  if (po?.contract_sealed_on) trail.push({ key: 'seal', time: dateTime(po.contract_sealed_on), text: `${po.contract_sealed_by || '演示员工113经理'} 电子用印，演示员工116生效` });
   return trail.reverse();
 }
 
 export const PO_FILTERS = [
   { key: 'all', label: '全部', match: () => true },
-  { key: 'contract', label: '合同办理中', match: (po) => ['草稿', '待采购确认', '待合同复核', '待电子用印'].includes(po.status) },
+  { key: 'contract', label: '演示员工116办理中', match: (po) => ['草稿', '待采购确认', '待演示员工116复核', '待电子用印'].includes(po.status) },
   { key: 'running', label: '执行中', match: (po) => ['已生效', '供应商制作中', '到货验收中', '付款中'].includes(po.status) },
   { key: 'closed', label: '已关闭', match: (po) => ['已关闭', '已取消'].includes(po.status) },
 ];

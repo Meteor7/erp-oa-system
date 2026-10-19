@@ -9,14 +9,14 @@ import {
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const socialRow = (overrides = {}) => ({
-  name: "R1", excel_name: "员工甲", employee_name: "员工甲", company: "Rayher", employee: "E1", status: "Pending", row_type: undefined,
+  name: "R1", excel_name: "员工甲", employee_name: "员工甲", company: "QIHENG Demo", employee: "E1", status: "Pending", row_type: undefined,
   difference_reasons: "local_pension与后台计算不一致", contribution_base: 17500, reference_base: 17500,
   employee_pension: 1400, calculated_employee_pension: 1400, local_pension: 0, calculated_local_pension: 175,
   employee_total: 2000, calculated_employee_total: 2000, company_total: 4500, calculated_company_total: 4675,
   receivable_total: 6500, calculated_receivable_total: 6675, ...overrides,
 });
 const fundRow = (overrides = {}) => ({
-  name: "F1", excel_name: "员工乙", employee_name: "员工乙", company: "Rayher", employee: "E2", status: "Pending", row_type: "excel",
+  name: "F1", excel_name: "员工乙", employee_name: "员工乙", company: "QIHENG Demo", employee: "E2", status: "Pending", row_type: "excel",
   difference_reasons: "个人缴存额与后台计算不一致", contribution_base: 12400, reference_base: 12400,
   employee_amount: 620, company_amount: 868, receivable_total: 1488,
   calculated_employee_amount: 868, calculated_company_amount: 868, calculated_receivable_total: 1736, ...overrides,
@@ -144,7 +144,7 @@ test("a batch can only go live once everything is decided and every base is fill
 test("the base table flags missing bases and households, and changes against last month", () => {
   assert.equal(baseStatus({ base: null }, "fund").text, "缺基数");
   assert.equal(baseStatus({ base: 9000, household_classification: "待完善" }, "si").text, "缺户口");
-  assert.equal(baseStatus({ base: 9000, household_classification: "待完善" }, "fund").text, "正常");
+  assert.equal(baseStatus({ base: 9000, household_classification: "待完善" }, "fund").text, "演示员工152");
   assert.equal(baseStatus({ base: 9000, prev_base: 8000 }, "fund").text, "较上月有变化");
   assert.equal(baseStatus({ base: 9000, prev_base: 9000, note: "户口未维护，无法复算" }, "si").text, "户口未维护，无法复算");
   assert.equal(missingBaseCount([{ base: null }, { base: 1, household_classification: "待完善" }, { base: 1 }], "si"), 2);

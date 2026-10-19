@@ -1,8 +1,8 @@
 """看板块：采购、PMC、生产主管。
 
 数据来源和口径（每个块的 hint 里也写了）：
-- PO 物料行（OA Purchase Order Line）：待到货 / 待验收 / 换货 / 退货 / 合同交期逾期 / 本周预计到货。只看合同已生效的 PO
-  （已生效、供应商制作中、到货验收中、付款中）——草稿 PO 的"交期"还是报价上的，不算合同交期。
+- PO 物料行（OA Purchase Order Line）：待到货 / 待验收 / 换货 / 退货 / 演示员工116交期逾期 / 本周预计到货。只看演示员工116已生效的 PO
+  （已生效、供应商制作中、到货验收中、付款中）——草稿 PO 的"交期"还是报价上的，不算演示员工116交期。
 - 到货 / 验收登记（OA PO Fulfillment Record）：本月已到货、本月已验收、到货后多久没验收。
 - 付款期次：直接调 `procurement_chain.list_payment_work_items`（可提交付款审批、已过计划付款日）。
 - 物料进度（OA Material Progress）：阶段分布、未编码、逾期未到、缺料影响的项目；阶段 / 逾期 / 未编码的 SQL 复用
@@ -26,10 +26,10 @@ from rayher_hr_payroll.dashboard.core import (
     alert, bar_row, bars, col_row, cols, drill, drill_row, drill_to, kpi, list_row, listing, money_wan, provider, target,
 )
 
-# 合同已生效、货还在路上或还没结清的 PO 状态（草稿 / 待确认 / 待合同复核 / 待电子用印的合同还没生效；已关闭 / 已取消不看）
+# 演示员工116已生效、货还在路上或还没结清的 PO 状态（草稿 / 待确认 / 待演示员工116复核 / 待电子用印的演示员工116还没生效；已关闭 / 已取消不看）
 EFFECTIVE_PO = ("已生效", "供应商制作中", "到货验收中", "付款中")
 STALE_INSPECT_DAYS = 7          # 到货后超过 7 天（不含）还没验收
-PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "Rayher Business Executive"}
+PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "QIHENG Demo Business Executive"}
 PO_VIEW_ROLES = {"Accounts User", "Finance User"} | PRICE_VIEW_ROLES
 # 持有这些岗位的人本来就合法看采购 / 付款金额；只持有 pmc / 生产主管岗位的人不给金额
 MONEY_POSITIONS = ("procurement_manager", "vice_manager", "general_manager",
@@ -57,7 +57,7 @@ def _can_open_requests(ctx):
 
 
 def _has_chain_view(ctx):
-    """= procurement_chain._require_view：PMC、采购经理、副总、采购角色、系统管理员（价格审批 / PR 的查看权）。"""
+    """= procurement_chain._require_view：PMC、采购经理、演示员工113、采购角色、系统演示员工170（价格审批 / PR 的查看权）。"""
     return ctx.holds("pmc", "procurement_manager", "vice_manager") or ctx.can("System Manager", *PRICE_VIEW_ROLES)
 
 
@@ -68,13 +68,13 @@ def _has_po_view(ctx):
 
 
 def _has_board(ctx):
-    """= material_progress.can_access_board：PMC、采购经理、副总、总经理、系统管理员。"""
+    """= material_progress.can_access_board：PMC、采购经理、演示员工113、总经理、系统演示员工170。"""
     return (ctx.user.strip().lower() == "administrator" or ctx.can("System Manager")
             or ctx.holds("pmc", "procurement_manager", "vice_manager", "general_manager"))
 
 
 def _money_blocked(ctx):
-    """PMC / 生产主管不给金额：持有 pmc 或生产主管岗位、又没有任何一个本来就看金额的岗位（采购经理、副总、总经理、财务）。
+    """PMC / 生产主管不给金额：持有 pmc 或生产主管岗位、又没有任何一个本来就看金额的岗位（采购经理、演示员工113、总经理、财务）。
     不能只看角色——PMC 带着 Purchase User 角色，现有的 `_can_view_procurement_financial` 之类会把他当财务。"""
     if ctx.can("System Manager") or ctx.holds(*MONEY_POSITIONS):
         return False
@@ -156,7 +156,7 @@ def _po_open(ctx, po):
 
 # ---------------------------------------------------------------- 数据读取（测试里整体替换；每个函数同一请求只跑一次）
 def _load_live_lines():
-    """合同已生效的 PO 的物料行。"""
+    """演示员工116已生效的 PO 的物料行。"""
     pos = frappe.get_all("OA Purchase Order", filters={"status": ["in", list(EFFECTIVE_PO)]},
                          fields=["name", "status", "supplier"], limit_page_length=0)
     if not pos:
@@ -292,7 +292,7 @@ def _load_await_pr():
 
 
 def _load_uncoded():
-    """物料进度里还没编码的物料行：状态正常、源单没被拒绝 / 撤回、物料编号为空。
+    """物料进度里还没编码的物料行：状态演示员工152、源单没被拒绝 / 撤回、物料编号为空。
     条件是物料进度页 ?uncoded=1 用的同一句 SQL（material_progress_query.UNCODED_SQL），点进去条数一样。"""
     from rayher_hr_payroll.material_progress_query import FROM_SQL, UNCODED_SQL
 
@@ -301,7 +301,7 @@ def _load_uncoded():
 
 
 def _load_overdue_materials(today):
-    """逾期未到的物料（物料进度的一行 = 采购申请的一行）：[{name, request, line, project, item, due}]，due = 逾期 PO 行里最早的合同交期。
+    """逾期未到的物料（物料进度的一行 = 采购申请的一行）：[{name, request, line, project, item, due}]，due = 逾期 PO 行里最早的演示员工116交期。
     条件是物料进度页 ?overdue=1 用的同一句 SQL（material_progress_query.overdue_sql），点进去条数一样。"""
     from rayher_hr_payroll.material_progress_query import FROM_SQL, overdue_due_sql, overdue_sql
 
@@ -377,7 +377,7 @@ def _received(row):
 
 
 def classify(rows, today):
-    """把合同已生效的 PO 物料行分到各个口径里（同一行可以同时算"待到货"和"待验收"：部分到货）。"""
+    """把演示员工116已生效的 PO 物料行分到各个口径里（同一行可以同时算"待到货"和"待验收"：部分到货）。"""
     out = {name: [] for name in ("transit", "to_arrive", "to_inspect", "exchange", "returning", "overdue", "week")}
     monday = today - timedelta(days=today.weekday())
     week = (monday.isoformat(), (monday + timedelta(days=6)).isoformat())
@@ -551,7 +551,7 @@ def _by_po(rows):
 
 
 def _po_list_drill(ctx, key, title, rows, note="", tone_of=None):
-    """按 PO 一行：PO | 供应商 | 状态 | 物料 | 最近合同交期。"""
+    """按 PO 一行：PO | 供应商 | 状态 | 物料 | 最近演示员工116交期。"""
     grouped = _by_po(rows)
 
     def first_due(items):
@@ -565,7 +565,7 @@ def _po_list_drill(ctx, key, title, rows, note="", tone_of=None):
         late = _days_since(ctx, due) if due and due < ctx.today else 0
         out.append(drill_row([po, first["supplier"] or "—", first["po_status"], f"{len(items)} 项", due or "未填", f"{late} 天" if late else "—"],
                              _po_open(ctx, po), tone=(tone_of(late) if tone_of else "")))
-    return drill(key, title, [("PO",), ("供应商",), ("状态",), ("物料", "r"), ("最近合同交期", "r"), ("已逾期", "r")], out,
+    return drill(key, title, [("PO",), ("供应商",), ("状态",), ("物料", "r"), ("最近演示员工116交期", "r"), ("已逾期", "r")], out,
                  summary=f"共 {len(grouped)} 个 PO，{len(rows)} 项物料", note=note)
 
 
@@ -577,13 +577,13 @@ def _line_drill(ctx, key, title, rows, columns, cells, note="", tone_of=None, su
 @provider("drill.proc.po_transit", "drill", visible=_po_ok, title="PO 在途")
 def drill_po_transit(ctx):
     return _po_list_drill(ctx, "drill.proc.po_transit", "在途的 PO", _lines(ctx)["transit"],
-                          note="合同已生效、还有物料没收齐的 PO；“物料”是还没收齐的项数。")
+                          note="演示员工116已生效、还有物料没收齐的 PO；“物料”是还没收齐的项数。")
 
 
 @provider("drill.proc.po_overdue", "drill", visible=_po_ok, title="交期已逾期的 PO")
 def drill_po_overdue(ctx):
     return _po_list_drill(ctx, "drill.proc.po_overdue", "交期已逾期的 PO", _lines(ctx)["overdue"],
-                          note="合同交期早于今天、还没收齐的物料所在的 PO；红色 = 逾期超过 7 天。", tone_of=lambda late: "bad" if late > 7 else "warn")
+                          note="演示员工116交期早于今天、还没收齐的物料所在的 PO；红色 = 逾期超过 7 天。", tone_of=lambda late: "bad" if late > 7 else "warn")
 
 
 @provider("drill.proc.week_arrive", "drill", visible=_po_ok, title="本周预计到货")
@@ -595,17 +595,17 @@ def drill_week_arrive(ctx):
         weekday = date.fromisoformat(due).weekday()
         return [f"{due[5:]} 周{WEEKDAYS[weekday]}", row["po"], row["item"] or "—", _qty(row), row["project"] or "—"]
     return _line_drill(ctx, "drill.proc.week_arrive", "本周预计到货的物料", _sorted_days(_lines(ctx)["week"]),
-                       [("合同交期",), ("PO",), ("物料",), ("已到 / 订购", "r"), ("项目",)], cells,
+                       [("演示员工116交期",), ("PO",), ("物料",), ("已到 / 订购", "r"), ("项目",)], cells,
                        tone_of=lambda row: "bad" if _iso(row["due"]) < today else ("warn" if _iso(row["due"]) == today else ""),
-                       note="合同交期落在本周（周一到周日）、还没收齐的物料；红色 = 交期已过还没到，黄色 = 今天。")
+                       note="演示员工116交期落在本周（周一到周日）、还没收齐的物料；红色 = 交期已过还没到，黄色 = 今天。")
 
 
 @provider("drill.proc.to_arrive", "drill", visible=_po_ok, title="待登记到货")
 def drill_to_arrive(ctx):
     return _line_drill(ctx, "drill.proc.to_arrive", "待登记到货的物料", _sorted_days(_lines(ctx)["to_arrive"]),
-                       [("PO",), ("物料",), ("已到 / 订购", "r"), ("合同交期", "r"), ("项目",)],
+                       [("PO",), ("物料",), ("已到 / 订购", "r"), ("演示员工116交期", "r"), ("项目",)],
                        lambda row: [row["po"], row["item"] or "—", _qty(row), _iso(row["due"]) or "未填", row["project"] or "—"],
-                       note="合同已生效的 PO 里，到货数量还不够的物料行（退货中的不算）。")
+                       note="演示员工116已生效的 PO 里，到货数量还不够的物料行（退货中的不算）。")
 
 
 @provider("drill.proc.to_inspect", "drill", visible=_po_ok, title="待验收")
@@ -787,7 +787,7 @@ def drill_risk_projects(ctx):
                              target("material.overdue", project=name), tone="bad" if worst > 7 else "warn"))
     return drill("drill.proc.risk_projects", "缺料影响的项目", [("项目",), ("逾期物料", "r"), ("最久逾期", "r"), ("物料",)], out,
                  summary=f"共 {len(ranked)} 个项目",
-                 note="有物料超过合同交期还没到的项目（项目取物料进度看板上的项目）；红色 = 最久逾期超过 7 天；项目为空的不列。点一行看这个项目的逾期物料。")
+                 note="有物料超过演示员工116交期还没到的项目（项目取物料进度看板上的项目）；红色 = 最久逾期超过 7 天；项目为空的不列。点一行看这个项目的逾期物料。")
 
 
 @provider("drill.proc.await_pr", "drill", visible=_chain_ok, title="待提 PR 的申请")
@@ -823,7 +823,7 @@ def drill_price_missing_quote(ctx):
            for name, count in sorted(unquoted.items(), key=lambda item: (-item[1], item[0]))]
     return drill("drill.proc.price_missing_quote", "有物料没有报价的价格审批单", [("价格审批单",), ("没有报价的物料", "r")], out,
                  summary=f"共 {len(unquoted)} 张，{sum(unquoted.values())} 项物料",
-                 note="已提交（待审批）的价格审批单里，一个供应商报价都没有的物料行；副总没法给这些物料选供应商。")
+                 note="已提交（待审批）的价格审批单里，一个供应商报价都没有的物料行；演示员工113没法给这些物料选供应商。")
 
 
 @provider("drill.proc.arrival_inspect", "drill", visible=_po_ok, title="到货与验收")
@@ -849,7 +849,7 @@ def drill_arrival_inspect(ctx):
     summary = (f"本月已到货 {len(arrived)} 项 · 本月已验收通过 {len(passed)} 项 · 待验收 {len(data['to_inspect'])} 项 · "
                f"待到货 {len(data['to_arrive'])} 项")
     return drill("drill.proc.arrival_inspect", "到货与验收", [("类别",), ("PO",), ("物料",), ("日期",)], out, summary=summary,
-                 note="前两类是本月的到货、验收登记（同一 PO 的同一行只算一次）；后两类是现在还没办完的存量（合同已生效的 PO）。部分到货的物料行会同时出现在待验收和待到货里。")
+                 note="前两类是本月的到货、验收登记（同一 PO 的同一行只算一次）；后两类是现在还没办完的存量（演示员工116已生效的 PO）。部分到货的物料行会同时出现在待验收和待到货里。")
 
 
 CHAIN_STEPS = (("request", "OA 申请"), ("pr", "PR"), ("po", "PO"), ("payment", "付款期次"))
@@ -887,11 +887,11 @@ URGENT_STUCK_DAYS = 3           # “没动静”= 超过 3 天（不含 3 天�
 
 
 def _urgent_ok(ctx):
-    """加急采购清单：采购链路的人、副总、总经理（管理层角色）。
+    """加急采购清单：采购链路的人、演示员工113、总经理（管理层角色）。
     清单每一行点进申请详情，详情按角色给读权限（oa_access._can_read）：只持有岗位、没有采购 / 管理层角色的人打不开，
     所以也不给看这张清单（2026-10-13：可见范围对齐到“点得开”，没有另外给岗位开读权限）。"""
     return ((ctx.holds("general_manager", "vice_manager", "procurement_manager", "pmc")
-             or ctx.can("System Manager", "Rayher Business Executive"))
+             or ctx.can("System Manager", "QIHENG Demo Business Executive"))
             and _can_open_requests(ctx) and _gate_open(ctx, "chain"))
 
 
@@ -1002,7 +1002,7 @@ def _kpi_urgent(ctx):
         parts.append(f"{len(stuck)} 张超过 {URGENT_STUCK_DAYS} 天没动静")
     if late:
         parts.append(f"{len(late)} 张已过期望到货日")
-    return kpi("proc.urgent", "加急采购在途", len(items), "张", _now_sub(ctx, " · ".join(parts) if parts else ("都在正常推进" if items else "")),
+    return kpi("proc.urgent", "加急采购在途", len(items), "张", _now_sub(ctx, " · ".join(parts) if parts else ("都在演示员工152推进" if items else "")),
                tone="bad" if stuck or late else ("hot" if items else ""), to=drill_to("proc.urgent", ctx) if items else None,
                hint="申请单上勾了「加急」的采购申请、购买申请，还没办完的（购买申请 = 还没付完款，采购申请 = 采购链路还没关闭）。"
                     f"“没动静”= 距离最近一次进展（审批签字；已进入采购执行的，还算 PR / 价格审批 / PO 的变动）超过 {URGENT_STUCK_DAYS} 天"
@@ -1070,7 +1070,7 @@ def _price_pending(ctx):
     to = target("price.approvals", view="approvals", status="pending", approval=names[0] if len(names) == 1 else None)
     return kpi("proc.price_pending", "价格审批中", state["pending"], "张",
                sub=_now_sub(ctx, f"另有 {state['draft']} 张还在比价（草稿）" if state["draft"] else ""), to=to,
-               hint="已提交、等副总经理终审的价格审批单。草稿是采购还在比价，没算进来。")
+               hint="已提交、等演示员工113经理终审的价格审批单。草稿是采购还在比价，没算进来。")
 
 
 @provider("proc.po_transit", "kpi", visible=_po_ok, title="PO 在途")
@@ -1079,7 +1079,7 @@ def _po_transit(ctx):
     pos = {row["po"] for row in data["transit"]}
     sub = _now_sub(ctx, f"待到货 {len(data['to_arrive'])} 项 · 待验收 {len(data['to_inspect'])} 项" if pos else "")
     return kpi("proc.po_transit", "PO 在途", len(pos), "个", sub=sub, to=drill_to("proc.po_transit", ctx) if pos else None,
-               hint="在途 = 合同已生效（已生效 / 供应商制作中 / 到货验收中 / 付款中）、还有物料没收齐的 PO。已关闭、已取消和合同还没生效的草稿 PO 不算。")
+               hint="在途 = 演示员工116已生效（已生效 / 供应商制作中 / 到货验收中 / 付款中）、还有物料没收齐的 PO。已关闭、已取消和演示员工116还没生效的草稿 PO 不算。")
 
 
 @provider("proc.po_overdue", "kpi", visible=_po_ok, title="交期已逾期的 PO")
@@ -1088,7 +1088,7 @@ def _po_overdue(ctx):
     count = len(info["pos"])
     sub = _now_sub(ctx, f"最久逾期 {max(info['pos'].values())} 天 · 共 {info['rows']} 项物料" if count else "")
     return kpi("proc.po_overdue", "交期已逾期的 PO", count, "个", sub=sub, tone="bad" if count else "", to=drill_to("proc.po_overdue", ctx) if count else None,
-               hint="合同交期早于今天、还没收齐的物料所在的 PO（只看合同已生效的 PO）。没填合同交期的物料不算逾期。")
+               hint="演示员工116交期早于今天、还没收齐的物料所在的 PO（只看演示员工116已生效的 PO）。没填演示员工116交期的物料不算逾期。")
 
 
 @provider("proc.ready_to_pay", "kpi", visible=_pay_ok, title="可提交付款审批")
@@ -1097,7 +1097,7 @@ def _ready_to_pay(ctx):
     amount = sum(item["amount"] for item in rows)
     return kpi("proc.ready_to_pay", "可提交付款审批", len(rows), "期", sub=_now_sub(ctx, f"合计 {_wan(amount)}" if rows else ""),
                tone="hot" if rows else "", to=target("procpay.work", status="可提交付款审批"),
-               hint="采购付款期次里到货 / 验收 / 合同条件都满足、还没提交付款审批的期次。")
+               hint="采购付款期次里到货 / 验收 / 演示员工116条件都满足、还没提交付款审批的期次。")
 
 
 @provider("proc.pay_planned_passed", "kpi", visible=_pay_ok, title="已过计划付款日")
@@ -1151,7 +1151,7 @@ def _uncoded(ctx):
     rows = ctx.memo("proc.uncoded", _load_uncoded)
     return kpi("proc.uncoded", "未编码物料", len(rows), "项", sub=_now_sub(ctx, "要 PMC 绑定物料编码" if rows else ""),
                tone="hot" if rows else "", to=target("material.progress", uncoded="1"),
-               hint="物料进度看板里物料编号为空的物料（状态正常，源申请没被拒绝或撤回）。点进去物料进度页只看这些。")
+               hint="物料进度看板里物料编号为空的物料（状态演示员工152，源申请没被拒绝或撤回）。点进去物料进度页只看这些。")
 
 
 @provider("proc.material_overdue", "kpi", visible=_board_ok, title="物料逾期未到")
@@ -1160,8 +1160,8 @@ def _material_overdue(ctx):
     count = len(materials)
     return kpi("proc.material_overdue", "物料逾期未到", count, "项", sub=_now_sub(ctx, f"最久逾期 {max(materials.values())} 天" if count else ""),
                tone="bad" if count else "", to=target("material.overdue"),
-               hint="物料进度看板里合同交期已过、还没收齐的物料（一行 = 采购申请的一行；只看合同已生效的 PO；退货中的算没收齐；"
-                    "没填合同交期、已取消的物料不算）。和物料进度页「交期已过未收齐」同一口径。")
+               hint="物料进度看板里演示员工116交期已过、还没收齐的物料（一行 = 采购申请的一行；只看演示员工116已生效的 PO；退货中的算没收齐；"
+                    "没填演示员工116交期、已取消的物料不算）。和物料进度页「交期已过未收齐」同一口径。")
 
 
 @provider("proc.risk_projects", "kpi", visible=_board_ok, title="缺料影响的项目")
@@ -1178,7 +1178,7 @@ def _week_arrive(ctx):
     rows = _lines(ctx)["week"]
     return kpi("proc.week_arrive", "本周预计到货", len(rows), "项", sub=_now_sub(ctx, f"来自 {_per_po(rows)} 个 PO" if rows else ""),
                to=drill_to("proc.week_arrive", ctx) if rows else None,
-               hint="合同交期落在本周（周一到周日）、还没收齐的物料；本周已经过了交期的也在里面（同时算进逾期）。")
+               hint="演示员工116交期落在本周（周一到周日）、还没收齐的物料；本周已经过了交期的也在里面（同时算进逾期）。")
 
 
 @provider("proc.to_arrive", "kpi", visible=_po_ok, title="待到货")
@@ -1186,7 +1186,7 @@ def _to_arrive(ctx):
     rows = _lines(ctx)["to_arrive"]
     return kpi("proc.to_arrive", "待登记到货", len(rows), "项", sub=_now_sub(ctx, f"来自 {_per_po(rows)} 个 PO" if rows else ""),
                tone="hot" if rows else "", to=drill_to("proc.to_arrive", ctx) if rows else None,
-               hint="合同已生效的 PO 里，到货数量还不够的物料行（退货中的不算，单独在「退货中」）。部分到货的行会同时算在待验收里。")
+               hint="演示员工116已生效的 PO 里，到货数量还不够的物料行（退货中的不算，单独在「退货中」）。部分到货的行会同时算在待验收里。")
 
 
 @provider("proc.to_inspect", "kpi", visible=_po_ok, title="待验收")
@@ -1203,14 +1203,14 @@ def _to_inspect(ctx):
 def _exchange(ctx):
     rows = _lines(ctx)["exchange"]
     return kpi("proc.exchange", "换货中", len(rows), "项", sub=_now_sub(ctx, "等供应商补发" if rows else ""), tone="warn" if rows else "",
-               to=drill_to("proc.exchange", ctx) if rows else None, hint="验收结果为「换货中」的物料行（合同已生效的 PO）。")
+               to=drill_to("proc.exchange", ctx) if rows else None, hint="验收结果为「换货中」的物料行（演示员工116已生效的 PO）。")
 
 
 @provider("proc.return", "kpi", visible=_po_ok, title="退货中")
 def _return(ctx):
     rows = _lines(ctx)["returning"]
     return kpi("proc.return", "退货中", len(rows), "项", sub=_now_sub(ctx, "等货退回供应商" if rows else ""), tone="warn" if rows else "",
-               to=drill_to("proc.return", ctx) if rows else None, hint="验收结果为「退货中」的物料行（合同已生效的 PO）。")
+               to=drill_to("proc.return", ctx) if rows else None, hint="验收结果为「退货中」的物料行（演示员工116已生效的 PO）。")
 
 
 def _month_counts(ctx):
@@ -1241,7 +1241,7 @@ def _alert_po_overdue(ctx):
     if not pos:
         return None
     worst = max(pos, key=lambda name: pos[name])
-    return alert("alert.po_overdue", "bad" if pos[worst] > 7 else "warn", f"{len(pos)} 个 PO 已过合同交期还没收齐",
+    return alert("alert.po_overdue", "bad" if pos[worst] > 7 else "warn", f"{len(pos)} 个 PO 已过演示员工116交期还没收齐",
                  sub=f"最久逾期 {pos[worst]} 天（{worst}）", go="逾期的 PO", to=drill_to("proc.po_overdue", ctx))
 
 
@@ -1264,7 +1264,7 @@ def _alert_price_missing_quote(ctx):
     only = next(iter(unquoted)) if len(unquoted) == 1 else None
     to = target("price.approvals", view="approvals", approval=only) if only else drill_to("proc.price_missing_quote", ctx)
     return alert("alert.price_missing_quote", "warn", f"{len(unquoted)} 张待审批的价格审批单有物料没有报价",
-                 sub=f"共 {lines} 项物料一个报价都没有，副总没法选供应商", go="价格审批", to=to)
+                 sub=f"共 {lines} 项物料一个报价都没有，演示员工113没法选供应商", go="价格审批", to=to)
 
 
 @provider("alert.uncoded", "alert", visible=_board_ok, title="物料未编码")
@@ -1292,7 +1292,7 @@ def _alert_material_overdue(ctx):
     if not materials:
         return None
     worst = max(materials.values())
-    return alert("alert.material_overdue", "bad" if worst > 7 else "warn", f"{len(materials)} 项物料超过合同交期还没到",
+    return alert("alert.material_overdue", "bad" if worst > 7 else "warn", f"{len(materials)} 项物料超过演示员工116交期还没到",
                  sub=f"最久逾期 {worst} 天", go="物料进度", to=target("material.overdue"))
 
 
@@ -1326,7 +1326,7 @@ def _block_arrival_inspect(ctx):
     return bars("block.arrival_inspect", "到货与验收", [bar_row(label, value, value / peak * 100, tone) for label, value, tone in rows],
                 sub="物料行 · 前两项是本月登记，后两项是当前存量", more="逐条看" if any(value for _, value, _ in rows) else "",
                 to=drill_to("proc.arrival_inspect", ctx) if any(value for _, value, _ in rows) else None,
-                hint="已到货 / 已验收通过按本月的到货、验收登记数物料行；待验收、待到货是现在还没办完的存量（合同已生效的 PO）。")
+                hint="已到货 / 已验收通过按本月的到货、验收登记数物料行；待验收、待到货是现在还没办完的存量（演示员工116已生效的 PO）。")
 
 
 @provider("block.proc_suppliers", "block", visible=_money_ok, title="本月采购金额 · 供应商")
@@ -1381,7 +1381,7 @@ def _block_risk_projects(ctx):
                              to=target("material.overdue", project=name)))
     return listing("block.risk_projects", "缺料影响的项目", rows, sub="逾期未到的物料", to=drill_to("proc.risk_projects", ctx) if ranked_all else None,
                    more=f"还有 {len(ranked_all) - len(ranked)} 个项目" if len(ranked_all) > len(ranked) else "",
-                   hint="按项目汇总合同交期已过、还没收齐的物料（物料进度看板的行，项目取看板上的项目）；红色 = 最久逾期超过 7 天；项目为空的不列。"
+                   hint="按项目汇总演示员工116交期已过、还没收齐的物料（物料进度看板的行，项目取看板上的项目）；红色 = 最久逾期超过 7 天；项目为空的不列。"
                         "点一行到物料进度页只看这个项目的逾期物料。")
 
 
@@ -1398,9 +1398,9 @@ def _block_week_schedule(ctx):
         weekday = date.fromisoformat(day).weekday()
         tone = "bad" if day < ctx.today else ("warn" if day == ctx.today else "")
         rows.append(list_row(f"{day[5:]} 周{WEEKDAYS[weekday]}", sub=sub, value=f"{len(items)} 项", tone=tone))
-    return listing("block.week_schedule", "本周预计到货", rows, sub="按合同交期 · 物料行" if rows else "本周没有预计到货的物料",
+    return listing("block.week_schedule", "本周预计到货", rows, sub="按演示员工116交期 · 物料行" if rows else "本周没有预计到货的物料",
                    to=drill_to("proc.week_arrive", ctx) if rows else None,
-                   hint="合同交期落在本周（周一到周日）、还没收齐的物料，按日期排；红色 = 交期已过还没到，黄色 = 今天。")
+                   hint="演示员工116交期落在本周（周一到周日）、还没收齐的物料，按日期排；红色 = 交期已过还没到，黄色 = 今天。")
 
 
 # ================================================================ 图表块：日程、账龄、趋势（2026-10-12 按岗位看板方案补）
@@ -1423,8 +1423,8 @@ def _block_week_cols(ctx):
     peak = max(counts.values()) or 1
     rows = [col_row(f"周{WEEKDAYS[offset]}", counts[day], _pct(counts[day], peak), day == today.isoformat())
             for offset, day in enumerate(sorted(counts))]
-    return cols("block.week_cols", "本周到货日程", rows, sub="预计到货的物料行 · 按合同交期", more="本周明细", to=drill_to("proc.week_arrive", ctx),
-                hint="合同交期落在本周（周一到周日）、还没收齐的物料，按天数；今天标橙；已过交期的也在里面（同时算进逾期）。")
+    return cols("block.week_cols", "本周到货日程", rows, sub="预计到货的物料行 · 按演示员工116交期", more="本周明细", to=drill_to("proc.week_arrive", ctx),
+                hint="演示员工116交期落在本周（周一到周日）、还没收齐的物料，按天数；今天标橙；已过交期的也在里面（同时算进逾期）。")
 
 
 def _age_groups(days_list, edges):
@@ -1458,7 +1458,7 @@ def _block_overdue_aging(ctx):
     peak = max(count for _label, count in groups) or 1
     rows = [bar_row(label, count, _pct(count, peak), "bad" if label.startswith("超过") and count else "") for label, count in groups]
     return bars("block.overdue_aging", "逾期了多久", rows, sub="物料（物料进度看板的行）", to=target("material.overdue"),
-                hint="合同交期已过、还没收齐的物料，按逾期天数分档（从最早的逾期合同交期次日起算）；加起来 = 物料进度页「交期已过未收齐」的条数。")
+                hint="演示员工116交期已过、还没收齐的物料，按逾期天数分档（从最早的逾期演示员工116交期次日起算）；加起来 = 物料进度页「交期已过未收齐」的条数。")
 
 
 def _trend(ctx):
@@ -1521,5 +1521,5 @@ def _block_pay_next30(ctx):
     peak = max(totals.values()) or 1
     rows = [col_row(label, _wan(totals[label]), _pct(totals[label], peak), label == "已过计划日" and totals[label] > 0) for label in PAY_WEEK_LABELS]
     return cols("block.pay_next30", "未来 30 天要付多少", rows, sub="采购付款，按计划付款日 · 周一到周日算一周", more="付款期次", to=drill_to("proc.pay_plan", ctx),
-                hint="采购付款期次里还没付清的金额（合同金额 − 已付），按计划付款日分档：本周 = 今天到本周日，下周、第 3 周、第 4 周都是周一到周日"
+                hint="采购付款期次里还没付清的金额（演示员工116金额 − 已付），按计划付款日分档：本周 = 今天到本周日，下周、第 3 周、第 4 周都是周一到周日"
                      "（和「本周预计到货」同一个“周”）；已过计划日的标橙；没填计划日的单独一栏。报销单、付款单没有计划日，不在这里。")

@@ -75,8 +75,8 @@ def _eligible_employee_rows(period_start=None, **extra) -> list:
     rows = [row for row in rows if str(_value(row, "user_id") or "").strip().lower() not in TIMESHEET_EXEMPT_USERS]
     if not period_start:
         return rows
-    # 修复（2026-09-29，审查 X3-6）：离职员工在离职当天就被停用，离职当月的工时再也登记不进去，
-    # 工资却照发。按月份看时，离职日期落在这个月或以后的离职员工仍然可以查看和补登。
+    # 修复（2026-09-29，审查 X3-6）：演示员工166员工在演示员工166当天就被停用，演示员工166当月的工时再也登记不进去，
+    # 工资却照发。按月份看时，演示员工166日期落在这个月或以后的演示员工166员工仍然可以查看和补登。
     kept = []
     for row in rows:
         relieved_on = _as_date(_value(row, "relieving_date"))
@@ -101,7 +101,7 @@ def _single_active_linked_rd_employee() -> str:
 def _team_research_names(manager: str, period_start=None) -> list[str]:
     """部门主管团队里的研发人员：汇报关系向下（直接和间接下属，下属在哪个部门都算），决定 2026-10-12。
 
-    按月份看时带上本月离职的人（和 _eligible_employee_rows 的规则一致）。
+    按月份看时带上本月演示员工166的人（和 _eligible_employee_rows 的规则一致）。
     """
     from rayher_hr_payroll.team_scope import team_names
 
@@ -148,7 +148,7 @@ def _require_monthly_employee(employee: str, mode: str, period_start=None) -> No
     if scope is not None and employee not in scope:
         frappe.throw(frappe._("您无权查看或登记该员工的工时。"))
     if mode == "edit" and not _eligible_employee_rows(period_start, name=employee):
-        frappe.throw(frappe._("只能为在职研发员工登记工时；已离职的只能补登离职当月及以前的工时。"))
+        frappe.throw(frappe._("只能为在职研发员工登记工时；已演示员工166的只能补登演示员工166当月及以前的工时。"))
 
 
 def _employees_for_scope(scope: list[str] | None, period_start=None) -> list:
@@ -162,7 +162,7 @@ def _employees_for_scope(scope: list[str] | None, period_start=None) -> list:
 def _monthly_summary_employee_filter(employee=None, period_start=None, employees=None):
     """查询工时记录时的员工范围。
 
-    修复（2026-10-13）：原来不带月份算范围（只有在职的人），部门主管看这个月时，本月离职的下属明明在填报名单里，
+    修复（2026-10-13）：原来不带月份算范围（只有在职的人），部门主管看这个月时，本月演示员工166的下属明明在填报名单里，
     他填的工时却查不出来，填报进度里显示成“一点没填”。现在按月份算范围（和名单同一个规则）；
     employees 给了（填报进度的名单）就直接按名单查，调用方已经按身份定好了范围。
     """
@@ -885,7 +885,7 @@ def _fill_rows(year: int, month: int, scope) -> list[dict]:
         )
     }
     used = {}
-    # 已填的工时按名单里的人查（名单含本月离职的人），不再另算一次范围。
+    # 已填的工时按名单里的人查（名单含本月演示员工166的人），不再另算一次范围。
     for row in _merge_monthly_entry_rows(
         _query_monthly_entries(period_text, employees=names), _query_legacy_monthly_entries(period_text, employees=names), period_text
     ):
@@ -959,7 +959,7 @@ def get_fill_progress(period):
 def remind_timesheet_fill(period, employees):
     require_rd_access(RD_MONTHLY_VIEW_ROLES)
     if not _roles() & FILL_REMIND_ROLES:
-        frappe.throw(frappe._("只有部门主管、人事或管理员可以催办填报。"))
+        frappe.throw(frappe._("只有部门主管、人事或演示员工170可以催办填报。"))
     year, month = parse_period(period)
     period_text = _canonical_period(year, month)
     start = _period_start(year, month)

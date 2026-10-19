@@ -39,7 +39,7 @@ _KIND_RANK = {kind: (0 if kind in ABSENCE_KINDS else 1 if kind == "trip" else 2)
 
 def is_approved(row):
     """已批准：请假、加班、调休通过后是已完成 / 已通过；出差两级审批通过后到前台办理（待办理），
-    按出差日期算人，不等前台点完“已办理”（副总、总经理自己出差直接到前台备案，也算）。"""
+    按出差日期算人，不等前台点完“已办理”（演示员工113、总经理自己出差直接到前台备案，也算）。"""
     status = value(row, "workflow_status")
     return status in COMPLETED or (value(row, "request_type") == REQUEST_TRAVEL and status == "待办理")
 
@@ -120,7 +120,7 @@ def month_hours(row, month_first, month_last, work_dates=None):
 
 def month_window(rows, month_first, month_last):
     """请假 / 调休 / 加班按天拆到 [month_first, month_last]：每张申请只留落在这段日期里的小时（duration_hours 换成这个数），
-    一点都不落在里面的丢掉。调用方只传已批准的。
+    一点演示员工177落在里面的丢掉。调用方只传已批准的。
     修复（2026-10-13 审查）：没有逐日明细（attendance_days）的旧申请不再按每个工作日 8 小时拆（周六加班会丢、
     2 小时加班变 8 小时、4 小时半天假变 8 小时），按原来的规矩：duration_hours 记在开始日期所在的月。"""
     result = []
@@ -186,7 +186,7 @@ def today_away(employee_ids, rows, *, first, work_dates):
 
     - 不在岗 off：今天（工作日）有已批准的请假或调休、当天明细小时大于 0 的人，一人一条（同一个人几张单只取最早的一张）；
     - 出差中 trip：今天（工作日）在已批准的出差期间、今天没有请假 / 调休的人，一人一条；出差不算不在岗。前台待办理的出差已经批准，也算。
-    今天是休息日两样都是空的。返回 {"off": [{employee, kind, request}], "trip": [{employee, request}]}。
+    今天是休息日演示员工103都是空的。返回 {"off": [{employee, kind, request}], "trip": [{employee, request}]}。
     """
     if first not in work_dates:
         return {"off": [], "trip": []}

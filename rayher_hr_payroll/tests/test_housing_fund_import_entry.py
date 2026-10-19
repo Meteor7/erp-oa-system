@@ -40,7 +40,7 @@ def test_a_row_stores_the_excel_figures_next_to_the_recalculation(monkeypatch):
     batch = SimpleNamespace(name="HFB-1", period="2026-10")
     row = {"row_number": 1, "source_row": 5, "excel_name": "员工", "identity_number": "110101199001010070",
            "contribution_base": Decimal("10000"), "employee_amount": Decimal("700"), "company_amount": Decimal("700")}
-    result = {"employee": "EMP-1", "employee_name": "员工", "company": "Rayher", "status": "Matched", "original_match_status": "Matched",
+    result = {"employee": "EMP-1", "employee_name": "员工", "company": "QIHENG Demo", "status": "Matched", "original_match_status": "Matched",
               "reference_base": Decimal("10000"), "base_source": "员工默认基数", "reference_employee_rate": Decimal("7"), "reference_company_rate": Decimal("7"),
               "calculated": {"employee_amount": Decimal("700"), "company_amount": Decimal("700")}, "difference_total": Decimal("0")}
     values = mod._row_values(batch, row, result)
@@ -51,7 +51,7 @@ def test_a_row_stores_the_excel_figures_next_to_the_recalculation(monkeypatch):
 
 def test_a_person_missing_from_the_file_becomes_a_pending_row_with_their_expected_amounts(monkeypatch):
     mod, _frappe = _load(monkeypatch)
-    employee = {"name": "EMP-2", "employee_name": "员工乙", "company": "Rayher", "housing_fund_base": Decimal("10000"),
+    employee = {"name": "EMP-2", "employee_name": "员工乙", "company": "QIHENG Demo", "housing_fund_base": Decimal("10000"),
                 "housing_base_source": "员工默认基数", "employee_rate": Decimal("7"), "company_rate": Decimal("7")}
     values = mod._missing_row_values(SimpleNamespace(name="HFB-1", period="2026-10"), employee)
     assert values["row_type"] == "missing" and values["status"] == "Pending" and values["employee"] == "EMP-2"

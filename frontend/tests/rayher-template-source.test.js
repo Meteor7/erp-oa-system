@@ -7,7 +7,7 @@ const template = readFileSync(
   "utf8",
 );
 
-test("Rayher page template uses real newlines so boot role injection executes", () => {
+test("QIHENG Demo page template uses real newlines so boot role injection executes", () => {
   assert.ok(template.includes("\n"));
   assert.ok(!template.includes("\\n"));
   assert.match(template, /for key in boot/);

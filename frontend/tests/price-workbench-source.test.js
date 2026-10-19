@@ -24,10 +24,10 @@ test('the page file is a thin wrapper around the price workbench component', () 
   assert.match(router, /pages\/PriceApprovalWorkbench\.vue/);
 });
 
-test('one level of tabs with counts: PR 待比价物料 | 价格审批单 | PO 与合同', () => {
+test('one level of tabs with counts: PR 待比价物料 | 价格审批单 | PO 与演示员工116', () => {
   assert.match(view, /PR 待比价物料/);
   assert.match(view, /价格审批单/);
-  assert.match(view, /PO 与合同/);
+  assert.match(view, /PO 与演示员工116/);
   assert.match(root, /role="tablist"/);
   assert.match(root, /item\.count/);
   assert.match(root, /pendingLineCount\(prs\.value\)/);
@@ -133,7 +133,7 @@ test('comparison matrix: per-line best price, totals only between complete quote
   assert.match(matrix, /采购推荐/);
   assert.match(matrix, /已选成交/);
   assert.match(matrix, /商务条件对比/);
-  for (const label of ['付款方式', '付款计划', '币种 / 税率', '合同主体', '最晚货期', '报价说明']) assert.match(matrix, new RegExp(label));
+  for (const label of ['付款方式', '付款计划', '币种 / 税率', '演示员工116主体', '最晚货期', '报价说明']) assert.match(matrix, new RegExp(label));
   assert.match(matrix, /MIN_SUPPLIER_SLOTS/);
   assert.match(view, /MIN_SUPPLIER_SLOTS = 3/);
   assert.match(matrix, /新增供应商/);
@@ -144,7 +144,7 @@ test('comparison matrix: per-line best price, totals only between complete quote
 
 test('supplier quote drawer keeps price, delivery, payment method, payment plan, tax, entity, note and recommendation', () => {
   assert.match(drawer, /role="dialog"/);
-  for (const label of ['报价', '商务条件', '付款计划', '说明', '付款方式', '币种', '税率', '合同主体', '增加期次', '按报价总额', '采购推荐这家', '删除这家供应商', '计划付款日期', '触发条件', '发票要求', '期次', '付款阶段', '比例', '金额', '货期', '单价']) {
+  for (const label of ['报价', '商务条件', '付款计划', '说明', '付款方式', '币种', '税率', '演示员工116主体', '增加期次', '按报价总额', '采购推荐这家', '删除这家供应商', '计划付款日期', '触发条件', '发票要求', '期次', '付款阶段', '比例', '金额', '货期', '单价']) {
     assert.match(drawer, new RegExp(label));
   }
   assert.match(drawer, /CNY（暂只支持人民币）/);
@@ -161,15 +161,15 @@ test('supplier quote drawer keeps price, delivery, payment method, payment plan,
 
 test('PO tab: list, delivery dates, confirm, contract fields, review, seal, close with missing items', () => {
   assert.match(poList, /PO 总额/);
-  for (const text of ['保存合同交期', '确认 PO', '合同信息', '物料明细', '到货与验收', '校验并关闭 PO', '还差', '付款计划', '合同审批轨迹']) assert.match(poDetail + view, new RegExp(text));
-  assert.match(view, /生成合同草稿/);
-  assert.match(view, /复核合同/);
+  for (const text of ['保存演示员工116交期', '确认 PO', '演示员工116信息', '物料明细', '到货与验收', '校验并关闭 PO', '还差', '付款计划', '演示员工116审批轨迹']) assert.match(poDetail + view, new RegExp(text));
+  assert.match(view, /生成演示员工116草稿/);
+  assert.match(view, /复核演示员工116/);
   assert.match(view, /电子用印/);
   assert.match(poDetail, /po\.can_manage_purchase/);
   assert.match(view, /po\.can_seal_contract/);
   assert.match(view, /待补充信息/);
   assert.match(view, /草稿待复核/);
-  // 合同信息输入：后端接受的全部字段。
+  // 演示员工116信息输入：后端接受的全部字段。
   for (const field of ['supplier_legal_name', 'credit_code', 'supplier_address', 'contract_contact', 'contract_bank_name', 'contract_bank_account', 'contract_delivery_date']) assert.match(view, new RegExp(field));
   assert.match(poDetail, /v-model="contractDraft\[field\.key\]"/);
   assert.match(root, /actions\.savePoContract\.submit\(payload\)/);

@@ -33,7 +33,7 @@ test("everyone the server lets read all trips gets the 全部 entry: admins, HR 
   assert.equal(canSeeAllTravel(["Employee"]), false);
   assert.equal(canSeeAllTravel(["Employee", "Department Manager"]), false);
   assert.equal(canSeeAllTravel(["Accounts User", "Employee"]), false);
-  assert.equal(canSeeAllTravel(["Employee", "Rayher Business Executive"]), true);
+  assert.equal(canSeeAllTravel(["Employee", "QIHENG Demo Business Executive"]), true);
   assert.equal(canSeeAllTravel(["System Manager"]), true);
   assert.equal(canSeeAllTravel(["Employee", "HR Manager"]), true);
   assert.equal(canSeeAllTravel(["Employee", "HR User"]), true);

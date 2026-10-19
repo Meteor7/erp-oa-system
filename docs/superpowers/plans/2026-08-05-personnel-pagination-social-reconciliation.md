@@ -74,7 +74,7 @@ def household_classification(value):
 
 
 def social_policy(company, period):
-    if company == "Rayher" and str(period)[:4] == "2026":
+    if company == "QIHENG Demo" and str(period)[:4] == "2026":
         return {"version": "示例总部-2026", "medical_floor": Decimal("6727"), ...}
     return None
 ```

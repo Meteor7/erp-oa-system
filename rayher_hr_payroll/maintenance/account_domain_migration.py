@@ -1,4 +1,4 @@
-"""Idempotent migration from legacy Rayher login domains to QIHENG DEMO."""
+"""Idempotent migration from legacy QIHENG Demo login domains to QIHENG DEMO."""
 
 from __future__ import annotations
 

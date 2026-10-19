@@ -22,7 +22,7 @@ export function waitText(days) {
   return days ? `等了 ${days} 天` : '今天';
 }
 
-// 列表页和首页上的"同意"：只给普通审批步骤。出纳要先填科目、确认付款要看清金额账户，这两种进详情页做。
+// 列表页和首页上的"同意"：只给普通审批步骤。演示员工110要先填科目、确认付款要看清金额账户，这两种进详情页做。
 export function canQuickApprove(doc = {}) {
   return Boolean(doc.can_approve) && !doc.can_edit_expense_items && doc.current_step_mode !== 'handle';
 }

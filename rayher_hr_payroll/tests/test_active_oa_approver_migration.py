@@ -34,7 +34,7 @@ def test_migration_never_looks_up_mutable_display_names(monkeypatch):
 
 
 def test_migration_keeps_a_step_whose_target_account_is_missing_or_disabled(monkeypatch):
-    # 审查 #12：映射到已离职（账号停用）的人，这一步就没人能审批。
+    # 审查 #12：映射到已演示员工166（账号停用）的人，这一步就没人能审批。
     import json
     from types import SimpleNamespace
 

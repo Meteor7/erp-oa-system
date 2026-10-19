@@ -33,7 +33,7 @@ def test_account_specs_preserve_admin_system_manager_and_limit_business_executiv
 def test_active_employee_account_specs_use_stable_temporary_login_names():
     rows = [
         {"name": "HR-EMP-90009", "employee_name": "演示员工158", "user_id": ""},
-        {"name": "HR-EMP-90010", "employee_name": "已有账号", "user_id": "user@example.com"},
+        {"name": "HR-EMP-90010", "employee_name": "演示员工126", "user_id": "user@example.com"},
     ]
 
     assert bootstrap.active_employee_account_specs(rows) == [{
@@ -76,14 +76,14 @@ def test_build_account_plan_renames_legacy_user_instead_of_creating_duplicate():
             "full_name": "\u6f14\u793a\u5458\u5de529",
             "employee": "HR-EMP-90003",
             "employee_name": "\u6f14\u793a\u5458\u5de529",
-            "roles": ("Employee", "Rayher Business Executive"),
+            "roles": ("Employee", "QIHENG Demo Business Executive"),
         }
     ]
     plan = bootstrap.build_account_plan(
         specs,
         existing_users={"person058@staff.example.invalid"},
         employees={"HR-EMP-90003": {"employee_name": "\u6f14\u793a\u5458\u5de529", "status": "Active", "user_id": None}},
-        roles_by_user={"person058@staff.example.invalid": {"Rayher Business Executive"}},
+        roles_by_user={"person058@staff.example.invalid": {"QIHENG Demo Business Executive"}},
         employee_by_user={},
     )
 

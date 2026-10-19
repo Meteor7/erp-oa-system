@@ -18,7 +18,7 @@ BLOCKS = ["block.dept_headcount", "block.leave_types", "block.expiring_list", "b
           "block.dorm_split", "block.dorm_buildings", "block.dorm_lease_list", "block.pay_progress", "block.si_hf_list",
           "block.pay_by_dept"]
 ALL_KEYS = KPIS + ALERTS + BLOCKS
-# 只依赖员工表（和 overview_entry.hr_scope 一样，HR 角色或副总 / 总经理岗位可看）的块；其余的底层接口只认 HR 角色。
+# 只依赖员工表（和 overview_entry.hr_scope 一样，HR 角色或演示员工113 / 总经理岗位可看）的块；其余的底层接口只认 HR 角色。
 EMPLOYEE_TABLE_KEYS = {"hr.active", "hr.joined_left", "hr.left_month", "hr.away_today", "hr.expiring", "hr.file_pending",
                        "hr.rd_gap", "alert.probation", "alert.contract", "alert.rd_gap", "block.dept_headcount",
                        "block.leave_types", "block.expiring_list"}
@@ -42,20 +42,20 @@ def _emp(name, label, dept, **kw):
 
 
 EMPLOYEES = [
-    # 合同 10-20 到期（11 天）
+    # 演示员工116 10-20 到期（11 天）
     _emp("EMP-1", "演示员工128", "研发软件部 - RAY", rd_personnel_type="全时研发", archive_status="已归档", first_contract_end_date="2026-10-20"),
-    # 试用期 10-12 到期（3 天）；第一次合同 10-15 到期但第二次合同更晚 = 已续签，不提醒
+    # 演示员工173期 10-12 到期（3 天）；第一次演示员工116 10-15 到期但第二次演示员工116更晚 = 已续签，不提醒
     _emp("EMP-2", "演示员工143", "研发算法部 - RAY", rd_personnel_type="研发辅助", archive_status="待确认", probation_end_date="2026-10-12",
          first_contract_end_date="2026-10-15", second_contract_end_date="2028-10-15"),
-    # 本月入职；试用期还早
+    # 本月入职；演示员工173期还早
     _emp("EMP-3", "演示员工156", "客服部 - RAY", date_of_joining="2026-10-05", probation_end_date="2027-01-05"),
     # 研发部门但没设研发类型
     _emp("EMP-4", "赵四", "研发软件部 - RAY", rd_personnel_type="", archive_status="待完善"),
-    # 本月 3 号已离职
+    # 本月 3 号已演示员工166
     _emp("EMP-5", "钱五", "采购部 - RAY", status="Left", relieving_date="2026-10-03"),
-    # 本月 20 号离职，今天还在职；合同 11-20 到期（42 天）
+    # 本月 20 号演示员工166，今天还在职；演示员工116 11-20 到期（42 天）
     _emp("EMP-6", "孙六", "采购部 - RAY", relieving_date="2026-10-20", first_contract_end_date="2026-11-20", archive_status="已归档"),
-    # 早就离职
+    # 早就演示员工166
     _emp("EMP-7", "周七", "客服部 - RAY", status="Left", relieving_date="2026-03-01"),
     # 没有部门
     _emp("EMP-8", "吴八", None),
@@ -101,7 +101,7 @@ def dorm_board():
         _room("B202", rent=1800, lease_end="2027-01-01"), _room("C301", "午休室"),
     ]
     occupancies = [{"employee": "EMP-1", "employee_name": "演示员工128", "room": "A101"},
-                   {"employee": "EMP-L", "employee_name": "离职人", "room": "A102"},
+                   {"employee": "EMP-L", "employee_name": "演示员工167", "room": "A102"},
                    {"employee": "EMP-2", "employee_name": "演示员工143", "room": "B202"}]
     fees = [_fee("A101", "EMP-1", (1000, 0, 100), (300, 50, 150))]
     return dormitory_board.build_board(rooms, occupancies, ["EMP-L"], fees, PERIOD, TODAY)
@@ -191,14 +191,14 @@ def test_left_on_the_relieving_day_is_still_active():
 
 def test_expiry_window_and_renewed_first_contract():
     today = date(2026, 10, 9)
-    assert people.expiry_items({"probation_end_date": "2026-10-12"}, today) == [("试用期", date(2026, 10, 12), 3)]
+    assert people.expiry_items({"probation_end_date": "2026-10-12"}, today) == [("演示员工173期", date(2026, 10, 12), 3)]
     assert people.expiry_items({"probation_end_date": "2026-12-09"}, today) == []                                   # 61 天不在窗口里
     assert people.expiry_items({"probation_end_date": "2026-12-08"}, today)[0][2] == 60
     assert people.expiry_items({"probation_end_date": "2026-10-08"}, today) == []                                   # 已过期不提醒
-    # 第二次合同晚于第一次 = 第一次已续签；第二次早于或等于第一次才都算
+    # 第二次演示员工116晚于第一次 = 第一次已续签；第二次早于或等于第一次才都算
     assert people.expiry_items({"first_contract_end_date": "2026-10-15", "second_contract_end_date": "2028-10-15"}, today) == []
     both = people.expiry_items({"first_contract_end_date": "2026-11-15", "second_contract_end_date": "2026-10-20"}, today)
-    assert both == [("合同", date(2026, 10, 20), 11)]
+    assert both == [("演示员工116", date(2026, 10, 20), 11)]
     assert people.expiry_items({"first_contract_end_date": "2026-10-20"}, today)[0][2] == 11
 
 
@@ -222,7 +222,7 @@ def test_top_with_other_groups_the_tail():
 
 def test_summarize_payroll_uses_the_payroll_page_population():
     payroll = people.summarize_payroll(EMPLOYEES, SLIPS[PERIOD], PERIOD)
-    # 应有工资条的人：除早已离职的周七
+    # 应有工资条的人：除早已演示员工166的周七
     assert payroll["expected"] == 7 and payroll["generated"] == 4
     assert (payroll["confirmed"], payroll["draft"], payroll["missing"]) == (2, 2, 3)
     assert payroll["draft_gross"] == 17000 and payroll["draft_people"] == {"EMP-3", "EMP-4"}
@@ -241,7 +241,7 @@ def test_plain_employee_and_finance_get_nothing_and_never_touch_the_data(monkeyp
 
 
 def test_leaders_see_only_what_their_real_interfaces_allow(monkeypatch):
-    # 副总 / 总经理岗位但没有 HR 角色：员工表类可以看（hr_scope 允许），工资、社保、宿舍的底层只认 HR 角色
+    # 演示员工113 / 总经理岗位但没有 HR 角色：员工表类可以看（hr_scope 允许），工资、社保、宿舍的底层只认 HR 角色
     install(monkeypatch, forbid=("_fetch_slips", "_fetch_contribution_detail", "_fetch_contribution_records", "_fetch_workbench", "_fetch_dorm",
                                  "_fetch_pay_totals", "_fetch_salaries"))
     for position in ("vice_manager", "general_manager"):
@@ -272,13 +272,13 @@ def test_headcount_cards(monkeypatch):
     ctx = make_ctx()
     active = run(ctx, "hr.active")
     assert (active["value"], active["sub"], active["target"]) == ("6", "研发 2 · 其他 4", {"key": "personnel.list", "params": {"status": "active"}})
-    assert "离职日当天仍算在职" in active["hint"] and "工时填报" in active["hint"]
+    assert "演示员工166日当天仍算在职" in active["hint"] and "工时填报" in active["hint"]
     joined = run(ctx, "hr.joined_left")
-    assert (joined["label"], joined["value"], joined["sub"]) == ("本月入职", "1", "试用期中 2 人 · 本月离职 1 人")
+    assert (joined["label"], joined["value"], joined["sub"]) == ("本月入职", "1", "演示员工173期中 2 人 · 本月演示员工166 1 人")
     assert joined["target"]["key"] == "personnel.joined"
     left = run(ctx, "hr.left_month")
-    # 数字 = 点进去员工页「已离职 + 本月离职」能看到的人数（已经离职的）；离职日还没到的在副标题里单独说
-    assert (left["value"], left["sub"]) == ("1", "另有 1 人离职日在本月、还没到")
+    # 数字 = 点进去员工页「已演示员工166 + 本月演示员工166」能看到的人数（已经演示员工166的）；演示员工166日还没到的在副标题里单独说
+    assert (left["value"], left["sub"]) == ("1", "另有 1 人演示员工166日在本月、还没到")
     assert left["target"] == {"key": "personnel.left_month", "params": {}}
     away = run(ctx, "hr.away_today")
     # 2026-10-14：人事经理岗位在考勤中心首页看得到全公司的人名，点进去落在「谁不在 · 今天」；只有 HR 角色的人仍进“今天不在岗”的列表
@@ -299,7 +299,7 @@ def test_expiry_file_and_rd_gap_cards(monkeypatch):
     install(monkeypatch)
     ctx = make_ctx()
     expiring = run(ctx, "hr.expiring")
-    assert (expiring["value"], expiring["sub"], expiring["tone"]) == ("3", "合同 2 · 试用期 1", "bad")   # 演示员工143只剩 3 天
+    assert (expiring["value"], expiring["sub"], expiring["tone"]) == ("3", "演示员工116 2 · 演示员工173期 1", "bad")   # 演示员工143只剩 3 天
     assert expiring["target"]["key"] == "personnel.expiring"
     file_ = run(ctx, "hr.file_pending")
     assert (file_["value"], file_["sub"], file_["target"]["key"]) == ("3", "2 人还没填档案状态 · 1 人标了待完善", "personnel.file")
@@ -362,10 +362,10 @@ def test_expiry_alerts(monkeypatch):
     install(monkeypatch)
     ctx = make_ctx()
     probation = run(ctx, "alert.probation")
-    assert probation["tone"] == "bad" and probation["title"] == "演示员工143 试用期 10-12 到期，只剩 3 天"
+    assert probation["tone"] == "bad" and probation["title"] == "演示员工143 演示员工173期 10-12 到期，只剩 3 天"
     contract = run(ctx, "alert.contract")
-    assert contract["tone"] == "warn" and contract["title"] == "演示员工128等 2 人合同 60 天内到期" and contract["sub"] == "最早 10-20"
-    # 试用期 / 合同分开：各去员工页只看那一种
+    assert contract["tone"] == "warn" and contract["title"] == "演示员工128等 2 人演示员工116 60 天内到期" and contract["sub"] == "最早 10-20"
+    # 演示员工173期 / 演示员工116分开：各去员工页只看那一种
     assert contract["target"] == {"key": "personnel.contract", "params": {}}
     rd = run(ctx, "alert.rd_gap")
     assert rd["title"] == "研发部门有 1 人没设研发类型" and rd["target"]["key"] == "personnel.rd_gap"
@@ -376,7 +376,7 @@ def test_probation_alert_uses_the_same_60_day_window_as_the_card(monkeypatch):
     install(monkeypatch, _fetch_employees=lambda ctx: near)
     assert run(make_ctx(), "alert.probation")["tone"] == "warn"
     assert run(make_ctx(), "hr.expiring")["value"] == "1"
-    far = [_emp("EMP-8", "钱八", "客服部 - RAY", probation_end_date="2026-12-20")]        # 72 天：都不算
+    far = [_emp("EMP-8", "钱八", "客服部 - RAY", probation_end_date="2026-12-20")]        # 72 天：演示员工177算
     install(monkeypatch, _fetch_employees=lambda ctx: far)
     assert run(make_ctx(), "alert.probation") is None
     assert run(make_ctx(), "hr.expiring")["value"] == "0"
@@ -391,7 +391,7 @@ def test_payroll_and_dorm_alerts(monkeypatch):
     lease = run(ctx, "alert.dorm_lease")
     assert (lease["tone"], lease["title"], lease["sub"]) == ("bad", "3 间租约 60 天内到期", "最早 10-14")   # 5 天内
     leaver = run(ctx, "alert.dorm_leaver")
-    assert (leaver["title"], leaver["sub"], leaver["target"]["key"]) == ("1 位已离职员工仍占房", "房间 A102", "dorm.leaver")
+    assert (leaver["title"], leaver["sub"], leaver["target"]["key"]) == ("1 位已演示员工166员工仍占房", "房间 A102", "dorm.leaver")
     register = run(ctx, "alert.dorm_register")
     assert register["title"] == "10 月宿舍费用还有 2 间没登记"       # A102、B202 在住但没登记
     assert register["target"] == {"key": "dorm.monthly", "params": {"period": PERIOD, "status": "open"}}
@@ -417,9 +417,9 @@ def test_expiring_list_gives_only_names_and_dates(monkeypatch):
     block = run(make_ctx(), "block.expiring_list")
     assert block["type"] == "list"
     assert [(r["label"], r["sub"], r["value"], r["tone"]) for r in block["rows"]] == [
-        ("演示员工143", "试用期 10-12 到期", "3 天", "bad"),
-        ("演示员工128", "合同 10-20 到期", "11 天", "warn"),
-        ("孙六", "合同 11-20 到期", "42 天", "warn"),
+        ("演示员工143", "演示员工173期 10-12 到期", "3 天", "bad"),
+        ("演示员工128", "演示员工116 10-20 到期", "11 天", "warn"),
+        ("孙六", "演示员工116 11-20 到期", "42 天", "warn"),
     ]
     assert block["more"] == ""
     many = [_emp(f"EMP-{i}", f"人{i}", "客服部 - RAY", probation_end_date="2026-10-20") for i in range(8)]
@@ -455,7 +455,7 @@ def test_dorm_blocks(monkeypatch):
     ctx = make_ctx()
     summary = run(ctx, "block.dorm_summary")
     assert [(r["label"], r["value"]) for r in summary["rows"]] == [
-        ("入住率", "60%"), ("空置房租", "¥ 3,550 元"), ("租约到期 / 已过期", "3 间"), ("已离职员工仍占房", "1 人")]
+        ("入住率", "60%"), ("空置房租", "¥ 3,550 元"), ("租约到期 / 已过期", "3 间"), ("已演示员工166员工仍占房", "1 人")]
     # 空置房租在宿舍看板上没有这个数：这一行点进去是空置房间的清单（加起来正好是这个数）
     vacant = core.get_detail_for(ctx, "hr.dorm_vacant")
     assert summary["rows"][1]["target"] == {"key": "drill", "params": {"item": "hr.dorm_vacant", "period": PERIOD}}

@@ -65,21 +65,21 @@ test("团队日历图例和标色规则一致：至少 3 人且占 20% 橙，占
   assert.equal(staffLevel(2, 10), "");
 });
 
-// ---------------------------------------------------------------- 员工页：试用期 / 合同分开看
+// ---------------------------------------------------------------- 员工页：演示员工173期 / 演示员工116分开看
 const ROWS = [
-  { name: "E1", employee_name: "试用", department: "研发一部 - RAY", status: "Active", probation_end_date: "2026-10-20", archive_status: "已归档" },
-  { name: "E2", employee_name: "合同", department: "研发一部 - RAY", status: "Active", first_contract_end_date: "2026-11-01", archive_status: "已归档" },
-  { name: "E3", employee_name: "两样", department: "研发一部 - RAY", status: "Active", probation_end_date: "2026-10-25", first_contract_end_date: "2026-10-30", archive_status: "已归档" },
-  { name: "E4", employee_name: "都不", department: "研发一部 - RAY", status: "Active", archive_status: "已归档" },
+  { name: "E1", employee_name: "演示员工173", department: "研发一部 - RAY", status: "Active", probation_end_date: "2026-10-20", archive_status: "已归档" },
+  { name: "E2", employee_name: "演示员工116", department: "研发一部 - RAY", status: "Active", first_contract_end_date: "2026-11-01", archive_status: "已归档" },
+  { name: "E3", employee_name: "演示员工103", department: "研发一部 - RAY", status: "Active", probation_end_date: "2026-10-25", first_contract_end_date: "2026-10-30", archive_status: "已归档" },
+  { name: "E4", employee_name: "演示员工177", department: "研发一部 - RAY", status: "Active", archive_status: "已归档" },
 ];
 const ITEMS = decorateEmployees(ROWS, { today: TODAY, groupOf: departmentGroupMap([{ department_name: "研发一部 - RAY", group_name: "研发" }]) });
 const names = (list) => list.map((item) => item.row.employee_name);
 
 test("reminder=probation / contract 只列那一种到期，expiring 两种都列", () => {
   assert.deepEqual(REMINDER_KINDS, ["expiring", "probation", "contract"]);
-  assert.deepEqual(names(filterByUrlExtras(ITEMS, { reminder: "expiring" }, TODAY)), ["试用", "合同", "两样"]);
-  assert.deepEqual(names(filterByUrlExtras(ITEMS, { reminder: "probation" }, TODAY)), ["试用", "两样"]);
-  assert.deepEqual(names(filterByUrlExtras(ITEMS, { reminder: "contract" }, TODAY)), ["合同", "两样"]);
+  assert.deepEqual(names(filterByUrlExtras(ITEMS, { reminder: "expiring" }, TODAY)), ["演示员工173", "演示员工116", "演示员工103"]);
+  assert.deepEqual(names(filterByUrlExtras(ITEMS, { reminder: "probation" }, TODAY)), ["演示员工173", "演示员工103"]);
+  assert.deepEqual(names(filterByUrlExtras(ITEMS, { reminder: "contract" }, TODAY)), ["演示员工116", "演示员工103"]);
   for (const reminder of REMINDER_KINDS) {
     assert.equal(parsePersonnelQuery({ reminder }).reminder, reminder);
     assert.deepEqual(personnelQueryOf(parsePersonnelQuery({ reminder })), { reminder });
@@ -88,7 +88,7 @@ test("reminder=probation / contract 只列那一种到期，expiring 两种都�
   assert.ok(PERSONNEL_QUERY_KEYS.includes("reminder"));
 });
 
-test("员工页把 reminder 的种类接到筛选和地址上；总经理、副总经理只能看，新增、编辑只给人事", () => {
+test("员工页把 reminder 的种类接到筛选和地址上；总经理、演示员工113经理只能看，新增、编辑只给人事", () => {
   const page = read("../src/pages/Personnel.vue");
   assert.match(page, /const reminderKind=ref\(""\);/);
   assert.match(page, /\{reminder:expiringOnly\.value\?reminderKind\.value:""\},today\)/);
@@ -101,7 +101,7 @@ test("员工页把 reminder 的种类接到筛选和地址上；总经理、副�
 });
 
 // ---------------------------------------------------------------- 宿舍：续租清单只看在用的房间
-test("续租清单、已离职仍占房只看在用的房间（和宿舍看板、看板卡片同一批）", () => {
+test("续租清单、已演示员工166仍占房只看在用的房间（和宿舍看板、看板卡片同一批）", () => {
   const page = read("../src/pages/AccommodationMaster.vue");
   assert.match(page, /\.filter\(\(row\) => !\(filters\.lease \|\| filters\.leaver\) \|\| inUse\(row\)\)\);/);
   assert.match(page, /function inUse\(row\) \{\n  return Number\(row\.is_active \?\? 1\) === 1;/);

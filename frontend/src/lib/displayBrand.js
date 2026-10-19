@@ -12,5 +12,5 @@ export function displayDepartment(value) {
 
 export function displayUser(value) {
   const label = String(value ?? '').trim();
-  return /^rayher\s+admin$/i.test(label) ? '栖衡 管理员' : label;
+  return /^rayher\s+admin$/i.test(label) ? '栖衡 演示员工170' : label;
 }

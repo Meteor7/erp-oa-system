@@ -76,7 +76,7 @@ test('attachmentPills applies the required / not-required rules by status and st
   assert.equal(states({ status: 'Completed', rd_stage: '费用化' }), 'miss,miss,na');
   // 阶段未判定：不要确认书
   assert.equal(states({ status: 'Open', rd_stage: '未判定' }), 'miss,na,na');
-  // 已取消：都不要
+  // 已取消：演示员工177要
   assert.equal(states({ status: 'Cancelled', rd_stage: '资本化' }), 'na,na,na');
   // 没有状态按进行中算
   assert.equal(states({ rd_stage: '费用化' }), 'miss,na,na');

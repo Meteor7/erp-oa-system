@@ -70,10 +70,10 @@ def shape(steps):
 
 
 def test_trip_goes_direct_supervisor_then_vice_manager_then_front_desk():
-    """决定 2026-10-13：直属上级 → 副总经理（演示员工37）→ 前台办理（行政专员），前台是办理不是审批。"""
+    """决定 2026-10-13：直属上级 → 演示员工113经理（演示员工37）→ 前台办理（行政专员），前台是办理不是审批。"""
     assert shape(route()) == [
         ("直属部门主管：张主管", "approve", ["zhang@example.com"]),
-        ("副总经理：演示员工21", "approve", ["vice@example.com"]),
+        ("演示员工113经理：演示员工21", "approve", ["vice@example.com"]),
         ("前台办理：演示员工30", "handle", ["desk@example.com"]),
     ]
     # build_route 分到同一条路线
@@ -103,7 +103,7 @@ def test_vice_and_general_manager_trips_need_no_approval_and_go_straight_to_the_
 
 
 def test_the_front_desk_never_handles_her_own_trip():
-    assert [step["label"] for step in route(applicant_user="desk@example.com")] == ["直属部门主管：张主管", "副总经理：演示员工21"]
+    assert [step["label"] for step in route(applicant_user="desk@example.com")] == ["直属部门主管：张主管", "演示员工113经理：演示员工21"]
 
 
 def test_a_missing_direct_supervisor_is_refused_with_a_readable_message():

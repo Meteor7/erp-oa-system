@@ -1,6 +1,6 @@
 import frappe
 
-BUSINESS_EXECUTIVE_ROLE = "Rayher Business Executive"
+BUSINESS_EXECUTIVE_ROLE = "QIHENG Demo Business Executive"
 
 # Four-tier role model. 员工=Employee, HR=HR User/HR Manager, 财务=Accounts User
 # all reuse stock roles; only "Department Manager" is new — it gates the OA *approval*

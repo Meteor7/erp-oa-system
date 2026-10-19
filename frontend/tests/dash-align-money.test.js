@@ -13,7 +13,7 @@ test("付款看板的等待分段和数据看板一样：今天 / 1–3 天 / �
   assert.deepEqual(agingTiles([]).map((tile) => tile.label), ["今天", "1–3 天", "超过 3 天"]);
 });
 
-test("出纳待付款的标题只算待付款，待核验单独列在后面（和数据看板的出纳待付款一致）", () => {
+test("演示员工110待付款的标题只算待付款，待核验单独列在后面（和数据看板的演示员工110待付款一致）", () => {
   const rows = [{ name: "A", status: "待付款" }, { name: "V", status: "待核验" }, { name: "B", status: "待付款" }];
   const split = cashierSplit(rows);
   assert.deepEqual(split.toPay.map((row) => row.name), ["A", "B"]);

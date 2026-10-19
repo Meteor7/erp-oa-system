@@ -21,7 +21,7 @@ from rayher_hr_payroll.procurement_mutation_guard import procurement_action
 from rayher_hr_payroll import site_time
 
 PO_PAYMENT_PUSH_SOURCE = "PO付款下推"
-PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "Rayher Business Executive"}
+PRICE_VIEW_ROLES = {"Purchase User", "Purchase Manager", "QIHENG Demo Business Executive"}
 PRICE_ENTRY_ROLES = {"Purchase User", "Purchase Manager"}
 
 
@@ -300,7 +300,7 @@ def _roles():
 
 
 def _position_holder(key, label):
-    """必须有人的岗位（生成审批节点、合同用印）。空缺时给出明确提示，而不是 500。"""
+    """必须有人的岗位（生成审批节点、演示员工116用印）。空缺时给出明确提示，而不是 500。"""
     try:
         return resolve_role(key)
     except ApprovalRoleResolutionError:
@@ -309,13 +309,13 @@ def _position_holder(key, label):
 
 def _require_view():
     if _user() not in position_users("pmc", "procurement_manager", "vice_manager") and not (_roles() & PRICE_VIEW_ROLES) and "System Manager" not in _roles():
-        frappe.throw("只有 PMC、采购、副总经理或系统管理员可以查看采购链路。")
+        frappe.throw("只有 PMC、采购、演示员工113经理或系统演示员工170可以查看采购链路。")
 
 
 def _require_po_view():
     if _user() in position_users("pmc", "procurement_manager", "vice_manager") | position_users("production_asset_owner") or "System Manager" in _roles() or _roles() & ({"Accounts User", "Finance User"} | PRICE_VIEW_ROLES):
         return
-    frappe.throw("只有 PMC、采购、副总经理、生产主管或财务人员可以查看 PO。")
+    frappe.throw("只有 PMC、采购、演示员工113经理、生产主管或财务人员可以查看 PO。")
 
 
 def _can_purchase():
@@ -324,8 +324,8 @@ def _can_purchase():
 
 def _can_purchase_uncached():
     # PMC remains read-only here even when a legacy Purchase User role is assigned.
-    # 修复（2026-09-29，审查 #10）：PMC 岗位空缺或绑定的人离职时原来直接抛错，
-    # 采购经理和系统管理员也做不了任何采购操作。空缺时按"不是 PMC"处理。
+    # 修复（2026-09-29，审查 #10）：PMC 岗位空缺或绑定的人演示员工166时原来直接抛错，
+    # 采购经理和系统演示员工170也做不了任何采购操作。空缺时按"不是 PMC"处理。
     if _user() in position_users("pmc"):
         return False
     return _user() in position_users("procurement_manager") or bool(_roles() & PRICE_ENTRY_ROLES) or "System Manager" in _roles()
@@ -333,7 +333,7 @@ def _can_purchase_uncached():
 
 def _require_purchase():
     if not _can_purchase():
-        frappe.throw("只有采购或系统管理员可以操作采购单据。")
+        frappe.throw("只有采购或系统演示员工170可以操作采购单据。")
 
 
 def _can_record_receipt():
@@ -344,14 +344,14 @@ def _can_record_inspection():
     return _can_record_receipt()
 
 
-# 决定（2026-10-13）：PMC、生产主管从看板能点到的地方都不出现金额（PO、价格审批、付款期次）。
+# 决定（2026-10-13）：PMC、生产主管从看板能点到的地方演示员工177出现金额（PO、价格审批、付款期次）。
 # 规则同看板的 dashboard/procurement._money_blocked：持有 pmc / 生产主管岗位、又没有任何一个本来就看金额的岗位
-# （采购经理、副总、总经理、财务）；系统管理员不挡。PMC 带着 Purchase User 角色，所以不能只看角色。
+# （采购经理、演示员工113、总经理、财务）；系统演示员工170不挡。PMC 带着 Purchase User 角色，所以不能只看角色。
 MONEY_POSITIONS = ("procurement_manager", "vice_manager", "general_manager",
                    "finance_manager", "finance_accountant", "finance_auditor")
 MONEY_KEYS = frozenset({"total_amount", "paid_amount", "outstanding_amount", "amount", "unit_price", "total_price",
                         "package_total", "selected_unit_price", "selected_total", "po_total_amount", "payment_plan_json",
-                        # 合同草稿正文里有“合同金额：CNY x”，合同快照 JSON 里有 total_amount：整段不给（审查 #79-1）
+                        # 演示员工116草稿正文里有“演示员工116金额：CNY x”，演示员工116快照 JSON 里有 total_amount：整段不给（审查 #79-1）
                         "contract_draft_content", "contract_snapshot", "price_snapshot"})
 
 
@@ -388,7 +388,7 @@ def _for_viewer(result):
 
 def _require_production_receipt():
     if not _can_record_receipt():
-        frappe.throw("只有生产主管或系统管理员可以登记到货资料、验收资料、换货到货和退货。")
+        frappe.throw("只有生产主管或系统演示员工170可以登记到货资料、验收资料、换货到货和退货。")
 
 
 def _require_po_payment_actor():
@@ -399,12 +399,12 @@ def _require_po_payment_actor():
 
 def _require_pmc():
     if _user() not in position_users("pmc") and "System Manager" not in _roles():
-        frappe.throw("只有 PMC 或系统管理员可以提报 PR。")
+        frappe.throw("只有 PMC 或系统演示员工170可以提报 PR。")
 
 
 def _require_purchase_or_qingbo():
     if _user() not in position_users("procurement_manager", "vice_manager") and "System Manager" not in _roles():
-        frappe.throw("只有采购、副总经理或系统管理员可以生成 PO。")
+        frappe.throw("只有采购、演示员工113经理或系统演示员工170可以生成 PO。")
 
 
 def po_fulfilment_state(po):
@@ -446,15 +446,15 @@ def _sync_po_payment_fulfilment(po):
             frappe.db.set_value("OA Approval Request", name, state, update_modified=False)
 
 
-# 决定（2026-09-24）：PO 合同电子用印人暂定为副总经理（演示员工37）。按岗位取人，换人只需改岗位任命；
-# 原来前端固定填 admin@staff.example.invalid，只有系统管理员能用印。
+# 决定（2026-09-24）：PO 演示员工116电子用印人暂定为演示员工113经理（演示员工37）。按岗位取人，换人只需改岗位任命；
+# 原来前端固定填 admin@staff.example.invalid，只有系统演示员工170能用印。
 CONTRACT_SEAL_POSITION = "vice_manager"
 
 
 def _contract_seal_user():
-    user = _text(_position_holder(CONTRACT_SEAL_POSITION, "副总经理")["user"]).lower()
+    user = _text(_position_holder(CONTRACT_SEAL_POSITION, "演示员工113经理")["user"]).lower()
     if not user or not frappe.db.exists("User", {"name": user, "enabled": 1}):
-        frappe.throw("未找到有效的合同用印人（副总经理岗位），请先在岗位任命中设置。")
+        frappe.throw("未找到有效的演示员工116用印人（演示员工113经理岗位），请先在岗位任命中设置。")
     return user
 
 
@@ -464,10 +464,10 @@ def _can_seal_contract(po):
 
 def _require_cny(currency):
     """决定（2026-09-24，审查 R3-54-1，来自 #54）：采购报价和订单暂时只用人民币。
-    原来可以选美元、欧元、日元，但付款和金额台账一律按人民币记账。外币合同先折算成人民币再录入。"""
+    原来可以选美元、欧元、日元，但付款和金额台账一律按人民币记账。外币演示员工116先折算成人民币再录入。"""
     value = _text(currency) or "CNY"
     if value != "CNY":
-        frappe.throw("采购报价和订单目前只支持人民币（CNY），外币合同请先按合同折算成人民币再录入。")
+        frappe.throw("采购报价和订单目前只支持人民币（CNY），外币演示员工116请先按演示员工116折算成人民币再录入。")
     return value
 
 
@@ -578,7 +578,7 @@ def _notification_link(document_type, document_name):
 
 
 def _notify(subject, content, document_type, document_name, source_requests=None):
-    """修复（2026-09-24，审查 R3-54，来自 #54）：采购、PMC、副总和采购经办人收到完整通知；
+    """修复（2026-09-24，审查 R3-54，来自 #54）：采购、PMC、演示员工113和采购经办人收到完整通知；
     其他人（需求申请人、项目主管）只收到"采购进度有更新"和自己那张申请的物料，
     不再看到供应商、报价、金额和别人申请的物料。"""
     source_requests = list(source_requests or [])
@@ -815,7 +815,7 @@ def _po_payment_plan_row(po, row_name):
 
 
 def _po_contract_ready(po):
-    return _text(getattr(po, "contract_status", None)) == "已生效" and po.status not in {"草稿", "待采购确认", "待合同复核", "待电子用印", "已取消"}
+    return _text(getattr(po, "contract_status", None)) == "已生效" and po.status not in {"草稿", "待采购确认", "待演示员工116复核", "待电子用印", "已取消"}
 
 
 def _require_gate(request_type):
@@ -944,7 +944,7 @@ def _po_payment_blockers(po, row, *, records=None):
     trigger = _text(getattr(row, "trigger_condition", None))
     blockers = []
     if not contract_ready:
-        blockers.append("PO 合同尚未生效")
+        blockers.append("PO 演示员工116尚未生效")
     if "到货" in trigger and not all_received:
         blockers.append("本期要求全部到货")
     if "到货" in trigger and all_received and not has_receipt_evidence:
@@ -1004,7 +1004,7 @@ def _payment_work_item(po, row, ctx=None):
             work_status = "付款审批中"
     elif blockers:
         if not contract_ready:
-            work_status = "待合同生效"
+            work_status = "待演示员工116生效"
         elif any("到货" in item for item in blockers):
             work_status = "待到货资料"
         else:
@@ -1078,7 +1078,7 @@ def list_payment_work_items(limit=500):
                 result.append(_payment_work_item(po, row, ctx))
     priority = {
         "可提交付款审批": 0, "待到货资料": 1, "待验收": 2,
-        "付款审批中": 3, "待实际付款": 4, "待合同生效": 5, "已付款": 6,
+        "付款审批中": 3, "待实际付款": 4, "待演示员工116生效": 5, "已付款": 6,
     }
     ordered = sorted(result, key=lambda item: (priority.get(item["work_status"], 9), item["po"], item["installment_no"]))
     # 生产主管 / PMC 在这里登记到货验收，但不看金额（2026-10-13）
@@ -1107,7 +1107,7 @@ def po_work_summary():
             "passed_lines": sum(1 for line in lines if _text(line.inspection_status) == "已通过"),
             "paid_amount": float(getattr(po, "paid_amount", 0) or 0), "total_amount": float(po.total_amount or 0),
         })
-    priority = ["待合同生效", "待到货资料", "待验收", "可提交付款审批", "付款审批中", "待实际付款", "已付款"]
+    priority = ["待演示员工116生效", "待到货资料", "待验收", "可提交付款审批", "付款审批中", "待实际付款", "已付款"]
     ordered = sorted(by_status.values(), key=lambda entry: priority.index(entry[0]) if entry[0] in priority else 99)
 
     def total(status, index):
@@ -1406,7 +1406,7 @@ def select_supplier_comparison(price_approval, supplier):
     if approval.status != "待审批":
         frappe.throw("只有待审批的价格审批单可以选择最终成交供应商。")
     if _user() not in position_users("vice_manager") and "System Manager" not in _roles():
-        frappe.throw("只有副总经理可以在价格审批阶段选择成交供应商。")
+        frappe.throw("只有演示员工113经理可以在价格审批阶段选择成交供应商。")
     _apply_supplier_selection(approval, supplier)
     frappe.db.commit()
     _notify(
@@ -1597,7 +1597,7 @@ def withdraw_price_approval(name, note=None):
     _require_purchase()
     doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status != "待审批":
-        frappe.throw("只有待副总经理审批的价格审批单可以撤回。")
+        frappe.throw("只有待演示员工113经理审批的价格审批单可以撤回。")
     _release_reserved_pr_lines(doc)
     frappe.db.delete("OA Approval Step", {"parent": doc.name})
     doc.status = "草稿"
@@ -1642,11 +1642,11 @@ def submit_price_approval(name):
     doc.status = "待审批"
     doc.save(ignore_permissions=True)
     step = frappe.new_doc("OA Approval Step")
-    # 审批人和标签都取副总经理岗位的当前人员（原来标签写死了姓名）；岗位空缺时明确提示。
-    vice = _position_holder("vice_manager", "副总经理")
+    # 审批人和标签都取演示员工113经理岗位的当前人员（原来标签写死了姓名）；岗位空缺时明确提示。
+    vice = _position_holder("vice_manager", "演示员工113经理")
     step.update({
         "parent": doc.name, "parentfield": "steps", "parenttype": "OA Price Approval",
-        "idx": 1, "step_index": 1, "label": "价格审批：" + (_text(vice.get("employee_name")) or "副总经理"), "mode": "approve",
+        "idx": 1, "step_index": 1, "label": "价格审批：" + (_text(vice.get("employee_name")) or "演示员工113经理"), "mode": "approve",
         "approvers": json.dumps([_text(vice["user"]).lower()], ensure_ascii=False), "status": "待审批",
         "approved_by": "[]", "step_key": str(uuid4()), "origin": "base",
     })
@@ -1663,7 +1663,7 @@ def submit_price_approval(name):
 def approve_price_approval(name, note=None):
     _require_gate(REQUEST_PROCUREMENT)
     if _user() not in position_users("vice_manager") and "System Manager" not in _roles():
-        frappe.throw("只有副总经理或系统管理员可以审批价格审批单。")
+        frappe.throw("只有演示员工113经理或系统演示员工170可以审批价格审批单。")
     doc = frappe.get_doc("OA Price Approval", _text(name), for_update=True)
     if doc.status != "待审批":
         frappe.throw("当前价格审批单不在待审批状态。")
@@ -1798,7 +1798,7 @@ def update_po_delivery(name, lines=None):
     _require_purchase()
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"草稿", "待采购确认"}:
-        frappe.throw("只有 PO 草稿可以修改合同交期。")
+        frappe.throw("只有 PO 草稿可以修改演示员工116交期。")
     values = _json(lines, [])
     if not isinstance(values, list) or not values:
         frappe.throw("请提供需要更新的 PO 明细。")
@@ -1827,12 +1827,12 @@ def confirm_po(name):
     if not po.supplier or not po.payment_method:
         frappe.throw("PO 缺少供应商或付款方式，不能确认。")
     if any(not line.contract_delivery_date for line in po.lines):
-        frappe.throw("每条 PO 物料都必须确认合同交期。")
-    po.status = "待合同复核"
+        frappe.throw("每条 PO 物料都必须确认演示员工116交期。")
+    po.status = "待演示员工116复核"
     po.contract_status = "待补充信息"
     po.save(ignore_permissions=True)
-    _notify(f"PO 已确认待合同复核：{po.name}",
-            f"采购已确认 PO，供应商：{po.supplier}，金额：{po.total_amount:.2f}，请补充合同信息并复核用印。",
+    _notify(f"PO 已确认待演示员工116复核：{po.name}",
+            f"采购已确认 PO，供应商：{po.supplier}，金额：{po.total_amount:.2f}，请补充演示员工116信息并复核用印。",
             "OA Purchase Order", po.name, {row.source_request for row in po.lines})
     frappe.db.commit()
     return _po_summary(po)
@@ -1849,8 +1849,8 @@ def save_po_contract_information(name, seal_user=None, contract_delivery_date=No
     _require_gate(REQUEST_PROCUREMENT)
     _require_purchase()
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
-    if po.status not in {"待合同复核", "草稿", "待采购确认"}:
-        frappe.throw("当前 PO 不在合同信息补充阶段。")
+    if po.status not in {"待演示员工116复核", "草稿", "待采购确认"}:
+        frappe.throw("当前 PO 不在演示员工116信息补充阶段。")
     # 用印人由岗位决定，忽略客户端传入的 seal_user。
     seal_user = _contract_seal_user()
     po.contract_version = int(getattr(po, "contract_version", 0) or 0) + 1
@@ -1865,7 +1865,7 @@ def save_po_contract_information(name, seal_user=None, contract_delivery_date=No
         if value is not None:
             setattr(po, fieldname, _text(value))
     po.contract_entity = _text(getattr(po, "contract_entity", None)) or "示例企业032有限公司"
-    po.contract_template = _text(contract_template) or "标准采购合同"
+    po.contract_template = _text(contract_template) or "标准采购演示员工116"
     po.contract_seal_user = seal_user
     if contract_delivery_date:
         po.contract_delivery_date = contract_delivery_date
@@ -1879,14 +1879,14 @@ def save_po_contract_information(name, seal_user=None, contract_delivery_date=No
         "payment_method": po.payment_method or "",
     }, ensure_ascii=False)
     po.contract_draft_content = (
-        f"示例企业032有限公司采购合同\nPO：{po.name}\n供应商：{po.contract_supplier_legal_name}\n"
-        f"合同金额：{po.currency or 'CNY'} {float(po.total_amount or 0):,.2f}\n"
-        f"合同交期：{po.contract_delivery_date or '未填写'}\n付款方式：{po.payment_method or '未填写'}"
+        f"示例企业032有限公司采购演示员工116\nPO：{po.name}\n供应商：{po.contract_supplier_legal_name}\n"
+        f"演示员工116金额：{po.currency or 'CNY'} {float(po.total_amount or 0):,.2f}\n"
+        f"演示员工116交期：{po.contract_delivery_date or '未填写'}\n付款方式：{po.payment_method or '未填写'}"
     )
     po.contract_status = "草稿待复核"
-    po.status = "待合同复核"
+    po.status = "待演示员工116复核"
     po.save(ignore_permissions=True)
-    _notify(f"PO 合同草稿待复核：{po.name}", "采购已生成 PO 合同草稿，请复核后进行电子用印。", "OA Purchase Order", po.name, {row.source_request for row in po.lines})
+    _notify(f"PO 演示员工116草稿待复核：{po.name}", "采购已生成 PO 演示员工116草稿，请复核后进行电子用印。", "OA Purchase Order", po.name, {row.source_request for row in po.lines})
     frappe.db.commit()
     return _po_summary(po)
 
@@ -1898,13 +1898,13 @@ def review_po_contract(name, note=None):
     _require_purchase()
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.contract_status != "草稿待复核" or not po.contract_draft_content:
-        frappe.throw("当前 PO 没有待复核的合同草稿。")
+        frappe.throw("当前 PO 没有待复核的演示员工116草稿。")
     po.contract_status = "待电子用印"
     po.status = "待电子用印"
     po.contract_reviewed_by = _user()
     po.contract_reviewed_on = now_datetime()
     po.save(ignore_permissions=True)
-    _notify(f"PO 合同已复核：{po.name}", "PO 合同草稿已复核，等待电子用印。", "OA Purchase Order", po.name, {row.source_request for row in po.lines})
+    _notify(f"PO 演示员工116已复核：{po.name}", "PO 演示员工116草稿已复核，等待电子用印。", "OA Purchase Order", po.name, {row.source_request for row in po.lines})
     frappe.db.commit()
     return _po_summary(po)
 
@@ -1913,7 +1913,7 @@ def review_po_contract(name, note=None):
 @procurement_action
 def seal_po_contract(name, note=None):
     _require_gate(REQUEST_PROCUREMENT)
-    # 用印由合同上的用印人（副总经理）本人完成，不再要求采购角色。
+    # 用印由演示员工116上的用印人（演示员工113经理）本人完成，不再要求采购角色。
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.contract_status != "待电子用印":
         frappe.throw("当前 PO 不在待电子用印状态。")
@@ -1928,7 +1928,7 @@ def seal_po_contract(name, note=None):
             row.status = "待审批"
             row.approval_status = "未发起"
     po.save(ignore_permissions=True)
-    _notify(f"PO 已电子用印生效：{po.name}", "PO 合同已完成电子用印，符合条件的付款期次可以发起付款审批。", "OA Purchase Order", po.name, {row.source_request for row in po.lines})
+    _notify(f"PO 已电子用印生效：{po.name}", "PO 演示员工116已完成电子用印，符合条件的付款期次可以发起付款审批。", "OA Purchase Order", po.name, {row.source_request for row in po.lines})
     frappe.db.commit()
     return _po_summary(po)
 
@@ -1939,7 +1939,7 @@ def record_po_receipt(name, lines, arrival_date=None, file_ref=None, note=None):
     _require_production_receipt()
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in {"供应商制作中", "到货验收中", "付款中"}:
-        frappe.throw("PO 合同生效并进入供应商制作后，才能登记到货资料。")
+        frappe.throw("PO 演示员工116生效并进入供应商制作后，才能登记到货资料。")
     values = _json(lines, [])
     if not isinstance(values, list) or not values:
         frappe.throw("请选择到货物料并填写本次到货数量。")
@@ -2061,7 +2061,7 @@ def record_po_exchange_receipt(name, lines, arrival_date=None, file_ref=None, no
     _require_production_receipt()
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in FULFILMENT_STATUSES:
-        frappe.throw("PO 合同生效并进入供应商制作后，才能登记换货到货。")
+        frappe.throw("PO 演示员工116生效并进入供应商制作后，才能登记换货到货。")
     picked = _defect_lines(po, _json(lines, []), "换货中", "换货到货")
     details = []
     for line, quantity in picked:
@@ -2083,13 +2083,13 @@ def record_po_exchange_receipt(name, lines, arrival_date=None, file_ref=None, no
 @frappe.whitelist(methods=["POST"])
 @procurement_action
 def record_po_return(name, lines, return_date=None, file_ref=None, note=None):
-    """货已退回供应商：这项已到数量清零，等供应商补发后再按正常流程登记到货。
+    """货已退回供应商：这项已到数量清零，等供应商补发后再按演示员工152流程登记到货。
     退款、PO 取消、缩减数量暂不支持（线下与供应商、财务处理）。"""
     _require_gate(REQUEST_PROCUREMENT)
     _require_production_receipt()
     po = frappe.get_doc("OA Purchase Order", _text(name), for_update=True)
     if po.status not in FULFILMENT_STATUSES:
-        frappe.throw("PO 合同生效并进入供应商制作后，才能登记退货。")
+        frappe.throw("PO 演示员工116生效并进入供应商制作后，才能登记退货。")
     picked = _defect_lines(po, _json(lines, []), "退货中", "退货")
     details = []
     for line, quantity in picked:

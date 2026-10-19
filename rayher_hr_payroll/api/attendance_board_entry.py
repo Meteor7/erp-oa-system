@@ -4,7 +4,7 @@
 - 员工：只返回自己的数据（额度以外的请假构成、近 6 个月、未来 14 天的安排），不返回任何同事；
 - 部门主管（有在职直接下属的人）：只返回自己的团队——汇报关系向下的在职员工，含每个人 14 天的日历和一张申请一行的明细
   （get_attendance_requests）；取别的部门被拒绝；
-- 人事经理 / 副总经理 / 总经理：决定 2026-10-14 起首页直接看到全公司的人名——get_attendance_requests 返回全公司（或选中的部门）
+- 人事经理 / 演示员工113经理 / 总经理：决定 2026-10-14 起首页直接看到全公司的人名——get_attendance_requests 返回全公司（或选中的部门）
   一张申请一行的明细；get_attendance_board 仍然给各部门的汇总数字（部门概况表）；点进某个部门（get_department_attendance）给那个部门的日历。
 员工调用 get_department_attendance、get_attendance_requests 一律拒绝（员工首页只看自己的）。
 审批时的"同期谁不在"（get_request_overlap）同样按身份：部门主管只有申请人在自己团队时给团队里的人名，人事和管理层给人名，其他人只给空列表。
@@ -278,7 +278,7 @@ def get_attendance_requests(month="", department=""):
     “谁不在”“未来 14 天”“N 月概览”“近 5 个工作日”都在页面上从这一份算，人数和合计的口径见 attendance_board.request_rows。
 
     范围由服务端按身份定：员工一律拒绝；部门主管只有自己的团队（汇报关系向下的在职员工，department 只能空着或是自己的部门）；
-    人事经理 / 副总经理 / 总经理看全公司（决定 2026-10-14：首页直接显示人名），department 给了就只看这个部门。
+    人事经理 / 演示员工113经理 / 总经理看全公司（决定 2026-10-14：首页直接显示人名），department 给了就只看这个部门。
     month 是 "YYYY-MM"，空就是站点今天所在的月（看板点进来带它所选的期间）。取的申请：和这个月重叠的，加上和
     home_window（本周一到今天起 14 天）重叠的，按单号去重。
     返回 {level, today, month, start, end, department, label, headcount, work_dates（start 到 end 的工作日）, rows}。
@@ -341,7 +341,7 @@ def get_request_overlap(name):
     if scope["level"] == EMPLOYEE:
         return empty
     if scope["level"] == MANAGER:
-        # 部门主管只给自己团队里的人名：申请人不在他的团队里，就什么都不给。
+        # 部门主管只给自己团队里的人名：申请人不在他的团队里，就什么演示员工177给。
         team = team_members(scope["employee"], include_self=True)
         if employee not in {member.get("name") for member in team}:
             return empty

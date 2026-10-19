@@ -13,7 +13,7 @@ from rayher_hr_payroll.oa_feature_gate import can_access_request_type
 _BATCH = "OA Invoice Import Batch"
 _RECORD = "OA Invoice Record"
 _VIEW_LOG = "OA Invoice View Log"
-_HIGH_PRIVILEGE_ROLES = {"System Manager", "Accounts User", "Rayher Business Executive"}
+_HIGH_PRIVILEGE_ROLES = {"System Manager", "Accounts User", "QIHENG Demo Business Executive"}
 # 发票可用于旧的费用付款申请，也可用于新的报销单 / 付款单（发票夹）。
 INVOICE_REQUEST_TYPES = (REQUEST_EXPENSE_PAYMENT, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT)
 

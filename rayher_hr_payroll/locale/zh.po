@@ -1,5 +1,5 @@
 # Translations template for Rayher HR Payroll.
-# Copyright (C) 2026 Rayher
+# Copyright (C) 2026 QIHENG Demo
 # This file is distributed under the same license as the Rayher HR Payroll project.
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
 #
@@ -130,8 +130,8 @@ msgid "Month must be between 1 and 12."
 msgstr "月份必须在 1 到 12 之间。"
 
 #: rayher_hr_payroll/demo.py:198
-msgid "Pass force=True to create Rayher demo data on this site."
-msgstr "必须传入 force=True 才能在本站点创建 Rayher 演示数据。"
+msgid "Pass force=True to create QIHENG Demo demo data on this site."
+msgstr "必须传入 force=True 才能在本站点创建 QIHENG Demo 演示数据。"
 
 #. Name of a report
 #: rayher_hr_payroll/rayher_hr_payroll/report/pending_my_approval/pending_my_approval.json
@@ -215,16 +215,16 @@ msgstr "研发工时比例快照"
 
 #: rayher_hr_payroll/translatable_labels.py:20
 msgid "Rayher HR Payroll"
-msgstr "Rayher 人事研发工时系统"
+msgstr "QIHENG Demo 人事研发工时系统"
 
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
 msgid "Rayher HR Settings"
-msgstr "Rayher 人事设置"
+msgstr "QIHENG Demo 人事设置"
 
 #. Label of a Link in the 研发成本 Workspace
 #: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
-msgid "Rayher HR 设置"
+msgid "QIHENG Demo HR 设置"
 msgstr ""
 
 #. Label of a Select field in DocType 'RD Work Ratio Snapshot'
@@ -237,8 +237,8 @@ msgid "Review R&D timesheet"
 msgstr "复核研发工时"
 
 #: rayher_hr_payroll/demo.py:62
-msgid "Set a default company before loading Rayher demo data."
-msgstr "加载 Rayher 演示数据前，请先设置默认公司。"
+msgid "Set a default company before loading QIHENG Demo demo data."
+msgstr "加载 QIHENG Demo 演示数据前，请先设置默认公司。"
 
 #. Label of a Float field in DocType 'Rayher HR Settings'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
@@ -736,7 +736,7 @@ msgid "本期已存在未取消的费用导入单（{0}）；每个会计期间�
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:42
-msgid "本期已有已提交的分摊单，如需重算请联系系统管理员先撤销。"
+msgid "本期已有已提交的分摊单，如需重算请联系系统演示员工170先撤销。"
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:34
@@ -869,11 +869,11 @@ msgid "该员工本期该项目存在手工工时单 {0}，请在后台处理后
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:27
-msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统管理员）。"
+msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统演示员工170）。"
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:33
-msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统管理员）。"
+msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统演示员工170）。"
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:66
@@ -1011,7 +1011,7 @@ msgstr "信息"
 
 #: rayher_hr_payroll/core_report_label_supplements.py:25
 msgid "Employee Exits"
-msgstr "员工离职"
+msgstr "员工演示员工166"
 
 #: rayher_hr_payroll/core_report_label_supplements.py:26
 msgid "Employees Working on a Holiday"

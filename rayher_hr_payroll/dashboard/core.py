@@ -196,8 +196,8 @@ PROFILE_ORDER = (
     ("production_asset_owner", "production_asset_owner"),
 )
 PROFILE_LABELS = {
-    "general_manager": "总经理", "vice_manager": "副总经理", "finance_manager": "财务主管", "hr_manager": "人事经理",
-    "procurement_manager": "采购经理", "pmc": "PMC", "finance_accountant": "总账会计", "finance_auditor": "出纳",
+    "general_manager": "总经理", "vice_manager": "演示员工113经理", "finance_manager": "财务主管", "hr_manager": "人事经理",
+    "procurement_manager": "采购经理", "pmc": "PMC", "finance_accountant": "演示员工135", "finance_auditor": "演示员工110",
     "production_asset_owner": "生产主管", "dept_manager": "部门主管", "employee": "员工",
 }
 

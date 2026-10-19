@@ -85,7 +85,7 @@ def permissions_module(monkeypatch):
     roles = {
         "admin@example.com": ["System Manager"],
         "finance@example.com": ["Accounts User"],
-        "executive@example.com": ["Rayher Business Executive"],
+        "executive@example.com": ["QIHENG Demo Business Executive"],
         "hr@example.com": ["HR User"],
         "hr-manager@example.com": ["HR Manager"],
         "alice@example.com": ["Employee"],

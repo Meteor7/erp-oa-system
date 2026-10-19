@@ -14,14 +14,14 @@ This addendum extends the approved dynamic expense approval design. It does not 
 
 The user selected business-highest access, not Frappe `System Manager` access.
 
-Create a custom `Rayher Business Executive` role. Users with this role can view all Rayher business modules and requests, process any active OA approval node, classify expense items when acting at the Finance node, reject to an eligible earlier node, and add signers. They cannot change Frappe permissions, install apps, administer the server, or gain delete/cancel rights reserved for `System Manager`.
+Create a custom `QIHENG Demo Business Executive` role. Users with this role can view all QIHENG Demo business modules and requests, process any active OA approval node, classify expense items when acting at the Finance node, reject to an eligible earlier node, and add signers. They cannot change Frappe permissions, install apps, administer the server, or gain delete/cancel rights reserved for `System Manager`.
 
 Assign the role to:
 
 - Vice General Manager Li Qinggele through the existing `person046@business.example.invalid` account.
 - General Manager Wang Yansong through the corrected internal `person060@legacy.example.invalid` account, linked to `HR-EMP-90003`.
 
-Li Qinggele and Wang Yansong receive Employee, HR Manager, Accounts User, Department Manager, All Project Access, and Rayher Business Executive. Neither executive receives System Manager.
+Li Qinggele and Wang Yansong receive Employee, HR Manager, Accounts User, Department Manager, All Project Access, and QIHENG Demo Business Executive. Neither executive receives System Manager.
 
 `admin@legacy-business.example.invalid` already has the existing `总控 Owner` role profile, including System Manager. The OA override check recognizes that existing System Manager role instead of trying to add a custom role that the Role Profile would immediately remove.
 
@@ -73,7 +73,7 @@ Labels on unresolved steps are updated to the current names. The migration is id
 
 ## 6. Administrator and executive override behavior
 
-A matched assigned approver remains the normal path. A Rayher Business Executive or framework Administrator may act on any current active step as an audited override.
+A matched assigned approver remains the normal path. A QIHENG Demo Business Executive or framework Administrator may act on any current active step as an audited override.
 
 - The actual session User is stored as `action_by` and in the operation log.
 - An override completes the current step even when the step is `all` mode; it does not impersonate or write fake approvals for the assigned users.
@@ -93,7 +93,7 @@ Replace the 1500-pixel table dialog with one responsive workbench surface inside
 - Sticky footer: note input on the left; Close, Save classification, Add sign, Targeted reject, and Approve/Complete on the right. Buttons render only from backend capability flags.
 - Desktop target: 1366x768 and larger. At narrower widths the summary and expense fields stack; no primary action or amount is clipped.
 
-This is a targeted redesign inside the current Rayher UI, so it reuses existing colors, typography, button components, icons, spacing, and modal conventions instead of introducing a separate visual brand.
+This is a targeted redesign inside the current QIHENG Demo UI, so it reuses existing colors, typography, button components, icons, spacing, and modal conventions instead of introducing a separate visual brand.
 
 ## 8. Backend/frontend contract
 

@@ -112,7 +112,7 @@ def _procurement_overview():
     stages = [
         {"key": "request", "label": "OA申请", "value": len(request_rows), "route": "/approval/request-dashboard"},
         {"key": "pr", "label": "PR/询价", "value": len(pr_sources), "route": "/approval/request-dashboard"},
-        {"key": "po", "label": "PO/合同", "value": len(po_names), "route": "/approval/request-dashboard"},
+        {"key": "po", "label": "PO/演示员工116", "value": len(po_names), "route": "/approval/request-dashboard"},
         {"key": "payment", "label": "付款", "value": len(work_items), "route": "/approval/procurement-payment"},
     ]
     return {"visible": bool(request_rows or work_items), "can_view_financial": financial_access,

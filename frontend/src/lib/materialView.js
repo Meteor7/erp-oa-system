@@ -24,7 +24,7 @@ export const MATERIAL_COLUMNS = Object.freeze([
   { field: 'po_quantity', label: 'PO 数量', width: '86px' },
   { field: 'received_quantity', label: '累计到货', width: '86px' },
   { field: 'oa_approval_trail', label: 'OA 审批轨迹', width: '360px' },
-  { field: 'contract_delivery_date', label: '合同交期', width: '130px' },
+  { field: 'contract_delivery_date', label: '演示员工116交期', width: '130px' },
   { field: 'inspection_status', label: '验收状态', width: '100px' },
   { field: 'payment_status', label: '付款状态', width: '100px' },
   { field: 'price_approval_numbers', label: '价格审批单号', width: '170px' },

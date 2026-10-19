@@ -81,9 +81,9 @@ def test_get_designation_options_returns_position_names(monkeypatch):
 def test_get_employment_type_options_returns_master_names(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    frappe.get_all = lambda doctype, pluck=None, order_by=None: ["劳动合同", "实习协议"]
+    frappe.get_all = lambda doctype, pluck=None, order_by=None: ["劳动演示员工116", "实习协议"]
 
-    assert mod.get_employment_type_options() == ["劳动合同", "实习协议"]
+    assert mod.get_employment_type_options() == ["劳动演示员工116", "实习协议"]
 
 def test_save_employee_sets_left_status_when_relieving_date_is_saved(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
@@ -134,7 +134,7 @@ def _save_new_employee(monkeypatch, department, **extra):
         return FakeDoc()
 
     frappe.get_doc = get_doc
-    mod.save_employee(employee_name="新人", company="Rayher", department=department, **extra)
+    mod.save_employee(employee_name="演示员工138", company="QIHENG Demo", department=department, **extra)
     return created
 
 
@@ -142,7 +142,7 @@ def test_new_employee_gets_the_rd_type_of_the_department_when_none_is_chosen(mon
     assert _save_new_employee(monkeypatch, "研发软件部 - RAY")["rd_personnel_type"] == "全时研发"
     assert _save_new_employee(monkeypatch, "研发软件部 - RAY", rd_personnel_type="")["rd_personnel_type"] == "全时研发"
     assert _save_new_employee(monkeypatch, "财务部 - RAY")["rd_personnel_type"] == "非研发"
-    # 自己选了就按自己选的；没选部门或不是标准部门就留空
+    # 演示员工171就按自己选的；没选部门或不是标准部门就留空
     assert _save_new_employee(monkeypatch, "研发软件部 - RAY", rd_personnel_type="研发辅助")["rd_personnel_type"] == "研发辅助"
     assert "rd_personnel_type" not in _save_new_employee(monkeypatch, None)
     assert "rd_personnel_type" not in _save_new_employee(monkeypatch, "旧部门 - RAY")
@@ -242,7 +242,7 @@ def test_save_employee_rejects_negative_base_and_fractional_salary_months(monkey
         {"salary_months": 12.5},
     ):
         try:
-            mod.save_employee(name="EMP-1", employee_name="员工", company="Rayher", **kwargs)
+            mod.save_employee(name="EMP-1", employee_name="员工", company="QIHENG Demo", **kwargs)
         except RuleError:
             pass
         else:
@@ -256,14 +256,14 @@ def test_company_options_use_formal_names_and_supported_companies(monkeypatch):
         assert doctype == "Company"
         assert fields == ["name", "company_name"]
         return [
-            {"name": "Rayher", "company_name": "Rayher"},
+            {"name": "QIHENG Demo", "company_name": "QIHENG Demo"},
             {"name": "示例研发中心", "company_name": "示例研发中心"},
             {"name": "Other", "company_name": "Other"},
         ]
 
     frappe.get_all = get_all
     assert mod.get_company_options() == [
-        {"name": "Rayher", "company_name": "Rayher", "display_name": "示例总部"},
+        {"name": "QIHENG Demo", "company_name": "QIHENG Demo", "display_name": "示例总部"},
         {"name": "示例研发中心", "company_name": "示例研发中心", "display_name": "示例研发中心"},
     ]
 
@@ -348,7 +348,7 @@ def test_list_employees_adds_household_classification(monkeypatch):
 def test_future_departure_remains_active_until_effective_date(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     assert mod._employment_status("2026-09-21") == "Active"
-    # 决定 D3：离职日当天仍在职，第二天起离职（today = 2026-09-20）。
+    # 决定 D3：演示员工166日当天仍在职，第二天起演示员工166（today = 2026-09-20）。
     assert mod._employment_status("2026-09-20") == "Active"
     assert mod._employment_status("2026-09-19") == "Left"
     assert mod._employment_status(None) == "Active"
@@ -369,9 +369,9 @@ def test_a_second_active_employee_with_the_same_name_is_refused(monkeypatch):
 
     mod, frappe = _load_personnel_entry(monkeypatch)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    monkeypatch.setattr(mod, "_company", lambda company, required=False: "Rayher")
+    monkeypatch.setattr(mod, "_company", lambda company, required=False: "QIHENG Demo")
     frappe.db = SimpleNamespace(commit=lambda: None, get_value=lambda doctype, filters, field: "HR-EMP-90001" if filters["employee_name"] == "演示员工130" else None)
     frappe.get_doc = lambda values: SimpleNamespace(insert=lambda **kwargs: None, name="HR-EMP-NEW")
     with pytest.raises(RuleError, match="演示员工130\\(研发\\)|加区分"):
-        mod.save_employee(employee_name="演示员工130", company="Rayher")
-    assert mod.save_employee(employee_name="演示员工130(研发)", company="Rayher") == {"name": "HR-EMP-NEW"}
+        mod.save_employee(employee_name="演示员工130", company="QIHENG Demo")
+    assert mod.save_employee(employee_name="演示员工130(研发)", company="QIHENG Demo") == {"name": "HR-EMP-NEW"}

@@ -214,7 +214,7 @@ class SanitizedErrorMiddleware:
 
 
 api = FastAPI(
-    title="Rayher Invoice OCR",
+    title="QIHENG Demo Invoice OCR",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,

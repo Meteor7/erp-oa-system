@@ -19,13 +19,13 @@ import ContributionBaseTable from './ContributionBaseTable.vue';
 const props = defineProps({ kind: { type: String, required: true } });
 const cfg = kindOf(props.kind);
 const other = kindOf(props.kind === 'si' ? 'fund' : 'si');
-// 总经理、副总经理只读打开：不显示上传、取消批次、确认纳入 / 忽略、改基数、确认生效（服务端也会拒绝）。
+// 总经理、演示员工113经理只读打开：不显示上传、取消批次、确认纳入 / 忽略、改基数、确认生效（服务端也会拒绝）。
 const canEdit = canEditHr();
 
 // 看板链接带 ?period=YYYY-MM：先读好期间，再建下面的数据请求。
 usePeriodFromRoute(useRoute(), useRouter());
 const company = ref('all');
-const companyOptions = [{ value: 'all', label: '全部公司' }, { value: 'Rayher', label: '栖衡科技' }, { value: '示例研发中心', label: '栖衡研发' }];
+const companyOptions = [{ value: 'all', label: '全部公司' }, { value: 'QIHENG Demo', label: '栖衡科技' }, { value: '示例研发中心', label: '栖衡研发' }];
 const step = ref(1);
 const filter = ref('pending');
 const file = ref(null);

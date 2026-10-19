@@ -172,13 +172,13 @@ class FakeInputs:
 def _payroll_world(monkeypatch, module, frappe, slip, social):
     frappe.get_all = lambda *args, **kwargs: [{"name": "SAL-1", "employee": "E1", "employee_name": "演示员工128", "hr_spa_managed": 1}]
     frappe.get_doc = lambda doctype, name: slip
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "演示员工128"})
     # 本月总工时 176、实际 160（请了 16 小时事假）：8800 × 160 / 176 = 8000
     monkeypatch.setattr(module, "_inputs", lambda: FakeInputs(social=social, fund={"employee_amount": 200, "company_amount": 200, "source": "公积金月度记录"},
                                                               total=176, actual=160, leave=16))
     monkeypatch.setattr(module, "_accommodation", lambda *args: 150)
     monkeypatch.setattr(module, "_slip", lambda *args: slip)
-    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - Rayher"})
+    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - QIHENG Demo"})
 
 
 def test_confirm_resaves_each_draft_with_current_contributions_before_submitting(monkeypatch):

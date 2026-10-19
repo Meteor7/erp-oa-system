@@ -135,7 +135,7 @@ def test_save_cap_uses_current_read_instead_of_stale_snapshot(calendar_module, m
 
 
 def test_joining_and_relieving_dates_trim_the_month(calendar_module):
-    # 审查 #51 / X3-6：月中入职、离职的人按整月算上限，工时会摊到入职前、离职后。
+    # 审查 #51 / X3-6：月中入职、演示员工166的人按整月算上限，工时会摊到入职前、演示员工166后。
     mod, frappe = calendar_module
     frappe.db = types.SimpleNamespace(
         get_value=lambda doctype, key, fields=None, as_dict=False: {

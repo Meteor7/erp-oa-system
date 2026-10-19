@@ -14,7 +14,7 @@ export const canMaintainCatalog = () => canMaintainProcurementCatalog();
 // 能看供应商 / 单价 / 金额的人；申请人只看数量和状态。
 export const isInsider = () => canSeePrice() || canSeePo();
 
-// 副总经理：价格审批选成交供应商、PO 电子用印都找他（access.js 没有单独的函数，按岗位判断）。
+// 演示员工113经理：价格审批选成交供应商、PO 电子用印都找他（access.js 没有单独的函数，按岗位判断）。
 export function isViceManager() {
   const positions = (typeof window !== 'undefined' && window.position_access) || {};
   const roles = (typeof window !== 'undefined' && Array.isArray(window.roles)) ? window.roles : [];

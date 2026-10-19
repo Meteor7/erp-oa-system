@@ -166,17 +166,17 @@ test("the procurement pages no longer carry payment, price or contract screens",
 
 test("structured price form validates locked commercial totals", () => {
   const valid = {
-    supplier: "供应商", delivery_terms: "合同生效后30天", warranty_terms: "一年",
+    supplier: "供应商", delivery_terms: "演示员工116生效后30天", warranty_terms: "一年",
     invoice_condition: "专票", business_lines: [{ quantity: 1, unit_price: 10000 }],
     payment_plan: [
-      { percentage: 30, amount: 3000, trigger_condition: "合同生效" },
+      { percentage: 30, amount: 3000, trigger_condition: "演示员工116生效" },
       { percentage: 70, amount: 7000, trigger_condition: "验收通过" },
     ],
   };
   assert.equal(validatePriceApprovalForm(valid), "");
   assert.match(validatePriceApprovalForm({
     ...valid,
-    payment_plan: [{ percentage: 90, amount: 10000, trigger_condition: "合同生效" }],
+    payment_plan: [{ percentage: 90, amount: 10000, trigger_condition: "演示员工116生效" }],
   }), /100%/);
 });
 

@@ -54,7 +54,7 @@ export function expenseRowKey(row) {
 }
 
 // 疑似重复的行：凭证号、一至四级科目、金额和所属项目都一样。凭证号为空的行不参与（没有可比对的凭证）。
-// 只用来提醒，不拦保存：同一个项目买同一样东西好几次是正常的。
+// 只用来提醒，不拦保存：同一个项目买同一样东西好几次是演示员工152的。
 // 返回 { groups: [[行下标…]…], keys: [组的内容键…]（与 groups 一一对应）, indexes: Map<行下标, 同组其他行的下标[]> }
 export function duplicateVoucherRows(rows = []) {
   const buckets = new Map();

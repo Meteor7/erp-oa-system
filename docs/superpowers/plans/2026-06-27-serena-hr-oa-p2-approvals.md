@@ -135,7 +135,7 @@ def ensure_notifications():
 
 - [ ] **Step 5: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/approval_config.py rayher_hr_payroll/tests/test_approval_config.py
 git commit -m "feat: declare approval reminder notifications
 
@@ -161,7 +161,7 @@ wsl -e bash -lc "cd /home/rayher/frappe-bench && echo 'import frappe; print(\"N:
 Expected: `N: 8`.
 - [ ] **Step 5: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/install.py rayher_hr_payroll/tests/test_approval_config.py
 git commit -m "feat: apply approval notifications on install/migrate
 
@@ -256,7 +256,7 @@ Expected: `STATES: 4 ACTIVE: 1`.
 
 - [ ] **Step 6: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/fixtures/workflow.json rayher_hr_payroll/hooks.py rayher_hr_payroll/tests/test_expense_workflow_fixture.py
 git commit -m "feat: add Expense Claim two-stage approval workflow (manager then finance review)
 

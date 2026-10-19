@@ -1,6 +1,6 @@
 <script setup>
 // 一张价格审批单的详情：头部（状态、金额、操作）、比价矩阵、商务条件、采购比价总结、需求内容、审批轨迹。
-// 采购能编辑的只有草稿；副总经理只有"选一家成交 + 审批通过"，没有退回 / 拒绝。
+// 采购能编辑的只有草稿；演示员工113经理只有"选一家成交 + 审批通过"，没有退回 / 拒绝。
 import { computed, ref, watch } from 'vue';
 import PriceMatrix from './PriceMatrix.vue';
 import {
@@ -80,7 +80,7 @@ function runConfirmed() {
     <section class="panel pa-head">
       <div class="detail-head">
         <div class="grow-col">
-          <div class="title-line"><h3 class="num">{{ approval.name }}</h3><span :class="pillClass(approvalTone(status))">{{ status === '待审批' ? '待审批 · 副总经理' : status }}</span></div>
+          <div class="title-line"><h3 class="num">{{ approval.name }}</h3><span :class="pillClass(approvalTone(status))">{{ status === '待审批' ? '待审批 · 演示员工113经理' : status }}</span></div>
           <div class="muted">{{ sourceLine }}</div>
         </div>
         <div class="amount-block"><span class="muted">{{ totalLabel }}</span><b>{{ totalText }}</b></div>
@@ -160,7 +160,7 @@ function runConfirmed() {
           <div class="rail"><i></i><span v-if="index < timeline.length - 1"></span></div>
           <div class="body"><b>{{ item.label }}</b><span class="muted">{{ item.sub }}</span><span v-if="item.note" class="note">{{ item.note }}</span></div>
         </div>
-        <p class="muted foot">副总经理在这里只有"选一家成交并通过"，没有退回或拒绝；不满意就请采购撤回修改。</p>
+        <p class="muted foot">演示员工113经理在这里只有"选一家成交并通过"，没有退回或拒绝；不满意就请采购撤回修改。</p>
       </section>
     </div>
   </div>

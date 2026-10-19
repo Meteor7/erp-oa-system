@@ -49,7 +49,7 @@ function submitCancel() {
         <div class="mp-drawer-block">
           <b class="mp-drawer-sub">执行分支</b>
           <MaterialExecutionProgress :key="line.source_request + ':' + (line.source_line || '')" :request="line.source_request" :source-line="line.source_line" expanded />
-          <span class="muted">供应商、单价和金额只有采购、PMC、副总经理、财务能看到，其他人这里只有数量和状态。</span>
+          <span class="muted">供应商、单价和金额只有采购、PMC、演示员工113经理、财务能看到，其他人这里只有数量和状态。</span>
         </div>
 
         <div v-if="row" class="mp-drawer-block mp-cancel">

@@ -15,8 +15,8 @@ test("legacy visible route is replaced with the canonical Qiheng Demo path", () 
 });
 
 test("visible company and administrator labels never expose the legacy name", () => {
-  assert.equal(displayCompany("Rayher"), "示例总部");
-  assert.equal(displayUser("Rayher Admin"), "QIHENG DEMO 管理员");
+  assert.equal(displayCompany("QIHENG Demo"), "示例总部");
+  assert.equal(displayUser("QIHENG Demo Staff 04"), "QIHENG DEMO 演示员工170");
   assert.match(appSource, /currentUser\(\)/);
-  assert.doesNotMatch(appSource, />\s*Rayher\s*</i);
+  assert.doesNotMatch(appSource, />\s*QIHENG Demo\s*</i);
 });

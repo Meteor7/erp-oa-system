@@ -59,7 +59,7 @@ def _company():
     frappe = _get_frappe()
     company = frappe.defaults.get_global_default("company")
     if not company:
-        frappe.throw(frappe._("Set a default company before loading Rayher demo data."))
+        frappe.throw(frappe._("Set a default company before loading QIHENG Demo demo data."))
     return company
 
 
@@ -199,7 +199,7 @@ def _ensure_demo_allowed(force: bool) -> None:
     if force:
         return
     frappe = _get_frappe()
-    frappe.throw(frappe._('Pass force=True to create Rayher demo data on this site.'))
+    frappe.throw(frappe._('Pass force=True to create QIHENG Demo demo data on this site.'))
 
 
 def create_demo_data(force: bool = False):

@@ -18,7 +18,7 @@ export function calendarDaysSince(since, now = Date.now()) {
   return Number.isFinite(time) ? Math.max(0, Math.round((startOfDay(now) - startOfDay(time)) / DAY_MS)) : null;
 }
 
-// 等了多少天算"等太久"：只看天数，null / 空 / 非数字都不算。
+// 等了多少天算"等太久"：只看天数，null / 空 / 非数字演示员工177算。
 export function isWaitingTooLong(days) {
   if (days === null || days === undefined || days === '') return false;
   return Number(days) > STUCK_AFTER_DAYS;

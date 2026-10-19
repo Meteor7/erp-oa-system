@@ -17,7 +17,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['changed']);
 
-// 四种登记各一个接口（都只有生产主管 / 系统管理员能调用，服务端再校验一次）。
+// 四种登记各一个接口（都只有生产主管 / 系统演示员工170能调用，服务端再校验一次）。
 const resources = {
   record_po_receipt: createResource({ url: PROCUREMENT_API + 'record_po_receipt', method: 'POST' }),
   record_po_inspection: createResource({ url: PROCUREMENT_API + 'record_po_inspection', method: 'POST' }),

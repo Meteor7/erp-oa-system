@@ -43,7 +43,7 @@
 
 Run:
 ```bash
-cd /e/Rayher/Logistics
+cd /e/QIHENG Demo/Logistics
 git fetch origin
 git merge-base --is-ancestor main origin/frappe-rd-cost-poc && echo "FF-OK" || echo "NOT-FF"
 ```
@@ -53,7 +53,7 @@ Expected: `FF-OK`.
 
 Run:
 ```bash
-cd /e/Rayher/Logistics
+cd /e/QIHENG Demo/Logistics
 git branch -f main origin/frappe-rd-cost-poc
 git rev-parse --short main   # expect a1c78a2
 ```
@@ -63,20 +63,20 @@ Expected: prints `a1c78a2`.
 
 Run:
 ```bash
-cd /e/Rayher/Logistics
+cd /e/QIHENG Demo/Logistics
 git worktree add -b feat/serena-hr-oa ../Logistics-hroa origin/frappe-rd-cost-poc
 git -C ../Logistics-hroa rev-parse --short HEAD   # expect a1c78a2
 ```
-Expected: a new worktree at `E:/Rayher/Logistics-hroa` on `feat/serena-hr-oa` at `a1c78a2`.
+Expected: a new worktree at `E:/QIHENG Demo/Logistics-hroa` on `feat/serena-hr-oa` at `a1c78a2`.
 
 - [ ] **Step 4: Carry the spec + this plan into the new branch**
 
 Run:
 ```bash
-cp /e/Rayher/Logistics/docs/superpowers/specs/2026-06-27-serena-hr-oa-platform-design.md /e/Rayher/Logistics-hroa/docs/superpowers/specs/ 2>/dev/null || { mkdir -p /e/Rayher/Logistics-hroa/docs/superpowers/specs && cp /e/Rayher/Logistics/docs/superpowers/specs/2026-06-27-serena-hr-oa-platform-design.md /e/Rayher/Logistics-hroa/docs/superpowers/specs/; }
-mkdir -p /e/Rayher/Logistics-hroa/docs/superpowers/plans
-cp /e/Rayher/Logistics/docs/superpowers/plans/2026-06-27-serena-hr-oa-foundation.md /e/Rayher/Logistics-hroa/docs/superpowers/plans/
-cd /e/Rayher/Logistics-hroa && git add docs/superpowers && git commit -m "docs: carry HR/OA spec + foundation plan onto feature branch
+cp /e/QIHENG Demo/Logistics/docs/superpowers/specs/2026-06-27-serena-hr-oa-platform-design.md /e/QIHENG Demo/Logistics-hroa/docs/superpowers/specs/ 2>/dev/null || { mkdir -p /e/QIHENG Demo/Logistics-hroa/docs/superpowers/specs && cp /e/QIHENG Demo/Logistics/docs/superpowers/specs/2026-06-27-serena-hr-oa-platform-design.md /e/QIHENG Demo/Logistics-hroa/docs/superpowers/specs/; }
+mkdir -p /e/QIHENG Demo/Logistics-hroa/docs/superpowers/plans
+cp /e/QIHENG Demo/Logistics/docs/superpowers/plans/2026-06-27-serena-hr-oa-foundation.md /e/QIHENG Demo/Logistics-hroa/docs/superpowers/plans/
+cd /e/QIHENG Demo/Logistics-hroa && git add docs/superpowers && git commit -m "docs: carry HR/OA spec + foundation plan onto feature branch
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -86,7 +86,7 @@ Expected: a commit on `feat/serena-hr-oa` adding the two docs.
 
 Run:
 ```bash
-cd /e/Rayher/Logistics-hroa && wsl -e bash -lc "cd /mnt/e/Rayher/Logistics-hroa && git push -u origin feat/serena-hr-oa"
+cd /e/QIHENG Demo/Logistics-hroa && wsl -e bash -lc "cd /mnt/e/QIHENG Demo/Logistics-hroa && git push -u origin feat/serena-hr-oa"
 ```
 Expected: branch published to origin.
 
@@ -130,7 +130,7 @@ Expected: all existing tests pass (97 green), 0 failures. **Do not proceed to P1
 
 ## P1 — Master Data + Four-Tier Roles + 总控 + 员工信息总表
 
-> All P1 work happens in the **`E:/Rayher/Logistics-hroa`** worktree on `feat/serena-hr-oa`. After code changes, sync the WSL bench with:
+> All P1 work happens in the **`E:/QIHENG Demo/Logistics-hroa`** worktree on `feat/serena-hr-oa`. After code changes, sync the WSL bench with:
 > `wsl -e bash -lc "cd /home/rayher/frappe-bench/apps/rayher_hr_payroll && git fetch origin && git checkout feat/serena-hr-oa && git pull && cd /home/rayher/frappe-bench && sudo -u rayher /home/rayher/.local/bin/bench --site qatest.localhost migrate"`
 > (push from the worktree first so the bench can pull.)
 
@@ -230,7 +230,7 @@ Expected: PASS (3 passed).
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/access_control.py rayher_hr_payroll/tests/test_access_control.py
 git commit -m "feat: declare Department Manager role + 总控 Owner role profile
 
@@ -286,14 +286,14 @@ Expected: `ROLE: Department Manager` and `PROFILE: 总控 Owner` (both truthy).
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/install.py rayher_hr_payroll/tests/test_access_control.py
 git commit -m "feat: apply access control (role + role profile) on install/migrate
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
 
-### Task 1.3: 员工信息总表 — standard Query Report (HR-only, includes 离职)
+### Task 1.3: 员工信息总表 — standard Query Report (HR-only, includes 演示员工166)
 
 **Files:**
 - Create: `rayher_hr_payroll/rayher_hr_payroll/report/employee_info_summary/__init__.py` (empty)
@@ -338,7 +338,7 @@ def test_report_is_hr_only_not_finance():
 
 def test_report_includes_left_employees_pii_and_education():
     q = _load()["query"].lower()
-    # No status filter => 离职 (Left) employees are included (需求#5):
+    # No status filter => 演示员工166 (Left) employees are included (需求#5):
     assert "status =" not in q and "status=" not in q
     # PII column + education join present:
     assert "id_card_number_cn" in q
@@ -354,7 +354,7 @@ Expected: FAIL — `FileNotFoundError` (report json missing).
 
 Author the empty init:
 ```bash
-: > /e/Rayher/Logistics-hroa/rayher_hr_payroll/rayher_hr_payroll/report/employee_info_summary/__init__.py
+: > /e/QIHENG Demo/Logistics-hroa/rayher_hr_payroll/rayher_hr_payroll/report/employee_info_summary/__init__.py
 ```
 (Create the dir first with `mkdir -p`.)
 
@@ -393,10 +393,10 @@ Expected: `COLS: 9` (the report executes and returns 9 columns).
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/rayher_hr_payroll/report/employee_info_summary/
 git add rayher_hr_payroll/tests/test_employee_info_report.py
-git commit -m "feat: add 员工信息总表 Query Report (HR-only, includes 离职)
+git commit -m "feat: add 员工信息总表 Query Report (HR-only, includes 演示员工166)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -546,12 +546,12 @@ Expected: all pass — the original 97 plus the new access-control (4) and repor
 
 - [ ] **Step 2: Push the branch**
 
-Run: `wsl -e bash -lc "cd /mnt/e/Rayher/Logistics-hroa && git push"`
+Run: `wsl -e bash -lc "cd /mnt/e/QIHENG Demo/Logistics-hroa && git push"`
 Expected: `feat/serena-hr-oa` updated on origin.
 
 - [ ] **Step 3: Confirm P1 acceptance against the spec**
 
-Re-read spec §P1 验证标准 and confirm every bullet is demonstrated by Task 1.3–1.5 outputs: employee has dept/岗位/学历; 总表 includes 离职; four accounts + 总控 see the correct scope. P1 is done.
+Re-read spec §P1 验证标准 and confirm every bullet is demonstrated by Task 1.3–1.5 outputs: employee has dept/岗位/学历; 总表 includes 演示员工166; four accounts + 总控 see the correct scope. P1 is done.
 
 ---
 
@@ -560,7 +560,7 @@ Re-read spec §P1 验证标准 and confirm every bullet is demonstrated by Task 
 **Spec coverage (§ of spec → task):**
 - P0 worktree + bench align → Task 0.1, 0.2 ✓
 - P1 部门/岗位/学历 masters → Task 1.4 ✓
-- P1 员工信息总表 含离职 + HR-only PII (需求#5) → Task 1.3 ✓
+- P1 员工信息总表 含演示员工166 + HR-only PII (需求#5) → Task 1.3 ✓
 - P1 四档角色 → Task 1.1 (Department Manager) + reuse of stock roles ✓
 - P1 总控 Role Profile (System Manager + HR Manager + Accounts User) → Task 1.1, 1.2 ✓
 - P1 可见范围验证(员工只见自己/财务不见 PII/总控全见) → Task 1.5 ✓

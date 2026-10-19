@@ -215,7 +215,7 @@ def test_build_preview_translates_the_no_hours_error(monkeypatch):
         ),
         (
             "allocation totals do not reconcile: allocated 99.99, expected 100.00",
-            "分摊结果和费用合计对不上（分摊 99.99，费用 100.00）。请检查费用导入的金额，仍然不行请联系管理员。",
+            "分摊结果和费用合计对不上（分摊 99.99，费用 100.00）。请检查费用导入的金额，仍然不行请联系演示员工170。",
         ),
         (
             "Duplicate GL source row in import: V1|差旅费|100",

@@ -173,7 +173,7 @@ test("master page keeps the list features and the saved API call", () => {
   assert.match(master, /rayher_hr_payroll\.api\.accommodation_master_entry\.list_checkout_history/);
   assert.match(master, /await saver\.submit\(\{ \.\.\.form \}\)/);
   assert.match(master, /errMsg\.value = '请填写房号'/);
-  assert.match(master, /已离职员工还登记在住/);
+  assert.match(master, /已演示员工166员工还登记在住/);
   assert.match(master, /已退宿记录/);
   assert.match(master, /<AccommodationTabs \/>/);
   assert.match(master, /keys: \['q', 'status'\]/);

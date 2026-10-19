@@ -9,7 +9,7 @@ from rayher_hr_payroll.approval_center import save_draft
 COMPANY = "[演示]示例企业021有限公司"
 PREFIX = "[演示]"
 PEOPLE = [
-    ("manager", "演示员工14", "管理部", ["HR Manager", "Projects Manager", "Rayher Business Executive"]),
+    ("manager", "演示员工14", "管理部", ["HR Manager", "Projects Manager", "QIHENG Demo Business Executive"]),
     ("hr", "许晴", "人事行政部", ["HR Manager"]),
     ("finance", "顾安", "财务部", ["Accounts User", "Accounts Manager"]),
     ("pmc", "林序", "供应链部", ["Purchase User"]),

@@ -23,7 +23,7 @@ def test_owner_role_profile_bundles_required_roles():
         "Department Manager",
         "Employee",
         "All Project Access",
-        "Rayher Business Executive",
+        "QIHENG Demo Business Executive",
     ):
         assert role in owner_roles
 

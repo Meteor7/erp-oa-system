@@ -28,7 +28,7 @@ COMPLETED = "已完成"
 PAID = "已付款"
 WAIT_HANDLE = "待办理"
 # 看板范围：财务和管理层看全公司，部门主管只看本部门，普通员工不开放。
-SCOPE_ALL_ROLES = {"System Manager", "Accounts User", "Rayher Business Executive"}
+SCOPE_ALL_ROLES = {"System Manager", "Accounts User", "QIHENG Demo Business Executive"}
 SCOPE_ALL_POSITIONS = {"finance_manager", "finance_auditor", "vice_manager", "general_manager"}
 SCOPE_DEPARTMENT_ROLES = {"Department Manager"}
 STUCK_DAYS = 3

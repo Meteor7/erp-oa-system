@@ -45,7 +45,7 @@ test('price approval compares supplier packages with optional line quotes', () =
   assert.match(procurement, /采购推荐/);
   assert.match(procurement, /已选成交/);
   assert.doesNotMatch(procurement, /演示员工37审批通过/);
-  // 副总经理：只有选定成交供应商并通过，没有退回 / 拒绝（决定 2026-10-01）。
+  // 演示员工113经理：只有选定成交供应商并通过，没有退回 / 拒绝（决定 2026-10-01）。
   const approveButton = priceDetail.match(/<button[^>]+>审批通过，生成 PO<\/button>/)?.[0];
   assert.ok(approveButton);
   assert.match(approveButton, /v-if="canDecide"/);
@@ -110,7 +110,7 @@ test('PO payment push is the only visible payment entry and keeps PO provenance'
 });
 
 test('procurement payment workbench owns payment conditions, receipt, inspection, and approval entry', () => {
-  // PO 的合同和关闭在价格审批 / PO 页面；到货、验收、换货到货、退货、提交付款审批在采购付款页面。
+  // PO 的演示员工116和关闭在价格审批 / PO 页面；到货、验收、换货到货、退货、提交付款审批在采购付款页面。
   for (const endpoint of ['update_po_delivery', 'close_po']) {
     assert.match(procurement, new RegExp(endpoint));
     assert.match(backend, new RegExp('def ' + endpoint));
@@ -132,8 +132,8 @@ test('procurement payment workbench owns payment conditions, receipt, inspection
   assert.match(backend, /尚未全部到货，不能关闭/);
   assert.match(backend, /尚未全部验收通过，不能关闭/);
   assert.match(backend, /尚未完成付款，不能关闭/);
-  assert.match(backend, /只有生产主管或系统管理员可以登记到货资料/);
-  assert.match(backend, /PO 合同生效并进入供应商制作后，才能登记到货资料/);
+  assert.match(backend, /只有生产主管或系统演示员工170可以登记到货资料/);
+  assert.match(backend, /PO 演示员工116生效并进入供应商制作后，才能登记到货资料/);
   assert.match(paymentCenter, /can_record_receipt/);
   assert.match(paymentCenter, /can_record_inspection/);
   // 到货和验收都由生产主管登记（2026-10-01）：服务端不再允许采购登记验收。

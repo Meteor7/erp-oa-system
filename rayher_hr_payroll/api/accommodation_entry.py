@@ -109,7 +109,7 @@ def get_emp_options():
     # app); get_all works for management roles that lack an Employee read DocPerm.
     return frappe.get_all(
         "Employee",
-        # status 供宿舍页区分离职员工：新入住只能选在职员工，历史记录照常显示姓名。
+        # status 供宿舍页区分演示员工166员工：新入住只能选在职员工，历史记录照常显示姓名。
         fields=["name", "employee_name", "expense_account_category", "status"],
         order_by="employee_name",
     )

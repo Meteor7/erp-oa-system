@@ -445,7 +445,7 @@ def test_timesheet_payload_keeps_monthly_metadata_on_parent(monthly_module):
 
     payload = mod.build_timesheet_payload(
         employee="EMP-1",
-        company="Rayher",
+        company="QIHENG Demo",
         period="2026-07",
         entry_id="entry-1",
         row=row,
@@ -491,7 +491,7 @@ def _install_save_dependencies(monkeypatch, mod, frappe):
         _require_visible_employee=lambda employee: None,
         _resolve_rd_project=lambda code, name, selected=None: selected or code,
         _period_has_submitted_allocation=lambda year, month: False,
-        _company=lambda: "Rayher",
+        _company=lambda: "QIHENG Demo",
     )
     monkeypatch.setattr(mod, "_daily_module", lambda: daily, raising=False)
     return daily
@@ -722,7 +722,7 @@ def test_replace_monthly_documents_preserves_ids_and_submits_generated_parents(m
         period="2026-07",
         year=2026,
         month=7,
-        company="Rayher",
+        company="QIHENG Demo",
         expected_revision=mod._monthly_revision([old_doc]),
         rows=[
             {
@@ -885,7 +885,7 @@ def test_replace_monthly_documents_rejects_stale_revision_before_delete(monthly_
             year=2026,
             month=7,
             rows=[],
-            company="Rayher",
+            company="QIHENG Demo",
             expected_revision="stale-revision",
         )
 
@@ -916,7 +916,7 @@ def test_replace_monthly_documents_allows_intentional_empty_save(monthly_module,
         year=2026,
         month=7,
         rows=[],
-        company="Rayher",
+        company="QIHENG Demo",
         expected_revision=mod._monthly_revision([old_doc]),
     )
 
@@ -941,7 +941,7 @@ def test_existing_monthly_documents_are_read_with_a_lock(monthly_module):
 
 
 def test_left_employee_can_be_backfilled_for_the_relieving_month_only(monthly_module):
-    # 审查 X3-6：离职当天账号就停用，离职当月的工时原来谁都补登不了。
+    # 审查 X3-6：演示员工166当天账号就停用，演示员工166当月的工时原来谁都补登不了。
     from datetime import date
 
     mod, frappe = monthly_module
@@ -951,7 +951,7 @@ def test_left_employee_can_be_backfilled_for_the_relieving_month_only(monthly_mo
 
     mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 9, 1))
     mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 8, 1))
-    with pytest.raises(RuleError, match="离职当月"):
+    with pytest.raises(RuleError, match="演示员工166当月"):
         mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 10, 1))
     with pytest.raises(RuleError, match="在职研发员工"):
         mod._require_monthly_employee("EMP-LEFT", "edit")
@@ -996,7 +996,7 @@ def test_monthly_spreading_skips_hours_already_taken_by_approved_leave(monthly_m
         period="2026-07",
         year=2026,
         month=7,
-        company="Rayher",
+        company="QIHENG Demo",
         expected_revision=mod._monthly_revision([]),
         work_dates=[date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)],
         leave_hours_by_date={"2026-07-01": 8.0, "2026-07-02": 4.0},
@@ -1046,7 +1046,7 @@ def test_a_173_hour_entry_is_stored_as_hours_with_the_days_derived_and_no_day_ab
         2026, 10, mod.split_hour_chunks(row["calculated_hours"]), project=row["project"], project_code=row["project_code"],
         project_name=row["project_name"], remark="", occupied_hours={},
     )
-    payload = mod.build_timesheet_payload(employee="EMP-1", company="Rayher", period="2026-10", entry_id="e1", row=row, time_logs=logs)
+    payload = mod.build_timesheet_payload(employee="EMP-1", company="QIHENG Demo", period="2026-10", entry_id="e1", row=row, time_logs=logs)
     assert payload["rd_calculated_hours"] == 173.0 and payload["rd_occurrence_days"] == 21.63
     assert sum(Decimal(str(log["hours"])) for log in logs) == Decimal("173")
     assert max(log["hours"] for log in logs) == 8.0 and len(logs) == 22      # 21 个整天 + 5 小时

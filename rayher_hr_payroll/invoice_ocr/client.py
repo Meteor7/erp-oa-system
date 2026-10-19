@@ -55,7 +55,7 @@ def _safe_internal_address(value: str) -> bool:
 
 
 def _configuration_error(error=None):
-    failure = OCRServiceError("OCR 服务配置无效，请联系管理员。")
+    failure = OCRServiceError("OCR 服务配置无效，请联系演示员工170。")
     if error is None:
         raise failure
     raise failure from error

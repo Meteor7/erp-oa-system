@@ -26,7 +26,7 @@ const checkoutHistory = createResource({
   method: 'GET',
   auto: true,
 });
-// 总经理、副总经理只读打开本页：不显示新增 / 编辑，也不取员工下拉（那个接口只给人事，取了会报没有权限）。
+// 总经理、演示员工113经理只读打开本页：不显示新增 / 编辑，也不取员工下拉（那个接口只给人事，取了会报没有权限）。
 const canEdit = canEditHr();
 const employees = createResource({
   url: 'rayher_hr_payroll.api.accommodation_entry.get_emp_options',
@@ -43,7 +43,7 @@ const blank = () => ({
   room_purpose: '', occupant_label: '', remark: '', is_active: 1,
 });
 const form = reactive(blank());
-// 离职员工不能新安排入住；正在编辑的房间原入住人即使已离职也保留，方便填写退宿日期。
+// 演示员工166员工不能新安排入住；正在编辑的房间原入住人即使已演示员工166也保留，方便填写退宿日期。
 const originalEmployee = ref('');
 const originalRoomNo = ref('');
 const employeeChoices = computed(() => (employees.data || [])
@@ -71,7 +71,7 @@ const loadError = computed(() => (rows.error ? extractFrappeError(rows.error, '�
 
 // ---------------------------------------------------------------- 列表筛选（都在地址里：看板、数据看板的链接共用，刷新还在）
 // ?lease=expiring 只看 60 天内到期或已过期的租约（宿舍看板"查看续租清单"、数据看板），
-// ?leaver=1 只看已离职员工仍占房的房间（数据看板）；?q= 搜索词、?status= 房间状态。改了筛选地址跟着变（replace），点编辑进内页后回来还是同一个筛选。
+// ?leaver=1 只看已演示员工166员工仍占房的房间（数据看板）；?q= 搜索词、?status= 房间状态。改了筛选地址跟着变（replace），点编辑进内页后回来还是同一个筛选。
 const filters = reactive({ keyword: '', status: '', lease: false, leaver: false });
 bindRouteFilters({
   route,
@@ -103,7 +103,7 @@ const filteredRows = computed(() => (rows.data || []).filter((row) => {
     .some((value) => String(value || '').toLowerCase().includes(keyword));
   return matchesKeyword && (!filters.status || row.occupancy_status === filters.status) && (!filters.lease || leaseSoon(row)) && (!filters.leaver || row.employee_left);
 }).filter((row) => !(filters.lease || filters.leaver) || inUse(row)));
-// 续租清单、已离职仍占房只看在用的房间：停用的房间宿舍看板不算，看板上的间数 / 人数也不算它（2026-10-13）。
+// 续租清单、已演示员工166仍占房只看在用的房间：停用的房间宿舍看板不算，看板上的间数 / 人数也不算它（2026-10-13）。
 function inUse(row) {
   return Number(row.is_active ?? 1) === 1;
 }
@@ -275,13 +275,13 @@ async function save() {
       <div v-if="savedNotice" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status" data-saved-notice>{{ savedNotice }}</div>
       <Card title="宿舍基本信息管理">
         <template v-if="canEdit" #actions><Button variant="solid" data-room-new @click="openNew">新增房间</Button></template>
-        <p class="mb-4 text-sm text-gray-500">统一维护房间租赁、押金、附件及入住关系；每月租金是整套房间的总租金。退宿后记录进入下方历史，不会被新入住人覆盖。</p>
+        <p class="mb-4 text-sm text-gray-500">统一维护房间租赁、押金、附件及入住关系；每月租金是整套房间的总租金。退宿后记录进入下方历史，不会被演示员工139覆盖。</p>
         <div v-if="filters.lease" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <span>续租清单：只显示在用房间里 60 天内到期或已过期的租约（{{ filteredRows.length }} 间）。</span>
           <button type="button" class="text-blue-600 hover:underline" @click="filters.lease = false">显示全部房间</button>
         </div>
         <div v-if="filters.leaver" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-leaver-filter>
-          <span>已离职仍占房：只显示登记的入住人已离职的房间（{{ filteredRows.length }} 间），请核实后编辑并填写退宿日期。</span>
+          <span>已演示员工166仍占房：只显示登记的入住人已演示员工166的房间（{{ filteredRows.length }} 间），请核实后编辑并填写退宿日期。</span>
           <button type="button" class="text-blue-600 hover:underline" @click="filters.leaver = false">显示全部房间</button>
         </div>
         <div class="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -290,7 +290,7 @@ async function save() {
           </div>
         </div>
         <div v-if="leftStillRegistered.length" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {{ leftStillRegistered.length }} 位已离职员工还登记在住：{{ leftStillRegistered.map((row) => `${row.room_no} ${row.employee_name}`).join('、') }}。<template v-if="canEdit">请核实后点"编辑"填写退宿日期。</template>
+          {{ leftStillRegistered.length }} 位已演示员工166员工还登记在住：{{ leftStillRegistered.map((row) => `${row.room_no} ${row.employee_name}`).join('、') }}。<template v-if="canEdit">请核实后点"编辑"填写退宿日期。</template>
         </div>
         <div class="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 md:flex-row">
           <input v-model="filters.keyword" class="min-w-0 flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="搜索房号、房型或入住人" />
@@ -304,15 +304,15 @@ async function save() {
             <thead class="sticky top-0 z-20 bg-gray-50 text-gray-500 shadow-sm"><tr>
               <th class="sticky left-0 top-0 z-30 bg-gray-50 px-3 py-2 text-left">房号</th><th class="px-3 py-2 text-left">房型</th><th class="px-3 py-2 text-left">状态</th>
               <th class="px-3 py-2 text-left">承租日</th><th class="px-3 py-2 text-left">到期日</th><th class="px-3 py-2 text-right">每月租金</th><th class="px-3 py-2 text-right">已付押金</th>
-              <th class="px-3 py-2 text-left">房租合同</th><th class="px-3 py-2 text-left">押金附件</th><th class="px-3 py-2 text-left">入住人</th><th class="px-3 py-2 text-left">入住日期</th><th class="px-3 py-2 text-left">退宿日期</th><th class="px-3 py-2 text-left">备注</th><th class="px-3 py-2 text-right">操作</th>
+              <th class="px-3 py-2 text-left">房租演示员工116</th><th class="px-3 py-2 text-left">押金附件</th><th class="px-3 py-2 text-left">入住人</th><th class="px-3 py-2 text-left">入住日期</th><th class="px-3 py-2 text-left">退宿日期</th><th class="px-3 py-2 text-left">备注</th><th class="px-3 py-2 text-right">操作</th>
             </tr></thead>
             <tbody>
               <tr v-for="row in filteredRows" :key="row.name" class="border-t hover:bg-gray-50">
                 <td class="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-2 font-semibold text-gray-900">{{ row.room_no }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.room_type || '-' }}</td><td class="px-3 py-2"><Badge :theme="statusTheme(row.occupancy_status)">{{ row.occupancy_status }}</Badge></td>
                 <td class="whitespace-nowrap px-3 py-2">{{ row.lease_start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.lease_end_date || '-' }}</td><td class="px-3 py-2 text-right">{{ money(row.monthly_rent) }}</td><td class="px-3 py-2 text-right">{{ money(row.paid_deposit) }}</td>
-                <td class="max-w-[150px] px-3 py-2"><a v-if="row.rent_contract_attachment" :href="row.rent_contract_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看合同</a><span v-else class="text-gray-400">-</span></td>
+                <td class="max-w-[150px] px-3 py-2"><a v-if="row.rent_contract_attachment" :href="row.rent_contract_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看演示员工116</a><span v-else class="text-gray-400">-</span></td>
                 <td class="max-w-[150px] px-3 py-2"><a v-if="row.deposit_attachment" :href="row.deposit_attachment" target="_blank" rel="noopener" class="block truncate text-xs text-blue-600">查看附件</a><span v-else class="text-gray-400">-</span></td>
-                <td class="whitespace-nowrap px-3 py-2">{{ row.employee_name || row.room_purpose || '-' }}<span v-if="row.employee_left" class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">已离职</span></td><td class="whitespace-nowrap px-3 py-2">{{ row.start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.end_date || '-' }}</td><td class="max-w-[220px] px-3 py-2">{{ row.remark || '-' }}</td><td class="px-3 py-2 text-right"><template v-if="canEdit"><router-link :to="editLocation(row)" class="text-xs text-blue-600 hover:underline" data-room-edit>编辑</router-link></template><span v-else class="text-xs text-gray-400">只读</span></td>
+                <td class="whitespace-nowrap px-3 py-2">{{ row.employee_name || row.room_purpose || '-' }}<span v-if="row.employee_left" class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">已演示员工166</span></td><td class="whitespace-nowrap px-3 py-2">{{ row.start_date || '-' }}</td><td class="whitespace-nowrap px-3 py-2">{{ row.end_date || '-' }}</td><td class="max-w-[220px] px-3 py-2">{{ row.remark || '-' }}</td><td class="px-3 py-2 text-right"><template v-if="canEdit"><router-link :to="editLocation(row)" class="text-xs text-blue-600 hover:underline" data-room-edit>编辑</router-link></template><span v-else class="text-xs text-gray-400">只读</span></td>
               </tr>
               <tr v-if="!filteredRows.length"><td colspan="14" class="py-8 text-center text-gray-400">暂无宿舍基础资料</td></tr>
             </tbody>
@@ -364,7 +364,7 @@ async function save() {
             <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">到期日</span><input v-model="form.lease_end_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
             <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">每月租金（房间总租金）</span><input v-model.number="form.monthly_rent" type="number" min="0" step="0.01" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
             <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">已付押金</span><input v-model.number="form.paid_deposit" type="number" min="0" step="0.01" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
-            <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">入住人</span><select v-model="form.employee" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="selectEmployee"><option value="">未关联员工</option><option v-for="employee in employeeChoices" :key="employee.name" :value="employee.name">{{ employee.employee_name }} · {{ employee.name }}{{ employee.status === 'Left' ? '（已离职）' : '' }}</option></select></label>
+            <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">入住人</span><select v-model="form.employee" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="selectEmployee"><option value="">未关联员工</option><option v-for="employee in employeeChoices" :key="employee.name" :value="employee.name">{{ employee.employee_name }} · {{ employee.name }}{{ employee.status === 'Left' ? '（已演示员工166）' : '' }}</option></select></label>
             <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">房间用途</span><select v-model="form.room_purpose" class="rounded border border-gray-300 px-3 py-2 text-sm" @change="selectPurpose"><option v-for="purpose in PURPOSES" :key="purpose || 'normal'" :value="purpose">{{ purpose || '普通员工宿舍' }}</option></select></label>
             <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">入住日期</span><input v-model="form.start_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
             <label class="flex flex-col"><span class="mb-1 text-xs text-gray-500">退宿日期</span><input v-model="form.end_date" type="date" class="rounded border border-gray-300 px-3 py-2 text-sm" /></label>
@@ -372,7 +372,7 @@ async function save() {
           </div>
 
           <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div v-for="fileField in [{ key: 'rent_contract_attachment', label: '房租合同' }, { key: 'deposit_attachment', label: '押金附件' }]" :key="fileField.key" class="rounded border border-gray-200 bg-white p-3">
+            <div v-for="fileField in [{ key: 'rent_contract_attachment', label: '房租演示员工116' }, { key: 'deposit_attachment', label: '押金附件' }]" :key="fileField.key" class="rounded border border-gray-200 bg-white p-3">
               <div class="mb-2 text-xs font-medium text-gray-600">{{ fileField.label }}</div>
               <div class="flex flex-wrap items-center gap-2">
                 <a v-if="form[fileField.key]" :href="form[fileField.key]" target="_blank" rel="noopener" class="max-w-[260px] truncate text-xs text-blue-600 hover:underline">{{ fileName(form[fileField.key]) }}</a>

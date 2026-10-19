@@ -27,7 +27,7 @@ def household_classification(value):
 
 # 示例总部 2026 年的社保政策：数据库里没有配置“社保公积金政策”时用它（原来写死在这里，决定 2026-10-14 改成可配置）。
 BUILTIN_POLICIES = {
-    ("Rayher", 2026): {
+    ("QIHENG Demo", 2026): {
         "version": "示例总部-2026",
         "medical_floor": Decimal("6727"),
         "employee_pension_rate": Decimal("8"),

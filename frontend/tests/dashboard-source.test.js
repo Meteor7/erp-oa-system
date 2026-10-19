@@ -147,7 +147,7 @@ test("notifications stay at the bottom of the overview, behaving as before", () 
 });
 
 test("nothing in the dashboard hard-codes a position or a role name", () => {
-  const names = /总经理|副总|财务主管|人事经理|采购经理|PMC|出纳|生产主管|总账|general_manager|vice_manager|finance_|hr_manager|procurement_manager|pmc\b|production_asset_owner|dept_manager|System Manager|Accounts User|HR Manager/;
+  const names = /总经理|演示员工113|财务主管|人事经理|采购经理|PMC|演示员工110|生产主管|总账|general_manager|vice_manager|finance_|hr_manager|procurement_manager|pmc\b|production_asset_owner|dept_manager|System Manager|Accounts User|HR Manager/;
   for (const [name, text] of Object.entries(all)) {
     const withoutComments = text.replace(/\/\/.*$/gm, "").replace(/<!--[\s\S]*?-->/g, "");
     assert.doesNotMatch(withoutComments, names, name);

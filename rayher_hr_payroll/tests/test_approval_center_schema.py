@@ -68,7 +68,7 @@ def test_business_documents_are_private_versioned_references():
     assert result["supersedes"]["options"] == "OA Business Document"
     assert {row["role"] for row in document_meta["permissions"]} >= {
         "System Manager", "Employee", "Department Manager", "Accounts User", "HR User", "HR Manager",
-        "Rayher Business Executive",
+        "QIHENG Demo Business Executive",
     }
     assert all(
         not permission.get(action)

@@ -102,7 +102,7 @@ REQUIRED_TRANSLATION_STRINGS = {
     'RD Period Lock',
     'Recognized RD Type',
     'Standard Daily Hours',
-    'Set a default company before loading Rayher demo data.',
+    'Set a default company before loading QIHENG Demo demo data.',
     # Report names + labels (Babel-unextractable; registered via translatable_labels._lt).
     'RD Allocation Matrix',
     'RD Timesheet Exceptions',

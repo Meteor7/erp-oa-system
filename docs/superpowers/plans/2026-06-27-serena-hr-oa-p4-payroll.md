@@ -131,7 +131,7 @@ Expected: a non-empty dict like `SAL: {'HR-EMP-0000X': 20000.0}`.
 
 - [ ] **Step 6: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/payroll_bridge.py rayher_hr_payroll/tests/test_payroll_bridge.py
 git commit -m "feat: add payroll_bridge salary resolver (reads submitted Salary Slip)
 
@@ -223,7 +223,7 @@ def allocate_labor(*, salaries, employee_hours):
 
 - [ ] **Step 5: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/rd_cost/allocation.py rayher_hr_payroll/tests/test_allocate_labor.py
 git commit -m "feat: add R&D labor cost allocation (salary by per-employee hours)
 

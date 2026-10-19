@@ -13,7 +13,7 @@ import { FEE_PATH, takeSaved } from '../lib/accommodationFees.js';
 import { canEditHr } from '../lib/access.js';
 
 const router = useRouter();
-// 总经理、副总经理只读打开：不显示编辑房间、登记费用（服务端也会拒绝）。
+// 总经理、演示员工113经理只读打开：不显示编辑房间、登记费用（服务端也会拒绝）。
 const canEdit = canEditHr();
 // 在房间内页或费用登记内页保存后回到本页：显示一条"已保存 A-302"，几秒后消失。
 const roomNotice = useRoomNotice();
@@ -140,7 +140,7 @@ function registerFee(item) {
         </div>
         <div v-if="leavers.length" class="flex flex-col gap-1 px-4 py-2.5 md:flex-row md:items-center md:gap-3">
           <span class="hidden h-1.5 w-1.5 shrink-0 rounded-full md:block" :style="{ background: COLORS.leaver }"></span>
-          <span class="flex-1"><b class="font-semibold">{{ leavers.length }} 位已离职员工还登记在住：</b>{{ leavers.map((item) => `${item.room_no} ${item.employee_name}`).join('、') }}</span>
+          <span class="flex-1"><b class="font-semibold">{{ leavers.length }} 位已演示员工166员工还登记在住：</b>{{ leavers.map((item) => `${item.room_no} ${item.employee_name}`).join('、') }}</span>
           <router-link :to="{ path: '/accommodation/master', query: { leaver: '1' } }" class="shrink-0 font-medium text-[#0E615B] hover:underline">{{ canEdit ? '去填写退宿日期 →' : '查看这些房间 →' }}</router-link>
         </div>
       </div>
@@ -250,7 +250,7 @@ function registerFee(item) {
                   @click="pickRoom(item)"
                 >
                   <span class="truncate text-[13px] font-semibold text-[#1A2130]">{{ item.room_no }}</span>
-                  <span class="truncate text-[11px]" :style="{ color: item.employee_left ? COLORS.leaver : STATUS_STYLE[item.status].text }">{{ item.employee_left ? '已离职在住' : item.status }}</span>
+                  <span class="truncate text-[11px]" :style="{ color: item.employee_left ? COLORS.leaver : STATUS_STYLE[item.status].text }">{{ item.employee_left ? '已演示员工166在住' : item.status }}</span>
                   <div class="mt-auto h-1 w-full overflow-hidden rounded-full" :style="splitBar(item)">
                     <div class="h-full" :style="{ width: ratioWidth(item.company, item.total), background: COLORS.company }"></div>
                   </div>
@@ -259,7 +259,7 @@ function registerFee(item) {
             </div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#6B7385]">
               <span v-for="item in legend" :key="item.status" class="flex items-center gap-1.5"><span class="h-2.5 w-[3px] rounded-sm" :style="{ background: item.color }"></span>{{ item.status }}</span>
-              <span class="flex items-center gap-1.5"><span class="h-2.5 w-[3px] rounded-sm" :style="{ background: COLORS.leaver }"></span>已离职在住</span>
+              <span class="flex items-center gap-1.5"><span class="h-2.5 w-[3px] rounded-sm" :style="{ background: COLORS.leaver }"></span>已演示员工166在住</span>
               <span class="text-[#9AA3B2]">|</span>
               <span>底部细条：<span :style="{ color: COLORS.companyText }">公司</span> / <span :style="{ color: COLORS.personalText }">个人</span>承担（所选月份）</span>
             </div>
@@ -275,7 +275,7 @@ function registerFee(item) {
               <span class="text-[#6B7385]">月租</span><span>{{ whole(room.monthly_rent) }} 元</span>
               <span class="text-[#6B7385]">租约</span><span :class="room.lease_days_left !== null && room.lease_days_left <= 60 ? 'text-[#0E615B]' : ''">{{ leaseText(room) }}</span>
               <span class="text-[#6B7385]">入住人</span>
-              <span>{{ room.employee_name || '—' }}<span v-if="room.employee_left" class="ml-1.5 text-xs" :style="{ color: COLORS.leaver }">已离职</span></span>
+              <span>{{ room.employee_name || '—' }}<span v-if="room.employee_left" class="ml-1.5 text-xs" :style="{ color: COLORS.leaver }">已演示员工166</span></span>
             </div>
             <div class="flex flex-col gap-2 border-t border-[#EEF0F4] pt-3">
               <div class="flex justify-between text-[13px]"><span class="text-[#6B7385]">{{ title }}费用</span><b class="font-semibold">{{ room.total > 0 ? `¥ ${money(room.total)}` : '未登记' }}</b></div>

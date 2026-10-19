@@ -190,7 +190,7 @@ test('price entry separates PMC and approver visibility from purchasing authorit
   assert.equal(canEditProcurementPrice(), false);
   window = { user: 'person033@staff.example.invalid', roles: ['Employee', 'Purchase User'] };
   assert.equal(canEditProcurementPrice(), true);
-  window = { user: 'person046@staff.example.invalid', roles: ['Rayher Business Executive'] };
+  window = { user: 'person046@staff.example.invalid', roles: ['QIHENG Demo Business Executive'] };
   assert.equal(canSeeProcurementPrice(), true);
   assert.equal(canEditProcurementPrice(), false);
   window = { user: 'admin@staff.example.invalid', roles: ['System Manager'] };

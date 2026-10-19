@@ -106,7 +106,7 @@ def validate_procurement_submission(doc, evidence=None):
     if allocation not in NON_PROJECT_ALLOCATION_TYPES or not department:
         raise ProcurementWorkflowError("非项目采购必须选择所属部门")
     if not department_expense_category(department):
-        raise ProcurementWorkflowError("所选部门没有对应的费用类别，请联系管理员")
+        raise ProcurementWorkflowError("所选部门没有对应的费用类别，请联系演示员工170")
 
 
 def procurement_expense_category(scope, department=""):
@@ -149,8 +149,8 @@ def validate_payment_submission(doc, evidence=None):
     evidence_types = _evidence_types(evidence)
     percentage = _decimal(_get(doc, "prepayment_percentage"), "预付款比例")
     if stage == "预付款":
-        if not ({"合同", "PO"} & evidence_types):
-            raise ProcurementWorkflowError("预付款必须提供合同或PO")
+        if not ({"演示员工116", "PO"} & evidence_types):
+            raise ProcurementWorkflowError("预付款必须提供演示员工116或PO")
         if "付款计划" not in evidence_types:
             raise ProcurementWorkflowError("预付款必须提供付款计划")
         if percentage == 100:
@@ -172,7 +172,7 @@ def transition_business_state(doc, action, payload=None, evidence=None):
     arrival_status = _text(_get(doc, "arrival_status")) or "未到货"
     if action == "record_arrival":
         if business_status not in {
-            "合同待登记", "合同已生效", "付款计划已生成", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"
+            "演示员工116待登记", "演示员工116已生效", "付款计划已生成", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"
         }:
             raise ProcurementWorkflowError("当前状态不能登记到货")
         if not (ARRIVAL_EVIDENCE & evidence_types):
@@ -296,13 +296,13 @@ def derive_prepayment_overdue(doc, *, today=None):
 
 def plan_contract_delivery(expected_delivery_date, contract_delivery_date, procurement_scope, reason=None):
     expected = _date(expected_delivery_date, "意向交期")
-    contract = _date(contract_delivery_date, "合同约定交期")
+    contract = _date(contract_delivery_date, "演示员工116约定交期")
     scope = _text(procurement_scope)
     if scope not in PROCUREMENT_SCOPES:
         raise ProcurementWorkflowError("采购范围必须选择项目采购或非项目采购")
     requires_reapproval = contract > expected
     if requires_reapproval and not _text(reason):
-        raise ProcurementWorkflowError("合同交期晚于意向交期时必须填写变更原因")
+        raise ProcurementWorkflowError("演示员工116交期晚于意向交期时必须填写变更原因")
     approval_roles = []
     if requires_reapproval:
         approval_roles.append("pmc")

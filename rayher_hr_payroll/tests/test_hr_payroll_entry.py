@@ -127,7 +127,7 @@ def test_company_specific_structure_never_falls_back_to_other_company(monkeypatc
 
 def test_apply_salary_adjustment_rejects_same_date_assignment_without_overwrite(monkeypatch):
     module, frappe = _load(monkeypatch)
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo"})
     monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪"})
     frappe.db.get_value = lambda doctype, filters, field=None: "SSA-EXISTING" if doctype == "Salary Structure Assignment" else None
 
@@ -137,7 +137,7 @@ def test_apply_salary_adjustment_rejects_same_date_assignment_without_overwrite(
 
 def test_apply_salary_adjustment_creates_submitted_assignment_for_employee_company(monkeypatch):
     module, frappe = _load(monkeypatch)
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo"})
     monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪"})
     frappe.db.get_value = lambda *args, **kwargs: None
     frappe.db.commit = lambda: (_ for _ in ()).throw(AssertionError("business APIs must not commit partial transactions"))
@@ -153,7 +153,7 @@ def test_apply_salary_adjustment_creates_submitted_assignment_for_employee_compa
     result = module.apply_salary_adjustment("EMP-1", "2026-08", 10500)
 
     assert result == {"name": "SSA-NEW", "base": 10500.0, "from_date": date(2026, 8, 1)}
-    assert captured["company"] == "Rayher"
+    assert captured["company"] == "QIHENG Demo"
     assert captured["base"] == 10500.0
     assert captured["insert"] is True and captured["submit"] is True
 
@@ -188,10 +188,10 @@ class NewSlip:
 
 def _draft_world(monkeypatch, module, frappe, inputs):
     monkeypatch.setattr(module, "_inputs", lambda: inputs)
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "Rayher", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "演示员工128"})
     monkeypatch.setattr(module, "_accommodation", lambda *args: 150)
     monkeypatch.setattr(module, "_slip", lambda *args: None)
-    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - Rayher"})
+    monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - QIHENG Demo"})
     slip = NewSlip()
     frappe.new_doc = lambda doctype: slip
     return slip

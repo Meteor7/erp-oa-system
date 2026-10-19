@@ -154,12 +154,12 @@ def test_no_open_requests(data):
 
 def test_my_claims_show_count_total_and_how_far_the_approval_got(data):
     data["claims"] = [
-        {"name": "C2", "amount": 100, "approved_amount": 0, "workflow_status": "待办理", "current_step_label": "出纳"},
+        {"name": "C2", "amount": 100, "approved_amount": 0, "workflow_status": "待办理", "current_step_label": "演示员工110"},
         {"name": "C1", "amount": 2860, "approved_amount": 2800, "workflow_status": "待审批", "current_step_label": "财务主管"},
         {"name": "C0", "amount": 50, "approved_amount": 0, "workflow_status": "草稿", "current_step_label": ""},
     ]
     kpi = run("me.claim", make_ctx())
-    assert (kpi["value"], kpi["unit"], kpi["sub"]) == ("2", "张", "合计 ¥ 2,900 · 出纳办理中 · 草稿 1")
+    assert (kpi["value"], kpi["unit"], kpi["sub"]) == ("2", "张", "合计 ¥ 2,900 · 演示员工110办理中 · 草稿 1")
     # 2026-10-13：报销页“我的”列出全部报销单，和在途张数对不上；点进去是同一份在途清单
     assert kpi["target"] == {"key": "drill", "params": {"item": "me.claim", "period": "2026-10"}}
     assert "不预测到账日" in kpi["hint"]
@@ -406,7 +406,7 @@ def test_my_balances_show_annual_and_comp_as_bars(data):
     assert [(r["label"], r["value"], r["pct"], r["tone"]) for r in block["rows"]] == [
         ("年假", "可用 6.5 / 10 天", 65.0, "ok"), ("调休", "可用 12 小时", 50.0, "info")]
     assert block["sub"] == "已用 3.5 天 · 审批中 1 天"
-    data["leave"]["annual"] = {"eligible": False, "message": "试用期内暂无年假"}
+    data["leave"]["annual"] = {"eligible": False, "message": "演示员工173期内暂无年假"}
     only_comp = run("block.me_balances", make_ctx())
     assert [r["label"] for r in only_comp["rows"]] == ["调休"] and only_comp["sub"] == "年假暂未发放"
     data["leave"] = {"visible": False}

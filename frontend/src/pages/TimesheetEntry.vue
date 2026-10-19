@@ -35,7 +35,7 @@ if (landing.period) period.value = landing.period;
 const options = createResource({
   url: "rayher_hr_payroll.api.monthly_timesheet_entry.get_monthly_options",
   method: "GET",
-  // 员工列表按月份给：离职员工在离职当月及以前的月份仍可补登。
+  // 员工列表按月份给：演示员工166员工在演示员工166当月及以前的月份仍可补登。
   makeParams: () => ({ period: period.value }),
   auto: true,
 });

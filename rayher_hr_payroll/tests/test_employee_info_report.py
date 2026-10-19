@@ -32,7 +32,7 @@ def test_report_is_hr_only_not_finance():
 
 def test_report_includes_left_employees_pii_and_education():
     q = _load()["query"].lower()
-    # No status filter => 离职 (Left) employees are included (需求#5):
+    # No status filter => 演示员工166 (Left) employees are included (需求#5):
     assert "status =" not in q and "status=" not in q
     # PII column + education join present:
     assert "id_card_number_cn" in q

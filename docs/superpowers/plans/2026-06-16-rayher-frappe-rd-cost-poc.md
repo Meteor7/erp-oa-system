@@ -1,10 +1,10 @@
-# Rayher Frappe RD Cost PoC Implementation Plan
+# QIHENG Demo Frappe RD Cost PoC Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Frappe/ERPNext/Frappe HR proof of concept that proves Rayher's HR-backed R&D timesheet and R&D expense allocation flow can run end to end without moving payroll into this system.
+**Goal:** Build a Frappe/ERPNext/Frappe HR proof of concept that proves QIHENG Demo's HR-backed R&D timesheet and R&D expense allocation flow can run end to end without moving payroll into this system.
 
-**Architecture:** Use ERPNext/Frappe HR standard Employee, Project, Timesheet, Leave, Expense Claim, Workflow, Notification, and Assignment objects wherever possible. Add a custom app named `rayher_hr_payroll` for Rayher-specific fields, R&D expense import, allocation calculation, source-data snapshots, period locking, project-owner review routing, and compliance reports. Put allocation math in pure Python first so denominator and capitalized/expensed subtotal behavior is tested before connecting Frappe documents. Treat submitted allocation documents as immutable versions: they must read from Timesheet/GL/project-stage snapshots, not live reports.
+**Architecture:** Use ERPNext/Frappe HR standard Employee, Project, Timesheet, Leave, Expense Claim, Workflow, Notification, and Assignment objects wherever possible. Add a custom app named `rayher_hr_payroll` for QIHENG Demo-specific fields, R&D expense import, allocation calculation, source-data snapshots, period locking, project-owner review routing, and compliance reports. Put allocation math in pure Python first so denominator and capitalized/expensed subtotal behavior is tested before connecting Frappe documents. Treat submitted allocation documents as immutable versions: they must read from Timesheet/GL/project-stage snapshots, not live reports.
 
 **Tech Stack:** Frappe Framework v15, ERPNext v15, HRMS v15, Python 3.10+, MariaDB, Redis, Node/Yarn, pytest, Frappe bench, WSL on Windows.
 
@@ -30,8 +30,8 @@ This PoC does not implement payroll calculation, salary slips, bank payment file
 Use this repository as the custom app repository:
 
 ```text
-E:\Rayher\Logistics
-/mnt/e/Rayher/Logistics
+E:\QIHENG Demo\Logistics
+/mnt/e/QIHENG Demo/Logistics
 ```
 
 Run Frappe bench from WSL outside the repo:
@@ -166,7 +166,7 @@ Create `pyproject.toml`:
 [project]
 name = "rayher_hr_payroll"
 version = "0.1.0"
-description = "Rayher HR, R&D timesheet, and R&D cost allocation custom Frappe app"
+description = "QIHENG Demo HR, R&D timesheet, and R&D cost allocation custom Frappe app"
 requires-python = ">=3.10"
 dependencies = []
 
@@ -194,8 +194,8 @@ Create `rayher_hr_payroll/hooks.py`:
 ```python
 app_name = "rayher_hr_payroll"
 app_title = "Rayher HR Payroll"
-app_publisher = "Rayher"
-app_description = "Rayher HR, R&D timesheet, and R&D cost allocation customizations"
+app_publisher = "QIHENG Demo"
+app_description = "QIHENG Demo HR, R&D timesheet, and R&D cost allocation customizations"
 app_email = "admin@example.com"
 app_license = "MIT"
 
@@ -532,13 +532,13 @@ bench --site rayher.localhost install-app hrms
 
 Expected: `apps/frappe`, `apps/erpnext`, `apps/hrms`, and `sites/rayher.localhost` exist.
 
-- [ ] **Step 4: Install Rayher app from this repository**
+- [ ] **Step 4: Install QIHENG Demo app from this repository**
 
 Run:
 
 ```bash
 cd ~/frappe-bench
-bench get-app /mnt/e/Rayher/Logistics
+bench get-app /mnt/e/QIHENG Demo/Logistics
 bench --site rayher.localhost install-app rayher_hr_payroll
 bench --site rayher.localhost list-apps
 ```
@@ -717,7 +717,7 @@ Run:
 ```bash
 cd ~/frappe-bench
 bench --site rayher.localhost migrate
-cd /mnt/e/Rayher/Logistics
+cd /mnt/e/QIHENG Demo/Logistics
 git add rayher_hr_payroll/doctype
 git commit -m "feat: add rd cost doctypes"
 ```
@@ -1233,7 +1233,7 @@ Expected: commit succeeds.
 Create `docs/frappe-poc-runbook.md`:
 
 ```markdown
-# Rayher Frappe PoC Runbook
+# QIHENG Demo Frappe PoC Runbook
 
 ## What This PoC Proves
 

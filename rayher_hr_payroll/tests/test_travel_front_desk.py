@@ -8,7 +8,7 @@ from rayher_hr_payroll.api import oa_entry
 
 
 def doc(mode="handle", request_type="出差申请", status="待办理"):
-    step = SimpleNamespace(step_index=3, mode=mode, label="前台办理：演示员工30" if mode == "handle" else "副总经理：演示员工21", approvers='["desk@tests-x.example.invalid"]')
+    step = SimpleNamespace(step_index=3, mode=mode, label="前台办理：演示员工30" if mode == "handle" else "演示员工113经理：演示员工21", approvers='["desk@tests-x.example.invalid"]')
     return SimpleNamespace(request_type=request_type, workflow_status=status, current_step_index=3, steps=[step]), step
 
 

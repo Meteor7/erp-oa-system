@@ -117,7 +117,7 @@ function planText(row) {
             <td v-for="item in matrix.suppliers" :key="item.supplier" :class="{ chosen: item.isSelected }">{{ item.group.currency || 'CNY' }} / {{ Number(item.group.tax_rate || 0) }}%</td>
           </tr>
           <tr>
-            <th scope="row">合同主体</th>
+            <th scope="row">演示员工116主体</th>
             <td v-for="item in matrix.suppliers" :key="item.supplier" :class="{ chosen: item.isSelected }">{{ item.group.contract_entity || '—' }}</td>
           </tr>
           <tr>

@@ -16,7 +16,7 @@ The PR #24 head worktree is the implementation baseline. Before changing behavio
 
 - Ren Feifan as the non-electronic fixed-asset approver;
 - corrected Ren Feifan, Li Qinggele, and Wang Yansong account mappings;
-- `Rayher Business Executive` invoice visibility;
+- `QIHENG Demo Business Executive` invoice visibility;
 - current OA API Chinese text and authorized expense-line serialization fixes.
 
 Do not copy the older PR OA files over Docker. After the recovered fixes and new route pass tests, deploy the exact worktree state to Docker, run migration and acceptance checks, then commit and push the final verified state to PR #24. Finally, make Docker run the exact PR commit instead of an old `main` checkout plus copied files.

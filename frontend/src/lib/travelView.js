@@ -40,9 +40,9 @@ export function showMissing(form = {}, attempted = false) {
 }
 
 // 能看到所有人的出差申请（列表的"全部"栏目、申请看板上的"出差中"指标）：和考勤中心的"全部"同一批角色——
-// 系统管理员、人事（HR Manager / HR User）和管理层（Rayher Business Executive）。其他人只看自己的和轮到自己审批的。
+// 系统演示员工170、人事（HR Manager / HR User）和管理层（QIHENG Demo Business Executive）。其他人只看自己的和轮到自己审批的。
 // 要和 attendance_entry.ALL_VIEW_ROLES 保持一致（服务端才是权威，这里只决定页面上给不给入口）。
-const ALL_ROLES = ['System Manager', 'HR Manager', 'HR User', 'Rayher Business Executive'];
+const ALL_ROLES = ['System Manager', 'HR Manager', 'HR User', 'QIHENG Demo Business Executive'];
 
 export function canSeeAllTravel(roles = globalThis.window?.roles || []) {
   return (roles || []).some((role) => ALL_ROLES.includes(role));

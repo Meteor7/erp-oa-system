@@ -23,7 +23,7 @@ ALERTS = ["alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_q
 BLOCKS = ["block.proc_chain", "block.arrival_inspect", "block.proc_suppliers", "block.proc_projects",
           "block.material_stage", "block.risk_projects", "block.week_schedule", "block.urgent_requests"]
 MINE = KPIS + ALERTS + BLOCKS
-URGENT = {"proc.urgent", "alert.urgent", "block.urgent_requests"}      # 加急采购：采购链路的人、副总、总经理看，生产主管和财务不看
+URGENT = {"proc.urgent", "alert.urgent", "block.urgent_requests"}      # 加急采购：采购链路的人、演示员工113、总经理看，生产主管和财务不看
 MONEY = {"proc.month_amount", "block.proc_suppliers", "block.proc_projects", "proc.ready_to_pay",
          "proc.pay_planned_passed", "alert.pay_planned_passed"}
 CHAIN = {"proc.to_compare", "proc.price_pending", "proc.await_pr", "alert.price_missing_quote"}
@@ -49,8 +49,8 @@ def rich_lines():
         line("PO-B", 3, 3, state="换货中", due="2026-09-20", status="到货验收中", name="B2"),
         line("PO-B", 2, 2, state="退货中", due="2026-09-30", status="到货验收中", name="B3"),
         line("PO-C", 1, 1, state="已通过", due="2026-09-01", status="付款中", name="C1"),
-        line("PO-D", 9, 0, due="2026-09-01", status="草稿", name="D1"),          # 草稿 PO：合同没生效，不参与任何口径
-        line("PO-E", 6, 0, project="P1", item="导轨", name="E1"),                 # 没填合同交期
+        line("PO-D", 9, 0, due="2026-09-01", status="草稿", name="D1"),          # 草稿 PO：演示员工116没生效，不参与任何口径
+        line("PO-E", 6, 0, project="P1", item="导轨", name="E1"),                 # 没填演示员工116交期
         line("PO-E", 6, 0, due=TODAY, name="E2"),                                 # 交期就是今天：不算逾期，算本周
     ]
 
@@ -84,7 +84,7 @@ def world(monkeypatch):
     reader("_load_urgent", "urgent")
 
     # 2026-10-13：物料口径改成物料进度的行（同物料进度页的 SQL）。假数据按同一规则从 PO 行推出来：
-    # 有来源（申请, 行）的、合同已生效、交期已过、没收齐或退货中；一个（申请, 行）一项，交期取最早的。
+    # 有来源（申请, 行）的、演示员工116已生效、交期已过、没收齐或退货中；一个（申请, 行）一项，交期取最早的。
     def overdue_materials(today):
         if data.get("overdue_materials") is not None:
             return data["overdue_materials"]
@@ -187,7 +187,7 @@ def test_every_provider_in_the_layouts_is_registered_with_the_right_kind():
 
 # ---------------------------------------------------------------- 权限
 SCENARIO_ROLES = [(), ("Employee",), ("Purchase User",), ("Purchase Manager",), ("Accounts User",), ("Finance User",),
-                  ("Rayher Business Executive",), ("System Manager",), ("Purchase User", "Accounts User")]
+                  ("QIHENG Demo Business Executive",), ("System Manager",), ("Purchase User", "Accounts User")]
 SCENARIO_POSITIONS = [(), ("pmc",), ("procurement_manager",), ("vice_manager",), ("general_manager",),
                       ("production_asset_owner",), ("finance_manager",), ("finance_accountant",), ("finance_auditor",),
                       ("hr_manager",), ("pmc", "production_asset_owner")]
@@ -253,7 +253,7 @@ def test_visibility_by_identity(world):
     assert visible_keys(accountant) == everything - CHAIN - BOARD - URGENT
 
     for positions in (("general_manager",), ("vice_manager",)):
-        boss = make_ctx(positions=positions, roles=("Employee", "Accounts User", "Rayher Business Executive"))
+        boss = make_ctx(positions=positions, roles=("Employee", "Accounts User", "QIHENG Demo Business Executive"))
         assert visible_keys(boss) == everything
 
     assert visible_keys(make_ctx()) == set()
@@ -262,7 +262,7 @@ def test_visibility_by_identity(world):
 
 def test_pmc_who_also_holds_a_finance_or_purchase_position_keeps_the_union(world):
     for extra in ("procurement_manager", "vice_manager", "general_manager", "finance_accountant"):
-        both = make_ctx(positions=("pmc", extra), roles=("Employee", "Purchase User", "Accounts User", "Rayher Business Executive"))
+        both = make_ctx(positions=("pmc", extra), roles=("Employee", "Purchase User", "Accounts User", "QIHENG Demo Business Executive"))
         assert MONEY <= visible_keys(both), extra
     admin = make_ctx(positions=("pmc",), roles=("Employee", "System Manager"))
     assert MONEY <= visible_keys(admin)
@@ -331,7 +331,7 @@ def test_production_owner_page_only_has_arrival_and_inspection(world, monkeypatc
 
 def test_every_layout_that_uses_these_blocks_renders_without_errors(world):
     fill(world)
-    boss_roles = ("Employee", "Accounts User", "Rayher Business Executive")
+    boss_roles = ("Employee", "Accounts User", "QIHENG Demo Business Executive")
     ctxs = {
         "general_manager": make_ctx(positions=("general_manager",), roles=boss_roles),
         "vice_manager": make_ctx(positions=("vice_manager",), roles=boss_roles),
@@ -358,7 +358,7 @@ def test_classify_puts_each_line_in_the_right_buckets():
     assert names("to_arrive") == ["A1", "B1", "E1", "E2"]            # 退货中的 B3 不算待到货
     assert names("to_inspect") == ["A2", "B1"]                        # B1 部分到货：还差货也有已到的部分待验
     assert names("exchange") == ["B2"] and names("returning") == ["B3"]
-    assert names("overdue") == ["A1", "B3"]                           # E1 没填交期、E2 交期是今天、草稿 PO 的 D1：都不算逾期
+    assert names("overdue") == ["A1", "B3"]                           # E1 没填交期、E2 交期是今天、草稿 PO 的 D1：演示员工177算逾期
     assert names("week") == ["B1", "E2"]
     assert all(row["po"] != "PO-D" for rows in data.values() for row in rows)
 
@@ -450,7 +450,7 @@ def test_month_amount_and_suppliers(world):
 
 # ---------------------------------------------------------------- 指标卡：没有数据
 def test_kpis_show_zero_when_there_is_nothing(world):
-    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "QIHENG Demo Business Executive"))
     for key in KPIS:
         item = run(key, ctx)
         assert item is not None, key
@@ -462,13 +462,13 @@ def test_kpis_show_zero_when_there_is_nothing(world):
 
 
 def test_alerts_stay_quiet_when_nothing_triggers(world):
-    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "QIHENG Demo Business Executive"))
     for key in ALERTS:
         assert run(key, ctx) is None, key
 
 
 def test_blocks_are_empty_but_present_without_data(world):
-    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "QIHENG Demo Business Executive"))
     for key in ("block.proc_suppliers", "block.proc_projects", "block.risk_projects", "block.week_schedule"):
         block = run(key, ctx)
         assert block["rows"] == [] and block["error"] is None, key
@@ -483,17 +483,17 @@ def test_alerts_with_data(world):
     fill(world)
     ctx = full_ctx()
     overdue = run("alert.po_overdue", ctx)
-    assert (overdue["tone"], overdue["title"], overdue["sub"]) == ("bad", "2 个 PO 已过合同交期还没收齐", "最久逾期 9 天（PO-B）")
+    assert (overdue["tone"], overdue["title"], overdue["sub"]) == ("bad", "2 个 PO 已过演示员工116交期还没收齐", "最久逾期 9 天（PO-B）")
     passed = run("alert.pay_planned_passed", ctx)
     assert (passed["tone"], passed["title"], passed["sub"]) == ("bad", "2 期采购付款已过计划付款日", "未付 4.5 万，最久 10 天，供应商可能催款")
     missing = run("alert.price_missing_quote", ctx)
-    assert (missing["tone"], missing["title"], missing["sub"]) == ("warn", "1 张待审批的价格审批单有物料没有报价", "共 2 项物料一个报价都没有，副总没法选供应商")
+    assert (missing["tone"], missing["title"], missing["sub"]) == ("warn", "1 张待审批的价格审批单有物料没有报价", "共 2 项物料一个报价都没有，演示员工113没法选供应商")
     assert run("alert.uncoded", ctx)["title"] == "4 项物料还没有物料编码"
     stale = run("alert.inspect_stale", ctx)
     assert (stale["tone"], stale["title"], stale["sub"]) == ("bad", "1 个 PO 到货超过 7 天还没验收", "PO-A 已到货 19 天，可能耽误付款")
     assert stale["target"]["params"]["item"] == "proc.inspect_stale"
     material = run("alert.material_overdue", ctx)
-    assert (material["tone"], material["title"]) == ("bad", "1 项物料超过合同交期还没到")      # 没有来源的 B3 不算（2026-10-13）
+    assert (material["tone"], material["title"]) == ("bad", "1 项物料超过演示员工116交期还没到")      # 没有来源的 B3 不算（2026-10-13）
     risk = run("alert.risk_projects", ctx)
     assert (risk["title"], risk["sub"]) == ("1 个项目有物料逾期未到", "P1 有 1 项物料逾期")
 
@@ -512,8 +512,8 @@ def test_overdue_ignores_received_lines_and_dead_pos(world):
     world["lines"] = [
         line("PO-A", 10, 10, state="已通过", due="2026-09-01", name="A1"),                 # 收齐了
         line("PO-B", 10, 0, due="2026-09-01", status="已关闭", name="B1"),                 # 已关闭
-        line("PO-C", 10, 0, due="2026-09-01", status="待电子用印", name="C1"),             # 合同没生效
-        line("PO-D", 10, 0, due="", name="D1"),                                            # 没填合同交期
+        line("PO-C", 10, 0, due="2026-09-01", status="待电子用印", name="C1"),             # 演示员工116没生效
+        line("PO-D", 10, 0, due="", name="D1"),                                            # 没填演示员工116交期
     ]
     assert kpi_of("proc.po_overdue")["value"] == "0"
     assert run("alert.po_overdue", full_ctx()) is None
@@ -598,7 +598,7 @@ def test_week_schedule_groups_by_day(world):
 # ---------------------------------------------------------------- 目标
 def test_all_targets_are_registered_and_params_checked(world):
     fill(world)
-    ctx = make_ctx(positions=("general_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    ctx = make_ctx(positions=("general_manager",), roles=("Employee", "Accounts User", "QIHENG Demo Business Executive"))
     production = make_ctx(positions=("production_asset_owner",))
     seen = set()
     for who in (ctx, production):
@@ -693,7 +693,7 @@ def test_money_lists_add_up_to_the_cards(world):
 
 
 def test_a_card_with_nothing_behind_it_does_not_link_to_an_empty_list(world):
-    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "Rayher Business Executive"))
+    ctx = make_ctx(positions=("vice_manager",), roles=("Employee", "Accounts User", "QIHENG Demo Business Executive"))
     for key in ("proc.po_transit", "proc.po_overdue", "proc.pay_planned_passed", "proc.month_amount", "proc.suppliers_count", "proc.risk_projects",
                 "proc.week_arrive", "proc.to_arrive", "proc.to_inspect", "proc.exchange", "proc.return", "proc.month_inspected", "proc.month_arrived",
                 "proc.urgent"):
@@ -727,7 +727,7 @@ def test_urgent_quiet_when_everything_is_moving(world):
                         "approving": True, "label": "直属主管", "since": "2026-10-08"}]
     ctx = full_ctx()
     card = kpi_of("proc.urgent", ctx)
-    assert (card["value"], card["sub"], card["tone"]) == ("1", "都在正常推进", "hot")
+    assert (card["value"], card["sub"], card["tone"]) == ("1", "都在演示员工152推进", "hot")
     assert run("alert.urgent", ctx) is None
     assert run("block.urgent_requests", ctx)["rows"][0]["label"] == "OA-U3"          # 没填事由就显示单号
 
@@ -736,10 +736,10 @@ def test_urgent_is_seen_by_the_bosses_procurement_and_pmc_but_not_by_production_
     fill(world)
     seen = lambda ctx: core.REGISTRY["proc.urgent"].visible(ctx)
     # 2026-10-13：还要能打开申请详情（详情按角色给读权限），所以带上这些岗位本来就有的角色
-    for positions, roles in ((("general_manager",), "Rayher Business Executive"), (("vice_manager",), "Rayher Business Executive"),
+    for positions, roles in ((("general_manager",), "QIHENG Demo Business Executive"), (("vice_manager",), "QIHENG Demo Business Executive"),
                              (("procurement_manager",), "Purchase Manager"), (("pmc",), "Purchase User")):
         assert seen(make_ctx(positions=positions, roles=("Employee", roles))), positions
-    assert seen(make_ctx(roles=("Employee", "Rayher Business Executive")))
+    assert seen(make_ctx(roles=("Employee", "QIHENG Demo Business Executive")))
     assert not seen(make_ctx(positions=("production_asset_owner",)))
     assert not seen(make_ctx(positions=("finance_accountant",), roles=("Employee", "Accounts User")))
     assert not seen(make_ctx())
@@ -916,14 +916,14 @@ def test_load_await_pr_follows_list_materials_for_pr(monkeypatch):
 
 
 def test_load_uncoded_ignores_blank_spaces_and_dead_requests(monkeypatch):
-    # 2026-10-13：条件是物料进度页 ?uncoded=1 用的同一句 SQL（状态正常、编号去空格后为空、源申请没被拒绝 / 撤回）
+    # 2026-10-13：条件是物料进度页 ?uncoded=1 用的同一句 SQL（状态演示员工152、编号去空格后为空、源申请没被拒绝 / 撤回）
     from rayher_hr_payroll.material_progress_query import FROM_SQL, UNCODED_SQL
 
     frappe = fake(monkeypatch, {}, sql_rows=[{"name": "M1", "source_request": "R1"}, {"name": "M2", "source_request": "R1"}])
     assert proc._load_uncoded() == [{"name": "M1", "request": "R1"}, {"name": "M2", "request": "R1"}]
     query = frappe.queries[0][1]
     assert FROM_SQL in query and UNCODED_SQL in query
-    for part in ("b.status='正常'", "TRIM(COALESCE(b.material_code,''))=''", "NOT IN ('已拒绝','已撤回')"):
+    for part in ("b.status='演示员工152'", "TRIM(COALESCE(b.material_code,''))=''", "NOT IN ('已拒绝','已撤回')"):
         assert part in UNCODED_SQL
 
 

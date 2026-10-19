@@ -3,12 +3,12 @@ import re
 TARGET_COMPANY = "示例研发中心"
 TARGET_ABBR = "SHGL"
 TARGET_EMPLOYEES = (
-    "演示人员H337caa",
-    "演示人员H118c59",
-    "演示人员H01feec",
-    "演示人员He58aff",
-    "演示人员Hbdc69a",
-    "演示人员He60276",
+    "演示员工201",
+    "演示员工109",
+    "演示员工219",
+    "演示员工226",
+    "演示员工155",
+    "演示员工230",
 )
 
 

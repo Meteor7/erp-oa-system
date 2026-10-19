@@ -6,7 +6,7 @@ import {
 } from "../src/lib/payrollView.js";
 
 const row = (overrides = {}) => ({
-  employee: "E1", employee_name: "员工甲", company: "Rayher", department: "研发软件部 - RAY", expense_account_category: "研发费用",
+  employee: "E1", employee_name: "员工甲", company: "QIHENG Demo", department: "研发软件部 - RAY", expense_account_category: "研发费用",
   total_working_days: 22, payment_days: 22, base_salary: 10000, salary_adjustment: 0, company_subsidy: 500, bonus: 0, other_adjustment: 0,
   social_insurance: 1000, housing_fund: 700, income_tax: 200, accommodation: 100, advanced_paid: 0,
   social_record_exists: true, housing_record_exists: true, salary_slip: null, docstatus: null, managed: false, ...overrides,

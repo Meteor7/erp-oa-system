@@ -9,9 +9,9 @@ const yuan = (value) => `¥ ${money(value)}`;
 // 指标卡可以点：to = { path, query } 跳到对应的列表或页面，to = { anchor } 滚动到本页的某一块。
 const page = (path, query) => ({ path, ...(query ? { query } : {}) });
 
-// 看的人能打开哪些"全部"：出差申请的全部只给系统管理员 / Rayher Business Executive；
-// 报销单、付款单的全部给财务（系统管理员、会计出纳）和 Rayher Business Executive（与 ClaimWorkbench、服务端一致）。
-const CLAIM_ALL_ROLES = ['System Manager', 'Accounts User', 'Rayher Business Executive'];
+// 看的人能打开哪些"全部"：出差申请的全部只给系统演示员工170 / QIHENG Demo Business Executive；
+// 报销单、付款单的全部给财务（系统演示员工170、会计演示员工110）和 QIHENG Demo Business Executive（与 ClaimWorkbench、服务端一致）。
+const CLAIM_ALL_ROLES = ['System Manager', 'Accounts User', 'QIHENG Demo Business Executive'];
 
 export function boardAccess(roles = globalThis.window?.roles || []) {
   const list = roles || [];
@@ -42,7 +42,7 @@ export function paymentKpis(data = {}, access = boardAccess()) {
   return withAccess([
     { key: 'bx', label: '本月已付 · 报销', value: yuan(s.reimbursement_paid), sub: '员工垫付，按付款日期', to: page('/approval/claim', { view: 'list', scope: 'all', bucket: 'paid' }) },
     { key: 'fk', label: '本月已付 · 付款', value: yuan(s.payment_paid), sub: '对外支付', to: page('/approval/payment', { view: 'list', scope: 'all', bucket: 'paid' }) },
-    { key: 'pay', label: '出纳待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#0E615B', to: { anchor: 'bd-cashier' } },
+    { key: 'pay', label: '演示员工110待付款', value: yuan(s.to_pay_amount), sub: `${s.to_pay_count || 0} 张，其中加急 ${s.to_pay_urgent || 0} 张`, tone: '#0E615B', to: { anchor: 'bd-cashier' } },
     { key: 'inv', label: '待补票', value: yuan(s.invoice_pending_amount), sub: `${s.invoice_pending_count || 0} 张，逾期 ${s.invoice_overdue_count || 0} 张`, tone: (s.invoice_overdue_count || 0) ? '#B42318' : '', to: { anchor: 'bd-invoices' } },
   ], access);
 }
@@ -68,7 +68,7 @@ export function procurementKpis(data = {}, part = 'request') {
 
 // ---------------------------------------------------------------- 采购付款：按 PO 付款期次的真实状态
 
-export const PO_STATUS_ORDER = Object.freeze(['待合同生效', '待到货资料', '待验收', '可提交付款审批', '付款审批中', '待实际付款', '已付款']);
+export const PO_STATUS_ORDER = Object.freeze(['待演示员工116生效', '待到货资料', '待验收', '可提交付款审批', '付款审批中', '待实际付款', '已付款']);
 
 export function hasPoWork(data = {}) {
   const work = data?.po_work;
@@ -265,7 +265,7 @@ export function donutSegments(rows = [], max = 5) {
   return { total: Math.round(total * 100) / 100, segments, gradient };
 }
 
-// 出纳待付按等待天数分段。和数据看板「待付款按等待时长」同一套三段（2026-10-13 统一）：
+// 演示员工110待付按等待天数分段。和数据看板「待付款按等待时长」同一套三段（2026-10-13 统一）：
 // 今天（0 天）/ 1–3 天 / 超过 3 天（严格大于 3，正好 3 天算在 1–3 天里，见 waiting.js）。
 export function agingColumns(queue = []) {
   const buckets = [
@@ -280,14 +280,14 @@ export function agingColumns(queue = []) {
   });
 }
 
-// 出纳待付款面板里"待付款"和"待核验"分开：标题上的张数、金额只算待付款（和数据看板「出纳待付款」一致），
+// 演示员工110待付款面板里"待付款"和"待核验"分开：标题上的张数、金额只算待付款（和数据看板「演示员工110待付款」一致），
 // 已付款等核验发票的付款单单独列在后面。
 export function cashierSplit(queue = []) {
   const rows = queue || [];
   return { toPay: rows.filter((row) => row.status !== '待核验'), verifying: rows.filter((row) => row.status === '待核验') };
 }
 
-// 出纳待付款面板顶部的三个小方块：各等待区间几张、多少钱，条按张数最多的那一段算宽度。
+// 演示员工110待付款面板顶部的三个小方块：各等待区间几张、多少钱，条按张数最多的那一段算宽度。
 export function agingTiles(queue = []) {
   const columns = agingColumns(queue);
   const peak = Math.max(1, ...columns.map((column) => column.value));

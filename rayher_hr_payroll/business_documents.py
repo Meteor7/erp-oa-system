@@ -25,7 +25,7 @@ DOCUMENT_TYPES = (
     "价格审批表",
     "PR",
     "PO",
-    "合同",
+    "演示员工116",
     "付款计划",
     "发票",
     "验收资料",
@@ -289,7 +289,7 @@ def remove(name, reason=None, *, store=None):
     parent = store.require_request(_get(document, "request"), "write")
     actor = _name(store.actor())
     if actor != _name(_get(document, "uploaded_by")) and not store.is_administrator():
-        raise BusinessDocumentError("只有上传人或系统管理员可以移除资料")
+        raise BusinessDocumentError("只有上传人或系统演示员工170可以移除资料")
     early_statuses = {"", "需求已批准/待询价"}
     can_delete = (
         _get(parent, "workflow_status") == "草稿"

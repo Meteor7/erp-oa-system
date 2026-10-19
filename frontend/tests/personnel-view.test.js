@@ -31,7 +31,7 @@ import {
 const TODAY = "2026-10-08";
 
 const full = (extra = {}) => ({
-  name: "HR-EMP-1", company: "Rayher", employee_number: "A001", employee_name: "演示员工186", english_name: "Chunlin Huang",
+  name: "HR-EMP-1", company: "QIHENG Demo", employee_number: "A001", employee_name: "演示员工186", english_name: "Chunlin Huang",
   date_of_birth: "1990-02-03", cell_number: "13800000002", household_registration: "深圳",
   department: "研发软件部 - RAY", designation: "软件工程师", reports_to: "HR-EMP-9", employment_type: "全职",
   labour_contract_start_date: "2023-03-06", rd_personnel_type: "全时研发", education_level_cn: "本科", graduation_school: "示例大学",
@@ -109,9 +109,9 @@ test("missingSummary names the first three items", () => {
 test("reminders: probation and contract inside 60 days, soonest first, urgent when within a week", () => {
   const list = reminders(full({ probation_end_date: "2026-10-31", first_contract_end_date: "2026-12-06" }), TODAY);
   assert.deepEqual(list.map((item) => item.key), ["probation", "contract"]);
-  assert.equal(list[0].text, "试用期 10-31 到期");
+  assert.equal(list[0].text, "演示员工173期 10-31 到期");
   assert.equal(list[0].tone, "warn");
-  assert.equal(list[1].text, "合同 12-06 到期");
+  assert.equal(list[1].text, "演示员工116 12-06 到期");
   const urgent = reminders(full({ probation_end_date: "2026-10-12" }), TODAY);
   assert.equal(urgent[0].tone, "bad");
 });
@@ -123,13 +123,13 @@ test("reminders ignore dates past or beyond 60 days, and a renewed first contrac
   const renewed = reminders(full({ first_contract_end_date: "2026-11-01", second_contract_end_date: "2029-11-01" }), TODAY);
   assert.deepEqual(renewed, []);
   const second = reminders(full({ first_contract_end_date: "2023-11-01", second_contract_end_date: "2026-11-15" }), TODAY);
-  assert.equal(second[0].text, "合同 11-15 到期");
+  assert.equal(second[0].text, "演示员工116 11-15 到期");
 });
 
 test("reminders: leaving soon, left, and missing data", () => {
-  assert.deepEqual(reminders(full({ relieving_date: "2026-10-31" }), TODAY).map((item) => item.text), ["10-31 离职"]);
+  assert.deepEqual(reminders(full({ relieving_date: "2026-10-31" }), TODAY).map((item) => item.text), ["10-31 演示员工166"]);
   const left = reminders(full({ relieving_date: "2026-06-17", probation_end_date: "2026-10-31", cell_number: "" }), TODAY);
-  assert.deepEqual(left.map((item) => item.text), ["已离职 06-17"]);
+  assert.deepEqual(left.map((item) => item.text), ["已演示员工166 06-17"]);
   const missing = reminders(full({ cell_number: "", employee_number: "" }), TODAY);
   assert.deepEqual(missing.map((item) => item.text), ["缺 2 项资料"]);
 });
@@ -213,7 +213,7 @@ test("sortEmployees: default keeps order, others are stable", () => {
   assert.deepEqual(ids("joined_desc"), ["E1", "E3", "E4", "E5", "E2"]);
   assert.deepEqual(ids("joined_asc"), ["E2", "E5", "E4", "E3", "E1"]);
   assert.deepEqual(ids("number"), ["E4", "E2", "E5", "E1", "E3"]);
-  // 提醒优先：即将离职 < 试用期 < 合同 < 缺资料 < 无提醒（一周内到期的排在所有提醒之前）
+  // 提醒优先：即将演示员工166 < 演示员工173期 < 演示员工116 < 缺资料 < 无提醒（一周内到期的排在所有提醒之前）
   assert.deepEqual(ids("alert").slice(0, 4), ["E5", "E2", "E3", "E1"]);
   assert.equal(items.length, 5);
 });
@@ -229,10 +229,10 @@ test("pageSlice clamps the page", () => {
 
 test("departmentGroups counts from the roster, by status and company, with an 其他 group", () => {
   const meta = [
-    { name: "研发软件部 - RAY", department_name: "研发软件部", company: "Rayher", group_name: "研发" },
+    { name: "研发软件部 - RAY", department_name: "研发软件部", company: "QIHENG Demo", group_name: "研发" },
     { name: "研发软件部 - SHGL", department_name: "研发软件部", company: "示例研发中心", group_name: "研发" },
-    { name: "研发光学部 - RAY", department_name: "研发光学部", company: "Rayher", group_name: "研发" },
-    { name: "财务部 - RAY", department_name: "财务部", company: "Rayher", group_name: "职能" },
+    { name: "研发光学部 - RAY", department_name: "研发光学部", company: "QIHENG Demo", group_name: "研发" },
+    { name: "财务部 - RAY", department_name: "财务部", company: "QIHENG Demo", group_name: "职能" },
   ];
   const items = roster();
   const active = departmentGroups(items, meta, { status: "active" });
@@ -247,10 +247,10 @@ test("departmentGroups counts from the roster, by status and company, with an �
 });
 
 const RD_META = [
-  { name: "研发软件部 - RAY", department_name: "研发软件部", company: "Rayher", group_name: "研发" },
-  { name: "研发AI部 - RAY", department_name: "研发AI部", company: "Rayher", group_name: "研发" },
-  { name: "财务部 - RAY", department_name: "财务部", company: "Rayher", group_name: "职能" },
-  { name: "总经办 - RAY", department_name: "总经办", company: "Rayher", group_name: "职能" },
+  { name: "研发软件部 - RAY", department_name: "研发软件部", company: "QIHENG Demo", group_name: "研发" },
+  { name: "研发AI部 - RAY", department_name: "研发AI部", company: "QIHENG Demo", group_name: "研发" },
+  { name: "财务部 - RAY", department_name: "财务部", company: "QIHENG Demo", group_name: "职能" },
+  { name: "总经办 - RAY", department_name: "总经办", company: "QIHENG Demo", group_name: "职能" },
 ];
 
 test("defaultRdType: the R&D group is 全时研发, other known groups 非研发, unknown stays empty", () => {
@@ -269,7 +269,7 @@ test("an active person in an R&D department without an R&D type is flagged, othe
   assert.equal(flagged.rdGap, true);
   assert.equal(flagged.group, "研发");
   assert.ok(flagged.reminders.some((r) => r.key === "rdtype" && r.tone === "warn"));
-  // 填了类型、非研发部门、已离职、没有分组信息：都不提醒
+  // 填了类型、非研发部门、已演示员工166、没有分组信息：演示员工177提醒
   assert.equal(decorateEmployee(full({ rd_personnel_type: "全时研发" }), ctx).rdGap, false);
   assert.equal(decorateEmployee(full({ department: "财务部 - RAY", rd_personnel_type: "" }), ctx).rdGap, false);
   assert.equal(decorateEmployee(full({ department: "研发AI部 - RAY", rd_personnel_type: "", relieving_date: "2026-09-01" }), ctx).rdGap, false);

@@ -60,7 +60,7 @@ def test_business_executive_can_view_invoice_records():
     assert permissions.has_record_permission(
         {"request": "OA-REQ-1"},
         user="executive@example.com",
-        roles={"Rayher Business Executive"},
+        roles={"QIHENG Demo Business Executive"},
     )
 ```
 
@@ -212,7 +212,7 @@ assert route_labels(r_and_d_employee_other_asset) == [
     "财务审核：演示员工13",
     "直属主管：演示员工132",
     "财务主管：演示员工16",
-    "副总经理：演示员工21",
+    "演示员工113经理：演示员工21",
     "总经理：演示员工29",
     "确认付款：演示员工13",
 ]
@@ -221,7 +221,7 @@ assert route_labels(r_and_d_manager_non_electronic_asset) == [
     "财务审核：演示员工13",
     "固定资产审批：演示员工10",
     "财务主管：演示员工16",
-    "副总经理：演示员工21",
+    "演示员工113经理：演示员工21",
     "总经理：演示员工29",
     "确认付款：演示员工13",
 ]

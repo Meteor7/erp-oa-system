@@ -171,7 +171,7 @@ test("list rows keep their own target and tone", () => {
   assert.equal(rows[0].toneClass, "t-bad");
   assert.deepEqual(rows[0].target, { key: "personnel.expiring", params: {} });
   assert.equal(rows[1].target, null);
-  assert.equal(rows[0].sub, "试用期");
+  assert.equal(rows[0].sub, "演示员工173期");
   assert.equal(listRows([{ label: "a", tone: "weird" }])[0].toneClass, "");
 });
 

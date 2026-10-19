@@ -28,3 +28,17 @@ household_registration_backfill.json
 
 # Local visual review captures; curated screenshots live in docs/images.
 .impeccable/review/
+
+# Private site configuration, credentials and database backups
+.env
+.env.*
+!.env.example
+**/site_config.json
+**/common_site_config.json
+**/private/backups/
+*.sql.gz
+*.backup
+*.pfx
+*.p12
+*.key
+.privacy-audit/

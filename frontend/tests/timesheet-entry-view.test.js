@@ -148,7 +148,7 @@ test('top up: one click puts the remaining hours on the chosen row and reaches f
   assert.equal(first.index, 0);
   assert.equal(topUpRow(rows, CAP).index, 1);                 // 没指定 / 越界：补最后一行
   assert.equal(topUpRow(rows, CAP, 9).index, 1);
-  assert.equal(topUpRow([row('A', 173)], CAP, 0).added, 0);   // 已填满、超上限、没有行：什么都不做
+  assert.equal(topUpRow([row('A', 173)], CAP, 0).added, 0);   // 已填满、超上限、没有行：什么演示员工177做
   assert.equal(topUpRow([row('A', 180)], CAP, 0).added, 0);
   assert.equal(topUpRow([], CAP, 0).added, 0);
   assert.equal(rows[1].hours, '88');                          // 不改入参
@@ -308,8 +308,8 @@ test('cap text explains the limit in hours, the derived days, the leave deductio
   assert.ok(cut.includes('10 月可填 173 小时（约 21.63 天）'));
   assert.ok(cut.includes('已批请假 3 小时'));
   assert.ok(capText({ month: 10, hourLimit: 172.5, baseHourLimit: 176, leaveHours: 3.5 }).includes('可填 172.5 小时（约 21.56 天）'));
-  assert.ok(!text.includes('离职'));
-  assert.ok(capText({ month: 4, hourLimit: 160, relievedOn: '2026-04-20' }).includes('2026-04-20 离职，之后的日子不计'));
+  assert.ok(!text.includes('演示员工166'));
+  assert.ok(capText({ month: 4, hourLimit: 160, relievedOn: '2026-04-20' }).includes('2026-04-20 演示员工166，之后的日子不计'));
 });
 
 test('previous period wraps over the year boundary', () => {

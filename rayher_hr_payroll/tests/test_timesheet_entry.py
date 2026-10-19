@@ -169,13 +169,13 @@ def test_save_rd_hours_writes_date_activity_description_and_project_code_to_time
 
     frappe.has_permission = lambda *args, **kwargs: True
     frappe.db.exists = lambda *args, **kwargs: False
-    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.db.get_single_value = lambda *args, **kwargs: "QIHENG Demo"
 
     def get_value(doctype, name_or_filters, fieldname=None, **kwargs):
         if doctype == "Employee" and fieldname == "rd_personnel_type":
             return mod.RD_TYPES[0]
         if doctype == "Employee" and fieldname == "company":
-            return "Rayher"
+            return "QIHENG Demo"
         if doctype == "Employee" and fieldname == "name":
             return name_or_filters
         if doctype == "Project" and fieldname == "allow_rd_timesheet":
@@ -258,13 +258,13 @@ def test_save_rd_hours_rejects_unknown_project_code_and_name(monkeypatch):
 
     frappe.has_permission = lambda *args, **kwargs: True
     frappe.db.exists = lambda *args, **kwargs: False
-    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.db.get_single_value = lambda *args, **kwargs: "QIHENG Demo"
 
     def get_value(doctype, name_or_filters, fieldname=None, **kwargs):
         if doctype == "Employee" and fieldname == "rd_personnel_type":
             return mod.RD_TYPES[0]
         if doctype == "Employee" and fieldname == "company":
-            return "Rayher"
+            return "QIHENG Demo"
         if doctype == "Employee" and fieldname == "name":
             return name_or_filters
         return None
@@ -468,13 +468,13 @@ def test_save_rd_hours_rejects_employee_daily_total_over_eight_hours(monkeypatch
 
     frappe.has_permission = lambda *args, **kwargs: True
     frappe.db.exists = lambda *args, **kwargs: False
-    frappe.db.get_single_value = lambda *args, **kwargs: "Rayher"
+    frappe.db.get_single_value = lambda *args, **kwargs: "QIHENG Demo"
 
     def get_value(doctype, name_or_filters, fieldname=None, **kwargs):
         if doctype == "Employee" and fieldname == "rd_personnel_type":
             return mod.RD_TYPES[0]
         if doctype == "Employee" and fieldname == "company":
-            return "Rayher"
+            return "QIHENG Demo"
         if doctype == "Employee" and fieldname == "name":
             return name_or_filters
         return None
@@ -692,7 +692,7 @@ def _prepare_zero_hour_save(mod, frappe, monkeypatch, activity):
     monkeypatch.setattr(mod, "_drop_combo", lambda *args, **kwargs: None)
     frappe.db.get_value = lambda doctype, target, fieldname=None, **kwargs: {
         "rd_personnel_type": mod.RD_TYPES[0],
-        "company": "Rayher",
+        "company": "QIHENG Demo",
         "name": target,
     }.get(fieldname)
 

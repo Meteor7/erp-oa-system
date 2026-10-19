@@ -80,11 +80,11 @@ def test_reconcile_row_marks_company_scoped_employee_and_exact_match():
     result = reconcile_row(row, {
         "name": "EMP-1",
         "employee_name": "测试员工",
-        "company": "Rayher",
+        "company": "QIHENG Demo",
         "household_registration": "广东省外城镇",
         "social_insurance_base": Decimal("10000.00"),
         "social_base_source": "员工默认基数",
-    }, "Rayher")
+    }, "QIHENG Demo")
     assert result["employee"] == "EMP-1"
     assert result["status"] == "Matched"
     assert result["original_match_status"] == "Matched"
@@ -100,7 +100,7 @@ def test_reconcile_row_rejects_cross_company_employee():
         "household_registration": "广东省外城镇",
         "social_insurance_base": Decimal("10000.00"),
         "social_base_source": "员工默认基数",
-    }, "Rayher")
+    }, "QIHENG Demo")
     assert result["status"] == "Pending"
     assert "所属公司" in result["difference_reasons"]
 
@@ -124,7 +124,7 @@ def test_reconcile_uses_employee_base_instead_of_excel_base():
     from rayher_hr_payroll.social_insurance_import import reconcile_row
     row = parse_social_workbook(_workbook_bytes(), "2026-07")[0]
     result = reconcile_row(row, {
-        "name": "EMP-BASE", "employee_name": "测试员工", "company": "Rayher",
+        "name": "EMP-BASE", "employee_name": "测试员工", "company": "QIHENG Demo",
         "household_registration": "广东省外城镇",
         "social_insurance_base": Decimal("5000.00"),
         "social_base_source": "员工默认基数",
@@ -138,7 +138,7 @@ def test_reconcile_missing_household_and_company_policy_are_pending():
     from rayher_hr_payroll.social_insurance_import import reconcile_row
     row = parse_social_workbook(_workbook_bytes(), "2026-07")[0]
     missing_household = reconcile_row(row, {
-        "name": "EMP-H", "employee_name": "测试员工", "company": "Rayher",
+        "name": "EMP-H", "employee_name": "测试员工", "company": "QIHENG Demo",
         "household_registration": "", "social_insurance_base": Decimal("10000.00"),
         "social_base_source": "员工默认基数",
     })

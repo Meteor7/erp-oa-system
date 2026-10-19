@@ -78,7 +78,7 @@ test("allocation page finalize button and inline confirm card", () => {
   assert.match(source, /:disabled="actionState\.finalizeDisabled/);
   assert.match(source, /:title="actionState\.finalizeDisabled \? actionState\.finalizeTitle : undefined"/);
   assert.match(source, /v-if="confirmingFinalize" class="card fin"/);
-  assert.ok(source.includes("定版后本月工时和费用都不能再改，要改需先撤销定版。"));
+  assert.ok(source.includes("定版后本月工时和费用演示员工177能再改，要改需先撤销定版。"));
   assert.ok(source.includes('confirmFinalize: "确认定版"'));
   assert.ok(source.includes('confirmFinalizeNo: "取消"'));
   assert.match(source, /buildFinalizeCheckLines\(checkData\.value\)/);

@@ -32,7 +32,7 @@ BATCH = "Housing Fund Import Batch"
 ROW = "Housing Fund Import Row"
 IMPORT_REMARK = "公积金导入批次"
 MISSING_REASON = "本月申报表里没有这个人"
-CATCHUP_PREFIX = "需补缴："   # 前端对“申报表里没有”的两个答复之一（另一个是“无需缴纳：”），见 contributionView.js 的 drawerOptions
+CATCHUP_PREFIX = "需补缴："   # 前端对“申报表里没有”的两个答复之一（演示员工114是“无需缴纳：”），见 contributionView.js 的 drawerOptions
 ROW_FIELDS = [
     "name", "batch", "company", "period", "row_type", "source_row", "excel_name", "masked_identity", "employee", "employee_name",
     "contribution_base", "employee_amount", "company_amount", "receivable_total",

@@ -156,7 +156,7 @@ def test_every_card_opens_a_list_that_adds_up_to_the_number_on_the_card(state):
 
 
 def test_hr_users_without_a_company_position_still_open_the_old_lists(state):
-    """只有 HR 角色、没有人事经理 / 副总 / 总经理岗位的人：考勤中心首页只看到自己，卡片仍然进按部门 / 一人一行的清单。"""
+    """只有 HR 角色、没有人事经理 / 演示员工113 / 总经理岗位的人：考勤中心首页只看到自己，卡片仍然进按部门 / 一人一行的清单。"""
     ctx = make_ctx(positions=frozenset())
     assert run("att.leave", ctx)["target"] == {"key": "drill", "params": {"item": "att.leave", "period": "2026-10"}}
     assert run("att.overtime", ctx)["target"] == {"key": "drill", "params": {"item": "att.overtime", "period": "2026-10"}}
@@ -198,7 +198,7 @@ def test_the_waiting_numbers_cover_trip_requests_like_the_attendance_centre_list
 
 def test_a_trip_waiting_row_shows_its_travel_dates_and_opens_the_request(state):
     state["waiting_rows"] = [{"name": "OA-T9", "request_type": "出差申请", "employee_name": "演示员工159", "department": "客服部 - RAY", "from_date": "2026-10-26",
-                              "to_date": "2026-10-28", "duration_hours": 0, "current_step_label": "副总经理", "waited": 4}]
+                              "to_date": "2026-10-28", "duration_hours": 0, "current_step_label": "演示员工113经理", "waited": 4}]
     detail = core.get_detail_for(make_ctx(), "att.pending")
     assert detail["rows"][0]["cells"][:4] == ["出差申请", "演示员工159", "客服部", "10-26 ～ 10-28"]
     assert detail["rows"][0]["target"] == {"key": "attendance.detail", "params": {"request": "OA-T9"}} and detail["rows"][0]["tone"] == "bad"

@@ -4,7 +4,7 @@ REQUEST_LEAVE = "请假申请"
 REQUEST_PROCUREMENT = "采购申请"
 REQUEST_DIRECT_PURCHASE = "购买申请"
 REQUEST_PROCUREMENT_PAYMENT = "采购付款"
-# 付款报销改造新增的单据类型；在站点配置启用前只有管理员可见。
+# 付款报销改造新增的单据类型；在站点配置启用前只有演示员工170可见。
 REQUEST_TRAVEL = "出差申请"
 REQUEST_REIMBURSEMENT = "报销单"
 REQUEST_PAYMENT = "付款单"

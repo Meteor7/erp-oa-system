@@ -1,5 +1,5 @@
 # Translations template for Rayher HR Payroll.
-# Copyright (C) 2026 Rayher
+# Copyright (C) 2026 QIHENG Demo
 # This file is distributed under the same license as the Rayher HR Payroll project.
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
 #
@@ -126,8 +126,8 @@ msgid "Month must be between 1 and 12."
 msgstr "Le mois doit être compris entre 1 et 12."
 
 #: rayher_hr_payroll/demo.py:198
-msgid "Pass force=True to create Rayher demo data on this site."
-msgstr "Passez force=True pour créer les données de démonstration Rayher sur ce site."
+msgid "Pass force=True to create QIHENG Demo demo data on this site."
+msgstr "Passez force=True pour créer les données de démonstration QIHENG Demo sur ce site."
 
 #. Name of a report
 #: rayher_hr_payroll/rayher_hr_payroll/report/pending_my_approval/pending_my_approval.json
@@ -211,7 +211,7 @@ msgstr ""
 
 #: rayher_hr_payroll/translatable_labels.py:20
 msgid "Rayher HR Payroll"
-msgstr "Rayher RH et temps R&D"
+msgstr "QIHENG Demo RH et temps R&D"
 
 #. Name of a DocType
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
@@ -220,7 +220,7 @@ msgstr ""
 
 #. Label of a Link in the 研发成本 Workspace
 #: rayher_hr_payroll/rayher_hr_payroll/workspace/rd_cost/rd_cost.json
-msgid "Rayher HR 设置"
+msgid "QIHENG Demo HR 设置"
 msgstr ""
 
 #. Label of a Select field in DocType 'RD Work Ratio Snapshot'
@@ -233,8 +233,8 @@ msgid "Review R&D timesheet"
 msgstr "Vérifier la feuille de temps R&D"
 
 #: rayher_hr_payroll/demo.py:62
-msgid "Set a default company before loading Rayher demo data."
-msgstr "Définissez une société par défaut avant de charger les données de démonstration Rayher."
+msgid "Set a default company before loading QIHENG Demo demo data."
+msgstr "Définissez une société par défaut avant de charger les données de démonstration QIHENG Demo."
 
 #. Label of a Float field in DocType 'Rayher HR Settings'
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rayher_hr_settings/rayher_hr_settings.json
@@ -732,7 +732,7 @@ msgid "本期已存在未取消的费用导入单（{0}）；每个会计期间�
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:42
-msgid "本期已有已提交的分摊单，如需重算请联系系统管理员先撤销。"
+msgid "本期已有已提交的分摊单，如需重算请联系系统演示员工170先撤销。"
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:34
@@ -865,11 +865,11 @@ msgid "该员工本期该项目存在手工工时单 {0}，请在后台处理后
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:27
-msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统管理员）。"
+msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统演示员工170）。"
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:33
-msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统管理员）。"
+msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统演示员工170）。"
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:66

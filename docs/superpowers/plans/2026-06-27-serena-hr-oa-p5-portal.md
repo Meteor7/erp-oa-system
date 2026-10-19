@@ -123,7 +123,7 @@ def execute(filters=None):
 
 - [ ] **Step 6: Commit**
 ```bash
-cd /e/Rayher/Logistics-hroa
+cd /e/QIHENG Demo/Logistics-hroa
 git add rayher_hr_payroll/rayher_hr_payroll/report/pending_my_approval/ rayher_hr_payroll/tests/test_pending_approval_report.py
 git commit -m "feat: add 待我审批 script report (pending items for the session user)
 

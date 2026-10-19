@@ -27,7 +27,7 @@
 - Modify: `rayher_hr_payroll/access_control.py`
 
 **Interfaces:**
-- Produces: `BUSINESS_EXECUTIVE_ROLE = "Rayher Business Executive"`
+- Produces: `BUSINESS_EXECUTIVE_ROLE = "QIHENG Demo Business Executive"`
 - Produces: an idempotently created desk role and a business role bundle that excludes `System Manager`
 
 - [ ] **Step 1: Write the failing role test**
@@ -35,7 +35,7 @@
 ```python
 def test_business_executive_role_is_business_wide_but_not_system_admin():
     assert ac.BUSINESS_EXECUTIVE_ROLE in {r["role_name"] for r in ac.CUSTOM_ROLES}
-    profile = next(p for p in ac.ROLE_PROFILES if p["role_profile"] == "Rayher Business Executive")
+    profile = next(p for p in ac.ROLE_PROFILES if p["role_profile"] == "QIHENG Demo Business Executive")
     assert ac.BUSINESS_EXECUTIVE_ROLE in profile["roles"]
     assert {"HR Manager", "Accounts User", "Department Manager", "All Project Access"} <= set(profile["roles"])
     assert "System Manager" not in profile["roles"]
@@ -119,7 +119,7 @@ def test_account_specs_cover_finance_and_executives_without_system_manager():
 - Extends request summary with `is_override_actor` and `action_scope`
 
 - [ ] **Step 1: Add failing migration tests for Ye Liwei, Ren Feifan, Qing Bo, mistaken Wang Bo, and legacy joint Qing Bo/Wang Bo mappings into the corrected Wang Yansong identity. Assert completed steps return no change and repeated execution is a no-op.**
-- [ ] **Step 2: Add failing capability/action tests for ordinary assigned approver, unrelated user, `Administrator`, `admin@legacy-business.example.invalid` with its existing `System Manager`, a `Rayher Business Executive`, Finance classification at Finance audit, all-mode override completion, stale/completed denial, and real `action_by` audit identity.**
+- [ ] **Step 2: Add failing capability/action tests for ordinary assigned approver, unrelated user, `Administrator`, `admin@legacy-business.example.invalid` with its existing `System Manager`, a `QIHENG Demo Business Executive`, Finance classification at Finance audit, all-mode override completion, stale/completed denial, and real `action_by` audit identity.**
 - [ ] **Step 3: Run focused tests and confirm the new cases fail.**
 - [ ] **Step 4: Implement the unresolved-only migration patch with dry-run counts, unresolved diagnostics, and no historical-field mutation.**
 - [ ] **Step 5: Implement `_is_oa_override_user`, capability metadata, and override-aware checks in approve, targeted reject, add-sign, and Finance classification. Preserve all existing transaction locks and validation.**

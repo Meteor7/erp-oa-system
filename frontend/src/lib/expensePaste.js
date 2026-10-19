@@ -270,7 +270,7 @@ export function parseExpenseTableRows(tableRows, projects = [], accountPaths = E
 // ---- Excel 导入预览 ---------------------------------------------------------------------
 // parsed: parseExpenseTableRows / importWorkbookFile 的结果；existingRows: 页面里现有的明细。
 // replace=true 覆盖：现有明细会被清空；false 追加：和现有明细完全相同的行会被跳过。
-// 有问题的行（badRows > 0）时整份都不能导入，blocked = true。
+// 有问题的行（badRows > 0）时整份演示员工177能导入，blocked = true。
 export function summarizeExpenseImport(parsed = {}, { existingRows = [], replace = false, accountPaths = EXPENSE_ACCOUNT_PATHS } = {}) {
   const validRows = Array.isArray(parsed.validRows) ? parsed.validRows : (Array.isArray(parsed.rows) ? parsed.rows : []);
   const errors = Array.isArray(parsed.errors) ? parsed.errors : [];
@@ -323,7 +323,7 @@ export function buildExpenseTemplateSheets(accountPaths = EXPENSE_ACCOUNT_PATHS)
     ['项目', '选填', '留空或填“公共费用”：公共费用，按工时比例分摊。填项目编号（如 RD16）或“编号|项目名称”：项目费用，直接归属该项目。项目必须是系统里已有、未取消的项目。'],
     [],
     ['导入方式', '', '“追加到现有费用”：把表里的行加到页面下面，和页面已有明细完全相同的行会跳过。“覆盖现有费用”：确认后先清空页面里现有的明细，再放入表里的内容。两种方式都会先给出预览，确认后才生效。'],
-    ['注意', '', '1. 表头放在“费用明细”工作表的第一行，列的顺序可以调整，但表头名称不要改。 2. 示例行的凭证号、金额、项目都是占位内容，导入前请删除或改成真实数据。 3. 只要有一行有问题，整份文件都不会导入，请先改好。 4. 导入后还需要在页面上点“保存本月费用”才会真正保存。'],
+    ['注意', '', '1. 表头放在“费用明细”工作表的第一行，列的顺序可以调整，但表头名称不要改。 2. 示例行的凭证号、金额、项目都是占位内容，导入前请删除或改成真实数据。 3. 只要有一行有问题，整份文件演示员工177会导入，请先改好。 4. 导入后还需要在页面上点“保存本月费用”才会真正保存。'],
   ];
   return [
     { name: '费用明细', rows: [EXPENSE_TEMPLATE_HEADERS, ...EXPENSE_TEMPLATE_EXAMPLES], widths: [12, 14, 16, 36, 20, 14, 18] },

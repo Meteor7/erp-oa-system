@@ -1,4 +1,4 @@
-/* 价格审批 / PO 与合同页面（2026-09-30 改版）。沿用 expenseUi.css 的 .xp 基础样式，这里只放本页特有的部分，
+/* 价格审批 / PO 与演示员工116页面（2026-09-30 改版）。沿用 expenseUi.css 的 .xp 基础样式，这里只放本页特有的部分，
    所有选择器都挂在 .xp 下面，类名前缀 pa-。 */
 
 /* ---- 页面骨架 ---- */
@@ -117,7 +117,7 @@
   .xp .pa-plan-row1, .xp .pa-plan-row2 { grid-template-columns: 1fr 1fr; }
 }
 
-/* ---- PO 与合同 ---- */
+/* ---- PO 与演示员工116 ---- */
 .xp .pa-stepper { list-style: none; margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--xp-line); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
 .xp .pa-stepper li { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .xp .pa-stepper li > .muted { padding-right: 8px; }

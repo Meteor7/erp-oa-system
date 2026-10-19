@@ -71,7 +71,7 @@ const archiveFilter=ref("");
 const alertOnly=ref(false);
 // 下面三个只从地址 / 标签进来：60 天内到期、本月入职、部门分组（看板链接用，见 bindRouteFilters）
 const expiringOnly=ref(false);
-// 看板的“试用期到期”“合同到期”提醒点进来只看那一种：probation | contract；空 = 两种都看。
+// 看板的“演示员工173期到期”“演示员工116到期”提醒点进来只看那一种：probation | contract；空 = 两种都看。
 const reminderKind=ref("");
 const joinedMonth=ref(false);
 const leftMonth=ref(false);
@@ -81,7 +81,7 @@ const currentPage=ref(1);
 const PAGE_SIZE=20;
 const today=todayIso();
 
-// 总经理、副总经理也能打开这个页面，但只能看（决定 2026-10-13；服务端的写接口仍然只认人事角色）：新增、编辑只给人事。
+// 总经理、演示员工113经理也能打开这个页面，但只能看（决定 2026-10-13；服务端的写接口仍然只认人事角色）：新增、编辑只给人事。
 const canEdit=typeof window!=="undefined"&&Array.isArray(window.roles)&&window.roles.some(r=>["System Manager","HR User","HR Manager"].includes(r));
 const canDelete=typeof window!=="undefined"&&Array.isArray(window.roles)&&window.roles.some(r=>["System Manager","HR Manager"].includes(r));
 const showHrSensitive=!isHrSensitiveHidden();
@@ -135,7 +135,7 @@ bindRouteFilters({route,router,specs:[{
   toQuery:personnelQueryOf,
   sources:[statusFilter,expiringOnly,rdFilter,groupFilter,archiveFilter,joinedMonth,leftMonth,departmentFilter],
 }]});
-// 点掉「60 天内到期」时，“只看试用期 / 只看合同”也一起去掉。
+// 点掉「60 天内到期」时，“只看演示员工173期 / 只看演示员工116”也一起去掉。
 watch(expiringOnly,on=>{if(!on)reminderKind.value=""});
 
 const formDepartmentOptions=computed(()=>(depts.data||[]).filter(x=>x.company===form.company));
@@ -171,24 +171,24 @@ const SECTIONS={
       {key:"_status",label:"状态",virtual:true},
       {key:"_seniority",label:"司龄",virtual:true},
       {key:"date_of_joining",label:"入职时间",type:"date"},
-      {key:"relieving_date",label:"离职时间",type:"date",hint:"离职日当天仍算在职，第二天起算已离职"},
+      {key:"relieving_date",label:"演示员工166时间",type:"date",hint:"演示员工166日当天仍算在职，第二天起算已演示员工166"},
       {key:"department",label:"部门",type:"department",empty:"未设置"},
       {key:"designation",label:"职位",type:"select",options:"designations",empty:"未设置"},
       {key:"reports_to",label:"直属主管",type:"select",options:"bosses",empty:"未设置"},
-      {key:"employment_type",label:"合同类型",type:"select",options:"employmentTypes",empty:"未设置"},
+      {key:"employment_type",label:"演示员工116类型",type:"select",options:"employmentTypes",empty:"未设置"},
       {key:"rd_personnel_type",label:"研发人员类型",type:"select",options:"rd",empty:"未设置"},
       {key:"expense_account_category",label:"费用科目",type:"select",options:"expense",empty:"未设置"},
       {key:"archive_status",label:"归档状态",type:"select",options:"archive"},
     ]},
-    {title:"劳动合同",fields:[
-      {key:"labour_contract_start_date",label:"劳动合同开始日期",type:"date"},
-      {key:"probation_months",label:"试用期（月）",type:"number",min:0,step:1},
-      {key:"probation_end_date",label:"试用期到期日",type:"date"},
-      {key:"first_contract_period_years",label:"第一次合同期限（年）",type:"number",min:0,step:0.5},
-      {key:"first_contract_end_date",label:"第一次劳动合同到期日",type:"date"},
-      {key:"contract_renewal_status",label:"劳动合同续签情况"},
-      {key:"second_contract_period_years",label:"第二次合同期限（年）",type:"number",min:0,step:0.5},
-      {key:"second_contract_end_date",label:"第二次劳动合同到期日",type:"date"},
+    {title:"劳动演示员工116",fields:[
+      {key:"labour_contract_start_date",label:"劳动演示员工116开始日期",type:"date"},
+      {key:"probation_months",label:"演示员工173期（月）",type:"number",min:0,step:1},
+      {key:"probation_end_date",label:"演示员工173期到期日",type:"date"},
+      {key:"first_contract_period_years",label:"第一次演示员工116期限（年）",type:"number",min:0,step:0.5},
+      {key:"first_contract_end_date",label:"第一次劳动演示员工116到期日",type:"date"},
+      {key:"contract_renewal_status",label:"劳动演示员工116续签情况"},
+      {key:"second_contract_period_years",label:"第二次演示员工116期限（年）",type:"number",min:0,step:0.5},
+      {key:"second_contract_end_date",label:"第二次劳动演示员工116到期日",type:"date"},
     ]},
   ],
   edu:[{title:"",fields:[
@@ -263,7 +263,7 @@ const headExtra=computed(()=>[current.value?.row.english_name,current.value?.row
 const headTags=computed(()=>{
   const item=current.value;
   if(!item)return [];
-  const list=[{text:item.left?"已离职":"在职",tone:item.left?"":"ok"}];
+  const list=[{text:item.left?"已演示员工166":"在职",tone:item.left?"":"ok"}];
   if(item.rdType)list.push({text:item.rdType,tone:rdTone(item.rdType)});
   list.push({text:"档案"+item.archive,tone:archiveTone(item.archive)});
   for(const r of item.reminders)if(r.key!=="left"&&r.key!=="missing")list.push({text:r.text,tone:r.tone});
@@ -373,7 +373,7 @@ function viewCell(item,field){
   const row=item.row;
   const key=field.key;
   let text="";
-  if(key==="_status")text=item.left?"已离职":"在职";
+  if(key==="_status")text=item.left?"已演示员工166":"在职";
   else if(key==="_seniority")text=item.seniority;
   else{
     const value=row[key];
@@ -565,7 +565,7 @@ onBeforeUnmount(()=>{
 </script>
 
 <template>
-<RdPage title="员工信息管理" subtitle="档案、合同、研发人员类型都在这里；点一行看详情，需要时再编辑。" crumb="人事中心">
+<RdPage title="员工信息管理" subtitle="档案、演示员工116、研发人员类型都在这里；点一行看详情，需要时再编辑。" crumb="人事中心">
 <template #ctl>
 <div v-if="canImport" ref="importWrap" class="pi-menuwrap">
 <button ref="importBtn" type="button" class="btn" data-import-btn aria-haspopup="menu" :aria-expanded="importMenuOpen" :disabled="importBusy" @click="toggleImportMenu"><RdIcon name="upload"/>导入 ▾</button>
@@ -591,10 +591,10 @@ onBeforeUnmount(()=>{
 
 <div class="kpis">
 <RdKpi label="在职员工" :value="loaded?kpi.active:'-'" :sub="loaded?`研发 ${kpi.rd} · 其他 ${kpi.other}${kpi.rdGap?` · 研发部门未设类型 ${kpi.rdGap}`:''}`:''" :tone="loaded&&kpi.rdGap?'warn':''"/>
-<RdKpi label="本月入职" :value="loaded?kpi.joinedThisMonth:'-'" :sub="loaded?`试用期中 ${kpi.onProbation} 人`:''"/>
-<RdKpi label="本月离职" :value="loaded?kpi.leftThisMonth:'-'" :sub="loaded?(kpi.leftPending?`已生效 ${kpi.leftEffective} · 待生效 ${kpi.leftPending}`:'按离职时间统计'):''"/>
+<RdKpi label="本月入职" :value="loaded?kpi.joinedThisMonth:'-'" :sub="loaded?`演示员工173期中 ${kpi.onProbation} 人`:''"/>
+<RdKpi label="本月演示员工166" :value="loaded?kpi.leftThisMonth:'-'" :sub="loaded?(kpi.leftPending?`已生效 ${kpi.leftEffective} · 待生效 ${kpi.leftPending}`:'按演示员工166时间统计'):''"/>
 <RdKpi label="档案待完善 / 待确认" :value="loaded?kpi.fileOpen:'-'" :sub="loaded?`待完善 ${kpi.filePending} · 待确认 ${kpi.fileConfirm}`:''" :tone="loaded&&kpi.fileOpen?'warn':''"/>
-<RdKpi label="60 天内合同或试用期到期" :value="loaded?kpi.expiring:'-'" :sub="loaded?`试用期 ${kpi.expiringProbation} · 合同 ${kpi.expiringContract}`:''" :tone="loaded&&kpi.expiring?'warn':''"/>
+<RdKpi label="60 天内演示员工116或演示员工173期到期" :value="loaded?kpi.expiring:'-'" :sub="loaded?`演示员工173期 ${kpi.expiringProbation} · 演示员工116 ${kpi.expiringContract}`:''" :tone="loaded&&kpi.expiring?'warn':''"/>
 </div>
 
 <div v-if="transferNote" class="note" :class="transferNote.tone" :role="transferNote.tone==='bad'?'alert':'status'"><RdIcon :name="transferNote.tone==='bad'?'alert':'check'"/><span class="grow">{{transferNote.text}}</span><button type="button" class="btn sm" @click="transferNote=null">知道了</button></div>
@@ -656,7 +656,7 @@ onBeforeUnmount(()=>{
 <div class="pl-tool">
 <div class="chips" role="group" aria-label="在职状态">
 <button type="button" class="chip" :aria-pressed="statusFilter==='active'" @click="statusFilter='active'">在职<small>{{statusCounts.active}}</small></button>
-<button type="button" class="chip" :aria-pressed="statusFilter==='left'" @click="statusFilter='left'">已离职<small>{{statusCounts.left}}</small></button>
+<button type="button" class="chip" :aria-pressed="statusFilter==='left'" @click="statusFilter='left'">已演示员工166<small>{{statusCounts.left}}</small></button>
 </div>
 <span class="muted">档案：</span>
 <div class="chips" role="group" aria-label="档案状态">
@@ -664,9 +664,9 @@ onBeforeUnmount(()=>{
 <button v-for="x in ARCH" :key="x" type="button" class="chip" :aria-pressed="archiveFilter===x" @click="archiveFilter=x">{{x}}</button>
 </div>
 <button type="button" class="chip" :aria-pressed="alertOnly" @click="alertOnly=!alertOnly"><RdIcon name="bell"/> 只看有提醒</button>
-<button type="button" class="chip" data-chip-expiring :aria-pressed="expiringOnly" title="试用期或合同在 60 天内到期" @click="expiringOnly=!expiringOnly">{{expiringOnly&&reminderKind==="probation"?"60 天内试用期到期":expiringOnly&&reminderKind==="contract"?"60 天内合同到期":"60 天内到期"}}</button>
+<button type="button" class="chip" data-chip-expiring :aria-pressed="expiringOnly" title="演示员工173期或演示员工116在 60 天内到期" @click="expiringOnly=!expiringOnly">{{expiringOnly&&reminderKind==="probation"?"60 天内演示员工173期到期":expiringOnly&&reminderKind==="contract"?"60 天内演示员工116到期":"60 天内到期"}}</button>
 <button type="button" class="chip" data-chip-joined :aria-pressed="joinedMonth" @click="joinedMonth=!joinedMonth">本月入职</button>
-<button type="button" class="chip" data-chip-left :aria-pressed="leftMonth" title="离职日在本月、已经离职的人" @click="leftMonth=!leftMonth">本月离职</button>
+<button type="button" class="chip" data-chip-left :aria-pressed="leftMonth" title="演示员工166日在本月、已经演示员工166的人" @click="leftMonth=!leftMonth">本月演示员工166</button>
 <button v-if="groupFilter" type="button" class="chip" data-chip-group aria-pressed="true" :aria-label="`清除部门分组筛选：${groupFilter}`" @click="groupFilter=''">分组：{{groupFilter}} ✕</button>
 </div>
 

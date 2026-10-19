@@ -10,7 +10,7 @@ const props = defineProps({
   householdOptions: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
-  readonly: { type: Boolean, default: false },   // 只读（总经理、副总经理）：不能改基数、户口，也不能按上月带入
+  readonly: { type: Boolean, default: false },   // 只读（总经理、演示员工113经理）：不能改基数、户口，也不能按上月带入
 });
 const emit = defineEmits(['base', 'household', 'carry', 'export']);
 

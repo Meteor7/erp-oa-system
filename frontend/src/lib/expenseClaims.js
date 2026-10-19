@@ -185,7 +185,7 @@ export function submitBlockers(kind, form, { invoices = [], lines = [], applicat
 }
 
 // 修复（2026-09-23 验收发现）：有的一级科目没有二级科目（如办公费、维修费），服务端允许只填一级；
-// 原来前端一律要求二级科目，出纳选这些科目时永远点不了同意。传入科目表时按科目表判断。
+// 原来前端一律要求二级科目，演示员工110选这些科目时永远点不了同意。传入科目表时按科目表判断。
 export function hasLevelTwo(levelOne, tree = null) {
   if (!Array.isArray(tree)) return true;
   const item = tree.find((entry) => entry.level_1 === String(levelOne || '').trim());
@@ -198,11 +198,11 @@ export function accountBlockers(lines, tree = null) {
     if (!levelOne) return true;
     return hasLevelTwo(levelOne, tree) && !String(line.expense_account_level_2 || '').trim();
   })
-    ? ['出纳需要为每行明细选择科目（有二级科目的要选到二级）']
+    ? ['演示员工110需要为每行明细选择科目（有二级科目的要选到二级）']
     : [];
 }
 
-// 出纳填科目用的草稿：每行一份，取单据上已保存的科目。无论从列表点开还是从通知链接
+// 演示员工110填科目用的草稿：每行一份，取单据上已保存的科目。无论从列表点开还是从通知链接
 // 直接打开单据，都要用它初始化，否则科目下拉框不会出现。
 export function accountDraftFor(lines) {
   return Object.fromEntries((lines || []).filter((line) => line?.line_key).map((line) => [line.line_key, {
@@ -222,7 +222,7 @@ export function withDefaultProjects(invoices, projects = {}) {
 
 // ---------------------------------------------------------------- 页面结构（按已确认的设计稿第 5 版）
 
-// 财务（出纳、会计）看"待我处理 / 全部"，其他人看"我的 / 新建"；审批人从待办或通知直接打开单据。
+// 财务（演示员工110、会计）看"待我处理 / 全部"，其他人看"我的 / 新建"；审批人从待办或通知直接打开单据。
 export function isFinanceUser(roles = globalThis.window?.roles || []) {
   return (roles || []).some((role) => ['System Manager', 'Accounts User'].includes(role));
 }

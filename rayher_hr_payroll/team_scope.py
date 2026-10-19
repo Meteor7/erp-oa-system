@@ -3,7 +3,7 @@
 部门主管 = 有在职直接下属的人；他的团队 = 直接或间接汇报给他的在职员工，下属在哪个部门都算，
 不是下属的人（哪怕在同一个部门）不算。考勤中心、数据看板、工时填报进度、HR 概览共用这一个范围。
 
-Employee 档案里的“汇报给”（reports_to）是唯一的依据。中间有人已经离职时，他名下的人仍然沿着他往上挂，
+Employee 档案里的“汇报给”（reports_to）是唯一的依据。中间有人已经演示员工166时，他名下的人仍然沿着他往上挂，
 所以向下遍历时不看状态，只在结果里去掉非在职的人。
 """
 from __future__ import annotations
@@ -67,7 +67,7 @@ def has_direct_reports(employee):
 
 
 def team_names(employee, *, include_self=False, statuses=("Active",)):
-    """这个人团队里的员工号（默认只要在职的；按月份看工时时要带上本月离职的，传 statuses=("Active", "Left")）。"""
+    """这个人团队里的员工号（默认只要在职的；按月份看工时时要带上本月演示员工166的，传 statuses=("Active", "Left")）。"""
     names = [row["name"] for row in collect_team(employee, _fetch_children) if row.get("status") in statuses]
     return ([str(employee)] if include_self and employee else []) + names
 

@@ -10,7 +10,7 @@ def _can_read_fulfillment(user=None):
     roles = set(frappe.get_roles(user))
     allowed = user == "Administrator" or bool(roles & {
         "System Manager", "Accounts User", "Finance User", "Purchase User",
-        "Purchase Manager", "Rayher Business Executive",
+        "Purchase Manager", "QIHENG Demo Business Executive",
     }) or user in position_users("pmc", "procurement_manager", "vice_manager", "production_asset_owner")
     return bool(allowed)
 

@@ -1,6 +1,6 @@
 <script setup>
 // 需求附件（业务资料）：列表、上传、作废（审批开始后要写原因，原因在行内填，不再弹窗）。
-// 报价、合同、送货单、验收记录属于价格审批单和 PO，在对应页面上传；这里只留需求附件，
+// 报价、演示员工116、送货单、验收记录属于价格审批单和 PO，在对应页面上传；这里只留需求附件，
 // 以及旧单据里还要求补齐的资料（documentChecklistForRequest 不为空时才出现）。
 import { computed, ref, watch } from 'vue';
 import { csrfHeaders } from '../../lib/expenseClaims.js';
@@ -36,7 +36,7 @@ async function load() {
   } catch (error) {
     if (requested !== name) return;
     docs.value = [];
-    // 全局角色可以看到这张单，但未必有权看它的附件：这是正常情况，不弹整页错误。
+    // 全局角色可以看到这张单，但未必有权看它的附件：这是演示员工152情况，不弹整页错误。
     if (/无权/.test(errText(error, ''))) noAccess.value = true;
     else ctx.flash('', errText(error, '资料加载失败'));
   }
@@ -129,7 +129,7 @@ async function confirmRemove(doc) {
       <button type="button" class="btn" :disabled="uploading || !request" @click="pick('需求申请')">{{ uploading ? '上传中…' : '＋ 上传附件' }}</button>
     </div>
     <input ref="input" type="file" class="pr-hidden" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx" :disabled="uploading || !request" aria-label="选择附件" @change="upload" />
-    <div v-if="ctx.isProcurement" class="muted pr-docs-note">报价、合同、送货单、验收记录不在这里：它们属于价格审批单和 PO，在对应页面上传。</div>
+    <div v-if="ctx.isProcurement" class="muted pr-docs-note">报价、演示员工116、送货单、验收记录不在这里：它们属于价格审批单和 PO，在对应页面上传。</div>
     <div v-if="copied.length" class="muted pr-copy">抄送：{{ copied.join('、') }}</div>
   </section>
 </template>

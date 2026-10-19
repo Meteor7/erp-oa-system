@@ -66,11 +66,11 @@ test("the template header row is recognised by the same header detection the imp
 
 test("headers are matched leniently: aliases, spaces, full-width brackets, required markers", () => {
   assert.equal(headerField("用工类型"), "employment_type");
-  assert.equal(headerField(" 合同类型 "), "employment_type");
+  assert.equal(headerField(" 演示员工116类型 "), "employment_type");
   assert.equal(headerField("入职时间"), "date_of_joining");
   assert.equal(headerField("*姓名"), "employee_name");
-  assert.equal(headerField("试用期(月)"), "probation_months");
-  assert.equal(headerField("试用期（月）"), "probation_months");
+  assert.equal(headerField("演示员工173期(月)"), "probation_months");
+  assert.equal(headerField("演示员工173期（月）"), "probation_months");
   assert.equal(headerField("岗位"), "designation");
   assert.equal(headerField("工资卡银行账号"), "bank_ac_no");
   assert.equal(headerField("employee_number"), "employee_number");
@@ -261,9 +261,9 @@ test("only roles that can save employees see the import button", () => {
 
 // ---------- 导出 ----------
 const sampleRow = (extra = {}) => ({
-  name: "HR-EMP-90001", company: "Rayher", employee_number: "007", employee_name: "演示员工129", english_name: "Zhang San", gender: "Male",
+  name: "HR-EMP-90001", company: "QIHENG Demo", employee_number: "007", employee_name: "演示员工129", english_name: "Zhang San", gender: "Male",
   date_of_birth: "1995-01-15", cell_number: "13800000002", household_registration: "深圳", date_of_joining: "2026-01-05", relieving_date: null,
-  department: "研发软件部 - RAY", designation: "工程师", reports_to: "HR-EMP-90009", employment_type: "劳动合同", rd_personnel_type: "全时研发",
+  department: "研发软件部 - RAY", designation: "工程师", reports_to: "HR-EMP-90009", employment_type: "劳动演示员工116", rd_personnel_type: "全时研发",
   expense_account_category: "研发费用", archive_status: "待完善", probation_months: 3, first_contract_period_years: 0, status: "Active",
   default_monthly_salary: 12000.5, salary_months: 13, default_social_insurance_base: 0, default_housing_fund_base: 8000, social_insurance_number: "0012345",
   housing_fund_number: null, id_type_cn: "身份证", id_card_number_cn: "110101199001010090", bank_name: "招商银行", bank_ac_no: "0622000011112222",
@@ -334,11 +334,11 @@ test("export cells: ids and bank numbers are text, zeros are blank, names are sh
 
 test("export rows: current filter ignores paging; all-active ignores department filters but honours the company filter", () => {
   const item = (name, company, left) => ({ row: { name, company }, left });
-  const all = [item("a", "Rayher", false), item("b", "Rayher", true), item("c", "示例研发中心", false), item("d", "Rayher", false)];
+  const all = [item("a", "QIHENG Demo", false), item("b", "QIHENG Demo", true), item("c", "示例研发中心", false), item("d", "QIHENG Demo", false)];
   const filtered = [all[0], all[1]];
   assert.deepEqual(pickExportRows("current", { filtered, all, company: "" }).map((row) => row.name), ["a", "b"]);
   assert.deepEqual(pickExportRows("active", { filtered, all, company: "" }).map((row) => row.name), ["a", "c", "d"]);
-  assert.deepEqual(pickExportRows("active", { filtered, all, company: "Rayher" }).map((row) => row.name), ["a", "d"]);
+  assert.deepEqual(pickExportRows("active", { filtered, all, company: "QIHENG Demo" }).map((row) => row.name), ["a", "d"]);
   assert.deepEqual(pickExportRows("active", { filtered, all, company: "示例研发中心" }).map((row) => row.name), ["c"]);
   assert.deepEqual(pickExportRows("current", {}), []);
 });

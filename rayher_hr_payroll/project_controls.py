@@ -90,7 +90,7 @@ def sync_request_project_owner(doc, method=None):
     """项目负责人换人以后，这个项目名下的采购申请 / 购买申请跟着换成现在的负责人（决定 2026-10-12）。
 
     申请上的“项目负责人”是提交时记下的；不跟着换，新负责人看不到老申请、旧负责人却还看得到，
-    后面的合同交期确认等节点也会找错人。已经走过的审批节点不动（那是当时谁批的）。
+    后面的演示员工116交期确认等节点也会找错人。已经走过的审批节点不动（那是当时谁批的）。
     """
     before = doc.get_doc_before_save() if hasattr(doc, "get_doc_before_save") else None
     if before is None:

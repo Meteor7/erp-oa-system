@@ -3,7 +3,7 @@
 块的内容、数据来源和权限判断在各 provider 模块里（money / people / timesheet / procurement / personal）。
 这里只管"这个岗位按什么顺序放哪些块"；放进来的块如果当前这个人没权限，provider 会自己返回 None。
 总览页签的 `todos: True` 表示第一屏左边放「要我处理」（key `todo.queue`，不缓存）。
-`kpis_first: True`（看整体的岗位：总经理、副总、财务主管、人事经理）总览先放指标卡再放「要我处理」；
+`kpis_first: True`（看整体的岗位：总经理、演示员工113、财务主管、人事经理）总览先放指标卡再放「要我处理」；
 干活的岗位总览先放「要我处理」。
 排版（2026-10-13）：每个页签 / 分段尽量放 4 或 8 张指标卡（前端按实际张数排列）；图表块的配对、空块收起由前端决定。
 设计依据：docs/superpowers/specs/2026-10-09-role-dashboard-design.md
@@ -22,8 +22,8 @@ def section(title, sub="", kpis=(), blocks=()):
 
 # 人事页签：人员 / 考勤 两段（看板上考勤只有汇总；点卡片进考勤中心首页对应的那一块，人名在那里，决定 2026-10-14）。
 # 2026-10-13 排版：人员段 4 张卡（加上“60 天内到期”）；考勤段 6 张卡，正好 3 列 × 2 排，本月请假 / 本月加班都能点开明细。
-# 宿舍块只给没有宿舍页签的人（总经理 / 副总）；人事经理有自己的宿舍页签，这里不重复。
-_PEOPLE_SECTION = section("人员", "在职、合同、宿舍", kpis=["hr.active", "hr.joined_left", "hr.left_month", "hr.expiring"],
+# 宿舍块只给没有宿舍页签的人（总经理 / 演示员工113）；人事经理有自己的宿舍页签，这里不重复。
+_PEOPLE_SECTION = section("人员", "在职、演示员工116、宿舍", kpis=["hr.active", "hr.joined_left", "hr.left_month", "hr.expiring"],
                           blocks=["block.dept_headcount", "block.expiring_list", "block.dorm_summary"])
 _ATTENDANCE_SECTION = section("考勤", "这里只有人数和天数；要看是谁，点卡片进考勤中心",
                               kpis=["hr.away_today", "att.trip", "att.pending", "att.rate", "att.leave", "att.overtime"],
@@ -91,7 +91,7 @@ LAYOUTS = {
                      alerts=["alert.pay_waiting", "alert.me_trip"], blocks=["block.pay_next30", "block.pay_wait_dist"], todos=True)],
     },
     "hr_manager": {
-        "note": "人员、合同、考勤、薪酬社保和宿舍。",
+        "note": "人员、演示员工116、考勤、薪酬社保和宿舍。",
         "tabs": [
             tab("overview", "总览",
                 kpis=["hr.active", "hr.joined_left", "hr.away_today", "hr.expiring", "hr.payroll", "hr.social_pending", "hr.dorm_rate", "hr.file_pending"],

@@ -138,7 +138,7 @@ export function drawerOptions(kind, item) {
   if (item.rowType === 'missing') {
     return [
       { key: 'ignore', label: '标记为需补缴，下月申报补上', hint: '申报漏了；备注里写清补缴月份', note: '需补缴：', recommended: true },
-      { key: 'ignore', label: '确认本月不用缴纳', hint: '例如停薪留职、已离职未减员；备注里写明原因', note: '无需缴纳：' },
+      { key: 'ignore', label: '确认本月不用缴纳', hint: '例如停薪留职、已演示员工166未减员；备注里写明原因', note: '无需缴纳：' },
     ];
   }
   const options = [];
@@ -204,7 +204,7 @@ export function baseStatus(row, kind) {
   if (kind === 'si' && row.household_classification === '待完善') return { text: '缺户口', tone: 'p-red' };
   if (row.note) return { text: row.note, tone: 'p-sun' };
   if (row.prev_base != null && !near(row.prev_base, row.base)) return { text: '较上月有变化', tone: 'p-sun' };
-  return { text: '正常', tone: 'p-jade' };
+  return { text: '演示员工152', tone: 'p-jade' };
 }
 
 export function missingBaseCount(rows, kind) {

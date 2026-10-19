@@ -61,7 +61,7 @@ def provision(backup_path):
                                               {"role_key": "finance_auditor"}, "name")
             finance = (frappe.get_doc("OA Approval Role Assignment", finance_name)
                        if finance_name else frappe.new_doc("OA Approval Role Assignment"))
-            finance.update({"role_key": "finance_auditor", "role_label": "出纳",
+            finance.update({"role_key": "finance_auditor", "role_label": "演示员工110",
                             "employee": finance_employee, "user": "person055@staff.example.invalid",
                             "enabled": 1})
             finance.save(ignore_permissions=True)

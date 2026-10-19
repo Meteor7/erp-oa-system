@@ -26,8 +26,8 @@ def apply(backup, rehearsal=False):
  "finance_auditor":["Employee","Accounts User"],
  "finance_accountant":["Employee","Accounts User"],
  "finance_manager":["Employee","Accounts User","Department Manager"],
- "general_manager":["Employee","Accounts User","All Project Access","Department Manager","HR Manager","Rayher Business Executive"],
- "vice_manager":["Employee","Accounts User","All Project Access","Department Manager","HR Manager","Rayher Business Executive"],
+ "general_manager":["Employee","Accounts User","All Project Access","Department Manager","HR Manager","QIHENG Demo Business Executive"],
+ "vice_manager":["Employee","Accounts User","All Project Access","Department Manager","HR Manager","QIHENG Demo Business Executive"],
  "it_asset_owner":["Employee","Department Manager"],
  "pmc":["Employee","Purchase User"],
  "procurement_manager":["Employee","Purchase User"],
@@ -55,7 +55,7 @@ def apply(backup, rehearsal=False):
   holders={key:resolve_role(key) for key in ROLE_SPECS}
   employee=frappe.db.get_value("Employee",{"user_id":holders["hr_manager"]["user"]},"name")
   if not employee:
-   doc=frappe.get_doc({"doctype":"Employee","first_name":"William","last_name":"Liu","company":"Rayher","department":"人事行政部 - RAY","designation":"人事行政经理","status":"Active","naming_series":"HR-EMP-.#####","create_user_permission":0})
+   doc=frappe.get_doc({"doctype":"Employee","first_name":"William","last_name":"Liu","company":"QIHENG Demo","department":"人事行政部 - RAY","designation":"人事行政经理","status":"Active","naming_series":"HR-EMP-.#####","create_user_permission":0})
    doc.flags.ignore_mandatory=True
    doc.insert(ignore_permissions=True)
    employee=doc.name
@@ -116,7 +116,7 @@ def apply(backup, rehearsal=False):
   assert before_users==frappe.db.sql("SELECT * FROM tabUser ORDER BY name",as_dict=True)
   # Align the explicitly authorized total-control roles without altering credentials.
   admin="admin@staff.example.invalid"
-  sync_roles(admin,set(),{"Accounts User","All Project Access","Department Manager","HR Manager","Rayher Business Executive","System Manager"},set())
+  sync_roles(admin,set(),{"Accounts User","All Project Access","Department Manager","HR Manager","QIHENG Demo Business Executive","System Manager"},set())
   report.update(designation_changes=changes,excluded_removed="HR-EMP-90006" in by_id,backup=backup)
   path=Path(frappe.get_site_path("private","position-handover"))
   path.mkdir(parents=True,exist_ok=True)

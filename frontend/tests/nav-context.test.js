@@ -336,7 +336,7 @@ test("PO payment link carries the PO; the workbench title says what the PO tab i
   assert.deepEqual(paymentPoLink("PO-8"), { path: "/approval/procurement-payment", query: { po: "PO-8" } });
   assert.deepEqual(paymentPoLink(null), { path: "/approval/procurement-payment" });
   assert.deepEqual(paymentPoLink({}), { path: "/approval/procurement-payment" });
-  assert.equal(pageTitle("po"), "价格审批 · 采购订单与合同");
+  assert.equal(pageTitle("po"), "价格审批 · 采购订单与演示员工116");
   assert.equal(pageTitle("approvals"), "价格审批");
   assert.equal(pageTitle("source"), "价格审批 · PR 待比价物料");
   assert.equal(pageTitle(), "价格审批");

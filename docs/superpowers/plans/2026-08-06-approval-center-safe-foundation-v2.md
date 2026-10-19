@@ -4,7 +4,7 @@
 
 **Goal:** 在采购申请、购买申请和采购付款的最终审批人尚未完全确定时，先在隔离本地环境交付不可绕过权限、不可超额付款、可保存草稿、可归档资料的审批中心安全底座，并保持所有未确认路线关闭。
 
-**Architecture:** 继续复用 `OA Approval Request` 作为审批聚合根，但把行级权限、状态转换、金额口径和原生 Frappe 写入保护下沉到共用服务。新增追加式金额流水和通用业务文档中心；新流程只允许 Administrator 在本地保存草稿，自定义 API、Frappe REST、Desk、导入器和后台任务都不能绕过关闭状态。
+**Architecture:** 继续复用 `OA Approval Request` 作为审批聚合根，但把行级权限、状态转换、金额口径和原生 Frappe 写入保护下沉到共用服务。新增追加式金额流水和通用业务文档中心；新流程只允许 Administrator 在本地保存草稿，自定义 API、Frappe REST、Desk、导入器和后台任务演示员工177能绕过关闭状态。
 
 **Tech Stack:** Frappe/ERPNext Python、MariaDB/InnoDB、Vue 3、frappe-ui、pytest、Node test runner、Yarn 1.22.22、Vite 5、本地 Docker Bench。
 
@@ -22,13 +22,13 @@
 4. 自定义 API 和 Frappe 原生接口共用行级权限。
 5. 申请金额、批准金额、审批占用、已付和可用余额分离。
 6. 并发付款不突破批准金额，撤回、付款、退款和冲销可追溯。
-7. 报价、价格审批、PR、PO、合同、付款计划、发票、验收、收料、入库和付款回单统一归档并版本化。
+7. 报价、价格审批、PR、PO、演示员工116、付款计划、发票、验收、收料、入库和付款回单统一归档并版本化。
 8. 使用本地测试数据验收申请看板和付款看板。
 
 必须等待后续路线计划才能启用：
 
 1. 采购申请、购买申请、采购付款的正式审批人、顺序、会签/或签和驳回目标。
-2. 价格审批、合同、付款计划、预付款、到货款和尾款完整状态机。
+2. 价格审批、演示员工116、付款计划、预付款、到货款和尾款完整状态机。
 3. 金蝶、电子章、邮件真实接口。
 4. 采购发票 OCR 自动放行付款。
 
@@ -36,14 +36,14 @@
 
 - 仅修改新建隔离 worktree 和本地 Docker `rayher.localhost`；禁止访问 staging `203.0.113.58`、product `203.0.113.32`。
 - 不改变现有请假、报销和对公付款路线快照；请假继续复用现有提交、审批、驳回和可见范围，只迁移入口与展示归类。
-- 新流程默认关闭：仅 Administrator 可保存本地草稿，任何用户包括 Administrator 都不能推进为非草稿状态。
+- 新流程默认关闭：仅 Administrator 可保存本地草稿，任何用户包括 Administrator 演示员工177能推进为非草稿状态。
 - 前端隐藏、Select选项和`read_only`元数据不是安全边界；所有路径必须执行服务端权限、状态和字段校验。
 - `workflow_status`、当前步骤、审批步骤、`approved_amount`、来源快照、付款信息和金额流水由服务端动作拥有。
 - 现有`amount`保持为申请金额；`approved_amount`是终审确认的含税人民币付款上限。外币采购在本阶段禁用。
 - `available_amount = approved_amount - reserved_amount - paid_amount`，全部使用`Decimal`精确到分。
 - 金额流水只追加、不更新、不删除；每个事件有唯一幂等键。
 - 新付款只能关联有权使用、类型正确、状态完成、批准金额大于0的来源申请。正式路线权限未确定前，“有权使用”只包括来源申请人本人和System Manager；后续路线只能显式扩大，不能依赖部门参数。
-- 每次追加流水后`reserved_amount`和`paid_amount`都不得为负；释放不得超过现有占用，退款/冲销不得超过现有已付。
+- 每次追加流水后`reserved_amount`和`paid_amount`演示员工177得为负；释放不得超过现有占用，退款/冲销不得超过现有已付。
 - `OA Approval Request`、金额流水和业务文档均禁止改名，避免来源链和审计引用漂移。
 - 权限复核、来源行锁、余额计算、流水追加和状态变化必须在同一事务完成。
 - 迁移不推断历史批准金额、固定资产属性或来源申请。
@@ -211,7 +211,7 @@ def test_finance_cannot_change_applicant_amount(native_api, login):
         native_api.set_value("OA Approval Request", "OA-ALICE", "amount", 1)
 ```
 
-测试文件必须使用真实Frappe测试用户和`frappe.client.get_list/get/set_value`调用，不得只模拟前端。
+测试文件必须使用真实Frappe测演示员工173户和`frappe.client.get_list/get/set_value`调用，不得只模拟前端。
 
 - [ ] **Step 2: 运行确认当前至少一个攻击成功**
 
@@ -367,15 +367,15 @@ def test_private_file_url_cannot_bypass_parent_permission(http, login):
 
 def test_upload_appends_version(service, login):
     login("owner@example.com")
-    first = service.attach("OA-1", "合同", "/private/files/a.pdf")
-    second = service.attach("OA-1", "合同", "/private/files/b.pdf")
+    first = service.attach("OA-1", "演示员工116", "/private/files/a.pdf")
+    second = service.attach("OA-1", "演示员工116", "/private/files/b.pdf")
     assert second.version_no == first.version_no + 1
     assert second.supersedes == first.name
 ```
 
 - [ ] **Step 2: 实现允许类型**
 
-允许类型固定为：需求申请、报价单、价格审批表、PR、PO、合同、付款计划、发票、验收资料、送货单、收料单、入库单、付款回单、采购完成报告。这里仅归档，不表示对应流程已启用。
+允许类型固定为：需求申请、报价单、价格审批表、PR、PO、演示员工116、付款计划、发票、验收资料、送货单、收料单、入库单、付款回单、采购完成报告。这里仅归档，不表示对应流程已启用。
 
 - [ ] **Step 3: 实现文件安全**
 
@@ -412,7 +412,7 @@ git commit -m "feat: add approval business document archive"
 
 - [ ] **Step 3: 实现草稿页面**
 
-管理员本地草稿支持基本信息、明细、资产属性、附件归档和来源预览。后端重算明细金额；前端不得提交批准金额、余额或状态字段。
+演示员工170本地草稿支持基本信息、明细、资产属性、附件归档和来源预览。后端重算明细金额；前端不得提交批准金额、余额或状态字段。
 
 - [ ] **Step 4: 实现看板**
 
@@ -444,7 +444,7 @@ D:\Tools\Pi\node\node.exe --test frontend/tests/*.test.js
 
 - [ ] **Step 2: 构建并扫描产物**
 
-从`frontend`执行`yarn build`。检查全部Git新增/修改文件和构建产物开头不是TSD标记，`index.html`以正常HTML开头。
+从`frontend`执行`yarn build`。检查全部Git新增/修改文件和构建产物开头不是TSD标记，`index.html`以演示员工152HTML开头。
 
 - [ ] **Step 3: 备份并迁移两次**
 
@@ -460,7 +460,7 @@ docker exec rayher-bench bash -lc 'cd /workspace/development/frappe-bench && ben
 
 - [ ] **Step 5: 旧业务回归**
 
-请假、报销、对公付款、发票OCR、工时及管理员查看保持原行为。新流程只显示本地草稿能力，无法提交。
+请假、报销、对公付款、发票OCR、工时及演示员工170查看保持原行为。新流程只显示本地草稿能力，无法提交。
 
 - [ ] **Step 6: 写验证报告并提交**
 
@@ -468,7 +468,7 @@ docker exec rayher-bench bash -lc 'cd /workspace/development/frappe-bench && ben
 
 ## 3. 后续独立计划
 
-1. `approval-center-purchase-request`：购买申请正式路线、合同模板和关联付款。
+1. `approval-center-purchase-request`：购买申请正式路线、演示员工116模板和关联付款。
 2. `approval-center-procurement-request`：需求、PMC、演示员工37、价格审批、PR/PO和采购进度。
 3. `approval-center-procurement-payment`：付款计划、预付款、到货、验收、发票核对、尾款和完成报告。
 4. `approval-center-procurement-ocr`：采购发票字段、全局发票占用、三方金额核对和人工异常审批。
