@@ -1,5 +1,5 @@
 # Translations template for Rayher HR Payroll.
-# Copyright (C) 2026 QIHENG Demo
+# Copyright (C) 2026 Rayher
 # This file is distributed under the same license as the Rayher HR Payroll project.
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
 #
