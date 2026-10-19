@@ -55,7 +55,7 @@ def _require_types():
 
 def can_view_all():
     """能不能看所有人的请假 / 加班 / 调休 / 出差（页面上的"全部"栏目，只读）。
-    人事和老板的角色，加上总经理、演示员工113经理岗位（决定 2026-10-13：看板上他们看得到公司考勤的数字，点进去也要能看到）。"""
+    人事和老板的角色，加上总经理、副总经理岗位（决定 2026-10-13：看板上他们看得到公司考勤的数字，点进去也要能看到）。"""
     from rayher_hr_payroll.hr_read_access import is_hr_leader
 
     user = str(frappe.session.user or "").strip()
@@ -235,11 +235,11 @@ def _in_my_team(name):
 @frappe.whitelist()
 def list_attendance_away_today():
     """今天不在岗（请假 / 调休）的人，一人一张单（口径同看板“今天不在岗”：attendance_board_entry.today_away）。
-    只读；人事、老板、总经理、演示员工113经理才能看（和“全部”同一个权限）。出差中的人另算，只给人数。"""
+    只读；人事、老板、总经理、副总经理才能看（和“全部”同一个权限）。出差中的人另算，只给人数。"""
     _user()
     _require_types()
     if not can_view_all():
-        frappe.throw(frappe._("只有人事或演示员工170可以查看全部申请。"), frappe.PermissionError)
+        frappe.throw(frappe._("只有人事或管理员可以查看全部申请。"), frappe.PermissionError)
     from rayher_hr_payroll.api import attendance_board_entry
 
     away = attendance_board_entry.today_away(site_time.today())
@@ -298,7 +298,7 @@ def list_attendance_all(request_type=None, limit=ALL_LIMIT):
     _user()
     types = _require_types()
     if not can_view_all():
-        frappe.throw(frappe._("只有人事或演示员工170可以查看全部申请。"), frappe.PermissionError)
+        frappe.throw(frappe._("只有人事或管理员可以查看全部申请。"), frappe.PermissionError)
     if request_type and request_type not in types:
         frappe.throw(frappe._("不支持的申请类型。"))
     try:

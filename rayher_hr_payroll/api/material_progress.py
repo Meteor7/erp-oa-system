@@ -36,13 +36,13 @@ def _clean(value):
     return str(value or "").strip()
 
 
-# 演示员工116已生效、货还在路上或还没结清的 PO 状态；看板首页的「交期逾期」和这里的 contract_overdue 用同一口径
+# 合同已生效、货还在路上或还没结清的 PO 状态；看板首页的「交期逾期」和这里的 contract_overdue 用同一口径
 # （dashboard/procurement.py 的 EFFECTIVE_PO 必须与它相等，有测试盯着）。
 LIVE_PO_STATUSES = ("已生效", "供应商制作中", "到货验收中", "付款中")
 
 
 def contract_line_overdue(line, po_status, today):
-    """某个 PO 行：PO 演示员工116已生效、填了演示员工116交期且已过今天、还没收齐。没填演示员工116交期的不算逾期。
+    """某个 PO 行：PO 合同已生效、填了合同交期且已过今天、还没收齐。没填合同交期的不算逾期。
     还没收齐 = 到货数量不够，或者被判了退货（退货中的货要退回去，同 procurement_chain._line_received；2026-10-13 和看板对齐）。
     SQL 版本在 material_progress_query.overdue_line_sql，两边要一起改。"""
     due = str(getattr(line, "contract_delivery_date", None) or "")
@@ -60,7 +60,7 @@ def _board_user(user=None):
     user = _clean(user or frappe.session.user).lower()
     if can_access_board(user):
         return user
-    frappe.throw("只有 PMC、采购、演示员工113经理和总经理可以访问物料进度看板。")
+    frappe.throw("只有 PMC、采购、副总经理和总经理可以访问物料进度看板。")
 
 
 def _is_procurement(doc):
@@ -117,7 +117,7 @@ def _ensure_row(doc, line):
         "quantity": getattr(line, "quantity", 0) or 0,
         "unit": _clean(getattr(line, "unit", None)),
         "expected_delivery_date": getattr(doc, "expected_delivery_date", None),
-        "status": "演示员工152",
+        "status": "正常",
     })
     board.insert(ignore_permissions=True)
     return board
@@ -354,7 +354,7 @@ def _serialize(board, source=None, metrics=None, approval_steps=None, po_statuse
         "actual_delivery_date": str(board.actual_delivery_date or ""),
         "po_closed": int(board.po_closed or 0),
         "remarks": board.remarks or "",
-        "record_status": board.status or "演示员工152",
+        "record_status": board.status or "正常",
         "progress_override": "",
         "progress_status": _derived_status(board, source, po_statuses, metrics),
         "business_status": _clean(getattr(source, "business_status", None)),
@@ -637,5 +637,5 @@ def cancel_material_progress(name, reason=None):
     board.cancel_reason = reason
     board.save(ignore_permissions=True)
     source = frappe.get_doc("OA Approval Request", board.source_request)
-    _notify_change(board, source, {"status": {"before": "演示员工152", "after": f"已取消（{reason}）"}}, actor)
+    _notify_change(board, source, {"status": {"before": "正常", "after": f"已取消（{reason}）"}}, actor)
     return _for_viewer(_serialize(board))

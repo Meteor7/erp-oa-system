@@ -22,7 +22,7 @@ ROOMS = [
     _room("B201", "客房", rent=2200), _room("C301", "午休室"),
 ]
 OCCUPANCIES = [
-    {"employee": "EMP-1", "employee_name": "演示员工129", "room": "A101"},
+    {"employee": "EMP-1", "employee_name": "南通工厂9", "room": "A101"},
     {"employee": "EMP-L", "employee_name": "演示员工146", "room": "B201"},
 ]
 DEDUCTIONS = [
@@ -77,7 +77,7 @@ def test_room_tiles_carry_the_selected_month_cost_and_lease_alert():
     data = board.build_board(ROOMS, OCCUPANCIES, [], DEDUCTIONS, period="2026-06", today="2026-09-29")
     a101 = next(room for room in data["rooms"] if room["room_no"] == "A101")
 
-    assert (a101["company"], a101["personal"], a101["employee_name"], a101["lease_days_left"]) == (1100, 500, "演示员工129", 15)
+    assert (a101["company"], a101["personal"], a101["employee_name"], a101["lease_days_left"]) == (1100, 500, "南通工厂9", 15)
     assert data["lease_alert"]["count"] == 5 and data["lease_alert"]["same_date"] is True
     assert data["lease_alert"]["earliest_date"] == "2026-10-14" and data["lease_alert"]["days_left"] == 15
 

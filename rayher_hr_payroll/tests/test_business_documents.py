@@ -93,7 +93,7 @@ class MemoryStore:
 
 def test_allowed_document_types_match_approved_archive_scope():
     assert documents.DOCUMENT_TYPES == (
-        "需求申请", "报价单", "价格审批表", "PR", "PO", "演示员工116", "付款计划",
+        "需求申请", "报价单", "价格审批表", "PR", "PO", "合同", "付款计划",
         "发票", "验收资料", "送货单", "收料单", "入库单", "付款回单", "退款回单", "采购完成报告", "其他补充资料",
     )
 
@@ -113,9 +113,9 @@ def test_attach_requires_parent_write_and_list_requires_parent_read():
     store.add_file("FILE-1", "contract.pdf", b"%PDF-1.7\nbody")
     store.writable = False
     with pytest.raises(documents.BusinessDocumentError, match="父审批单"):
-        documents.attach("OA-1", "演示员工116", "FILE-1", store=store)
+        documents.attach("OA-1", "合同", "FILE-1", store=store)
     store.writable = True
-    documents.attach("OA-1", "演示员工116", "FILE-1", store=store)
+    documents.attach("OA-1", "合同", "FILE-1", store=store)
     store.readable = False
     with pytest.raises(documents.BusinessDocumentError, match="父审批单"):
         documents.list_documents("OA-1", store=store)
@@ -125,8 +125,8 @@ def test_upload_appends_version_and_reparents_private_file():
     store = MemoryStore()
     first_file = store.add_file("FILE-1", "contract.pdf", b"%PDF-1.7\nfirst")
     second_file = store.add_file("FILE-2", "contract-v2.pdf", b"%PDF-1.7\nsecond")
-    first = documents.attach("OA-1", "演示员工116", "FILE-1", store=store)
-    second = documents.attach("OA-1", "演示员工116", "FILE-2", store=store)
+    first = documents.attach("OA-1", "合同", "FILE-1", store=store)
+    second = documents.attach("OA-1", "合同", "FILE-2", store=store)
     assert first.version_no == 1
     assert second.version_no == 2
     assert second.supersedes == first.name
@@ -134,7 +134,7 @@ def test_upload_appends_version_and_reparents_private_file():
     assert first_file.attached_to_doctype == "OA Business Document"
     assert first_file.attached_to_name == first.name
     assert first_file.owner == "Administrator"
-    assert store.locks == [("OA-1", "演示员工116"), ("OA-1", "演示员工116")]
+    assert store.locks == [("OA-1", "合同"), ("OA-1", "合同")]
 
 
 def test_wrong_upload_can_be_deleted_before_price_submission():
@@ -151,7 +151,7 @@ def test_document_is_voided_with_reason_after_approval_starts():
     store.add_file("FILE-1", "approved.pdf", b"%PDF-1.7\napproved")
     row = documents.attach("OA-1", "价格审批表", "FILE-1", store=store)
     store.parent.workflow_status = "已完成"
-    store.parent.business_status = "价格已批准/待补充演示员工116信息"
+    store.parent.business_status = "价格已批准/待补充合同信息"
     store.parent.price_submitted_on = "2026-08-25 12:00:00"
     with pytest.raises(documents.BusinessDocumentError, match="作废原因"):
         documents.remove(row.name, store=store)
@@ -173,7 +173,7 @@ def test_file_must_be_private_unattached_supported_and_magic_must_match():
         store = MemoryStore()
         store.add_file(f"FILE-{index}", filename, content, private, attached)
         with pytest.raises(documents.BusinessDocumentError, match=message):
-            documents.attach("OA-1", "演示员工116", f"FILE-{index}", store=store)
+            documents.attach("OA-1", "合同", f"FILE-{index}", store=store)
 
 
 
@@ -184,7 +184,7 @@ def test_declared_oversize_is_rejected_before_reading_file_content():
     reads = []
     store.file_content = lambda file_value: reads.append(file_value.name) or file_value.content
     with pytest.raises(documents.BusinessDocumentError, match="大小"):
-        documents.attach("OA-1", "演示员工116", "FILE-1", store=store)
+        documents.attach("OA-1", "合同", "FILE-1", store=store)
     assert reads == []
 
 
@@ -199,9 +199,9 @@ def test_invalid_document_type_and_duplicate_file_fail_closed():
     store.add_file("FILE-1", "contract.pdf", b"%PDF-1.7\nbody")
     with pytest.raises(documents.BusinessDocumentError, match="资料类型"):
         documents.attach("OA-1", "用户随意类型", "FILE-1", store=store)
-    documents.attach("OA-1", "演示员工116", "FILE-1", store=store)
+    documents.attach("OA-1", "合同", "FILE-1", store=store)
     with pytest.raises(documents.BusinessDocumentError, match="已关联"):
-        documents.attach("OA-1", "演示员工116", "FILE-1", store=store)
+        documents.attach("OA-1", "合同", "FILE-1", store=store)
 
 
 def test_business_document_permission_delegates_read_to_parent_and_denies_mutation(monkeypatch):
@@ -232,7 +232,7 @@ def test_frappe_store_serializes_versions_on_parent_row(monkeypatch):
 
     monkeypatch.setattr(documents.frappe, "db", DB())
     monkeypatch.setattr(documents.frappe, "get_all", lambda *args, **kwargs: [])
-    assert documents.FrappeBusinessDocumentStore().lock_versions("OA-1", "演示员工116") == []
+    assert documents.FrappeBusinessDocumentStore().lock_versions("OA-1", "合同") == []
     assert "FOR UPDATE" in calls[0][0]
     assert calls[0][1] == ("OA-1",)
 

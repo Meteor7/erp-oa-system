@@ -1,13 +1,13 @@
 """看板：我的团队（部门主管 / 有下属的人）。
 
 团队 = 汇报关系向下的在职员工（直接和间接下属，下属在哪个部门都算，决定 2026-10-12），和考勤中心、工时填报进度、
-HR 概览共用 `team_scope` 这一个范围。团队页显示人名（日历、每个人的请假加班）；公司级看板（人事、演示员工113、总经理）仍然只有汇总。
+HR 概览共用 `team_scope` 这一个范围。团队页显示人名（日历、每个人的请假加班）；公司级看板（人事、副总、总经理）仍然只有汇总。
 
 - 谁不在、未来 14 天的日历：复用考勤中心的团队明细（`attendance_board_entry._team_detail`），数字和日历对得上；
   “不在岗”只算请假和调休（口径见 attendance_board.today_away）；日历上也画出差，但出差不算不在岗，不进在岗人数和人少提醒。
 - 本月请假 / 加班：复用 `overview_entry._attendance_rows`（已批准的，跨月申请按天拆），按 `attendance_board.leave_figures`
   算——和公司的“本月请假”、考勤中心首页同一个算法：请假按天，调休单独算。
-- 卡片点进去是一演示员工128行的明细（看板明细），每一行进那张申请（决定 2026-10-13）。
+- 卡片点进去是一南通工厂8行的明细（看板明细），每一行进那张申请（决定 2026-10-13）。
 可见性只看“有没有在职直接下属”（`ctx.has_reports`），不看角色名。
 """
 from __future__ import annotations
@@ -203,7 +203,7 @@ def team_leave(ctx):
     return kpi("team.leave", f"{_month_word(ctx)}请假", _n(figures["leave_days"]), "天", sub,
                to=drill_to("team.leave", ctx) if figures["leave_count"] or figures["comp_count"] else None,
                hint="团队已批准的请假天数（只算请假，调休单独算；出差、加班不算；跨月申请按天拆到各月；小时 ÷ 8），"
-                    "和公司的“本月请假”、考勤中心首页同一个算法。点进去一演示员工128行，每一行进那张申请。" + TEAM_HINT)
+                    "和公司的“本月请假”、考勤中心首页同一个算法。点进去一南通工厂8行，每一行进那张申请。" + TEAM_HINT)
 
 
 @provider("team.overtime", "kpi", visible=team_visible, title="本月加班")
@@ -216,7 +216,7 @@ def team_overtime(ctx):
     else:
         sub = "上月没有加班" if current else "本月没有加班"
     return kpi("team.overtime", f"{_month_word(ctx)}加班", _n(current), "小时", sub, to=drill_to("team.overtime", ctx) if current else None,
-               hint="团队已批准的加班小时数（跨月申请按天拆到各月）；提交后按 1:1 计入调休额度。点进去一演示员工128行，每一行进那张申请。" + TEAM_HINT)
+               hint="团队已批准的加班小时数（跨月申请按天拆到各月）；提交后按 1:1 计入调休额度。点进去一南通工厂8行，每一行进那张申请。" + TEAM_HINT)
 
 
 # ---------------------------------------------------------------- 明细：一张申请一行，每一行进申请详情

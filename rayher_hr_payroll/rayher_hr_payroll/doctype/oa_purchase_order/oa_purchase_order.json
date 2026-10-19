@@ -43,7 +43,7 @@
       "fieldname": "status",
       "fieldtype": "Select",
       "label": "Status",
-      "options": "草稿\n待采购确认\n待演示员工116复核\n待电子用印\n已生效\n供应商制作中\n到货验收中\n付款中\n已关闭\n已取消",
+      "options": "草稿\n待采购确认\n待合同复核\n待电子用印\n已生效\n供应商制作中\n到货验收中\n付款中\n已关闭\n已取消",
       "default": "草稿",
       "in_list_view": 1
     },

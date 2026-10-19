@@ -85,9 +85,9 @@ def resolve_monthly_calendar(year, month, employee=None, company=None):
             "Holiday", filters={"parent": selected_list}, pluck="holiday_date"
         )
     work_dates = count_work_dates(year, month, holiday_dates)
-    # 修复（2026-09-29，审查 #51 / X3-6）：入职前、演示员工166后的日子不算这个员工的工作日。
-    # 原来月中入职或演示员工166的人也按整月算上限，工时会摊到入职前或演示员工166后的日子上。
-    # 复职的人可能还留着上次的演示员工166日期（早于这次入职日期），这种演示员工166日期不用。
+    # 修复（2026-09-29，审查 #51 / X3-6）：入职前、离职后的日子不算这个员工的工作日。
+    # 原来月中入职或离职的人也按整月算上限，工时会摊到入职前或离职后的日子上。
+    # 复职的人可能还留着上次的离职日期（早于这次入职日期），这种离职日期不用。
     joined_on = getdate(joined_on) if joined_on else None
     relieved_on = getdate(relieved_on) if relieved_on else None
     if relieved_on and joined_on and relieved_on < joined_on:

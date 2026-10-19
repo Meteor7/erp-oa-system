@@ -200,7 +200,7 @@ test("the front desk step reads 已办理 once done, and the trip hint does not 
   const request = {
     workflow_status: "已完成", current_step_index: 2,
     steps: [
-      { step_index: 1, label: "演示员工113经理：演示员工21", mode: "approve", status: "已通过", approvers: ["q@tests-x.example.invalid"] },
+      { step_index: 1, label: "副总经理：演示员工21", mode: "approve", status: "已通过", approvers: ["q@tests-x.example.invalid"] },
       { step_index: 2, label: "前台办理：演示员工30", mode: "handle", status: "已通过", approvers: ["w@tests-x.example.invalid"] },
     ],
   };

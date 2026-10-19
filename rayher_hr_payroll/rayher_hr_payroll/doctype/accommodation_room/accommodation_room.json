@@ -16,7 +16,7 @@
   {"fieldname": "monthly_rent", "label": "每月租金", "fieldtype": "Currency", "in_list_view": 1},
   {"fieldname": "default_rent", "label": "标准房租（兼容）", "fieldtype": "Currency", "hidden": 1},
   {"fieldname": "paid_deposit", "label": "已付押金", "fieldtype": "Currency"},
-  {"fieldname": "rent_contract_attachment", "label": "房租演示员工116", "fieldtype": "Attach"},
+  {"fieldname": "rent_contract_attachment", "label": "房租合同", "fieldtype": "Attach"},
   {"fieldname": "deposit_attachment", "label": "押金附件", "fieldtype": "Attach"},
   {"fieldname": "occupant_label", "label": "基础资料入住人", "fieldtype": "Data"},
   {"fieldname": "room_purpose", "label": "房间用途", "fieldtype": "Select", "options": "\n空\n客房\n午休室"},

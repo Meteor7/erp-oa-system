@@ -28,7 +28,7 @@ def _employee(**fields):
 def _env(monkeypatch, user="Administrator", roles=("System Manager",), allow_create=True):
     env = SimpleNamespace(
         store=[
-            _employee(name="HR-EMP-90001", employee_number="A001", employee_name="演示员工129", department="研发软件部 - RAY",
+            _employee(name="HR-EMP-90001", employee_number="A001", employee_name="南通工厂9", department="研发软件部 - RAY",
                       designation="工程师", date_of_joining="2024-01-01", default_monthly_salary=10000.0,
                       bank_ac_no="6222000011112222", cell_number="13800000002", english_name="Zhang San"),
             _employee(name="HR-EMP-90002", employee_number="B002", employee_name="演示员工146", company="示例研发中心"),
@@ -41,7 +41,7 @@ def _env(monkeypatch, user="Administrator", roles=("System Manager",), allow_cre
             {"name": "旧部门 - RAY", "department_name": "旧部门", "company": "QIHENG Demo"},
         ],
         designations=["工程师", "财务主管"],
-        employment_types=["劳动演示员工116", "实习协议"],
+        employment_types=["劳动合同", "实习协议"],
         approvers={},
         comments=[], commits=0, rollbacks=0, fail_on=set(), snapshot=None, inserted=[], saved=[],
     )
@@ -165,9 +165,9 @@ def test_new_rows_get_the_rd_type_of_their_department_unless_given(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     rows = [
         _new_row(_row=2, department="研发软件部"),
-        _new_row(_row=3, employee_number="N101", employee_name="财务演示员工138", department="财务部"),
-        _new_row(_row=4, employee_number="N102", employee_name="演示员工153"),
-        _new_row(_row=5, employee_number="N103", employee_name="演示员工171", department="研发软件部", rd_personnel_type="研发辅助"),
+        _new_row(_row=3, employee_number="N101", employee_name="财务新人", department="财务部"),
+        _new_row(_row=4, employee_number="N102", employee_name="没填部门"),
+        _new_row(_row=5, employee_number="N103", employee_name="自己选了", department="研发软件部", rd_personnel_type="研发辅助"),
     ]
     by = _by_row(mod.preview_employee_import(rows))
     assert {row["status"] for row in by.values()} == {"create"}
@@ -180,9 +180,9 @@ def test_new_rows_get_the_rd_type_of_their_department_unless_given(monkeypatch):
     mod.import_employees(rows)
     types = {row["employee_name"]: row.get("rd_personnel_type") for row in env.store}
     assert types["新员工"] == "全时研发"
-    assert types["财务演示员工138"] == "非研发"
-    assert types["演示员工153"] is None
-    assert types["演示员工171"] == "研发辅助"
+    assert types["财务新人"] == "非研发"
+    assert types["没填部门"] is None
+    assert types["自己选了"] == "研发辅助"
 
 
 def test_updating_an_existing_employee_never_fills_in_the_rd_type(monkeypatch):
@@ -243,8 +243,8 @@ def test_unknown_department_is_reported_per_row(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     result = mod.preview_employee_import([
         _new_row(_row=2, department="不存在部"),
-        _new_row(_row=3, employee_number="N101", employee_name="演示员工115", department="旧部门"),
-        _new_row(_row=4, employee_number="N102", employee_name="演示员工169", department="财务部"),
+        _new_row(_row=3, employee_number="N101", employee_name="另一人", department="旧部门"),
+        _new_row(_row=4, employee_number="N102", employee_name="第三人", department="财务部"),
     ])
     by = _by_row(result)
     assert by[2]["status"] == "error" and "部门“不存在部”" in by[2]["errors"][0]
@@ -256,12 +256,12 @@ def test_department_is_resolved_inside_the_rows_company(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     result = mod.preview_employee_import([
         _new_row(_row=2, company="示例研发中心", department="研发软件部"),   # 示例研发中心没有研发软件部
-        _new_row(_row=3, employee_number="N101", employee_name="演示员工105", company="示例研发中心", department="财务部"),
+        _new_row(_row=3, employee_number="N101", employee_name="二号", company="示例研发中心", department="财务部"),
     ])
     by = _by_row(result)
     assert by[2]["status"] == "error"
     assert by[3]["status"] == "create"
-    assert by[3]["employee_name"] == "演示员工105"
+    assert by[3]["employee_name"] == "二号"
 
 
 def test_option_fields_are_checked_against_the_existing_lists(monkeypatch):
@@ -271,9 +271,9 @@ def test_option_fields_are_checked_against_the_existing_lists(monkeypatch):
                  archive_status="随便", expense_account_category="杂费", household_registration="待确认", gender="未知"),
     ])
     errors = " ".join(result["rows"][0]["errors"])
-    for needle in ("职位“首席摸鱼官”", "演示员工116类型“终身制”", "研发人员类型", "归档状态", "费用科目", "户口信息", "性别"):
+    for needle in ("职位“首席摸鱼官”", "合同类型“终身制”", "研发人员类型", "归档状态", "费用科目", "户口信息", "性别"):
         assert needle in errors, needle
-    ok = mod.preview_employee_import([_new_row(designation="工程师", employment_type="劳动演示员工116", rd_personnel_type="全时研发",
+    ok = mod.preview_employee_import([_new_row(designation="工程师", employment_type="劳动合同", rd_personnel_type="全时研发",
                                               archive_status="待完善", expense_account_category="研发费用", household_registration="深圳", gender="女")])
     assert ok["rows"][0]["status"] == "create"
 
@@ -282,8 +282,8 @@ def test_duplicate_employee_number_in_the_file_marks_both_rows(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     result = mod.preview_employee_import([
         _new_row(_row=2, employee_number="N100"),
-        _new_row(_row=5, employee_number="n100", employee_name="演示员工114"),
-        _new_row(_row=6, employee_number="N200", employee_name="演示员工152"),
+        _new_row(_row=5, employee_number="n100", employee_name="另一个"),
+        _new_row(_row=6, employee_number="N200", employee_name="正常"),
     ])
     by = _by_row(result)
     assert by[2]["status"] == "error" and "第 5 行" in by[2]["errors"][0]
@@ -313,7 +313,7 @@ def test_company_is_required_for_new_rows_and_must_be_known(monkeypatch):
     result = mod.preview_employee_import([
         _new_row(_row=2, company=""),
         _new_row(_row=3, employee_number="N101", company="火星分公司"),
-        _new_row(_row=4, employee_number="N102", employee_name="演示员工101", company="QIHENG Demo"),
+        _new_row(_row=4, employee_number="N102", employee_name="三号", company="QIHENG Demo"),
     ])
     by = _by_row(result)
     assert "所属单位" in by[2]["errors"][0]
@@ -327,7 +327,7 @@ def test_new_employee_requires_number_name_and_joining_date(monkeypatch):
         {"_row": 2, "company": "示例总部", "employee_name": "没员工号", "date_of_joining": "2026-10-01"},
         {"_row": 3, "company": "示例总部", "employee_number": "N1", "date_of_joining": "2026-10-01"},
         {"_row": 4, "company": "示例总部", "employee_number": "N2", "employee_name": "没入职日期"},
-        {"_row": 5, "company": "示例总部", "employee_number": "N3", "employee_name": "演示员工140", "date_of_joining": "2026-13-45"},
+        {"_row": 5, "company": "示例总部", "employee_number": "N3", "employee_name": "日期坏", "date_of_joining": "2026-13-45"},
     ])
     by = _by_row(result)
     assert "员工号必填" in by[2]["errors"][0]
@@ -476,7 +476,7 @@ def test_cross_field_date_rules_are_checked(monkeypatch):
         {"_row": 2, "employee_number": "A001", "relieving_date": "2023-12-31"},  # 早于入职 2024-01-01
         _new_row(_row=3, employee_number="N1", date_of_birth="2026-10-01", date_of_joining="2026-10-01"),
     ])
-    assert "演示员工166日期不能早于入职日期" in result["rows"][0]["errors"][0]
+    assert "离职日期不能早于入职日期" in result["rows"][0]["errors"][0]
     assert "入职日期必须晚于出生日期" in result["rows"][1]["errors"][0]
 
 
@@ -489,29 +489,29 @@ def test_archived_status_needs_the_same_information_as_the_employee_validation(m
 def test_active_employee_names_must_stay_unique_inside_the_file_and_against_the_system(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     result = mod.preview_employee_import([
-        _new_row(_row=2, employee_number="N1", employee_name="演示员工129"),         # 系统里已有在职演示员工129
+        _new_row(_row=2, employee_number="N1", employee_name="南通工厂9"),         # 系统里已有在职南通工厂9
         _new_row(_row=3, employee_number="N2", employee_name="演示员工175"),
         _new_row(_row=4, employee_number="N3", employee_name="演示员工175"),         # 文件里重名
-        _new_row(_row=5, employee_number="N4", employee_name="演示员工157"),         # 演示员工157已演示员工166，可以用
+        _new_row(_row=5, employee_number="N4", employee_name="演示员工157"),         # 演示员工157已离职，可以用
     ])
     by = _by_row(result)
-    assert by[2]["status"] == "error" and "已有在职员工叫「演示员工129」" in by[2]["errors"][0]
+    assert by[2]["status"] == "error" and "已有在职员工叫「南通工厂9」" in by[2]["errors"][0]
     assert by[3]["status"] == "error" and by[4]["status"] == "error" and "第 3、4 行" in by[3]["errors"][0]
     assert by[5]["status"] == "create"
-    # 把演示员工146改名成演示员工129
-    renamed = mod.preview_employee_import([{"_row": 2, "employee_number": "B002", "employee_name": "演示员工129"}])
-    assert renamed["rows"][0]["status"] == "error" and "已有在职员工叫「演示员工129」" in renamed["rows"][0]["errors"][0]
+    # 把演示员工146改名成南通工厂9
+    renamed = mod.preview_employee_import([{"_row": 2, "employee_number": "B002", "employee_name": "南通工厂9"}])
+    assert renamed["rows"][0]["status"] == "error" and "已有在职员工叫「南通工厂9」" in renamed["rows"][0]["errors"][0]
     # 改名成没人用的名字没问题；名字没变的更新不查重名
     assert mod.preview_employee_import([{"_row": 2, "employee_number": "B002", "employee_name": "演示员工146(财务)"}])["rows"][0]["status"] == "update"
-    assert mod.preview_employee_import([{"_row": 2, "employee_number": "A001", "employee_name": "演示员工129", "designation": "财务主管"}])["rows"][0]["status"] == "update"
+    assert mod.preview_employee_import([{"_row": 2, "employee_number": "A001", "employee_name": "南通工厂9", "designation": "财务主管"}])["rows"][0]["status"] == "update"
 
 
 def test_supervisor_is_resolved_by_number_or_unique_active_name(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     result = mod.preview_employee_import([
         _new_row(_row=2, employee_number="N1", employee_name="甲", reports_to="A001"),
-        _new_row(_row=3, employee_number="N2", employee_name="乙", reports_to="演示员工129"),
-        _new_row(_row=4, employee_number="N3", employee_name="丙", reports_to="演示员工157"),   # 已演示员工166，不能按姓名找
+        _new_row(_row=3, employee_number="N2", employee_name="乙", reports_to="南通工厂9"),
+        _new_row(_row=4, employee_number="N3", employee_name="丙", reports_to="演示员工157"),   # 已离职，不能按姓名找
         _new_row(_row=5, employee_number="N4", employee_name="丁", reports_to="查无此人"),
         {"_row": 6, "employee_number": "A001", "reports_to": "A001"},
     ])
@@ -523,7 +523,7 @@ def test_supervisor_is_resolved_by_number_or_unique_active_name(monkeypatch):
 
 def test_import_refuses_the_whole_file_when_any_row_has_a_problem(monkeypatch):
     mod, env, _ = _env(monkeypatch)
-    rows = [_new_row(_row=2), _new_row(_row=3, employee_number="N101", employee_name="演示员工122", department="不存在部")]
+    rows = [_new_row(_row=2), _new_row(_row=3, employee_number="N101", employee_name="坏行", department="不存在部")]
     with pytest.raises(RuleError, match="第 3 行"):
         mod.import_employees(rows)
     assert env.inserted == [] and env.saved == [] and env.commits == 0 and env.comments == []
@@ -532,7 +532,7 @@ def test_import_refuses_the_whole_file_when_any_row_has_a_problem(monkeypatch):
 def test_import_does_not_trust_a_client_side_preview(monkeypatch):
     mod, env, _ = _env(monkeypatch)
     # 前端算好的字段（status / vals）一概不看，服务端按原始单元格重新算
-    rows = [dict(_new_row(), status="create", errors=[], vals={"company": "QIHENG Demo", "employee_name": "演示员工106"}, department="不存在部")]
+    rows = [dict(_new_row(), status="create", errors=[], vals={"company": "QIHENG Demo", "employee_name": "伪造"}, department="不存在部")]
     with pytest.raises(RuleError, match="整份都没有导入"):
         mod.import_employees(rows)
     assert env.inserted == []
@@ -596,9 +596,9 @@ def test_failure_on_an_update_also_rolls_back_earlier_updates(monkeypatch):
 
 def test_save_employee_still_uses_the_shared_write_path(monkeypatch):
     mod, env, _ = _env(monkeypatch)
-    result = mod.save_employee(employee_number="Z9", employee_name="演示员工136", company="QIHENG Demo", date_of_joining="2026-10-02")
+    result = mod.save_employee(employee_number="Z9", employee_name="手工新增", company="QIHENG Demo", date_of_joining="2026-10-02")
     assert result == {"name": "HR-EMP-90004"} and env.commits == 1
     row = env.store[-1]
-    assert row["gender"] == "Male" and row["date_of_birth"] == "1990-01-01" and row["first_name"] == "演示员工136"
+    assert row["gender"] == "Male" and row["date_of_birth"] == "1990-01-01" and row["first_name"] == "手工新增"
     mod.save_employee(name="HR-EMP-90001", designation="财务主管")
     assert env.store[0]["designation"] == "财务主管"

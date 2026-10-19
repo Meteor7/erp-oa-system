@@ -62,7 +62,7 @@ test('the nudge button is for the applicant or the project owner after three day
   });
   assert.equal(canNudge(waited(4), { user: 'applicant@tests-x.example.invalid', now: NOW }), true);
   assert.equal(canNudge(waited(4), { user: 'someone@tests-x.example.invalid', employee: 'E1', now: NOW }), true, 'on behalf of: the employee is the applicant');
-  assert.equal(canNudge(waited(4), { user: 'Owner@tests-x.example.invalid', now: NOW }), true, 'the project owner');
+  assert.equal(canNudge(waited(4), { user: 'Person041@tests-x.example.invalid', now: NOW }), true, 'the project owner');
   assert.equal(canNudge(waited(4), { user: 'pmc@tests-x.example.invalid', employee: 'E7', now: NOW }), false, 'an approver cannot nudge');
   assert.equal(canNudge(waited(2), { user: 'applicant@tests-x.example.invalid', now: NOW }), false, 'not waiting long enough');
   assert.equal(canNudge(waited(9, { workflow_status: '已完成' }), { user: 'applicant@tests-x.example.invalid', now: NOW }), false);

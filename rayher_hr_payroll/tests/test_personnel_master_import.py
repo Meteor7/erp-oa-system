@@ -69,7 +69,7 @@ def test_public_summary_never_exposes_source_personal_data():
     plan = {
         "counts": {"create": 1, "update": 0, "skip": 1},
         "items": [
-            {"action": "create", "record": {"employee_name": "演示员工129", "id_card_number_cn": "secret", "bank_ac_no": "secret"}},
+            {"action": "create", "record": {"employee_name": "南通工厂9", "id_card_number_cn": "secret", "bank_ac_no": "secret"}},
             {"action": "skip", "reason": "ambiguous_name", "record": {"employee_name": "演示员工146"}},
         ],
     }
@@ -83,7 +83,7 @@ def test_public_summary_never_exposes_source_personal_data():
 
 
 def test_plan_never_overwrites_a_leaver_or_a_numbered_namesake():
-    # 审查 X3-2（决定 D2）：同名演示员工166员工、工号不同的同名在职员工演示员工177能被覆盖。
+    # 审查 X3-2（决定 D2）：同名离职员工、工号不同的同名在职员工都不能被覆盖。
     records = [
         {"employee_number": "101", "employee_name": "演示员工149"},
         {"employee_number": "102", "employee_name": "演示员工164"},

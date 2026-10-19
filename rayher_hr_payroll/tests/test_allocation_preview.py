@@ -93,14 +93,14 @@ def test_build_preview_captures_calculate_messages_and_restores_the_message_log(
     created = []
 
     def behaviour(doc):
-        frappe.local.message_log.append(json.dumps({"message": "以下员工本期工时不完整：<b>演示员工129</b>", "title": "提示"}))
+        frappe.local.message_log.append(json.dumps({"message": "以下员工本期工时不完整：<b>南通工厂9</b>", "title": "提示"}))
         frappe.local.message_log.append("plain text warning")
 
     _install_get_doc(frappe, behaviour, created)
 
     result = preview.build_preview("2026-07", 2026, 7)
 
-    assert result.warnings == ["以下员工本期工时不完整：演示员工129", "plain text warning"]
+    assert result.warnings == ["以下员工本期工时不完整：南通工厂9", "plain text warning"]
     assert frappe.local.message_log == earlier
 
 
@@ -215,7 +215,7 @@ def test_build_preview_translates_the_no_hours_error(monkeypatch):
         ),
         (
             "allocation totals do not reconcile: allocated 99.99, expected 100.00",
-            "分摊结果和费用合计对不上（分摊 99.99，费用 100.00）。请检查费用导入的金额，仍然不行请联系演示员工170。",
+            "分摊结果和费用合计对不上（分摊 99.99，费用 100.00）。请检查费用导入的金额，仍然不行请联系管理员。",
         ),
         (
             "Duplicate GL source row in import: V1|差旅费|100",

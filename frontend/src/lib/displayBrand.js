@@ -1,6 +1,6 @@
 export function displayCompany(value) {
   const label = String(value ?? '').trim();
-  if (/^(rayher|示例企业032有限公司|示例总部)$/i.test(label)) return '栖衡科技';
+  if (/^(qiheng(?: demo)?|示例企业032有限公司|示例总部)$/i.test(label)) return '栖衡科技';
   if (label === 'QIHENG DEMO OVERSEAS') return '栖衡海外研发';
   if (label === '示例研发中心') return '栖衡研发';
   return label;
@@ -12,5 +12,5 @@ export function displayDepartment(value) {
 
 export function displayUser(value) {
   const label = String(value ?? '').trim();
-  return /^rayher\s+admin$/i.test(label) ? '栖衡 演示员工170' : label;
+  return /^qiheng(?: demo)?\s+admin$/i.test(label) ? '栖衡 管理员' : label;
 }

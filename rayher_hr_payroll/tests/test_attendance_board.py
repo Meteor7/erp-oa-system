@@ -153,9 +153,9 @@ def test_department_labels_drop_the_company_suffix_unless_that_would_make_two_th
 
 def test_the_company_summary_has_numbers_per_department_and_no_names():
     employees = [
-        {"name": "A", "employee_name": "演示员工165", "department": "研发软件部 - RAY"},
-        {"name": "B", "employee_name": "演示员工104", "department": "研发软件部 - RAY"},
-        {"name": "C", "employee_name": "演示员工102", "department": "财务部 - RAY"},
+        {"name": "A", "employee_name": "甲某某", "department": "研发软件部 - RAY"},
+        {"name": "B", "employee_name": "乙某某", "department": "研发软件部 - RAY"},
+        {"name": "C", "employee_name": "丙某某", "department": "财务部 - RAY"},
     ]
     rows = [row("A", att.REQUEST_LEAVE, "已完成", [("2026-10-15", 8)], "年假"), row("C", att.REQUEST_LEAVE, "已完成", [("2026-10-16", 8)], "事假")]
     result = board.summarize_departments(employees, rows, {"财务部 - RAY": 2, "研发软件部 - RAY": 1},
@@ -167,7 +167,7 @@ def test_the_company_summary_has_numbers_per_department_and_no_names():
     assert finance["month_hours"] == 8 and finance["per_capita"] == 8 and finance["pending"] == 2
     assert result["pending"] == 3 and result["stats"]["headcount"] == 3 and result["stats"]["today"]["off"] == 1
     text = json.dumps(result, ensure_ascii=False)
-    for name in ("演示员工165", "演示员工104", "演示员工102"):
+    for name in ("甲某某", "乙某某", "丙某某"):
         assert name not in text
     assert set(software) == {"department", "label", "headcount", "today_off", "today_trip", "trend", "month_hours", "per_capita", "rate", "pending",
                             "month_leave_days", "month_comp_hours"}

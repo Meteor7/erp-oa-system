@@ -1,6 +1,6 @@
 <script setup>
 // 物料执行进度：按原始物料跟踪 PR → 价格审批 → PO → 到货 / 验收；付款显示关联 PO 的整体状态。
-// 申请人只看数量和状态；供应商、单价、金额只给能看价格 / PO 的角色（采购、PMC、演示员工113、财务等），其中 PMC、生产主管不看金额。
+// 申请人只看数量和状态；供应商、单价、金额只给能看价格 / PO 的角色（采购、PMC、副总、财务等），其中 PMC、生产主管不看金额。
 // 属性和事件保持不变（request / sourceLine / expanded），2026-09-30 只改了样式。
 import { computed, ref, watch } from 'vue';
 import { createResource } from 'frappe-ui';
@@ -66,7 +66,7 @@ const amountsHidden = computed(() => Object.values(orders.value).some((po) => po
     <div class="pt">
       <span>执行明细 <span class="muted">每项物料：申请 → PR → 价格审批 → PO，数量和状态</span></span>
       <span class="row-actions">
-        <span v-if="insider" class="tag">{{ amountsHidden ? '含供应商（金额不对你显示）' : '含供应商和金额（仅采购 / 演示员工113 / 财务可见）' }}</span>
+        <span v-if="insider" class="tag">{{ amountsHidden ? '含供应商（金额不对你显示）' : '含供应商和金额（仅采购 / 副总 / 财务可见）' }}</span>
         <button type="button" class="btn sm" :aria-expanded="opened" @click="toggle">{{ opened ? '收起进度' : '查看执行进度' }}</button>
       </span>
     </div>
@@ -102,7 +102,7 @@ const amountsHidden = computed(() => Object.values(orders.value).some((po) => po
               <div><span class="k">PO</span><b>{{ order.name }}</b><span class="muted">{{ order.status }}</span></div>
               <div><span class="k">到货</span>{{ number(order.received_quantity) }} / {{ number(order.quantity) }} {{ line.unit }}</div>
               <div><span class="k">验收</span>{{ order.inspection_status }}</div>
-              <div><span class="k">演示员工116交期</span>{{ order.delivery_date || '待确认' }}</div>
+              <div><span class="k">合同交期</span>{{ order.delivery_date || '待确认' }}</div>
               <div><span class="k">所在 PO 付款（整单）</span>{{ order.payment_status }}</div>
               <template v-if="insider && priceOf(order, line)">
                 <div><span class="k">供应商</span>{{ priceOf(order, line).supplier }}</div>

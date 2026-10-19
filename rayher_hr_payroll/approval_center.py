@@ -566,7 +566,7 @@ def procurement_payment_source_options(limit=500, *, store=None):
     try:
         # 修复（2026-09-24，审查 #2）：原来任何员工都能在这里看到全部 PO 的供应商、单价和付款计划。
         po_names = frappe.get_all(
-            "OA Purchase Order", filters={"contract_status": "已生效", "status": ["not in", ["草稿", "待采购确认", "待演示员工116复核", "待电子用印", "已取消"]]},
+            "OA Purchase Order", filters={"contract_status": "已生效", "status": ["not in", ["草稿", "待采购确认", "待合同复核", "待电子用印", "已取消"]]},
             pluck="name", order_by="modified desc", limit_page_length=limit,
         ) if _can_source_po_payment() else []
     except RuntimeError:
@@ -718,7 +718,7 @@ def save_draft(request_type, payload, name=None, *, store=None):
     source_snapshot = None
     source_plan = None
     if request_type == REQUEST_PROCUREMENT_PAYMENT and not ((source_request and source_payment_plan_row) or (source_purchase_order and source_po_payment_plan_row)):
-        raise ApprovalCenterError("采购付款必须选择已生效演示员工116的付款计划期次")
+        raise ApprovalCenterError("采购付款必须选择已生效合同的付款计划期次")
     if source_purchase_order:
         # 修复（2026-09-24，审查 #2 / R3-52-1 / R3-54-1）：只有采购和财务能按 PO 期次建采购付款；
         # 期次已被其他付款占用、或 PO 不是人民币时拒绝。
@@ -726,7 +726,7 @@ def save_draft(request_type, payload, name=None, *, store=None):
             raise ApprovalCenterError("只有采购或财务可以按 PO 付款计划发起采购付款")
         po = frappe.get_doc("OA Purchase Order", source_purchase_order, for_update=True)
         if _get(po, "contract_status") != "已生效":
-            raise ApprovalCenterError("来源 PO 演示员工116必须已电子用印生效")
+            raise ApprovalCenterError("来源 PO 合同必须已电子用印生效")
         if str(_get(po, "currency") or "CNY") != "CNY":
             raise ApprovalCenterError("采购订单目前只支持人民币（CNY）")
         source_plan = next((row for row in list(_get(po, "payment_plan", []) or []) if _name(row) == source_po_payment_plan_row), None)
@@ -756,7 +756,7 @@ def save_draft(request_type, payload, name=None, *, store=None):
         if _get(source_snapshot, "request_type") != REQUEST_PROCUREMENT:
             raise ApprovalCenterError("采购付款只能关联采购申请")
         if _get(source_snapshot, "workflow_status") != "已完成" or _get(source_snapshot, "contract_status") != "已生效":
-            raise ApprovalCenterError("来源采购演示员工116必须已生效")
+            raise ApprovalCenterError("来源采购合同必须已生效")
         if str(_get(source_snapshot, "currency") or "") != "CNY":
             raise ApprovalCenterError("来源采购申请必须为人民币")
         if _money(_get(source_snapshot, "approved_amount")) <= 0:

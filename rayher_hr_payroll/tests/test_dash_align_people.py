@@ -95,7 +95,7 @@ def test_month_leave_groups_by_the_employee_record_department_and_skips_people_w
                 {"name": "L2", "employee": "B", "employee_name": "乙", "request_type": att.REQUEST_LEAVE, "leave_type": "事假", "duration_hours": 4.0},
                 {"name": "C1", "employee": "B", "employee_name": "乙", "request_type": att.REQUEST_COMP_TIME, "duration_hours": 8.0},
                 {"name": "O1", "employee": "A", "employee_name": "甲", "request_type": att.REQUEST_OVERTIME, "duration_hours": 12.0},
-                {"name": "X1", "employee": "GONE", "employee_name": "演示员工166", "request_type": att.REQUEST_LEAVE, "leave_type": "年假", "duration_hours": 80.0}]
+                {"name": "X1", "employee": "GONE", "employee_name": "离职", "request_type": att.REQUEST_LEAVE, "leave_type": "年假", "duration_hours": 80.0}]
     seen = {}
 
     def get_all(doctype, filters=None, **kwargs):
@@ -170,7 +170,7 @@ def test_company_away_today_card_and_list_are_the_same_people(monkeypatch):
         "trip": [{"employee": "D", "employee_name": "丁", "request": "T-D"}]})
     card = run("hr.away_today", make_ctx())
     assert (card["value"], card["sub"]) == ("3", "年假 2 · 调休 1 · 另有出差 1")
-    # 2026-10-14：人事经理 / 演示员工113 / 总经理进考勤中心首页「谁不在 · 今天」；只有 HR 角色的人仍进“今天不在岗”的列表
+    # 2026-10-14：人事经理 / 副总 / 总经理进考勤中心首页「谁不在 · 今天」；只有 HR 角色的人仍进“今天不在岗”的列表
     assert card["target"] == {"key": "attendance.away", "params": {}}
     assert run("hr.away_today", make_ctx(positions=frozenset()))["target"] == {"key": "attendance.today", "params": {}}
     assert "一人只算一次" in card["hint"] and "出差不算不在岗" in card["hint"]
@@ -238,17 +238,17 @@ def _member(name, first_kind=None):
 
 @pytest.fixture
 def team_state(monkeypatch):
-    members = [_member("张主管"), _member("杨员工", "annual"), _member("演示员工120", "trip"), _member("演示员工181", "comp")]
+    members = [_member("张主管"), _member("杨员工", "annual"), _member("南通工厂0", "trip"), _member("演示员工181", "comp")]
     days = [{"date": f"2026-10-{15 + i:02d}", "label": f"10/{15 + i}", "day": 15 + i, "weekday": "四", "off_day": i in (2, 3, 9, 10)} for i in range(14)]
     detail = {"headcount": 4, "label": "我的团队", "members": members, "stats": {"days": days, "today": {"rest_day": False}},
               "today_away": {"off": [{"employee": "E2", "employee_name": "杨员工", "kind": "annual", "request": "L-2"},
                                      {"employee": "E4", "employee_name": "演示员工181", "kind": "comp", "request": "C-4"}],
-                             "trip": [{"employee": "E3", "employee_name": "演示员工120", "request": "T-3"}]}}
+                             "trip": [{"employee": "E3", "employee_name": "南通工厂0", "request": "T-3"}]}}
     rows = {(2026, 10): [{"name": "L-2", "employee": "E2", "employee_name": "杨员工", "request_type": att.REQUEST_LEAVE, "leave_type": "年假",
                           "duration_hours": 12, "from_date": "2026-10-15", "to_date": "2026-10-16"},
                          {"name": "C-4", "employee": "E4", "employee_name": "演示员工181", "request_type": att.REQUEST_COMP_TIME, "duration_hours": 8,
                           "from_date": "2026-10-15", "to_date": "2026-10-15"},
-                         {"name": "O-3", "employee": "E3", "employee_name": "演示员工120", "request_type": att.REQUEST_OVERTIME, "duration_hours": 6,
+                         {"name": "O-3", "employee": "E3", "employee_name": "南通工厂0", "request_type": att.REQUEST_OVERTIME, "duration_hours": 6,
                           "from_date": "2026-10-11", "to_date": "2026-10-11"}]}
     monkeypatch.setattr(team, "_load_team_ids", lambda ctx: ["E1", "E2", "E3", "E4"])
     monkeypatch.setattr(team, "_load_team_detail", lambda ctx: detail)
@@ -476,19 +476,19 @@ def test_fill_progress_reads_filled_hours_for_the_roster_including_people_who_le
     from rayher_hr_payroll.api import monthly_timesheet_entry as mt
 
     seen = {}
-    monkeypatch.setattr(mt, "_employees_for_scope", lambda scope, start=None: [{"name": "E1", "employee_name": "甲"}, {"name": "LEFT", "employee_name": "演示员工174"}])
+    monkeypatch.setattr(mt, "_employees_for_scope", lambda scope, start=None: [{"name": "E1", "employee_name": "甲"}, {"name": "LEFT", "employee_name": "走了"}])
     monkeypatch.setattr(mt.frappe, "get_all", lambda *a, **k: [], raising=False)
     monkeypatch.setattr(mt, "resolve_monthly_work_limit", lambda year, month, employee=None, **k: {"hour_limit": 160}, raising=False)
 
     def query(period, employee=None, employees=None):
         seen.setdefault("employees", []).append(employees)
-        return [{"employee": "LEFT", "hours": 40, "project": "P", "employee_name": "演示员工174"}] if employees else []
+        return [{"employee": "LEFT", "hours": 40, "project": "P", "employee_name": "走了"}] if employees else []
 
     monkeypatch.setattr(mt, "_query_monthly_entries", query)
     monkeypatch.setattr(mt, "_query_legacy_monthly_entries", lambda period, employee=None, employees=None: [])
     rows = {item["employee"]: item for item in mt._fill_rows(2026, 10, ["E1", "LEFT"])}
     assert seen["employees"] == [["E1", "LEFT"]]
-    assert rows["LEFT"]["status"] == "part" and rows["LEFT"]["used_hours"] == 40       # 本月演示员工166的人填了的不再显示成“一点没填”
+    assert rows["LEFT"]["status"] == "part" and rows["LEFT"]["used_hours"] == 40       # 本月离职的人填了的不再显示成“一点没填”
 
 
 def test_the_summary_filter_takes_the_month_into_account(monkeypatch):
@@ -501,13 +501,13 @@ def test_the_summary_filter_takes_the_month_into_account(monkeypatch):
     assert mt._monthly_summary_employee_filter(None, None, ["A", "B"]) == ("and ts.employee in %(employees)s", None, ("A", "B"))
 
 
-# ================================================================ 总经理、演示员工113经理只读
+# ================================================================ 总经理、副总经理只读
 def test_leaders_pass_the_read_check_and_others_fall_back_to_roles(monkeypatch):
     from rayher_hr_payroll import position_access
 
     monkeypatch.setattr(position_access, "position_users", lambda *keys: {"person014@tests-x.example.invalid"} if "general_manager" in keys else set())
     checked = []
-    monkeypatch.setattr(hr_read_access.frappe, "session", SimpleNamespace(user="GM@tests-x.example.invalid"), raising=False)
+    monkeypatch.setattr(hr_read_access.frappe, "session", SimpleNamespace(user="PERSON014@tests-x.example.invalid"), raising=False)
     hr_read_access.require_hr_read(("HR Manager",), lambda roles: checked.append(roles))
     assert checked == [] and hr_read_access.is_hr_leader()
     monkeypatch.setattr(hr_read_access.frappe, "session", SimpleNamespace(user="someone@tests-x.example.invalid"), raising=False)

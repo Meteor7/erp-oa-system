@@ -90,7 +90,7 @@ function save() {
             <div class="f s2"><label for="pa-pay-method">付款方式 <b>*</b></label><input id="pa-pay-method" v-model="draft.payment_method" placeholder="例如：预付 30%，验收后 70%" /></div>
             <div class="f"><label for="pa-currency">币种</label><input id="pa-currency" value="CNY（暂只支持人民币）" readonly /></div>
             <div class="f"><label for="pa-tax">税率 %</label><input id="pa-tax" v-model.number="draft.tax_rate" type="number" min="0" max="100" step="0.01" /></div>
-            <div class="f s2"><label for="pa-entity">演示员工116主体</label><input id="pa-entity" v-model="draft.contract_entity" placeholder="我方签约主体" /></div>
+            <div class="f s2"><label for="pa-entity">合同主体</label><input id="pa-entity" v-model="draft.contract_entity" placeholder="我方签约主体" /></div>
           </div>
         </section>
 
@@ -108,7 +108,7 @@ function save() {
             </div>
             <div class="pa-plan-row2">
               <div class="f"><label>计划付款日期</label><input v-model="row.planned_date" class="cell" type="date" /></div>
-              <div class="f"><label>触发条件</label><input v-model="row.trigger_condition" class="cell" list="pa-trigger-list" placeholder="例如：演示员工116生效" /></div>
+              <div class="f"><label>触发条件</label><input v-model="row.trigger_condition" class="cell" list="pa-trigger-list" placeholder="例如：合同生效" /></div>
               <div class="f"><label>发票要求</label><select v-model="row.invoice_requirement" class="cell"><option v-for="item in INVOICE_REQUIREMENTS" :key="item">{{ item }}</option></select></div>
               <button type="button" class="pa-x sm" title="删除期次" :disabled="draft.payment_plan.length === 1" aria-label="删除期次" @click="removeRow(index)">×</button>
             </div>

@@ -92,7 +92,7 @@ STATUS_PAID = "\u5df2\u4ed8\u6b3e"
 STATUS_WITHDRAWN = "\u5df2\u64a4\u56de"
 ACTIVE_STATUSES = {STATUS_PENDING, STATUS_WAIT_HANDLE}
 PRIVILEGED_ROLES = {"System Manager", "HR Manager", "HR User", "Accounts User"}
-# 修复（2026-09-24，审查 R3-57-2，来自 #57）：报销统计和审批记录的"全部"只给财务和系统演示员工170。
+# 修复（2026-09-24，审查 R3-57-2，来自 #57）：报销统计和审批记录的"全部"只给财务和系统管理员。
 # 行级权限早已不给 HR 看付款单据，这里原来仍用 PRIVILEGED_ROLES，HR 能看到全部报销。
 EXPENSE_REPORT_ROLES = {"System Manager", "Accounts User"}
 FINANCE_ROLES = {"System Manager", "Accounts User"}
@@ -393,7 +393,7 @@ def _append_request_event(doc, action, from_status, to_status, note="", details=
 
 
 def _last_submitted_on(events):
-    """最近一次"提交申请"的时间：草稿放多久演示员工177算等待，被驳回再提交的单据从重新提交算起。"""
+    """最近一次"提交申请"的时间：草稿放多久都不算等待，被驳回再提交的单据从重新提交算起。"""
     for event in reversed(events or []):
         if isinstance(event, dict) and event.get("action") == "提交申请":
             return str(event.get("acted_on") or "")
@@ -755,8 +755,8 @@ def _route_context(
         return ctx
 
     organization_managed = bool(ctx.get("employee"))
-    # 修复（2026-09-29，审查 X3-12，决定 D5）：没有在职员工档案的账号（演示员工170、演示员工166但账号还开着的人）
-    # 原来会直接用页面传来的部门和主管生成路线：部门填"财务部"能跳过演示员工113，主管填演示员工113的名字能免掉主管节点。
+    # 修复（2026-09-29，审查 X3-12，决定 D5）：没有在职员工档案的账号（管理员、离职但账号还开着的人）
+    # 原来会直接用页面传来的部门和主管生成路线：部门填"财务部"能跳过副总，主管填副总的名字能免掉主管节点。
     # 提交和预览时要求在职员工档案；审批人驳回退回草稿等内部重算不受影响。
     if require_employee and not organization_managed:
         frappe.throw(frappe._(NO_ACTIVE_EMPLOYEE_MESSAGE))
@@ -803,8 +803,8 @@ def _require_leave_accounts(steps, copied_to, label="请假审批"):
             raise ApprovalRouteError(f"{label}账号未启用或不存在：{user}")
 
 
-# 会发抄送的事件：提交（请假、加班、调休）、确认演示员工116交期、采购付款确认付款。
-COPY_EVENT_ACTIONS = frozenset({"提交申请", "确认演示员工116交期", "确认付款"})
+# 会发抄送的事件：提交（请假、加班、调休）、确认合同交期、采购付款确认付款。
+COPY_EVENT_ACTIONS = frozenset({"提交申请", "确认合同交期", "确认付款"})
 
 
 def _copy_round(doc):
@@ -819,22 +819,22 @@ def _notify_copied_users(doc):
     subject_prefix = (
         request_type + "抄送"
         if request_type in ATTENDANCE_TYPES
-        else "采购演示员工116交期抄送"
+        else "采购合同交期抄送"
         if request_type == REQUEST_PROCUREMENT
         else "采购付款结果汇总"
     )
     content = (
         f"{request_type} {doc.name} 已提交，现抄送给你查阅。"
         if request_type in ATTENDANCE_TYPES
-        else "采购申请 {0} 的演示员工116交期已确认，现抄送给你查阅。".format(doc.name)
+        else "采购申请 {0} 的合同交期已确认，现抄送给你查阅。".format(doc.name)
         if request_type != REQUEST_PROCUREMENT_PAYMENT
-        else "采购付款 {0} 已完成演示员工110办理，现汇总给你查阅。".format(doc.name)
+        else "采购付款 {0} 已完成出纳办理，现汇总给你查阅。".format(doc.name)
     )
     for row in _parse_json(getattr(doc, "copied_to", None), default=[]) or []:
         user = _clean(row.get("user") if isinstance(row, dict) else "").lower()
         if not user:
             continue
-        # 修复（2026-09-29，审查 #14）：键里带上轮次。第二次确认演示员工116交期、撤回付款后重新付款时
+        # 修复（2026-09-29，审查 #14）：键里带上轮次。第二次确认合同交期、撤回付款后重新付款时
         # 原来键不变，抄送人收不到新的通知；同一次事件重复调用仍然只发一次。
         # 修复（2026-10-13）：轮次只数会发抄送的事件；原来用日志条数，日志满了以后后面的抄送都被当成已发过。前缀 n 和旧键分开。
         key = f"oa-copy:{doc.name}:{subject_prefix}:n{_copy_round(doc)}"
@@ -1121,7 +1121,7 @@ def _request_capabilities(doc, user=None):
         "can_approve": can_approve,
         # 出差的前台办理只能点已办理，不能退回、不能加签（决定 2026-10-13）。
         "can_reject": bool(can_act and not desk),
-        # 演示员工116交期确认阶段不能加签；付款（经办）节点只能前加签（修复 2026-09-29，决定 D6/D9）。
+        # 合同交期确认阶段不能加签；付款（经办）节点只能前加签（修复 2026-09-29，决定 D6/D9）。
         "can_add_sign": bool(can_act and not desk and not _is_contract_delivery_step(step)),
         "can_add_sign_after": bool(can_act and not _is_contract_delivery_step(step) and getattr(step, "mode", None) != "handle"),
         "can_edit_expense_items": finance_edit,
@@ -1239,7 +1239,7 @@ def _can_edit_procurement_contract(doc):
     return (
         getattr(doc, "request_type", None) == REQUEST_PROCUREMENT
         and getattr(doc, "workflow_status", None) == STATUS_COMPLETED
-        and _clean(getattr(doc, "business_status", None)) == "价格已批准/待补充演示员工116信息"
+        and _clean(getattr(doc, "business_status", None)) == "价格已批准/待补充合同信息"
         and _procurement_actor(doc)
     )
 
@@ -1247,7 +1247,7 @@ def _can_edit_procurement_contract(doc):
 def _can_review_procurement_contract(doc):
     return (
         getattr(doc, "request_type", None) == REQUEST_PROCUREMENT
-        and _clean(getattr(doc, "business_status", None)) == "演示员工116草稿待复核"
+        and _clean(getattr(doc, "business_status", None)) == "合同草稿待复核"
         and _procurement_actor(doc)
     )
 
@@ -1465,14 +1465,14 @@ def _calculate_procurement_chain(doc, data=None):
 
 
 def _procurement_amounts_hidden():
-    """PMC / 生产主管看不到金额（和 procurement_chain 同一个判断）：演示员工116草稿正文和报价快照里都有金额。"""
+    """PMC / 生产主管看不到金额（和 procurement_chain 同一个判断）：合同草稿正文和报价快照里都有金额。"""
     from rayher_hr_payroll.api import procurement_chain
 
     return procurement_chain._amounts_hidden()
 
 
 def _hide_procurement_money(doc):
-    """只有采购申请带演示员工116草稿和报价快照；别的单据不用判断。"""
+    """只有采购申请带合同草稿和报价快照；别的单据不用判断。"""
     return getattr(doc, "request_type", None) == REQUEST_PROCUREMENT and _procurement_amounts_hidden()
 
 
@@ -1763,7 +1763,7 @@ def _is_finance_user(user=None):
 
 def _require_finance_user():
     if not _is_finance_user():
-        frappe.throw(frappe._("\u53ea\u6709\u8d22\u52a1\u6216\u7cfb\u7edf\u6f14\u793a\u5458\u5de5170\u53ef\u6267\u884c\u6b64\u64cd\u4f5c\u3002"))
+        frappe.throw(frappe._("\u53ea\u6709\u8d22\u52a1\u6216\u7cfb\u7edf\u7ba1\u7406\u5458\u53ef\u6267\u884c\u6b64\u64cd\u4f5c\u3002"))
 
 
 def _advance_after_step(doc, step):
@@ -1782,7 +1782,7 @@ def _advance_after_step(doc, step):
         if doc.request_type == REQUEST_PROCUREMENT:
             if _clean(getattr(step, "label", None)).startswith("价格审批："):
                 # Legacy requests that still contain the old downstream OA steps.
-                doc.business_status = "价格已批准/待补充演示员工116信息"
+                doc.business_status = "价格已批准/待补充合同信息"
                 doc.contract_status = "待补充信息"
                 doc.price_approved_by = _clean(getattr(step, "action_by", None))
                 doc.price_approved_on = getattr(step, "acted_on", None)
@@ -2189,7 +2189,7 @@ def _validate_procurement_plan_payment(doc):
     if po_name and po_row_name:
         po = frappe.get_doc("OA Purchase Order", po_name, for_update=True)
         if getattr(po, "contract_status", None) != "已生效":
-            frappe.throw(frappe._("来源采购演示员工116尚未生效。"))
+            frappe.throw(frappe._("来源采购合同尚未生效。"))
         row = next((item for item in (getattr(po, "payment_plan", []) or []) if _clean(getattr(item, "name", None)) == po_row_name), None)
         if not row:
             frappe.throw(frappe._("来源 PO 付款计划期次不存在。"))
@@ -2208,7 +2208,7 @@ def _validate_procurement_plan_payment(doc):
         return _clean(getattr(row, "payment_stage", None))
     source = frappe.get_doc("OA Approval Request", _clean(getattr(doc, "source_request", None)))
     if getattr(source, "contract_status", None) != "已生效":
-        frappe.throw(frappe._("来源采购演示员工116尚未生效。"))
+        frappe.throw(frappe._("来源采购合同尚未生效。"))
     row = _find_payment_plan_row(source, getattr(doc, "source_payment_plan_row", None))
     if not row:
         frappe.throw(frappe._("来源付款计划期次不存在。"))
@@ -2347,7 +2347,7 @@ def _submit_draft(doc):
     if not steps:
         frappe.throw(frappe._("审批路线不能为空，请先维护申请人的组织审批关系。"))
     doc.workflow_status = steps[0]["status"]
-    # 演示员工113、总经理自己出差没有审批，第一步就是前台备案。
+    # 副总、总经理自己出差没有审批，第一步就是前台备案。
     doc.business_status = "待前台办理" if doc.request_type == REQUEST_TRAVEL and steps[0]["mode"] == "handle" else "待审批"
     doc.current_step_index = 1
     doc.current_step_label = steps[0]["label"]
@@ -2506,7 +2506,7 @@ def create_request(
     if request_type in (REQUEST_TRAVEL, REQUEST_REIMBURSEMENT, REQUEST_PAYMENT):
         # 修复（2026-09-23）：这三类单据有各自的草稿接口（travel_entry / expense_claim_entry），
         # 关联申请的校验和购买申请额度的占用都在那里；从这个通用接口新建并提交会绕过额度占用，
-        # 超额的单据能审批通过，到演示员工110付款时才报错。
+        # 超额的单据能审批通过，到出纳付款时才报错。
         frappe.throw(frappe._("出差申请、报销单、付款单请在各自的页面新建。"))
     if request_type == REQUEST_EXPENSE_PAYMENT:
         # 旧的费用付款申请停用后不能再新建；在途单据和被驳回的旧草稿不受影响。
@@ -2793,7 +2793,7 @@ FINANCE_AUDIT_LABEL_PREFIX = "\u8d22\u52a1\u5ba1\u6838"
 
 
 def _is_finance_audit_step(step):
-    return bool(step and getattr(step, "mode", None) == "approve" and _clean(getattr(step, "label", None)).startswith(("演示员工110审核", FINANCE_AUDIT_LABEL_PREFIX)))
+    return bool(step and getattr(step, "mode", None) == "approve" and _clean(getattr(step, "label", None)).startswith(("出纳审核", FINANCE_AUDIT_LABEL_PREFIX)))
 
 
 def _classification_ready(doc):
@@ -2949,8 +2949,8 @@ def _run_approval_amount_operation(operation, *args, **kwargs):
 def _workflow_ledger_kwargs(workflow):
     """工作流发起的台账操作（驳回释放、确认付款、盖章后自动下推）不按当前操作人的来源权限校验。
 
-    修复（2026-09-29，审查 X1-4 / #12）：默认的台账存储只放行演示员工170、财务和来源申请的经办人；
-    演示员工113驳回、总经理确认付款、演示员工113盖章后自动下推占用时，操作人不是这些人，整个操作失败。
+    修复（2026-09-29，审查 X1-4 / #12）：默认的台账存储只放行管理员、财务和来源申请的经办人；
+    副总驳回、总经理确认付款、副总盖章后自动下推占用时，操作人不是这些人，整个操作失败。
     旧费用付款、报销单、付款单已经这样处理（WorkflowLedgerStore），这里把采购付款旧路径补上。
     申请人自己提交时仍按默认存储校验。
     """
@@ -3266,7 +3266,7 @@ def _current_contract_delivery_step(doc):
 
 
 def _reject_contract_delivery(doc, current_step, actor, reason):
-    """修复（2026-09-24，审查 R3-53-1，来自 #53）：演示员工116交期确认节点驳回时只驳回本次登记的交期。
+    """修复（2026-09-24，审查 R3-53-1，来自 #53）：合同交期确认节点驳回时只驳回本次登记的交期。
 
     原来会退回申请人或更早的节点，已完成的采购申请回到草稿，而它的 PR、PO 和付款仍在执行。
     现在本轮交期确认节点作废，采购申请保持已完成，恢复原交期和登记前的状态。
@@ -3282,17 +3282,17 @@ def _reject_contract_delivery(doc, current_step, actor, reason):
             step.note = reason
         elif getattr(step, "status", None) in {STATUS_PENDING, STATUS_WAIT_FLOW, STATUS_WAIT_HANDLE}:
             step.status = STATUS_WITHDRAWN
-    registered = next((event for event in reversed(_operation_events(doc)) if event.get("action") == "登记延期演示员工116交期"), {})
+    registered = next((event for event in reversed(_operation_events(doc)) if event.get("action") == "登记延期合同交期"), {})
     rejected_date = _clean(getattr(doc, "pending_contract_delivery_date", None))
     doc.pending_contract_delivery_date = ""
-    doc.business_status = _clean(registered.get("from_status")) or ("采购执行中" if _clean(getattr(doc, "contract_delivery_date", None)) else "演示员工116待登记")
+    doc.business_status = _clean(registered.get("from_status")) or ("采购执行中" if _clean(getattr(doc, "contract_delivery_date", None)) else "合同待登记")
     doc.workflow_status = STATUS_COMPLETED
     doc.current_step_label = ""
-    _append_request_event(doc, "驳回演示员工116交期", old_status, doc.workflow_status, reason, {"rejected_contract_delivery_date": rejected_date})
+    _append_request_event(doc, "驳回合同交期", old_status, doc.workflow_status, reason, {"rejected_contract_delivery_date": rejected_date})
 
 
 def _procurement_withdraw_blocker(doc):
-    """修复（2026-09-24，审查 X1-3）：进入演示员工116交期确认或已有采购付款的采购申请不能撤回。
+    """修复（2026-09-24，审查 X1-3）：进入合同交期确认或已有采购付款的采购申请不能撤回。
 
     原来登记延期交期后单据回到审批中，申请人可以撤回、改明细，再生成重复的 PR / PO。
     """
@@ -3301,7 +3301,7 @@ def _procurement_withdraw_blocker(doc):
     if _clean(getattr(doc, "pending_contract_delivery_date", None)) or any(
         _clean(getattr(step, "origin", None)) == "contract_delivery" for step in list(getattr(doc, "steps", []) or [])
     ):
-        return "采购申请已进入演示员工116交期确认，不能撤回；如需调整请由确认人驳回本次交期。"
+        return "采购申请已进入合同交期确认，不能撤回；如需调整请由确认人驳回本次交期。"
     if _procurement_has_payment_activity(doc):
         return "采购申请已有采购付款，不能撤回。"
     return ""
@@ -3309,26 +3309,26 @@ def _procurement_withdraw_blocker(doc):
 
 def _require_contract_registration_access(doc):
     if getattr(doc, "request_type", None) != REQUEST_PROCUREMENT:
-        frappe.throw(frappe._("只有采购申请可以登记演示员工116交期。"))
+        frappe.throw(frappe._("只有采购申请可以登记合同交期。"))
     if getattr(doc, "workflow_status", None) != STATUS_COMPLETED:
-        frappe.throw(frappe._("采购审批完成后才能登记演示员工116交期。"))
-    if _clean(getattr(doc, "business_status", None)) == "演示员工116交期待确认":
-        frappe.throw(frappe._("当前演示员工116交期仍在确认中，不能重复登记。"))
+        frappe.throw(frappe._("采购审批完成后才能登记合同交期。"))
+    if _clean(getattr(doc, "business_status", None)) == "合同交期待确认":
+        frappe.throw(frappe._("当前合同交期仍在确认中，不能重复登记。"))
     if _clean(getattr(doc, "business_status", None)) in CONTRACT_REGISTRATION_CLOSED:
         # 修复（2026-09-24，审查 R3-53 / #53）：已验收或已关闭的采购再登记交期会把状态改回采购执行中。
-        frappe.throw(frappe._("采购已验收或已关闭，不能再登记演示员工116交期。"))
+        frappe.throw(frappe._("采购已验收或已关闭，不能再登记合同交期。"))
     user = _clean(getattr(frappe.session, "user", None))
     allowed = {_clean(getattr(doc, "owner", None)), _clean(getattr(doc, "purchaser_user", None))}
     roles = set(frappe.get_roles(user))
     if user not in allowed and not (roles & {"System Manager", "Purchase User", "Purchase Manager"}):
-        frappe.throw(frappe._("只有申请人、采购经办人或采购管理人员可以登记演示员工116交期。"))
+        frappe.throw(frappe._("只有申请人、采购经办人或采购管理人员可以登记合同交期。"))
 
 
 def _append_contract_delivery_steps(doc, role_keys, contract_date):
     pmc = _step_snapshot(doc, "PMC", "PMC")
     role_rows = {
-        "pmc": (pmc, "演示员工116交期确认-PMC"),
-        "project_owner": ({"label": "项目主管", "user": _clean(getattr(doc, "project_owner", None))}, "演示员工116交期确认-项目主管"),
+        "pmc": (pmc, "合同交期确认-PMC"),
+        "project_owner": ({"label": "项目主管", "user": _clean(getattr(doc, "project_owner", None))}, "合同交期确认-项目主管"),
     }
     next_index = max([int(getattr(row, "step_index", 0) or 0) for row in list(getattr(doc, "steps", []) or [])] or [0]) + 1
     appended = []
@@ -3337,7 +3337,7 @@ def _append_contract_delivery_steps(doc, role_keys, contract_date):
         role, label_prefix = role_rows[role_key]
         user = _clean(role.get("user"))
         if not user:
-            frappe.throw(frappe._("演示员工116交期确认缺少{0}有效账号。".format(role.get("label") or role_key)))
+            frappe.throw(frappe._("合同交期确认缺少{0}有效账号。".format(role.get("label") or role_key)))
         if user in seen_users:
             continue
         seen_users.add(user)
@@ -3386,7 +3386,7 @@ def _finalize_contract_delivery_if_complete(doc, completed_step):
     doc.pending_contract_delivery_date = ""
     doc.business_status = "采购执行中"
     doc.copied_to = _json_list(contract_copy_recipients(_contract_copy_snapshot(doc)))
-    _append_request_event(doc, "确认演示员工116交期", "演示员工116交期待确认", "采购执行中", getattr(doc, "delivery_change_reason", None), {"previous_contract_delivery_date": previous, "contract_delivery_date": pending_date})
+    _append_request_event(doc, "确认合同交期", "合同交期待确认", "采购执行中", getattr(doc, "delivery_change_reason", None), {"previous_contract_delivery_date": previous, "contract_delivery_date": pending_date})
     return True
 
 
@@ -3407,16 +3407,16 @@ def register_contract_delivery(name, contract_delivery_date, reason=None):
         details = {"previous_contract_delivery_date": previous, "requested_contract_delivery_date": plan["contract_delivery_date"], "requires_reapproval": plan["requires_reapproval"]}
         if plan["requires_reapproval"]:
             doc.pending_contract_delivery_date = plan["contract_delivery_date"]
-            doc.business_status = "演示员工116交期待确认"
+            doc.business_status = "合同交期待确认"
             _append_contract_delivery_steps(doc, plan["approval_roles"], plan["contract_delivery_date"])
-            _append_request_event(doc, "登记延期演示员工116交期", old_business_status, doc.business_status, doc.delivery_change_reason, details)
+            _append_request_event(doc, "登记延期合同交期", old_business_status, doc.business_status, doc.delivery_change_reason, details)
             notify = False
         else:
             doc.contract_delivery_date = plan["contract_delivery_date"]
             doc.pending_contract_delivery_date = ""
             doc.business_status = "采购执行中"
             doc.copied_to = _json_list(contract_copy_recipients(_contract_copy_snapshot(doc)))
-            _append_request_event(doc, "确认演示员工116交期", old_business_status, doc.business_status, doc.delivery_change_reason, details)
+            _append_request_event(doc, "确认合同交期", old_business_status, doc.business_status, doc.delivery_change_reason, details)
             notify = True
         _save_document(doc)
         _sync_assignments_after_save(doc)
@@ -4326,7 +4326,7 @@ def action_request(name, action="approve", note=None, reject_target=None, expect
         from_status = doc.workflow_status
         if step.mode == "handle" and _unresolved_add_sign_after(doc, step):
             # 旧数据里付款节点后面的加签节点还没处理，不能直接置为已付款（修复 2026-09-29，审查 X1-5）。
-            frappe.throw(frappe._("付款节点后面还有未处理的加签节点，请联系演示员工170处理后再确认付款。"))
+            frappe.throw(frappe._("付款节点后面还有未处理的加签节点，请联系管理员处理后再确认付款。"))
         if step.mode == "handle" and doc.request_type == REQUEST_PROCUREMENT_PAYMENT:
             _validate_procurement_payment_release(doc)
         _set_step_action(step, done_status, actor, note)
@@ -4471,7 +4471,7 @@ def submit_procurement_quote(
                 "step_index": next_index,
                 "step_key": str(uuid4()),
                 "origin": "base",
-                "label": "价格审批：演示员工113经理：" + _clean(vice.get("employee_name")),
+                "label": "价格审批：副总经理：" + _clean(vice.get("employee_name")),
                 "mode": "approve",
                 "approvers": _json_list([vice["user"]]),
                 "status": STATUS_PENDING,
@@ -4521,7 +4521,7 @@ def save_procurement_contract_information(
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_contract_actor(doc, _can_edit_procurement_contract, "只有采购经办人可在价格批准后补充演示员工116信息。")
+        _require_procurement_contract_actor(doc, _can_edit_procurement_contract, "只有采购经办人可在价格批准后补充合同信息。")
         values = {
             "supplier_legal_name": supplier_legal_name,
             "credit_code": credit_code,
@@ -4558,8 +4558,8 @@ def save_procurement_contract_information(
         doc.contract_snapshot = json.dumps(snapshot, ensure_ascii=False)
         doc.contract_draft_content = draft
         doc.contract_status = "草稿待复核"
-        doc.business_status = "演示员工116草稿待复核"
-        _append_request_event(doc, "生成电子演示员工116草稿", old_status, doc.business_status, details={"contract_version": version, "price_fingerprint": snapshot["price_fingerprint"]})
+        doc.business_status = "合同草稿待复核"
+        _append_request_event(doc, "生成电子合同草稿", old_status, doc.business_status, details={"contract_version": version, "price_fingerprint": snapshot["price_fingerprint"]})
         _save_document(doc)
         return _summarize_doc(doc)
 
@@ -4570,13 +4570,13 @@ def review_procurement_contract(name, note=None):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_contract_actor(doc, _can_review_procurement_contract, "只有采购经办人可复核电子演示员工116草稿。")
+        _require_procurement_contract_actor(doc, _can_review_procurement_contract, "只有采购经办人可复核电子合同草稿。")
         old_status = doc.business_status
         doc.contract_status = "待电子用印"
         doc.business_status = "待电子用印"
         doc.contract_reviewed_by = _clean(frappe.session.user)
         doc.contract_reviewed_on = now_datetime()
-        _append_request_event(doc, "复核电子演示员工116", old_status, doc.business_status, _bounded_optional_text(note, "复核备注", 500))
+        _append_request_event(doc, "复核电子合同", old_status, doc.business_status, _bounded_optional_text(note, "复核备注", 500))
         _save_document(doc)
         return _summarize_doc(doc)
 
@@ -4620,7 +4620,7 @@ def _auto_push_procurement_payment_plans(source):
             continue
         payload = {
             "subject": f"{_clean(getattr(source, 'name', None))} · {_clean(getattr(row, 'installment_name', None))}",
-            "reason": "由已生效采购演示员工116付款计划自动下推",
+            "reason": "由已生效采购合同付款计划自动下推",
             "asset_nature": "非固定资产",
             "fixed_asset_category": "",
             "source_request": source.name,
@@ -4630,7 +4630,7 @@ def _auto_push_procurement_payment_plans(source):
             "payment_stage": _clean(getattr(row, "payment_stage", None)),
             "prepayment_percentage": float(getattr(row, "percentage", 0) or 0) if _clean(getattr(row, "payment_stage", None)) == "预付款" else 0,
             "expected_arrival_date": _clean(getattr(row, "planned_date", None)),
-            "prepayment_risk_note": "演示员工116付款计划已审批" if float(getattr(row, "percentage", 0) or 0) == 100 else "",
+            "prepayment_risk_note": "合同付款计划已审批" if float(getattr(row, "percentage", 0) or 0) == 100 else "",
         }
         try:
             payment_doc = save_draft(REQUEST_PROCUREMENT_PAYMENT, payload)
@@ -4650,9 +4650,9 @@ def seal_procurement_contract(name, note=None):
     with invoice_service._transaction_lock("request", request_name):
         doc = _load_request(request_name, current=True)
         require_request_type_access(doc.request_type)
-        _require_procurement_contract_actor(doc, _can_seal_procurement_contract, "当前账号不是该演示员工116配置的用印账号。")
+        _require_procurement_contract_actor(doc, _can_seal_procurement_contract, "当前账号不是该合同配置的用印账号。")
         if not _clean(getattr(doc, "contract_draft_content", None)):
-            frappe.throw(frappe._("电子演示员工116草稿不存在。"))
+            frappe.throw(frappe._("电子合同草稿不存在。"))
         old_status = doc.business_status
         for row in (getattr(doc, "payment_plan", []) or []):
             row.status = "待下推"
@@ -5037,7 +5037,7 @@ def _reset_approval_step(step, status=STATUS_WAIT_FLOW):
 
 def _eligible_rejection_targets(doc):
     if _current_contract_delivery_step(doc) is not None:
-        return [{"target": CONTRACT_DELIVERY_REJECT_TARGET, "label": "驳回本次演示员工116交期（恢复原交期）"}]
+        return [{"target": CONTRACT_DELIVERY_REJECT_TARGET, "label": "驳回本次合同交期（恢复原交期）"}]
     current_index = int(getattr(doc, "current_step_index", 0) or 0)
     targets = [{"target": "applicant", "label": "\u7533\u8bf7\u4eba"}]
     completed = {STATUS_APPROVED, STATUS_HANDLED}
@@ -5143,7 +5143,7 @@ STALE_STEP_MESSAGE = "这张单据已经变化，现在在「{0}」这一步，�
 def _require_expected_step(doc, step, expected_step_key):
     """审批只作用在页面上看到的那一步（修复 2026-09-29，审查 #10，决定 D10）。
 
-    原来接口只收单号，按服务端当前节点处理：双击、或同一人占相邻两个节点（包括演示员工170放行账号）时
+    原来接口只收单号，按服务端当前节点处理：双击、或同一人占相邻两个节点（包括管理员放行账号）时
     第二次点击会把下一步也批掉，最坏连付款一起确认；开着旧页面还会在没看到驳回原因的情况下再批一次。
     从网页和 API 来的请求必须带 expected_step_key；服务器内部代码（维护脚本、测试）直接调用时不要求。
     """
@@ -5168,10 +5168,10 @@ def _insert_add_sign_step(doc, current_step, approver, position, opinion, actor)
         frappe.throw(frappe._("Add-sign approver and opinion are required."))
     if approver == _clean(actor):
         frappe.throw(frappe._("You cannot add yourself as an approver."))
-    # 修复（2026-09-29，审查 E1，决定 D9）：演示员工116交期确认阶段的加签节点不走交期确认的规则，
+    # 修复（2026-09-29，审查 E1，决定 D9）：合同交期确认阶段的加签节点不走交期确认的规则，
     # 在加签节点驳回会把执行中的采购申请退回草稿，最后一步通过时新交期也不生效。
     if _is_contract_delivery_step(current_step):
-        frappe.throw(frappe._("演示员工116交期确认阶段不能加签。"))
+        frappe.throw(frappe._("合同交期确认阶段不能加签。"))
     # 修复（2026-09-29，审查 X1-5，决定 D6）：付款（经办）节点确认付款时单据直接变成已付款，
     # 排在它后面的加签节点再也没人处理。付款节点只能前加签：被加签人先批，批完才能付款。
     if position == "after" and getattr(current_step, "mode", None) == "handle":

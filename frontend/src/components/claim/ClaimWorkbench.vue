@@ -32,7 +32,7 @@ const isClaim = computed(() => props.kind === 'claim');
 const route = useRoute();
 const router = useRouter();
 const finance = isFinanceUser();
-// 服务端只对财务、系统演示员工170和 QIHENG Demo Business Executive 返回全部报销 / 付款单。
+// 服务端只对财务、系统管理员和 QIHENG Demo Business Executive 返回全部报销 / 付款单。
 const seeAll = finance || (globalThis.window?.roles || []).includes('QIHENG Demo Business Executive');
 
 const view = computed(() => claimView(route.query));
@@ -143,7 +143,7 @@ const stats = computed(() => {
     // 指标卡带着状态（bucket）点进列表，列表只显示这一类；不再是"我的"全部单据。
     { key: 'draft', label: '我的草稿', count: mine('draft').length, amount: sumDocs(mine('draft')), hint: '继续编辑后提交', tone: '#C3CAD6', query: { view: 'list', scope: 'mine', bucket: 'draft' } },
     { key: 'review', label: '我的 · 审批中', count: mine('review').length, amount: sumDocs(mine('review')), hint: '点进去看卡在谁那里', tone: '#5470C6', query: { view: 'list', scope: 'mine', bucket: 'review' } },
-    { key: 'topay', label: '我的 · 待付款', count: mine('topay').length, amount: sumDocs(mine('topay')), hint: '演示员工110付款后会通知你', tone: '#78B8AD', query: { view: 'list', scope: 'mine', bucket: 'topay' } },
+    { key: 'topay', label: '我的 · 待付款', count: mine('topay').length, amount: sumDocs(mine('topay')), hint: '出纳付款后会通知你', tone: '#78B8AD', query: { view: 'list', scope: 'mine', bucket: 'topay' } },
   ];
 });
 const scopes = computed(() => [
@@ -276,7 +276,7 @@ async function prepareAccounts(rows) {
   for (const doc of rows) {
     if (doc.can_edit_expense_items) accountDrafts[doc.name] = accountDraftFor(doc.expense_lines);
   }
-  // 修复（2026-09-23）：演示员工110在单据里直接选科目，有待填科目的单据时就取科目表。
+  // 修复（2026-09-23）：出纳在单据里直接选科目，有待填科目的单据时就取科目表。
   if (!accountTree.value.length && rows.some((doc) => doc.can_edit_expense_items)) {
     const options = await callApi('oa_entry.get_options', {}, { method: 'GET' });
     accountTree.value = options?.expense_account_tree || [];
@@ -302,7 +302,7 @@ async function loadList() {
   if (!home.loaded) home.todo = scope.value === 'todo' ? docs.value : await loadTodo();
 }
 
-// 详情页的“发票与附件”：这张单据用到的每张发票（类别、原件、补充附件）。审批人和演示员工110核对时直接在这里看。
+// 详情页的“发票与附件”：这张单据用到的每张发票（类别、原件、补充附件）。审批人和出纳核对时直接在这里看。
 const docInvoices = ref([]);
 const previewInvoice = ref('');
 const previewAttachment = ref(null);
@@ -589,7 +589,7 @@ async function returnInvoices(doc) {
 async function withdrawPayment(doc) {
   const note = (window.prompt('请填写撤回付款的原因') || '').trim();
   if (!note) return;
-  await run(() => callApi('expense_claim_entry.withdraw_claim_payment', { name: doc.name, note }), `${doc.name} 付款已撤回，回到演示员工110确认付款`);
+  await run(() => callApi('expense_claim_entry.withdraw_claim_payment', { name: doc.name, note }), `${doc.name} 付款已撤回，回到出纳确认付款`);
 }
 
 function togglePick(doc) {
@@ -643,7 +643,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
               </span>
             </div>
             <div v-if="!home.todo.length" class="empty">没有需要你处理的单据</div>
-            <div v-else class="muted foot">只列等得最久的 3 张；演示员工110填科目、确认付款请进详情页。</div>
+            <div v-else class="muted foot">只列等得最久的 3 张；出纳填科目、确认付款请进详情页。</div>
           </section>
 
           <section class="panel">
@@ -769,7 +769,7 @@ watch(() => [view.value, scope.value, route.query.request, route.query.draft, ro
             <button v-if="focusDoc.can_verify_claim_invoices" type="button" class="btn pri" :disabled="busy" @click="verify(focusDoc)">核验通过</button>
             <button v-if="focusDoc.can_supplement_claim_invoices && supplement.doc !== focusDoc.name" type="button" class="btn pri" :disabled="busy" @click="openSupplement(focusDoc)">补录发票</button>
             <button v-if="focusDoc.workflow_status === '草稿'" type="button" class="btn" :disabled="busy" @click="go({ view: 'new', draft: focusDoc.name, ...carryQuery(route.query) })">继续编辑</button>
-            <!-- 演示员工110审核：科目没填完时后端 can_approve 为 false，但演示员工110正是要在这里填科目再同意（先保存科目再同意）。 -->
+            <!-- 出纳审核：科目没填完时后端 can_approve 为 false，但出纳正是要在这里填科目再同意（先保存科目再同意）。 -->
             <button v-if="focusDoc.can_approve || focusDoc.can_edit_expense_items" type="button" class="btn pri lg" :disabled="busy" @click="approve(focusDoc)">{{ focusDoc.current_step_mode === 'handle' ? '确认付款' : '同意' }}</button>
           </div>
         </section>

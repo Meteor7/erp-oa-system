@@ -33,11 +33,11 @@ def test_account_specs_preserve_admin_system_manager_and_limit_business_executiv
 def test_active_employee_account_specs_use_stable_temporary_login_names():
     rows = [
         {"name": "HR-EMP-90009", "employee_name": "演示员工158", "user_id": ""},
-        {"name": "HR-EMP-90010", "employee_name": "演示员工126", "user_id": "user@example.com"},
+        {"name": "HR-EMP-90010", "employee_name": "已有账号", "user_id": "user@example.com"},
     ]
 
     assert bootstrap.active_employee_account_specs(rows) == [{
-        "user_id": "person018@staff.example.invalid",
+        "user_id": "hr-emp-90009@staff.example.invalid",
         "full_name": "演示员工158",
         "employee": "HR-EMP-90009",
         "employee_name": "演示员工158",

@@ -51,7 +51,7 @@ def member(name, **cells):
 @pytest.fixture
 def state(monkeypatch):
     data = {"ids": ["E1", "E2", "E3", "E4"], "detail": detail([member("张主管"), member("杨员工", d0=cell("annual"), d3=cell("personal")),
-            member("演示员工120", d0=cell("trip"), d3=cell("personal"), d1=cell("comp", True)), member("演示员工181", d3=cell("sick"), d4=cell("annual"))]),
+            member("南通工厂0", d0=cell("trip"), d3=cell("personal"), d1=cell("comp", True)), member("演示员工181", d3=cell("sick"), d4=cell("annual"))]),
             "staff": [{"name": "E1", "rd_personnel_type": "", "date_of_joining": "2020-01-01"},
                       {"name": "E2", "rd_personnel_type": "全时研发", "date_of_joining": "2026-10-05"},
                       {"name": "E3", "rd_personnel_type": "辅助", "date_of_joining": "2024-03-01"},
@@ -120,7 +120,7 @@ def test_the_calendar_detail_is_fetched_once_for_all_the_blocks(state):
 
 def test_away_in_two_weeks_counts_people_with_approved_absence_only(state):
     kpi = run("team.away2w", make_ctx())
-    # 杨员工（年假、事假）、演示员工181（病假、年假）、演示员工120（只有事假；调休还在审批、出差不算）
+    # 杨员工（年假、事假）、演示员工181（病假、年假）、南通工厂0（只有事假；调休还在审批、出差不算）
     assert (kpi["value"], kpi["sub"]) == ("3", "10/12 · 10/15 · 10/15")
     state["detail"] = detail([member("张主管")])
     assert run("team.away2w", make_ctx())["sub"] == "两周内没有人请假或调休"
@@ -130,9 +130,9 @@ def test_leave_and_overtime_follow_the_selected_month_and_compare_with_the_last_
     state["rows"] = {
         (2026, 10): [{"request_type": "请假申请", "leave_type": "事假", "duration_hours": 24, "employee_name": "杨员工"},
                      {"request_type": "调休申请", "duration_hours": 8, "employee_name": "杨员工"},
-                     {"request_type": "加班申请", "duration_hours": 30, "employee_name": "演示员工120"},
+                     {"request_type": "加班申请", "duration_hours": 30, "employee_name": "南通工厂0"},
                      {"request_type": "加班申请", "duration_hours": 16, "employee_name": "杨员工"}],
-        (2026, 9): [{"request_type": "加班申请", "duration_hours": 41, "employee_name": "演示员工120"}],
+        (2026, 9): [{"request_type": "加班申请", "duration_hours": 41, "employee_name": "南通工厂0"}],
     }
     ctx = make_ctx()
     leave = run("team.leave", ctx)
@@ -162,13 +162,13 @@ def test_low_staff_alert_picks_the_worst_workday_and_names_the_people(state):
 def test_the_calendar_block_has_names_cells_and_the_present_count(state):
     block = run("block.team_calendar", make_ctx())
     assert block["type"] == "calendar" and block["title"] == "团队日历 · 谁哪天不在" and block["rows"] == []
-    assert [person["name"] for person in block["people"]] == ["张主管", "杨员工", "演示员工120", "演示员工181"]
+    assert [person["name"] for person in block["people"]] == ["张主管", "杨员工", "南通工厂0", "演示员工181"]
     assert block["people"][1]["cells"][0] == {"kind": "annual", "pending": False}
     assert block["people"][2]["cells"][1] == {"kind": "comp", "pending": True}
     assert block["people"][0]["cells"][0] is None
     assert [day["label"] for day in block["days"]][:2] == ["10/12", "10/13"] and len(block["days"]) == 14
     totals = block["totals"]
-    assert totals[0] == {"off": 1, "present": 3}                              # 杨员工年假；演示员工120出差不算不在岗（2026-10-13）
+    assert totals[0] == {"off": 1, "present": 3}                              # 杨员工年假；南通工厂0出差不算不在岗（2026-10-13）
     assert totals[1] == {"off": 0, "present": 4}                              # 调休还在审批：不算不在岗
     assert totals[3] == {"off": 3, "present": 1}
     assert totals[5] == {"off": 0, "present": None}                           # 周末没有在岗人数

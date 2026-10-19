@@ -63,7 +63,7 @@ def test_request_board_kpis_follow_the_design():
     rows = [
         purchase("P1", paid_amount=400, reserved_amount=100),
         purchase("P2", approved_amount=500, approved_on=date(2026, 8, 1)),
-        purchase("P3", workflow_status="待审批", waited_days=5, current_step_label="演示员工113经理", amount=300),
+        purchase("P3", workflow_status="待审批", waited_days=5, current_step_label="副总经理", amount=300),
         travel("T1"),
         travel("T2", workflow_status="待审批", waited_days=1, current_step_label="直属主管"),
     ]

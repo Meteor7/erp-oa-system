@@ -152,7 +152,7 @@ test('choosing a supplier shows the consequence: unquoted lines go back to the P
   assert.match(guide.text, /它没报价的 1 项物料会退回 PR/);
   assert.match(guide.text, /生成 1 张 PO 草稿/);
   assert.match(approvalGuide(approval).text, /选择成交供应商/);
-  assert.match(approvalGuide({ ...approval, can_select_quote: false }).text, /等待演示员工113经理审批/);
+  assert.match(approvalGuide({ ...approval, can_select_quote: false }).text, /等待副总经理审批/);
   assert.match(approvalGuide({ ...approval, status: '草稿' }, { canEdit: true }).text, /提交会重新占用 PR 数量/);
 });
 
@@ -165,10 +165,10 @@ test('approval timeline has no reject step and keeps the draft state readable', 
   const draft = approvalTimeline({ status: '草稿', steps: [] });
   assert.equal(draft[0].state, 'todo');
   assert.equal(draft[1].sub, '未开始');
-  const pending = approvalTimeline({ status: '待审批', steps: [{ name: 's1', label: '价格审批：演示员工113经理', status: '待审批' }] });
+  const pending = approvalTimeline({ status: '待审批', steps: [{ name: 's1', label: '价格审批：副总经理', status: '待审批' }] });
   assert.equal(pending[0].state, 'done');
   assert.equal(pending[1].state, 'now');
-  const passed = approvalTimeline({ status: '已转PO', steps: [{ name: 's1', label: '价格审批：演示员工113经理', status: '已通过', action_by: 'vp', acted_on: '2026-09-29 16:10:00' }] });
+  const passed = approvalTimeline({ status: '已转PO', steps: [{ name: 's1', label: '价格审批：副总经理', status: '已通过', action_by: 'vp', acted_on: '2026-09-29 16:10:00' }] });
   assert.equal(passed[1].state, 'done');
   assert.match(passed[1].sub, /2026-09-29 16:10/);
 });
@@ -195,7 +195,7 @@ test('supplier draft: blank slots, validation mirrors the server rules and paylo
   draft.prices.A1.unit_price = 100;
   draft.prices.A1.delivery_date = '2026-10-20';
   draft.payment_plan = [
-    { installment_name: '第1期', payment_stage: '预付款', percentage: 30, amount: 0, planned_date: '', trigger_condition: '演示员工116生效', invoice_requirement: '付款后提供' },
+    { installment_name: '第1期', payment_stage: '预付款', percentage: 30, amount: 0, planned_date: '', trigger_condition: '合同生效', invoice_requirement: '付款后提供' },
     { installment_name: '第2期', payment_stage: '尾款', percentage: 70, amount: 0, planned_date: '', trigger_condition: '全部到货并验收通过', invoice_requirement: '付款前提供' },
   ];
   assert.ok(validateSupplierDraft(approval, draft).some((item) => /金额/.test(item)));
@@ -243,22 +243,22 @@ const po = (patch = {}) => ({
 
 test('contract steps follow contract_status and the main action depends on the viewer', () => {
   assert.equal(contractMode(po()), 'draft');
-  assert.equal(contractMode(po({ status: '待演示员工116复核' })), 'fill');
-  assert.equal(contractMode(po({ status: '待演示员工116复核', contract_status: '草稿待复核' })), 'review');
+  assert.equal(contractMode(po({ status: '待合同复核' })), 'fill');
+  assert.equal(contractMode(po({ status: '待合同复核', contract_status: '草稿待复核' })), 'review');
   assert.equal(contractMode(po({ status: '待电子用印', contract_status: '待电子用印' })), 'seal');
   assert.equal(contractMode(po({ status: '供应商制作中', contract_status: '已生效' })), 'effective');
 
   assert.deepEqual(poMainAction(po()), { key: 'confirm', text: '确认 PO' });
   assert.equal(poMainAction(po({ can_manage_purchase: 0 })).key, '');
-  assert.equal(poMainAction(po({ status: '待演示员工116复核' })).key, 'generate');
-  assert.equal(poMainAction(po({ status: '待演示员工116复核', contract_status: '草稿待复核' })).key, 'review');
+  assert.equal(poMainAction(po({ status: '待合同复核' })).key, 'generate');
+  assert.equal(poMainAction(po({ status: '待合同复核', contract_status: '草稿待复核' })).key, 'review');
   const sealing = po({ status: '待电子用印', contract_status: '待电子用印' });
   assert.equal(poMainAction(sealing).key, '');
-  assert.match(poMainAction(sealing).wait, /演示员工113经理电子用印/);
+  assert.match(poMainAction(sealing).wait, /副总经理电子用印/);
   assert.equal(poMainAction({ ...sealing, can_seal_contract: 1 }).key, 'seal');
   assert.equal(poMainAction(po({ status: '供应商制作中', contract_status: '已生效' })).key, '');
 
-  const steps = contractStepper(po({ status: '待演示员工116复核', contract_status: '草稿待复核' }));
+  const steps = contractStepper(po({ status: '待合同复核', contract_status: '草稿待复核' }));
   assert.deepEqual(steps.map((step) => [step.done, step.now]), [[true, false], [false, true], [false, false], [false, false]]);
   const sealed = contractStepper(po({ status: '供应商制作中', contract_status: '已生效' }));
   assert.ok(sealed.every((step) => step.done && !step.now));
@@ -293,7 +293,7 @@ test('payment plan rows show real statuses', () => {
 
 test('contract draft exposes every field the backend accepts and only sends what was filled', () => {
   const sample = po({
-    status: '待演示员工116复核', contract_supplier_legal_name: '甲有限公司', contract_credit_code: '9132', contract_supplier_address: '苏州',
+    status: '待合同复核', contract_supplier_legal_name: '甲有限公司', contract_credit_code: '9132', contract_supplier_address: '苏州',
     contract_contact: '周工 138', contract_bank_name: '某银行', contract_bank_account: '6200000000000002', contract_delivery_date: '2026-10-15',
   });
   const draft = contractDraftFor(sample);
@@ -303,7 +303,7 @@ test('contract draft exposes every field the backend accepts and only sends what
     name: 'PO-1', supplier_legal_name: '甲有限公司', credit_code: '9132', supplier_address: '苏州', contract_contact: '周工 138',
     contract_bank_name: '某银行', contract_bank_account: '6200000000000002', contract_delivery_date: '2026-10-15',
   });
-  const sparse = contractPayload(po({ status: '待演示员工116复核' }), { supplier_legal_name: ' 乙 ', credit_code: '', contract_delivery_date: '' });
+  const sparse = contractPayload(po({ status: '待合同复核' }), { supplier_legal_name: ' 乙 ', credit_code: '', contract_delivery_date: '' });
   assert.deepEqual(sparse, { name: 'PO-1', supplier_legal_name: '乙' });
 });
 

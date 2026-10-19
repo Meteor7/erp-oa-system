@@ -23,7 +23,7 @@ ALERTS = ["alert.po_overdue", "alert.pay_planned_passed", "alert.price_missing_q
 BLOCKS = ["block.proc_chain", "block.arrival_inspect", "block.proc_suppliers", "block.proc_projects",
           "block.material_stage", "block.risk_projects", "block.week_schedule", "block.urgent_requests"]
 MINE = KPIS + ALERTS + BLOCKS
-URGENT = {"proc.urgent", "alert.urgent", "block.urgent_requests"}      # 加急采购：采购链路的人、演示员工113、总经理看，生产主管和财务不看
+URGENT = {"proc.urgent", "alert.urgent", "block.urgent_requests"}      # 加急采购：采购链路的人、副总、总经理看，生产主管和财务不看
 MONEY = {"proc.month_amount", "block.proc_suppliers", "block.proc_projects", "proc.ready_to_pay",
          "proc.pay_planned_passed", "alert.pay_planned_passed"}
 CHAIN = {"proc.to_compare", "proc.price_pending", "proc.await_pr", "alert.price_missing_quote"}
@@ -49,8 +49,8 @@ def rich_lines():
         line("PO-B", 3, 3, state="换货中", due="2026-09-20", status="到货验收中", name="B2"),
         line("PO-B", 2, 2, state="退货中", due="2026-09-30", status="到货验收中", name="B3"),
         line("PO-C", 1, 1, state="已通过", due="2026-09-01", status="付款中", name="C1"),
-        line("PO-D", 9, 0, due="2026-09-01", status="草稿", name="D1"),          # 草稿 PO：演示员工116没生效，不参与任何口径
-        line("PO-E", 6, 0, project="P1", item="导轨", name="E1"),                 # 没填演示员工116交期
+        line("PO-D", 9, 0, due="2026-09-01", status="草稿", name="D1"),          # 草稿 PO：合同没生效，不参与任何口径
+        line("PO-E", 6, 0, project="P1", item="导轨", name="E1"),                 # 没填合同交期
         line("PO-E", 6, 0, due=TODAY, name="E2"),                                 # 交期就是今天：不算逾期，算本周
     ]
 
@@ -84,7 +84,7 @@ def world(monkeypatch):
     reader("_load_urgent", "urgent")
 
     # 2026-10-13：物料口径改成物料进度的行（同物料进度页的 SQL）。假数据按同一规则从 PO 行推出来：
-    # 有来源（申请, 行）的、演示员工116已生效、交期已过、没收齐或退货中；一个（申请, 行）一项，交期取最早的。
+    # 有来源（申请, 行）的、合同已生效、交期已过、没收齐或退货中；一个（申请, 行）一项，交期取最早的。
     def overdue_materials(today):
         if data.get("overdue_materials") is not None:
             return data["overdue_materials"]
@@ -154,7 +154,7 @@ def fill(world):
     ]
     world["chain"] = {"request": 40, "pr": 20, "po": 10, "payment": 25}
     world["urgent"] = [
-        {"name": "OA-U1", "type": "采购申请", "subject": "伺服电机", "applicant": "演示员工129", "project": "RD03", "expected": "2026-10-08",
+        {"name": "OA-U1", "type": "采购申请", "subject": "伺服电机", "applicant": "南通工厂9", "project": "RD03", "expected": "2026-10-08",
          "approving": False, "label": "PO 执行中", "since": "2026-10-01"},
         {"name": "OA-U2", "type": "购买申请", "subject": "打印机", "applicant": "演示员工146", "project": "", "expected": "",
          "approving": True, "label": "财务主管", "since": "2026-10-08"}]
@@ -358,7 +358,7 @@ def test_classify_puts_each_line_in_the_right_buckets():
     assert names("to_arrive") == ["A1", "B1", "E1", "E2"]            # 退货中的 B3 不算待到货
     assert names("to_inspect") == ["A2", "B1"]                        # B1 部分到货：还差货也有已到的部分待验
     assert names("exchange") == ["B2"] and names("returning") == ["B3"]
-    assert names("overdue") == ["A1", "B3"]                           # E1 没填交期、E2 交期是今天、草稿 PO 的 D1：演示员工177算逾期
+    assert names("overdue") == ["A1", "B3"]                           # E1 没填交期、E2 交期是今天、草稿 PO 的 D1：都不算逾期
     assert names("week") == ["B1", "E2"]
     assert all(row["po"] != "PO-D" for rows in data.values() for row in rows)
 
@@ -483,17 +483,17 @@ def test_alerts_with_data(world):
     fill(world)
     ctx = full_ctx()
     overdue = run("alert.po_overdue", ctx)
-    assert (overdue["tone"], overdue["title"], overdue["sub"]) == ("bad", "2 个 PO 已过演示员工116交期还没收齐", "最久逾期 9 天（PO-B）")
+    assert (overdue["tone"], overdue["title"], overdue["sub"]) == ("bad", "2 个 PO 已过合同交期还没收齐", "最久逾期 9 天（PO-B）")
     passed = run("alert.pay_planned_passed", ctx)
     assert (passed["tone"], passed["title"], passed["sub"]) == ("bad", "2 期采购付款已过计划付款日", "未付 4.5 万，最久 10 天，供应商可能催款")
     missing = run("alert.price_missing_quote", ctx)
-    assert (missing["tone"], missing["title"], missing["sub"]) == ("warn", "1 张待审批的价格审批单有物料没有报价", "共 2 项物料一个报价都没有，演示员工113没法选供应商")
+    assert (missing["tone"], missing["title"], missing["sub"]) == ("warn", "1 张待审批的价格审批单有物料没有报价", "共 2 项物料一个报价都没有，副总没法选供应商")
     assert run("alert.uncoded", ctx)["title"] == "4 项物料还没有物料编码"
     stale = run("alert.inspect_stale", ctx)
     assert (stale["tone"], stale["title"], stale["sub"]) == ("bad", "1 个 PO 到货超过 7 天还没验收", "PO-A 已到货 19 天，可能耽误付款")
     assert stale["target"]["params"]["item"] == "proc.inspect_stale"
     material = run("alert.material_overdue", ctx)
-    assert (material["tone"], material["title"]) == ("bad", "1 项物料超过演示员工116交期还没到")      # 没有来源的 B3 不算（2026-10-13）
+    assert (material["tone"], material["title"]) == ("bad", "1 项物料超过合同交期还没到")      # 没有来源的 B3 不算（2026-10-13）
     risk = run("alert.risk_projects", ctx)
     assert (risk["title"], risk["sub"]) == ("1 个项目有物料逾期未到", "P1 有 1 项物料逾期")
 
@@ -512,8 +512,8 @@ def test_overdue_ignores_received_lines_and_dead_pos(world):
     world["lines"] = [
         line("PO-A", 10, 10, state="已通过", due="2026-09-01", name="A1"),                 # 收齐了
         line("PO-B", 10, 0, due="2026-09-01", status="已关闭", name="B1"),                 # 已关闭
-        line("PO-C", 10, 0, due="2026-09-01", status="待电子用印", name="C1"),             # 演示员工116没生效
-        line("PO-D", 10, 0, due="", name="D1"),                                            # 没填演示员工116交期
+        line("PO-C", 10, 0, due="2026-09-01", status="待电子用印", name="C1"),             # 合同没生效
+        line("PO-D", 10, 0, due="", name="D1"),                                            # 没填合同交期
     ]
     assert kpi_of("proc.po_overdue")["value"] == "0"
     assert run("alert.po_overdue", full_ctx()) is None
@@ -713,12 +713,12 @@ def test_urgent_card_alert_block_and_list(world):
     assert alert["sub"] == "最久的 OA-U1（伺服电机）卡在「PO 执行中」8 天" and alert["target"] == card["target"]
     block = run("block.urgent_requests", ctx)
     assert [(row["label"], row["sub"], row["value"], row["tone"]) for row in block["rows"]] == [
-        ("伺服电机", "PO 执行中 · 演示员工129 · RD03", "8 天", "bad"), ("打印机", "财务主管 · 演示员工146", "1 天", "warn")]
+        ("伺服电机", "PO 执行中 · 南通工厂9 · RD03", "8 天", "bad"), ("打印机", "财务主管 · 演示员工146", "1 天", "warn")]
     assert [row["target"] for row in block["rows"]] == [{"key": "procurement.detail", "params": {"request": "OA-U1"}},
                                                          {"key": "directpurchase.detail", "params": {"request": "OA-U2"}}]
     detail = detail_of(ctx, "proc.urgent")
     assert len(detail["rows"]) == int(card["value"]) and detail["summary"] == "共 2 张"
-    assert detail["rows"][0]["cells"] == ["OA-U1", "采购申请", "伺服电机", "演示员工129", "RD03", "PO 执行中", "8 天", "2026-10-08"]
+    assert detail["rows"][0]["cells"] == ["OA-U1", "采购申请", "伺服电机", "南通工厂9", "RD03", "PO 执行中", "8 天", "2026-10-08"]
     assert [row["tone"] for row in detail["rows"]] == ["bad", "hot"]
 
 
@@ -727,7 +727,7 @@ def test_urgent_quiet_when_everything_is_moving(world):
                         "approving": True, "label": "直属主管", "since": "2026-10-08"}]
     ctx = full_ctx()
     card = kpi_of("proc.urgent", ctx)
-    assert (card["value"], card["sub"], card["tone"]) == ("1", "都在演示员工152推进", "hot")
+    assert (card["value"], card["sub"], card["tone"]) == ("1", "都在正常推进", "hot")
     assert run("alert.urgent", ctx) is None
     assert run("block.urgent_requests", ctx)["rows"][0]["label"] == "OA-U3"          # 没填事由就显示单号
 
@@ -758,7 +758,7 @@ def test_load_urgent_keeps_unfinished_ones_and_names_where_each_one_is(monkeypat
     from rayher_hr_payroll.api import oa_entry
 
     rows = [
-        {"name": "U1", "request_type": "采购申请", "subject": " 伺服电机 ", "employee_name": "演示员工129", "project": "RD03", "workflow_status": "已完成",
+        {"name": "U1", "request_type": "采购申请", "subject": " 伺服电机 ", "employee_name": "南通工厂9", "project": "RD03", "workflow_status": "已完成",
          "business_status": "需求已批准/待询价", "current_step_label": "", "expected_delivery_date": "2026-10-20", "creation": "2026-09-28 09:00:00"},
         {"name": "U2", "request_type": "购买申请", "subject": "打印机", "employee_name": "演示员工146", "project": None, "workflow_status": "待审批",
          "business_status": "待审批", "current_step_label": "财务主管", "expected_delivery_date": None, "creation": "2026-10-06 09:00:00",
@@ -916,14 +916,14 @@ def test_load_await_pr_follows_list_materials_for_pr(monkeypatch):
 
 
 def test_load_uncoded_ignores_blank_spaces_and_dead_requests(monkeypatch):
-    # 2026-10-13：条件是物料进度页 ?uncoded=1 用的同一句 SQL（状态演示员工152、编号去空格后为空、源申请没被拒绝 / 撤回）
+    # 2026-10-13：条件是物料进度页 ?uncoded=1 用的同一句 SQL（状态正常、编号去空格后为空、源申请没被拒绝 / 撤回）
     from rayher_hr_payroll.material_progress_query import FROM_SQL, UNCODED_SQL
 
     frappe = fake(monkeypatch, {}, sql_rows=[{"name": "M1", "source_request": "R1"}, {"name": "M2", "source_request": "R1"}])
     assert proc._load_uncoded() == [{"name": "M1", "request": "R1"}, {"name": "M2", "request": "R1"}]
     query = frappe.queries[0][1]
     assert FROM_SQL in query and UNCODED_SQL in query
-    for part in ("b.status='演示员工152'", "TRIM(COALESCE(b.material_code,''))=''", "NOT IN ('已拒绝','已撤回')"):
+    for part in ("b.status='正常'", "TRIM(COALESCE(b.material_code,''))=''", "NOT IN ('已拒绝','已撤回')"):
         assert part in UNCODED_SQL
 
 

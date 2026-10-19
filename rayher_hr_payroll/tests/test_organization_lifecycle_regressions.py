@@ -41,7 +41,7 @@ def test_daily_departure_rechecks_date_after_lock(monkeypatch):
 
 
 def test_one_failing_leaver_does_not_stop_the_others_and_rehires_stay_active(monkeypatch):
-    # 模块 7：主管名下还有在职下属时 ERPNext 不让标演示员工166；原来整批回滚，每天重复失败。
+    # 模块 7：主管名下还有在职下属时 ERPNext 不让标离职；原来整批回滚，每天重复失败。
     from rayher_hr_payroll import organization_master_data as mod
     saved, logged, rolled = [], [], []
 
@@ -76,13 +76,13 @@ def test_one_failing_leaver_does_not_stop_the_others_and_rehires_stay_active(mon
 
 
 def test_a_position_holder_is_not_relieved_before_handover(monkeypatch):
-    # 模块 7：岗位任职人演示员工166当晚账号停用会让该岗位的审批全部卡住。
+    # 模块 7：岗位任职人离职当晚账号停用会让该岗位的审批全部卡住。
     from rayher_hr_payroll import organization_master_data as mod
     logged = []
-    holder = SimpleNamespace(name="CASHIER", employee_name="演示员工110", status="Active", relieving_date="2026-09-10",
+    holder = SimpleNamespace(name="CASHIER", employee_name="出纳", status="Active", relieving_date="2026-09-10",
                              date_of_joining="2020-01-01", save=lambda **kw: None)
     fake = types.ModuleType("frappe")
-    fake.get_all = lambda dt, **kw: ["演示员工110"] if dt == "OA Approval Role Assignment" else [SimpleNamespace(name="CASHIER")]
+    fake.get_all = lambda dt, **kw: ["出纳"] if dt == "OA Approval Role Assignment" else [SimpleNamespace(name="CASHIER")]
     fake.get_doc = lambda *a, **kw: holder
     fake.db = SimpleNamespace(savepoint=lambda name: None, rollback=lambda save_point=None: None)
     fake.log_error = lambda title=None, message=None: logged.append(message)

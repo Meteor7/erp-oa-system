@@ -44,7 +44,7 @@ def test_diagnostics_reports_routes_and_missing_mapping_without_mutation():
 
 def test_accountless_excluded_manager_resolves_upward_without_error():
     report = build_diagnostics(
-        [{"name": "EMP-BU", "employee_name": "演示员工127", "department": "研发部 - RAY"}],
+        [{"name": "EMP-BU", "employee_name": "南通工厂7", "department": "研发部 - RAY"}],
         resolve_user,
         account_state,
         required_approvers={},

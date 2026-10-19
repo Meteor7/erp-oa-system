@@ -12,13 +12,13 @@ import { calendarDaysSince } from './waiting.js';
 const EPS = 1e-6;
 
 export const REFUND_NOTICE = '退款需线下与供应商、财务处理，系统暂不记录';
-export const WORK_STATUSES = ['待演示员工116生效', '待到货资料', '待验收', '可提交付款审批', '付款审批中', '待实际付款', '已付款'];
+export const WORK_STATUSES = ['待合同生效', '待到货资料', '待验收', '可提交付款审批', '付款审批中', '待实际付款', '已付款'];
 export const STATUS_FILTERS = ['未完成', '全部', ...WORK_STATUSES];
 export const STATUS_PRIORITY = {
-  可提交付款审批: 0, 待到货资料: 1, 待验收: 2, 付款审批中: 3, 待实际付款: 4, 待演示员工116生效: 5, 已付款: 6,
+  可提交付款审批: 0, 待到货资料: 1, 待验收: 2, 付款审批中: 3, 待实际付款: 4, 待合同生效: 5, 已付款: 6,
 };
 export const STATUS_TONE = {
-  已付款: 'jade', 付款审批中: 'cobalt', 待实际付款: 'cobalt', 待到货资料: 'sun', 待验收: 'sun', 可提交付款审批: 'brand', 待演示员工116生效: 'gray',
+  已付款: 'jade', 付款审批中: 'cobalt', 待实际付款: 'cobalt', 待到货资料: 'sun', 待验收: 'sun', 可提交付款审批: 'brand', 待合同生效: 'gray',
 };
 // 服务端允许登记到货 / 验收 / 换货到货 / 退货发出的 PO 状态。
 export const FULFILMENT_PO_STATUSES = ['供应商制作中', '到货验收中', '付款中'];
@@ -118,13 +118,13 @@ export function summarizeLines(lines = []) {
 // ------------------------------------------------------------------ 付款条件 / 状态
 export function contractReady(item = {}) {
   if (item.contract_ready !== undefined && item.contract_ready !== null && item.contract_ready !== '') return Boolean(Number(item.contract_ready));
-  const notReady = ['草稿', '待采购确认', '待演示员工116复核', '待电子用印', '已取消'];
+  const notReady = ['草稿', '待采购确认', '待合同复核', '待电子用印', '已取消'];
   return text(item.contract_status) === '已生效' && !notReady.includes(text(item.po_status));
 }
 
 export function paymentBlockers({ contractOk, trigger, summary }) {
   const blockers = [];
-  if (!contractOk) blockers.push('PO 演示员工116尚未生效');
+  if (!contractOk) blockers.push('PO 合同尚未生效');
   if (requiresReceipt(trigger) && !summary.allReceived) blockers.push('本期要求全部到货');
   if (requiresInspection(trigger)) {
     if (!summary.allReceived) blockers.push('验收前需全部到货');
@@ -143,7 +143,7 @@ export function computeWorkStatus({ paid = false, paymentRequest = '', requestSu
     return label.includes('付款') || ['已通过', '已完成'].includes(wf) ? '待实际付款' : '付款审批中';
   }
   if (blockers.length) {
-    if (!contractOk) return '待演示员工116生效';
+    if (!contractOk) return '待合同生效';
     return blockers.some((b) => b.includes('到货')) ? '待到货资料' : '待验收';
   }
   return '可提交付款审批';
@@ -186,7 +186,7 @@ export function draftNote(name) { return `上次被退回的付款单 ${name}，
 // 谁在等谁。
 export function waitingFor({ status, summary, canPush = false, draft = '', requestSummary = {}, paymentRequest = '' }) {
   if (status === '已付款') return '';
-  if (status === '待演示员工116生效') return '等 PO 演示员工116电子用印生效';
+  if (status === '待合同生效') return '等 PO 合同电子用印生效';
   if (status === '待到货资料' || status === '待验收') {
     if (summary.hasReturn) return '等退货发出 / 供应商补发';
     if (summary.hasExchange) return '等供应商换货到货';
@@ -205,7 +205,7 @@ export function waitingFor({ status, summary, canPush = false, draft = '', reque
 export function gateTiles({ contractOk, trigger, summary, invoiceRequirement = '', invoiceDocs = null }) {
   const needReceipt = requiresReceipt(trigger) || requiresInspection(trigger);
   const needInspect = requiresInspection(trigger);
-  const tiles = [{ key: 'contract', k: '演示员工116已生效', v: contractOk ? '已满足' : '演示员工116尚未生效', state: contractOk ? 1 : 0 }];
+  const tiles = [{ key: 'contract', k: '合同已生效', v: contractOk ? '已满足' : '合同尚未生效', state: contractOk ? 1 : 0 }];
   if (needReceipt) {
     tiles.push({
       key: 'receipt', k: '全部到货',
@@ -600,7 +600,7 @@ export function activeDocumentTypes(documents = []) { return [...activeDocuments
 export function invoiceDocCount(documents = []) {
   return (documents || []).filter((d) => d && text(d.document_type) === '发票' && text(d.status) !== '已作废').length;
 }
-// PO 下推的付款：报价和演示员工116属于 PO，不再要求；只有“付款前提供”的发票是必须的，补充资料随便传。
+// PO 下推的付款：报价和合同属于 PO，不再要求；只有“付款前提供”的发票是必须的，补充资料随便传。
 export function poPaymentChecklist(documents = [], invoiceRequirement = '') {
   const requirement = text(invoiceRequirement);
   const count = invoiceDocCount(documents);
@@ -612,7 +612,7 @@ export function poPaymentChecklist(documents = [], invoiceRequirement = '') {
   }
   return [];
 }
-// 没有来源 PO 的旧采购付款：沿用旧的资料清单（报价 / 演示员工116 / 发票 …）。
+// 没有来源 PO 的旧采购付款：沿用旧的资料清单（报价 / 合同 / 发票 …）。
 export function legacyChecklist(request = {}, documents = []) {
   return documentChecklistForRequest(request, documents).map((entry) => ({
     key: entry.key, label: entry.label, required: entry.required, satisfied: entry.satisfied,
@@ -686,7 +686,7 @@ export function approvalBanner(request = {}, { canAct = false, finalPay = false,
   }
   if (canAct && finalPay) {
     const blocked = review?.available && review.blockers?.length;
-    return { tone: blocked ? 'warn' : 'act', text: blocked ? `轮到你“确认付款”（最后一步）。但本期条件现在不满足：${review.blockers.join('；')}。确认时系统会拦下，请先让生产主管登记到货 / 验收，或驳回。` : '轮到你“确认付款”（最后一步）。系统会再检查：演示员工116已生效、本期到货 / 验收条件、发票（本期要求付款前提供）。条件都满足，可以确认。' };
+    return { tone: blocked ? 'warn' : 'act', text: blocked ? `轮到你“确认付款”（最后一步）。但本期条件现在不满足：${review.blockers.join('；')}。确认时系统会拦下，请先让生产主管登记到货 / 验收，或驳回。` : '轮到你“确认付款”（最后一步）。系统会再检查：合同已生效、本期到货 / 验收条件、发票（本期要求付款前提供）。条件都满足，可以确认。' };
   }
   if (canAct) return { tone: review?.available && review.blockers?.length ? 'warn' : 'act', text: `轮到你审批（${text(request.current_step_label) || '当前步骤'}）。${review?.available && review.blockers?.length ? `注意：本期条件现在不满足（${review.blockers.join('；')}）。` : '前面几级审批要自己看下面的条件复核，别等到最后一步被拦下。'}` };
   if (request.can_withdraw) return { tone: 'plain', text: '你是申请人：审批没结束前可以撤回，撤回后期次回到“可提交付款审批”。付款后不能撤回。' };

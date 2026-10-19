@@ -11,7 +11,7 @@ const props = defineProps({
   employees: { type: Array, default: () => [] },
   busy: { type: Boolean, default: false },
   error: { type: String, default: '' },
-  readonly: { type: Boolean, default: false },   // 只读（总经理、演示员工113经理）：不给处理选项和提交按钮
+  readonly: { type: Boolean, default: false },   // 只读（总经理、副总经理）：不给处理选项和提交按钮
 });
 const emit = defineEmits(['close', 'confirm', 'ignore', 'fix']);
 

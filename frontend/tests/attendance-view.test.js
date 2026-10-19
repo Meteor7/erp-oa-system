@@ -390,8 +390,8 @@ test("kind, title, status, node and wait text of a row", () => {
   assert.deepEqual([kindOf({ request_type: "加班申请" }).text, kindOf({ request_type: "调休申请" }).tone], ["加班", "comp"]);
   assert.equal(requestTitle(leaveRow), "请假 · 事假 · 10月26日–28日");
   assert.equal(requestTitle({ request_type: "加班申请", attendance_days: [{ work_date: "2026-10-24", hours: 6 }] }), "加班 · 10月24日");
-  assert.equal(personShort("演示员工21"), "格乐");
-  assert.equal(personShort("演示员工108"), "演示员工108");
+  assert.equal(personShort("演示员工21"), "21");
+  assert.equal(personShort("演示员工108"), "08");
   assert.deepEqual(statusTag(leaveRow), { text: "待审批", tone: "warn" });
   assert.deepEqual(statusTag({ workflow_status: "待审批" }), { text: "审批中", tone: "info" });
   assert.deepEqual(statusTag({ workflow_status: "已完成" }), { text: "已通过", tone: "ok" });

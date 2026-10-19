@@ -356,7 +356,7 @@ async function exportCurrentProjects() {
       <div class="att-legend">
         <span class="pill up"><RdIcon name="check" />已上传</span><span>点开可下载，悬停看文件名</span>
         <span class="pill miss"><RdIcon name="alert" />缺附件</span><span>需要但还没传，点击打开编辑补传</span>
-        <span class="pill na">不需要</span><span>立项报告：进行中、已结束都要 · 结项报告：已结束才要 · 资本化确认书：资本化项目才要 · 已取消的演示员工177要</span>
+        <span class="pill na">不需要</span><span>立项报告：进行中、已结束都要 · 结项报告：已结束才要 · 资本化确认书：资本化项目才要 · 已取消的都不要</span>
       </div>
     </div>
 

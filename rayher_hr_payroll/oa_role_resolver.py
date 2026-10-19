@@ -9,10 +9,10 @@ ROLE_SPECS = {
         "designation": "人事行政经理",
         "designations": ("人事行政经理", "人事经理"),
     },
-    "finance_auditor": {"label": "演示员工110", "designation": "演示员工110"},
-    "finance_accountant": {"label": "演示员工135", "designation": "演示员工135"},
+    "finance_auditor": {"label": "出纳", "designation": "出纳"},
+    "finance_accountant": {"label": "总账会计", "designation": "总账会计"},
     "finance_manager": {"label": "财务主管", "designation": "财务主管"},
-    "vice_manager": {"label": "演示员工113经理", "designation": "演示员工113经理"},
+    "vice_manager": {"label": "副总经理", "designation": "副总经理"},
     "general_manager": {"label": "总经理", "designation": "总经理"},
     "production_asset_owner": {"label": "生产设备负责人", "designation": "生产主管"},
     "procurement_manager": {"label": "采购经理", "designation": "采购经理"},
@@ -240,8 +240,8 @@ def _resolve_role_uncached(role_key, *, store=None):
         raise ApprovalRoleResolutionError(f"未知审批角色：{role_key}")
     store = _store(store)
     row = store.get_assignment(role_key)
-    # 修复（2026-09-29，审查 R3-55-2，决定 D4）：审批岗位只认岗位任命（只有系统演示员工170能改）。
-    # 原来没有启用的任命时按员工职务找人，人事改一下某人的职务就能让他成为演示员工110、总经理等审批人。
+    # 修复（2026-09-29，审查 R3-55-2，决定 D4）：审批岗位只认岗位任命（只有系统管理员能改）。
+    # 原来没有启用的任命时按员工职务找人，人事改一下某人的职务就能让他成为出纳、总经理等审批人。
     # 职务只用于诊断和给新站点补建任命（designation_suggestion / seed_missing_assignments）。
     if not row or not int(_get(row, "enabled") or 0):
         raise ApprovalRoleResolutionError(f"审批角色{spec['label']}没有找到有效配置，请在岗位任命中设置")

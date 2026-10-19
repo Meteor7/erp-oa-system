@@ -47,7 +47,7 @@ test("the payroll page accepts status=submitted from the url", () => {
   assert.match(page, /<PayrollSummary :rows="summaryRows"/);
 });
 
-// ---------------------------------------------------------------- 3. 总经理、演示员工113经理只读
+// ---------------------------------------------------------------- 3. 总经理、副总经理只读
 test("accommodation rooms page does not load the HR-only employee list or show write buttons for leaders", () => {
   const page = read("pages/AccommodationMaster.vue");
   assert.match(page, /const canEdit = canEditHr\(\);/);

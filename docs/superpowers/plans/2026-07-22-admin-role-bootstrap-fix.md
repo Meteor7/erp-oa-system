@@ -1,4 +1,4 @@
-# Frappe 演示员工170角色注入模板修复 Implementation Plan
+# Frappe 管理员角色注入模板修复 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

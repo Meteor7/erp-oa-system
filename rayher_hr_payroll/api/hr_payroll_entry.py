@@ -118,7 +118,7 @@ def _require_contributions(found):
 
 
 def _require_read():
-    """看薪酬：人事角色；总经理、演示员工113经理岗位只读（决定 2026-10-13：领导点进来和人事看到的一样，不能改）。"""
+    """看薪酬：人事角色；总经理、副总经理岗位只读（决定 2026-10-13：领导点进来和人事看到的一样，不能改）。"""
     from rayher_hr_payroll.hr_read_access import require_hr_read
 
     require_hr_read(ROLES, require_rd_access)
@@ -541,7 +541,7 @@ def create_draft_salary_slip(employee, period, other_income=0, income_tax=0, oth
 
 @frappe.whitelist()
 def get_payroll_access():
-    """页面用：能不能改（人事角色）。总经理、演示员工113经理能打开但只读。"""
+    """页面用：能不能改（人事角色）。总经理、副总经理能打开但只读。"""
     _require_read()
     return {"can_edit": bool(set(frappe.get_roles(frappe.session.user)) & set(ROLES))}
 

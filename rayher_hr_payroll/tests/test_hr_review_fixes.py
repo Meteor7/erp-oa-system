@@ -170,9 +170,9 @@ class FakeInputs:
 
 
 def _payroll_world(monkeypatch, module, frappe, slip, social):
-    frappe.get_all = lambda *args, **kwargs: [{"name": "SAL-1", "employee": "E1", "employee_name": "演示员工128", "hr_spa_managed": 1}]
+    frappe.get_all = lambda *args, **kwargs: [{"name": "SAL-1", "employee": "E1", "employee_name": "南通工厂8", "hr_spa_managed": 1}]
     frappe.get_doc = lambda doctype, name: slip
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "南通工厂8"})
     # 本月总工时 176、实际 160（请了 16 小时事假）：8800 × 160 / 176 = 8000
     monkeypatch.setattr(module, "_inputs", lambda: FakeInputs(social=social, fund={"employee_amount": 200, "company_amount": 200, "source": "公积金月度记录"},
                                                               total=176, actual=160, leave=16))
@@ -200,7 +200,7 @@ def test_confirm_skips_a_draft_that_can_no_longer_be_recalculated(monkeypatch):
     _payroll_world(monkeypatch, module, frappe, slip, {"missing": "员工档案里没有社保基数"})   # 社保算不出来了
     result = module.confirm_payroll("2026-10")
     assert result["confirmed"] == 0 and slip.events == []
-    assert result["skipped"] == [{"employee": "E1", "employee_name": "演示员工128", "reason": module.RESAVE_FAILED + "社保算不出来：员工档案里没有社保基数。"}]
+    assert result["skipped"] == [{"employee": "E1", "employee_name": "南通工厂8", "reason": module.RESAVE_FAILED + "社保算不出来：员工档案里没有社保基数。"}]
     assert frappe.db.rollbacks == ["confirm_payroll"]
 
 

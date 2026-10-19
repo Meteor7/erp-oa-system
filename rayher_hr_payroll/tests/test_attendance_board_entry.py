@@ -19,7 +19,7 @@ IN_TWO_DAYS = (TODAY + timedelta(days=2)).isoformat()
 EMPLOYEES = [
     {"name": "E1", "employee_name": "张主管", "department": "研发软件部 - RAY", "user_id": "mgr@tests-x.example.invalid", "reports_to": "", "status": "Active"},
     {"name": "E2", "employee_name": "杨员工", "department": "研发软件部 - RAY", "user_id": "emp@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
-    {"name": "E3", "employee_name": "演示员工120", "department": "研发软件部 - RAY", "user_id": "mate@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
+    {"name": "E3", "employee_name": "南通工厂0", "department": "研发软件部 - RAY", "user_id": "mate@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
     {"name": "E4", "employee_name": "演示员工144", "department": "财务部 - RAY", "user_id": "fin@tests-x.example.invalid", "reports_to": "", "status": "Active"},
     {"name": "E5", "employee_name": "演示员工111", "department": "人事行政部 - RAY", "user_id": "hr@tests-x.example.invalid", "reports_to": "", "status": "Active"},
     {"name": "E6", "employee_name": "演示员工160", "department": "总经办 - RAY", "user_id": "person014@tests-x.example.invalid", "reports_to": "", "status": "Active"},
@@ -146,7 +146,7 @@ def test_a_manager_gets_their_own_team_with_names_and_is_refused_any_other_depar
     assert result["level"] == "manager"
     detail = result["detail"]
     assert detail["department"] == "" and detail["label"] == "我的团队" and detail["headcount"] == 3
-    assert [member["name"] for member in detail["members"]] == ["张主管", "杨员工", "演示员工120"]
+    assert [member["name"] for member in detail["members"]] == ["张主管", "杨员工", "南通工厂0"]
     assert detail["stats"]["days"][2]["off"] == 2
     assert department(api, "mgr@tests-x.example.invalid", "")["detail"]["label"] == "我的团队"
     assert department(api, "mgr@tests-x.example.invalid", "研发软件部 - RAY")["level"] == "manager"
@@ -161,17 +161,17 @@ def test_the_team_follows_the_reporting_line_not_the_department(api, monkeypatch
     extra = [
         {"name": "E7", "employee_name": "演示员工180", "department": "财务部 - RAY", "user_id": "x7@tests-x.example.invalid", "reports_to": "E1", "status": "Active"},
         {"name": "E8", "employee_name": "吴同部不属", "department": "研发软件部 - RAY", "user_id": "x8@tests-x.example.invalid", "reports_to": "", "status": "Active"},
-        {"name": "E9", "employee_name": "演示员工123", "department": "财务部 - RAY", "user_id": "x9@tests-x.example.invalid", "reports_to": "E7", "status": "Active"},
+        {"name": "E9", "employee_name": "南通工厂3", "department": "财务部 - RAY", "user_id": "x9@tests-x.example.invalid", "reports_to": "E7", "status": "Active"},
     ]
     monkeypatch.setattr(sys.modules[__name__], "EMPLOYEES", [*EMPLOYEES, *extra])
     names = [member["name"] for member in board(api, "mgr@tests-x.example.invalid")["detail"]["members"]]
-    assert names == ["张主管", "杨员工", "演示员工120", "演示员工180", "演示员工123"]
+    assert names == ["张主管", "杨员工", "南通工厂0", "演示员工180", "南通工厂3"]
     assert "吴同部不属" not in names
-    # 只有下属的下属（没有上级的人不算团队）：演示员工180有下属演示员工123，所以他自己也是 manager
+    # 只有下属的下属（没有上级的人不算团队）：演示员工180有下属南通工厂3，所以他自己也是 manager
     _entry, scope, state = api
     state.login("x7@tests-x.example.invalid")
     assert scope.resolve_scope()["level"] == "manager"
-    assert [member["name"] for member in board(api, "x7@tests-x.example.invalid")["detail"]["members"]] == ["演示员工180", "演示员工123"]
+    assert [member["name"] for member in board(api, "x7@tests-x.example.invalid")["detail"]["members"]] == ["演示员工180", "南通工厂3"]
 
 
 def test_the_department_overview_table_is_numbers_only(api):
@@ -195,7 +195,7 @@ def test_the_company_levels_see_names_only_after_choosing_a_department(api):
     for user in ("hr@tests-x.example.invalid", "person014@tests-x.example.invalid"):
         result = department(api, user, "研发软件部 - RAY")
         assert result["level"] == "company"
-        assert [member["name"] for member in result["detail"]["members"]] == ["张主管", "杨员工", "演示员工120"]
+        assert [member["name"] for member in result["detail"]["members"]] == ["张主管", "杨员工", "南通工厂0"]
         finance = department(api, user, "财务部 - RAY")["detail"]
         assert [member["name"] for member in finance["members"]] == ["演示员工144"] and finance["pending"] == 1
     with pytest.raises(Exception, match="请选择要查看的部门"):
@@ -218,7 +218,7 @@ def test_the_review_endpoint_hides_the_who_is_away_grid_from_plain_employees(mon
     monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])
     monkeypatch.setattr(module, "_department_mates", lambda employees: {"研发软件部": [{"name": "E2", "employee_name": "杨员工"}]})
     monkeypatch.setattr(module, "team_members", lambda employee, include_self=True: [{"name": "E2", "employee_name": "杨员工"}])
-    monkeypatch.setattr(module, "_team", lambda departments, today: [{"department": "研发软件部", "headcount": 1, "days": [{"approved": ["演示员工120"]}]}])
+    monkeypatch.setattr(module, "_team", lambda departments, today: [{"department": "研发软件部", "headcount": 1, "days": [{"approved": ["南通工厂0"]}]}])
     monkeypatch.setattr(module, "_absence_rows", lambda employees, start, end: [])
     monkeypatch.setattr(module.frappe, "db", SimpleNamespace(get_value=lambda *args, **kwargs: "E1"), raising=False)
     monkeypatch.setattr(module.frappe, "get_all", lambda *args, **kwargs: ["E2"], raising=False)
@@ -227,7 +227,7 @@ def test_the_review_endpoint_hides_the_who_is_away_grid_from_plain_employees(mon
         monkeypatch.setattr(module, "resolve_scope", lambda level=level: {"level": level, "employee": "E1"})
         result = raw()
         assert len(result["team"]) == shown, level
-        assert ("演示员工120" in json.dumps(result, ensure_ascii=False)) is bool(shown)
+        assert ("南通工厂0" in json.dumps(result, ensure_ascii=False)) is bool(shown)
 
 def overlap(api, user, request, monkeypatch):
     entry, _scope, state = api
@@ -246,11 +246,11 @@ def leave_request(employee, name="OA-9"):
 def test_the_overlap_list_names_colleagues_only_for_those_allowed_to_see_the_team(api, monkeypatch):
     entry, _scope, state = api
     monkeypatch.setattr(entry.frappe.db, "get_value", lambda doctype, name, field: next(row["department"] for row in EMPLOYEES if row["name"] == name), raising=False)
-    # 杨员工（E2）的申请：同部门有演示员工120（E3）病假同一天；自己的年假不算
+    # 杨员工（E2）的申请：同部门有南通工厂0（E3）病假同一天；自己的年假不算
     for user in ("mgr@tests-x.example.invalid", "hr@tests-x.example.invalid", "person014@tests-x.example.invalid"):
         result = overlap(api, user, leave_request("E2"), monkeypatch)
         assert result["visible"] is True and result["count"] == 1
-        assert result["people"] == [{"name": "演示员工120", "kind": "sick", "dates": [IN_TWO_DAYS], "pending": False}]
+        assert result["people"] == [{"name": "南通工厂0", "kind": "sick", "dates": [IN_TWO_DAYS], "pending": False}]
     # 没有管理职责的审批人：不给人名
     assert overlap(api, "emp@tests-x.example.invalid", leave_request("E2"), monkeypatch) == {"visible": False, "count": 0, "people": []}
     # 部门主管看别的部门的申请：不给人名
@@ -260,7 +260,7 @@ def test_the_overlap_list_names_colleagues_only_for_those_allowed_to_see_the_tea
     assert overlap(api, "hr@tests-x.example.invalid", overtime, monkeypatch)["people"] == []
     # 同一天有几个人时，按日期再按名字排；申请人自己不在列表里
     both = overlap(api, "hr@tests-x.example.invalid", leave_request("E1", "OA-8"), monkeypatch)
-    assert [person["name"] for person in both["people"]] == ["演示员工120", "杨员工"] and both["count"] == 2
+    assert [person["name"] for person in both["people"]] == ["南通工厂0", "杨员工"] and both["count"] == 2
 
 
 def test_the_overlap_list_checks_the_same_access_as_the_detail_page(api, monkeypatch):
@@ -317,14 +317,14 @@ def test_an_employee_gets_no_request_rows_at_all(api):
             requests(api, user)
         with pytest.raises(api[0].frappe.PermissionError):
             requests(api, user, department="研发软件部 - RAY")
-    assert state.sql == []                                                                  # 连库演示员工177查
+    assert state.sql == []                                                                  # 连库都不查
 
 
 def test_a_manager_gets_only_the_team_rows_and_is_refused_other_departments(api):
     _entry, _scope, state = api
     result = requests(api, "mgr@tests-x.example.invalid")
     assert (result["level"], result["label"], result["headcount"], result["department"]) == ("manager", "我的团队", 3, "")
-    assert sorted(row["employee_name"] for row in result["rows"]) == ["演示员工120", "杨员工"]
+    assert sorted(row["employee_name"] for row in result["rows"]) == ["南通工厂0", "杨员工"]
     rows_queries = [args for query, args in state.sql if "FROM `tabOA Approval Request`" in query]
     assert rows_queries and all(set(args["employees"]) <= {"E1", "E2", "E3"} for args in rows_queries)   # 只查了团队的人
     assert "演示员工144" not in json.dumps(result, ensure_ascii=False)
@@ -339,7 +339,7 @@ def test_the_company_levels_get_every_name_on_the_home_page(api):
         result = requests(api, user)
         assert result["level"] == "company" and result["label"] == "全公司" and result["headcount"] == len(EMPLOYEES)
         rows = {row["employee_name"]: row for row in result["rows"]}
-        assert set(rows) == {"杨员工", "演示员工120", "演示员工144"}, user                                # 不用先点进部门
+        assert set(rows) == {"杨员工", "南通工厂0", "演示员工144"}, user                                # 不用先点进部门
         assert rows["杨员工"]["department_label"] == "研发软件部" and rows["杨员工"]["kind"] == "annual" and rows["杨员工"]["approved"] is True
         assert rows["杨员工"]["days"] == [[IN_TWO_DAYS, 8]]
         assert rows["演示员工144"]["approved"] is False and rows["演示员工144"]["workflow_status"] == "待审批"  # 审批中的列出来，标好

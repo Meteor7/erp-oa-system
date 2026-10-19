@@ -188,13 +188,13 @@ def drill_prj_projects(ctx):
     for project in sorted(projects, key=lambda item: str(item.get("name"))):
         counts = per_project.get(project.get("name")) or _counts([])
         # 点一行 = 采购申请列表「我负责的项目」页签，只看这个项目、只看有进度的阶段（不含退回 / 撤回 / 取消）：
-        # 条数 = 这一行前三个数相加。购买申请在演示员工114页面，单独一列。
+        # 条数 = 这一行前三个数相加。购买申请在另一个页面，单独一列。
         rows.append(drill_row([_project_label(projects, project.get("name")), project.get("status") or "—", counts[STAGE_DEMAND], counts[STAGE_EXEC],
                                counts[STAGE_DONE], direct.get(project.get("name"), 0)],
                               target("procurement.list", scope="owned", project=project.get("name"), stage="live")))
     return drill("drill.prj.projects", "我负责的项目", [("项目",), ("状态",), ("需求审批", "r"), ("采购执行", "r"), ("已完成", "r"), ("购买申请", "r")], rows,
                  summary=f"共 {len(projects)} 个项目",
-                 note=HINT + " 前三列是采购申请（点一行到采购申请列表看这个项目的）；购买申请在演示员工114页面，全部申请合在一起看「项目里的申请」。")
+                 note=HINT + " 前三列是采购申请（点一行到采购申请列表看这个项目的）；购买申请在另一个页面，全部申请合在一起看「项目里的申请」。")
 
 
 # ---------------------------------------------------------------- 指标卡

@@ -44,7 +44,7 @@ def test_inspection_is_registered_by_production_not_purchase(monkeypatch):
     monkeypatch.setattr(pc, "frappe", NS(throw=fail))
     monkeypatch.setattr(pc, "_can_record_receipt", lambda: False)
     monkeypatch.setattr(pc, "_can_purchase", lambda: True)
-    with pytest.raises(ValueError, match="只有生产主管或系统演示员工170可以登记到货资料"):
+    with pytest.raises(ValueError, match="只有生产主管或系统管理员可以登记到货资料"):
         inspect.unwrap(pc.record_po_inspection)("PO1", [{"line": "L1", "status": "已通过"}])
     monkeypatch.setattr(pc, "_can_record_receipt", lambda: True)
     assert pc._can_record_inspection() is True
@@ -193,14 +193,14 @@ def test_work_item_flags_follow_production_role_and_line_states(monkeypatch):
 def test_work_item_hides_registration_from_purchase_and_finance(monkeypatch):
     pc = patch_work(monkeypatch, production=False, purchase=True)
     po = work_po(wl("A", 10, 10, "待验收"))
-    item = pc._payment_work_item(po, work_row(trigger_condition="演示员工116生效"))
+    item = pc._payment_work_item(po, work_row(trigger_condition="合同生效"))
     assert (item["can_record_receipt"], item["can_record_inspection"], item["can_record_exchange"], item["can_record_return"]) == (0, 0, 0, 0)
     assert item["work_status"] == "可提交付款审批" and item["can_push_payment"] == 1
 
 
 def test_returned_draft_is_reported_and_the_installment_can_be_pushed_again(monkeypatch):
     pc = patch_work(monkeypatch, production=False, purchase=True, draft="OA-2026-1")
-    item = pc._payment_work_item(work_po(wl("A", 10, 10, "已通过")), work_row(trigger_condition="演示员工116生效"))
+    item = pc._payment_work_item(work_po(wl("A", 10, 10, "已通过")), work_row(trigger_condition="合同生效"))
     assert item["draft_request"] == "OA-2026-1"
     assert item["can_push_payment"] == 1
 
@@ -208,7 +208,7 @@ def test_returned_draft_is_reported_and_the_installment_can_be_pushed_again(monk
 def test_push_reuses_the_returned_draft_instead_of_opening_a_second_request(monkeypatch):
     pc = patch_work(monkeypatch, production=False, purchase=True, draft="OA-2026-1")
     po = NS(name="PO1", status="供应商制作中", contract_status="已生效", supplier="供应商", payment_plan=[work_row(name="PLAN-1")], lines=[wl("A", 10, 10, "已通过")])
-    po.payment_plan[0].trigger_condition = "演示员工116生效"
+    po.payment_plan[0].trigger_condition = "合同生效"
     monkeypatch.setattr(pc, "_require_purchase", lambda: None)
     monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: po)
     seen = {}
@@ -282,6 +282,6 @@ def test_work_item_reports_invoice_documents_without_reading_the_documents(monke
     monkeypatch.setattr(pc.frappe, "db", NS(exists=lambda *a, **kw: True), raising=False)
     monkeypatch.setattr(pc.frappe, "get_doc", lambda *a, **kw: NS(
         name="OA-9", workflow_status="待审批", business_status="待审批", current_step_index=5, current_step_label="总经理付款：某人"))
-    item = pc._payment_work_item(po, work_row(payment_request="OA-9", status="已下推", trigger_condition="演示员工116生效"))
+    item = pc._payment_work_item(po, work_row(payment_request="OA-9", status="已下推", trigger_condition="合同生效"))
     assert item["invoice_documents"] == 2
-    assert pc._payment_work_item(po, work_row(trigger_condition="演示员工116生效"))["invoice_documents"] == 0
+    assert pc._payment_work_item(po, work_row(trigger_condition="合同生效"))["invoice_documents"] == 0

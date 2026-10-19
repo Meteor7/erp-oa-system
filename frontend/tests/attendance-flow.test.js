@@ -38,11 +38,11 @@ test("slow means waiting more than three days; search looks at the person, the n
   assert.equal(isSlow({ submitted_on: "2026-10-12 12:00:00" }, NOW), false);     // 正好 3 天
   assert.equal(isSlow({}, NOW), false);
   const row = leave([["2026-10-26", 8]], { name: "OA-2026-18311", reason: "回老家处理" });
-  assert.equal(searchMatch(row, "吴大"), true);
+  assert.equal(searchMatch(row, "员工117"), true);
   assert.equal(searchMatch(row, "18311"), true);
   assert.equal(searchMatch(row, "老家"), true);
   assert.equal(searchMatch(row, "oa-2026"), true);
-  assert.equal(searchMatch(row, "演示员工129"), false);
+  assert.equal(searchMatch(row, "南通工厂9"), false);
   assert.equal(searchMatch(row, "  "), true);
 });
 
@@ -57,7 +57,7 @@ test("filters combine, and 'active' says whether any is on", () => {
   assert.deepEqual(names({ type: "调休" }), ["B"]);
   assert.deepEqual(names({ time: "week" }), ["A", "C"]);
   assert.deepEqual(names({ slow: true }), ["A"]);
-  assert.deepEqual(names({ query: "静静" }), ["C"]);
+  assert.deepEqual(names({ query: "员工112" }), ["C"]);
   assert.deepEqual(names({ type: "请假", time: "week", slow: true }), ["A"]);
   assert.deepEqual(names({ type: "加班", slow: true }), []);
   assert.equal(filtersActive({}), false);

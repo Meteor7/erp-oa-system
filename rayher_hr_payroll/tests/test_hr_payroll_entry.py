@@ -188,7 +188,7 @@ class NewSlip:
 
 def _draft_world(monkeypatch, module, frappe, inputs):
     monkeypatch.setattr(module, "_inputs", lambda: inputs)
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "南通工厂8"})
     monkeypatch.setattr(module, "_accommodation", lambda *args: 150)
     monkeypatch.setattr(module, "_slip", lambda *args: None)
     monkeypatch.setattr(module, "ensure_payroll_masters", lambda company: {"salary_structure": "标准月薪 - QIHENG Demo"})

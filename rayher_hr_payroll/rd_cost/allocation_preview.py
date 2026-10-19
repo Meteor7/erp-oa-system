@@ -43,7 +43,7 @@ def friendly_error(text):
     match = _NOT_RECONCILE.search(message)
     if match:
         return (
-            "分摊结果和费用合计对不上（分摊 %s，费用 %s）。请检查费用导入的金额，仍然不行请联系演示员工170。"
+            "分摊结果和费用合计对不上（分摊 %s，费用 %s）。请检查费用导入的金额，仍然不行请联系管理员。"
             % (match.group("allocated"), match.group("expected"))
         )
     match = _DUPLICATE_ROW.search(message)

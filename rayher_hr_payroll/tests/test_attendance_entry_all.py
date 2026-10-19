@@ -56,7 +56,7 @@ def test_everyone_else_is_refused(entry):
     state.roles = ["Employee"]
     with pytest.raises(Exception) as caught:
         raw()
-    assert "只有人事或演示员工170" in str(caught.value)
+    assert "只有人事或管理员" in str(caught.value)
     assert state.sql == []
 
 
@@ -114,7 +114,7 @@ def test_a_user_gets_the_trip_type_only_when_the_travel_feature_is_open(monkeypa
 def test_hr_opens_any_submitted_trip_read_only_but_a_plain_employee_cannot(entry, monkeypatch):
     module, _raw, state = entry
     detail = getattr(module.get_attendance_request, "__wrapped__", module.get_attendance_request)
-    monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])             # 出差申请的“全部”只给系统演示员工170、高管：人事走下面的只读通道
+    monkeypatch.setattr(module.oa_entry, "list_requests", lambda **kwargs: [])             # 出差申请的“全部”只给系统管理员、高管：人事走下面的只读通道
     monkeypatch.setattr(module, "_balances", lambda employee, cache: {"annual": None, "comp": None})
     monkeypatch.setattr(module, "_linked_documents", lambda trip: [{"name": "BX-1", "request_type": "报销单"}] if trip == "OA-2" else [])
     state.summaries = {"OA-2": {"name": "OA-2", "request_type": "出差申请", "employee": "E1", "employee_name": "演示员工117", "steps": [],

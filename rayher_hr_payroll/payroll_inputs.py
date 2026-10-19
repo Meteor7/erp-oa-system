@@ -1,7 +1,7 @@
 """薪酬计算的三样输入：工时、社保公积金、个税累计（决定 2026-10-14）。
 
 - 工时：当月总工时 = 公司日历这个月的工作日 × 8；实际工时 = 在职期间的工作日 × 8 − 已批准的事假小时。
-  只有事假扣工时（年假、调休、病假、婚丧产假演示员工177扣），和研发工时上限同一个算法（attendance_requests.leave_hours_by_date）。
+  只有事假扣工时（年假、调休、病假、婚丧产假都不扣），和研发工时上限同一个算法（attendance_requests.leave_hours_by_date）。
 - 社保：已生效的社保账单 → 本月社保月度记录 → 按员工档案基数 × 公司当年政策算（hr_contributions.social_policy）；
   公积金：本月公积金月度记录（公积金账单生效时写入）→ 按档案基数 × 政策比例算。
   按档案算出来的，保存工资草稿时顺带写一条月度记录（备注“自动：按档案基数”），社保公积金页、看板、研发分摊都看得到。
@@ -165,7 +165,7 @@ def materialize(employee_row, period, found):
             "company_total": social["company_total"], "status": "Confirmed",
             "remark": f"{AUTO_REMARK}（{policy['version']}）", "employee_period_key": f"{employee}|{period}",
         })
-        # 医疗有最低基数、深户有地方补充养老，记录自己的重算没有这演示员工103：用政策算好的金额，不让它重算
+        # 医疗有最低基数、深户有地方补充养老，记录自己的重算没有这两样：用政策算好的金额，不让它重算
         doc.flags.keep_amounts = True
         doc.insert(ignore_permissions=True)
     if fund.get("auto"):

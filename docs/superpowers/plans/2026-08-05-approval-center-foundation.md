@@ -24,13 +24,13 @@
 - 现有记录不得因字段为空或旧分类模糊而被自动改成报销、对公付款、固定资产或非固定资产；无法可靠判断的历史记录显示“历史未分类”。
 - 看板是查询视图，不是新的申请类型；所有金额从权限过滤后的服务端数据计算。
 - 所有写接口必须在后端重复执行权限、状态、来源类型、余额和版本检查；前端隐藏按钮不构成权限控制。
-- 迁移和补丁必须幂等，只补缺失字段或可靠可推导的数据，不覆盖演示员工170已经维护的值。
+- 迁移和补丁必须幂等，只补缺失字段或可靠可推导的数据，不覆盖管理员已经维护的值。
 - 生成或修改的源码、测试、文档和 Vite 构建产物都必须检查文件开头不是 `%TSD-Header-###%`，且以各自预期的明文头开始。
 
 ## 本计划明确不包含
 
 - 采购申请审批路线、购买申请审批路线、采购付款审批路线的审批人和顺序。
-- 采购询价、比价、采购订单、演示员工116、供应商门户、收货入库和退货。
+- 采购询价、比价、采购订单、合同、供应商门户、收货入库和退货。
 - 固定资产验收是否作为付款前置条件、固定资产卡片、标签、折旧和盘点。
 - 银企直连或真实银行付款。
 - 自动判断申请应归“采购申请”还是“购买申请”。
@@ -624,7 +624,7 @@ Pass `payment_type: expectedPaymentType.value` in every list and exact-detail qu
 
 - [ ] **Step 6: Implement pre-request and payment shells behind boot flags**
 
-When the new route flag is false, show the exact non-actionable message `审批流程尚未配置，当前页面仅供演示员工170本地验收。` and do not render a submit button. Existing reimbursement and corporate payment pages remain active according to the current expense feature flag.
+When the new route flag is false, show the exact non-actionable message `审批流程尚未配置，当前页面仅供管理员本地验收。` and do not render a submit button. Existing reimbursement and corporate payment pages remain active according to the current expense feature flag.
 
 - [ ] **Step 7: Run frontend tests**
 

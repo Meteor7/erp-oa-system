@@ -48,13 +48,13 @@ def test_supervisor_relationship_comes_from_employee_records(monkeypatch):
 
 
 def test_a_vacant_executive_position_does_not_break_the_executive_check(monkeypatch):
-    # 审查 #10：演示员工113或总经理岗位空缺时，原来所有申请的提交都 500。
+    # 审查 #10：副总或总经理岗位空缺时，原来所有申请的提交都 500。
     def resolve(key):
         if key == "general_manager":
             raise ApprovalRoleResolutionError("position unassigned")
-        return {"employee_name": "演示员工113", "user": "vice@example.com"}
+        return {"employee_name": "副总", "user": "vice@example.com"}
     monkeypatch.setattr(position_access, "resolve_role", resolve)
-    assert position_access.executive_names() == {"演示员工113"}
+    assert position_access.executive_names() == {"副总"}
 
 
 def test_a_vacant_pmc_position_leaves_purchase_rights_to_purchasers_and_admins(monkeypatch):
@@ -68,13 +68,13 @@ def test_a_vacant_pmc_position_leaves_purchase_rights_to_purchasers_and_admins(m
     monkeypatch.setattr(pc, "_roles", lambda: {"System Manager"})
     assert pc._can_purchase() is True
     monkeypatch.setattr(pc, "frappe", SimpleNamespace(throw=lambda message, *a: (_ for _ in ()).throw(ValueError(message))))
-    with pytest.raises(ValueError, match="演示员工113经理岗位"):
-        pc._position_holder("vice_manager", "演示员工113经理")
+    with pytest.raises(ValueError, match="副总经理岗位"):
+        pc._position_holder("vice_manager", "副总经理")
 
 
 
 def test_left_namesakes_are_ignored_and_active_ones_only_affect_themselves(monkeypatch):
-    # 审查 X3-1：演示员工166同名不再让所有人报错；在职同名只影响查到这个名字的人。
+    # 审查 X3-1：离职同名不再让所有人报错；在职同名只影响查到这个名字的人。
     rows = [
         SimpleNamespace(name="E1", employee_name="员工", reports_to="E2", status="Active"),
         SimpleNamespace(name="E2", employee_name="主管", reports_to=None, status="Active"),

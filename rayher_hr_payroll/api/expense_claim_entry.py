@@ -1,6 +1,6 @@
 """报销单 / 付款单接口。
 
-草稿保存、从申请下推、演示员工110填写科目、付款单补票与核验、财务撤回付款在这里。
+草稿保存、从申请下推、出纳填写科目、付款单补票与核验、财务撤回付款在这里。
 提交、审批、驳回和撤回沿用 oa_entry 的通用接口；oa_entry 在对应位置调用本模块的
 validate_submit / reserve / release / mark_paid 钩子。规则本身在 expense_claims.py。
 """
@@ -703,7 +703,7 @@ def list_claim_projects(request_type):
 
 @frappe.whitelist(methods=["POST"])
 def save_claim_accounts(name, lines):
-    """演示员工110审核时逐行填写一、二级科目。"""
+    """出纳审核时逐行填写一、二级科目。"""
     request_name = _text(name, "单号", 140)
     rows = _rows(lines, "费用科目", MAX_LINES)
     if not rows:
@@ -717,7 +717,7 @@ def save_claim_accounts(name, lines):
             or not oa_entry._can_act_on_current_step(doc)
             or not (oa_entry._is_finance_user() or oa_entry._is_oa_override_user())
         ):
-            frappe.throw("只有当前演示员工110审核人可以填写费用科目。")
+            frappe.throw("只有当前出纳审核人可以填写费用科目。")
         by_key = {_clean(line.line_key): line for line in doc.expense_lines}
         seen = set()
         for row in rows:
@@ -826,7 +826,7 @@ def return_claim_invoices(name, note):
 
 @frappe.whitelist(methods=["POST"])
 def withdraw_claim_payment(name, note=None):
-    """财务撤回付款：冲回台账已付、重新占用额度，单据回到演示员工110付款节点，可再次付款。"""
+    """财务撤回付款：冲回台账已付、重新占用额度，单据回到出纳付款节点，可再次付款。"""
     oa_entry._require_finance_user()
     request_name = _text(name, "单号", 140)
     reason = _text(note, "撤回说明", 500)
@@ -836,7 +836,7 @@ def withdraw_claim_payment(name, note=None):
             frappe.throw("只有已付款的报销单或付款单可以撤回付款。")
         pay_step = next((step for step in sorted(doc.steps, key=lambda row: -int(row.step_index or 0)) if step.mode == "handle"), None)
         if not pay_step:
-            frappe.throw("找不到演示员工110付款节点。")
+            frappe.throw("找不到出纳付款节点。")
         round_no = rules.payment_round(_events(doc))
         if _capped(doc):
             _ledger(

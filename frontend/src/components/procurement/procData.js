@@ -21,7 +21,7 @@ export async function settle(job, fallback = []) {
 
 let poCache = { at: 0, promise: null };
 
-// 价格审批 / PO / 付款计划只有采购、PMC、演示员工113、财务看得到；其他人调用会被后端拒绝，这里返回空。
+// 价格审批 / PO / 付款计划只有采购、PMC、副总、财务看得到；其他人调用会被后端拒绝，这里返回空。
 export function loadPurchaseOrders({ force = false } = {}) {
   const now = Date.now();
   if (!force && poCache.promise && now - poCache.at < 20000) return poCache.promise;

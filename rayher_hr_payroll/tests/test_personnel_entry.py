@@ -81,9 +81,9 @@ def test_get_designation_options_returns_position_names(monkeypatch):
 def test_get_employment_type_options_returns_master_names(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
-    frappe.get_all = lambda doctype, pluck=None, order_by=None: ["劳动演示员工116", "实习协议"]
+    frappe.get_all = lambda doctype, pluck=None, order_by=None: ["劳动合同", "实习协议"]
 
-    assert mod.get_employment_type_options() == ["劳动演示员工116", "实习协议"]
+    assert mod.get_employment_type_options() == ["劳动合同", "实习协议"]
 
 def test_save_employee_sets_left_status_when_relieving_date_is_saved(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
@@ -134,7 +134,7 @@ def _save_new_employee(monkeypatch, department, **extra):
         return FakeDoc()
 
     frappe.get_doc = get_doc
-    mod.save_employee(employee_name="演示员工138", company="QIHENG Demo", department=department, **extra)
+    mod.save_employee(employee_name="新人", company="QIHENG Demo", department=department, **extra)
     return created
 
 
@@ -142,7 +142,7 @@ def test_new_employee_gets_the_rd_type_of_the_department_when_none_is_chosen(mon
     assert _save_new_employee(monkeypatch, "研发软件部 - RAY")["rd_personnel_type"] == "全时研发"
     assert _save_new_employee(monkeypatch, "研发软件部 - RAY", rd_personnel_type="")["rd_personnel_type"] == "全时研发"
     assert _save_new_employee(monkeypatch, "财务部 - RAY")["rd_personnel_type"] == "非研发"
-    # 演示员工171就按自己选的；没选部门或不是标准部门就留空
+    # 自己选了就按自己选的；没选部门或不是标准部门就留空
     assert _save_new_employee(monkeypatch, "研发软件部 - RAY", rd_personnel_type="研发辅助")["rd_personnel_type"] == "研发辅助"
     assert "rd_personnel_type" not in _save_new_employee(monkeypatch, None)
     assert "rd_personnel_type" not in _save_new_employee(monkeypatch, "旧部门 - RAY")
@@ -210,7 +210,7 @@ def test_save_employee_updates_reference_template_fields(monkeypatch):
     frappe.get_doc = lambda doctype, name=None: FakeDoc()
 
     mod.save_employee(
-        name="EMP-REF", employee_name="演示员工129", company="示例企业技术", english_name="Zhang San",
+        name="EMP-REF", employee_name="南通工厂9", company="示例企业技术", english_name="Zhang San",
         default_monthly_salary=10000, salary_months=14,
         first_education_level="本科", first_education_school="A大学", first_education_major="电子",
         education_level_cn="硕士", graduation_school="B大学", major_cn="微电子",
@@ -348,7 +348,7 @@ def test_list_employees_adds_household_classification(monkeypatch):
 def test_future_departure_remains_active_until_effective_date(monkeypatch):
     mod, frappe = _load_personnel_entry(monkeypatch)
     assert mod._employment_status("2026-09-21") == "Active"
-    # 决定 D3：演示员工166日当天仍在职，第二天起演示员工166（today = 2026-09-20）。
+    # 决定 D3：离职日当天仍在职，第二天起离职（today = 2026-09-20）。
     assert mod._employment_status("2026-09-20") == "Active"
     assert mod._employment_status("2026-09-19") == "Left"
     assert mod._employment_status(None) == "Active"

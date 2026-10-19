@@ -29,13 +29,13 @@ class AccommodationDeduction(Document):
         # read_only in the doctype, so it can no longer be checked by accident).
         if (not self.is_new() and self.get_db_value("exported_to_finance")
                 and "System Manager" not in frappe.get_roles()):
-            frappe.throw(frappe._("该宿舍代扣已导出财务，不可修改（如需更正请联系系统演示员工170）。"))
+            frappe.throw(frappe._("该宿舍代扣已导出财务，不可修改（如需更正请联系系统管理员）。"))
 
     def on_trash(self):
         self._check_period_lock()
         if (self.get_db_value("exported_to_finance")
                 and "System Manager" not in frappe.get_roles()):
-            frappe.throw(frappe._("该宿舍代扣已导出财务，不可删除（如需更正请联系系统演示员工170）。"))
+            frappe.throw(frappe._("该宿舍代扣已导出财务，不可删除（如需更正请联系系统管理员）。"))
 
     def _canonical_period(self):
         raw = str(self.period or "").strip()

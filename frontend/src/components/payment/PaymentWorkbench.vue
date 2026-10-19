@@ -73,7 +73,7 @@ onBeforeUnmount(() => {
         <div class="muted">按 PO 办理：生产主管登记到货和验收 → 条件满足后采购提交付款审批 → 财务逐级审批、总经理确认付款。验收不是审批节点，只是付款的前置条件。</div>
       </div>
       <div class="head-actions">
-        <router-link v-if="canWork" class="btn" to="/approval/procurement/price-approvals?tab=po">查看 PO 与演示员工116</router-link>
+        <router-link v-if="canWork" class="btn" to="/approval/procurement/price-approvals?tab=po">查看 PO 与合同</router-link>
         <button type="button" class="btn" :disabled="workLoader.loading" @click="refreshAll">刷新</button>
       </div>
     </div>

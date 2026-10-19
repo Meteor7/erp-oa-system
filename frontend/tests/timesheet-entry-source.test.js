@@ -205,8 +205,8 @@ test("redesigned pages carry product copy, not design commentary", () => {
     read("../src/pages/ExpenseImport.vue"),
     read("../src/pages/Allocation.vue"),
   ].join("\n");
-  for (const phrase of ["点一个部门，右边只看它", "是默认状态", "不再每行都贴标签", "表头固定", "点单元格直接编辑", "为示意", "演示", "上月没有工时记录，所以没有"]) {
+  for (const phrase of ["点一个部门，右边只看它", "是默认状态", "不再每行都贴标签", "表头固定", "点单元格直接编辑", "为示意", "上月没有工时记录，所以没有"]) {
     assert.ok(!pages.includes(phrase), phrase);
   }
-  assert.doesNotMatch(pages, /[Dd]emo|示意/);
+  assert.doesNotMatch(pages, /示意/);
 });

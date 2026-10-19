@@ -3310,7 +3310,7 @@ def test_workbench_listing_scopes_owner_and_bounds_filters(env):
         "INV-OWN-CONFIRMED", "INV-OWN-PENDING", "INV-OWN-PUSHED", "INV-OTHER",
     }
     with pytest.raises(ValidationError, match="状态"):
-        service.list_workbench_invoices(status="演示员工106状态")
+        service.list_workbench_invoices(status="伪造状态")
     with pytest.raises(ValidationError, match="数量"):
         service.list_workbench_invoices(limit=301)
 

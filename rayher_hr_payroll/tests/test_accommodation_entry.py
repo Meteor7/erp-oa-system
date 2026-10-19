@@ -48,7 +48,7 @@ def test_get_emp_options_exposes_employee_expense_category(monkeypatch):
     def get_all(doctype, fields=None, order_by=None, **kwargs):
         assert doctype == "Employee"
         captured["fields"] = fields
-        return [{"name": "EMP-1", "employee_name": "演示员工129", "expense_account_category": "研发费用"}]
+        return [{"name": "EMP-1", "employee_name": "南通工厂9", "expense_account_category": "研发费用"}]
 
     frappe.get_all = get_all
 
@@ -323,8 +323,8 @@ def test_get_room_occupants_keeps_both_people_during_turnover_month(monkeypatch)
     monkeypatch.setattr(mod, "require_rd_access", lambda roles: None)
     frappe.db.get_value = lambda *args, **kwargs: {"name": "A203", "room_purpose": ""}
     frappe.get_all = lambda *args, **kwargs: [
-        {"employee": "EMP-OLD", "employee_name": "演示员工141", "start_date": "2026-01-01", "end_date": "2026-08-15", "is_active": 0},
-        {"employee": "EMP-NEW", "employee_name": "演示员工139", "start_date": "2026-08-16", "end_date": None, "is_active": 1},
+        {"employee": "EMP-OLD", "employee_name": "旧入住人", "start_date": "2026-01-01", "end_date": "2026-08-15", "is_active": 0},
+        {"employee": "EMP-NEW", "employee_name": "新入住人", "start_date": "2026-08-16", "end_date": None, "is_active": 1},
     ]
 
     choices = mod.get_room_occupants("2026-08", "A203")

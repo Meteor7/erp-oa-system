@@ -36,9 +36,9 @@ def test_a_cycle_and_a_deep_chain_do_not_loop_forever():
 def test_someone_who_left_in_the_middle_does_not_hide_the_people_below_them(monkeypatch):
     tree = {"M": [("A", "Left")], "A": [("C", "Active")]}
     monkeypatch.setattr(team_scope, "_fetch_children", children_of(tree))
-    assert team_scope.team_names("M") == ["C"]                                   # 演示员工166的人不在结果里，但他名下的人还在
+    assert team_scope.team_names("M") == ["C"]                                   # 离职的人不在结果里，但他名下的人还在
     assert team_scope.team_names("M", include_self=True) == ["M", "C"]
-    assert team_scope.team_names("M", statuses=("Active", "Left")) == ["A", "C"]  # 按月份看工时时带上本月演示员工166的
+    assert team_scope.team_names("M", statuses=("Active", "Left")) == ["A", "C"]  # 按月份看工时时带上本月离职的
 
 
 @pytest.fixture
@@ -101,8 +101,8 @@ def test_the_manager_role_follows_the_reporting_line_and_never_takes_roles_away(
     assert fake_frappe.roles["boss@tests-x.example.invalid"] == ["Department Manager"]
     assert team_scope.ensure_manager_role(SimpleNamespace(reports_to="E1", status="Active")) is False   # 已经有了不重复加
     assert team_scope.ensure_manager_role(SimpleNamespace(reports_to="", status="Active")) is False
-    assert team_scope.ensure_manager_role(SimpleNamespace(reports_to="E1", status="Left")) is False      # 演示员工166的人不触发
-    assert team_scope.grant_manager_role("nobody@tests-x.example.invalid") is False                                       # 演示员工154的不处理
+    assert team_scope.ensure_manager_role(SimpleNamespace(reports_to="E1", status="Left")) is False      # 离职的人不触发
+    assert team_scope.grant_manager_role("nobody@tests-x.example.invalid") is False                                       # 没有账号的不处理
 
 
 def test_the_backfill_grants_every_current_supervisor_once(fake_frappe):

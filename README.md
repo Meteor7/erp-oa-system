@@ -14,12 +14,12 @@
 | --- | --- |
 | 员工与组织 | 公司、部门、员工档案、岗位与角色管理 |
 | 考勤与审批 | 请假、加班、调休、出差，假期额度、部门概况与待办审批 |
-| 采购协作 | OA 申请、采购需求 PR、供应商比价、价格审批、采购订单 PO 与演示员工116衔接 |
+| 采购协作 | OA 申请、采购需求 PR、供应商比价、价格审批、采购订单 PO 与合同衔接 |
 | 付款与物料 | 付款申请、采购执行与物料进度查看 |
 | 研发管理 | 研发项目、工时填报、工时报表、费用导入、分摊与台账 |
 | 人事配套 | 薪酬、社保、公积金及宿舍管理 |
 
-**采购业务链：** 员工 OA 申请 → 岗位审批 → PR → 比价 / 价格审批 → PO → 演示员工116、到货、验收与付款。
+**采购业务链：** 员工 OA 申请 → 岗位审批 → PR → 比价 / 价格审批 → PO → 合同、到货、验收与付款。
 
 ## 界面预览
 
@@ -32,7 +32,7 @@
 ![ERP OA 考勤与审批总览](docs/images/attendance-overview.png)
 
 <details>
-<summary><strong>采购订单与演示员工116工作台：查看界面</strong></summary>
+<summary><strong>采购订单与合同工作台：查看界面</strong></summary>
 
 从采购订单追溯来源申请、价格审批、供应商与物料，查看金额及下一步操作。
 
@@ -44,7 +44,7 @@
 
 ## 运行项目
 
-准备 **Windows PowerShell、Git、Python**，并确认 Docker Desktop 的 **Linux 引擎**演示员工152运行：
+准备 **Windows PowerShell、Git、Python**，并确认 Docker Desktop 的 **Linux 引擎**正常运行：
 
 ```powershell
 git clone https://github.com/Meteor7/erp-oa-system.git
@@ -67,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-to-docker.p
 | --- | --- |
 | 业务工作台 | [http://127.0.0.1:8082/planck-semicon](http://127.0.0.1:8082/planck-semicon) |
 | 管理后台 | [http://127.0.0.1:8082/app](http://127.0.0.1:8082/app) |
-| 演示员工170 | `Administrator`；密码为本地配置中的 `LOCAL_ADMIN_PASSWORD` |
+| 管理员 | `Administrator`；密码为本地配置中的 `LOCAL_ADMIN_PASSWORD` |
 
 这些地址用于运行项目的本机。新站点需要配置公司、员工和审批岗位，也可导入演示数据。完整步骤见 [部署文档](deploy/LOCAL-DEPLOYMENT.md)。可选的 [发票 OCR 服务](docs/invoice-ocr-runbook.md) 需要单独部署。
 

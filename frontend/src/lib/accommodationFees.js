@@ -109,7 +109,7 @@ export function unregisteredRooms(rooms = []) {
 }
 
 // 保存完某一间后的"下一间"：按房号排序，取排在它后面的第一间在住未登记的房间；后面没有了就从头找；都登记完返回 null。
-// current 是刚保存的房间（房间记录名 = 房间号），无论看板数据里它是否已算登记演示员工177会再选它。
+// current 是刚保存的房间（房间记录名 = 房间号），无论看板数据里它是否已算登记都不会再选它。
 export function nextUnregistered(rooms = [], current = '') {
   const pending = unregisteredRooms(rooms).filter((room) => room.name !== current && room.room_no !== current);
   if (!pending.length) return null;

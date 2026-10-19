@@ -144,7 +144,7 @@ test("a batch can only go live once everything is decided and every base is fill
 test("the base table flags missing bases and households, and changes against last month", () => {
   assert.equal(baseStatus({ base: null }, "fund").text, "缺基数");
   assert.equal(baseStatus({ base: 9000, household_classification: "待完善" }, "si").text, "缺户口");
-  assert.equal(baseStatus({ base: 9000, household_classification: "待完善" }, "fund").text, "演示员工152");
+  assert.equal(baseStatus({ base: 9000, household_classification: "待完善" }, "fund").text, "正常");
   assert.equal(baseStatus({ base: 9000, prev_base: 8000 }, "fund").text, "较上月有变化");
   assert.equal(baseStatus({ base: 9000, prev_base: 9000, note: "户口未维护，无法复算" }, "si").text, "户口未维护，无法复算");
   assert.equal(missingBaseCount([{ base: null }, { base: 1, household_classification: "待完善" }, { base: 1 }], "si"), 2);

@@ -80,7 +80,7 @@ def occupancy_is_effective(start_date, end_date, period_start, period_end):
 
 
 def _employee_for_name(employee_name):
-    # 只匹配在职员工：演示员工166员工的同名演示员工138不能被登记到演示员工166档上（修复 2026-09-29，模块 7）。
+    # 只匹配在职员工：离职员工的同名新人不能被登记到离职档上（修复 2026-09-29，模块 7）。
     matches = frappe.get_all(
         "Employee",
         filters={"employee_name": employee_name, "status": "Active"},
@@ -113,7 +113,7 @@ def _upsert_occupancy(room_no, values, employee):
     if not existing:
         # 修复（2026-09-29，审查 #15a）：换房时原来只把旧记录 is_active 改成 0，唯一键
         # active_employee_key 还在，新记录保存撞唯一键，整个导入失败；旧记录也没有退宿日期，
-        # 下次保存又变回"在住"。现在按演示员工152退宿保存旧记录：退宿日 = 新入住日前一天（无入住日按今天）。
+        # 下次保存又变回"在住"。现在按正常退宿保存旧记录：退宿日 = 新入住日前一天（无入住日按今天）。
         old_current = frappe.get_all(
             "Accommodation Occupancy",
             filters={"employee": employee, "is_active": 1},

@@ -118,7 +118,7 @@ async function pushPayment(view) {
           <div class="muted">
             {{ header.supplier }}<template v-if="header.source"> · 来源 {{ header.source }}</template>
             <template v-if="active.source_price_approvals"> · 价格审批 {{ active.source_price_approvals }}</template>
-            <template v-if="active.contract_status"> · 演示员工116 {{ active.contract_status }}</template>
+            <template v-if="active.contract_status"> · 合同 {{ active.contract_status }}</template>
             <template v-if="!active.amounts_hidden">· PO 总额 {{ amountText(header.total, header.currency) }} · 已付 {{ amountText(header.paid, header.currency) }}</template>
           </div>
         </section>

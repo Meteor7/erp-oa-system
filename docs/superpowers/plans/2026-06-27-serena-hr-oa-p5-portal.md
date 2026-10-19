@@ -37,13 +37,13 @@ def test_columns_cover_type_applicant_summary_status():
 
 def test_rows_from_sources_tags_each_type():
     sources = {
-        "请假": [{"name": "LA-1", "employee_name": "演示员工129", "status": "Open"}],
+        "请假": [{"name": "LA-1", "employee_name": "南通工厂9", "status": "Open"}],
         "报销": [{"name": "EC-1", "employee_name": "演示员工146", "workflow_state": "经理已批"}],
     }
     rows = rpt.rows_from_sources(sources)
     types = {r[0] for r in rows}
     assert types == {"请假", "报销"}
-    assert any("演示员工129" in r for r in rows)
+    assert any("南通工厂9" in r for r in rows)
 ```
 
 - [ ] **Step 2: Run → FAIL** (`ModuleNotFoundError`). `pytest rayher_hr_payroll/tests/test_pending_approval_report.py -q`

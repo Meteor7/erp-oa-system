@@ -37,7 +37,7 @@
       "in_list_view": 1,
       "in_standard_filter": 1,
       "label": "Document Type",
-      "options": "需求申请\n报价单\n价格审批表\nPR\nPO\n演示员工116\n付款计划\n发票\n验收资料\n送货单\n收料单\n入库单\n付款回单\n退款回单\n采购完成报告\n其他补充资料",
+      "options": "需求申请\n报价单\n价格审批表\nPR\nPO\n合同\n付款计划\n发票\n验收资料\n送货单\n收料单\n入库单\n付款回单\n退款回单\n采购完成报告\n其他补充资料",
       "read_only": 1,
       "reqd": 1
     },

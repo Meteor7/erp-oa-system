@@ -151,7 +151,7 @@ if (form.room_no) {
           <select v-model="occupantSelection" :disabled="!form.room_no || occupantOptions.loading" class="border border-gray-300 rounded px-3 py-2 text-sm disabled:bg-gray-100">
             <option value="">{{ form.room_no ? (occupantOptions.loading ? "加载中…" : "请选择入住人") : "请先选择房间" }}</option>
             <option v-for="choice in occupantChoices" :key="choice.value" :value="choice.value">{{ occupantChoiceLabel(choice) }}</option>
-          </select><span v-if="occupantSelection === 'special:空'" class="mt-1 text-[11px] text-amber-600">空（空置房间费用），可演示员工152登记房租、水费和电费</span></div>
+          </select><span v-if="occupantSelection === 'special:空'" class="mt-1 text-[11px] text-amber-600">空（空置房间费用），可正常登记房租、水费和电费</span></div>
         <div class="flex flex-col"><label class="text-xs text-gray-500 mb-1">费用科目</label><input :value="empCategory" disabled class="border border-gray-200 rounded px-3 py-2 text-sm bg-gray-100 text-gray-500" /></div>
         <div class="flex flex-col"><label class="text-xs text-gray-500 mb-1">房间月租参考</label><input :value="selectedRoom ? fmt(selectedRoom.monthly_rent) : fmt(0)" disabled class="border border-gray-200 rounded px-3 py-2 text-sm bg-gray-100 text-right" placeholder="选择房间后显示" /></div>
         <div class="flex flex-col"><label class="text-xs text-gray-500 mb-1">总费用</label><input :value="fmt(formTotal)" disabled class="border border-gray-200 rounded px-3 py-2 text-sm bg-gray-100 text-right" /></div>

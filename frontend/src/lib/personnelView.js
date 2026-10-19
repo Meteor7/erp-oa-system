@@ -12,7 +12,7 @@ export const NEW_EMPLOYEE_WINDOW_DAYS = 30;
 // 抽屉里的五个页签。locked：含敏感信息，isHrSensitiveHidden() 时整页隐藏，其余默认遮挡。
 export const PERSON_TABS = [
   { key: "basic", label: "基本信息", locked: false },
-  { key: "job", label: "任职与演示员工116", locked: false },
+  { key: "job", label: "任职与合同", locked: false },
   { key: "edu", label: "学历", locked: false },
   { key: "pay", label: "薪酬与社保", locked: true },
   { key: "id", label: "证件与银行", locked: true },
@@ -28,8 +28,8 @@ export const REQUIRED_FIELDS = [
   { key: "department", label: "部门", tab: "job" },
   { key: "designation", label: "职位", tab: "job" },
   { key: "reports_to", label: "直属主管", tab: "job" },
-  { key: "employment_type", label: "演示员工116类型", tab: "job" },
-  { key: "labour_contract_start_date", label: "劳动演示员工116开始日期", tab: "job" },
+  { key: "employment_type", label: "合同类型", tab: "job" },
+  { key: "labour_contract_start_date", label: "劳动合同开始日期", tab: "job" },
   { key: "rd_personnel_type", label: "研发人员类型", tab: "job" },
   { key: "education_level_cn", label: "最高学历", tab: "edu" },
   { key: "graduation_school", label: "毕业院校", tab: "edu" },
@@ -80,8 +80,8 @@ function monthDay(value) {
 
 const isBlank = (value) => value === null || value === undefined || String(value).trim() === "";
 
-// ---------- 在职 / 演示员工166 ----------
-// 与服务端 personnel_entry._employment_status 一致：演示员工166日当天仍在职，第二天起演示员工166；status 为 Left 也算演示员工166。
+// ---------- 在职 / 离职 ----------
+// 与服务端 personnel_entry._employment_status 一致：离职日当天仍在职，第二天起离职；status 为 Left 也算离职。
 export function isLeft(row, today) {
   if (String(row?.status || "") === "Left") return true;
   const relieving = row?.relieving_date;
@@ -103,7 +103,7 @@ export function defaultRdType(group) {
   return group === RD_GROUP ? "全时研发" : "非研发";
 }
 
-// 司龄：入职日到今天（已演示员工166算到演示员工166日），"3 年 7 个月" / "7 个月" / "12 天" / "今天入职"
+// 司龄：入职日到今天（已离职算到离职日），"3 年 7 个月" / "7 个月" / "12 天" / "今天入职"
 export function seniority(row, today) {
   const start = dayNumber(row?.date_of_joining);
   if (start === null) return "";
@@ -111,7 +111,7 @@ export function seniority(row, today) {
   if (dayNumber(endDate) === null) return "";
   const gap = dayNumber(endDate) - start;
   if (gap < 0) return "尚未入职";
-  if (gap === 0) return isLeft(row, today) ? "当天演示员工166" : "今天入职";
+  if (gap === 0) return isLeft(row, today) ? "当天离职" : "今天入职";
   const a = ISO_DATE.exec(row.date_of_joining);
   const b = ISO_DATE.exec(endDate);
   let months = (Number(b[1]) - Number(a[1])) * 12 + (Number(b[2]) - Number(a[2]));
@@ -151,25 +151,25 @@ export function missingSummary(missing, limit = 3) {
 // ---------- 提醒 ----------
 const REMINDER_RANK = { left: 0, leaving: 1, probation: 2, contract: 3, rdtype: 4, missing: 5 };
 
-// 返回按优先级排好的提醒：已演示员工166 > 即将演示员工166 > 演示员工173期到期 > 演示员工116到期 > 缺资料。
+// 返回按优先级排好的提醒：已离职 > 即将离职 > 试用期到期 > 合同到期 > 缺资料。
 // days：距今天数（到期类提醒用，越小越紧急）。
 // rdGap：在职、属于研发部门、但研发人员类型没设置——他不会出现在研发工时填报里。
 export function reminders(row, today, { sensitiveHidden = false, missingCount, rdGap = false } = {}) {
   const list = [];
   if (isLeft(row, today)) {
     const day = monthDay(row?.relieving_date);
-    list.push({ key: "left", text: day ? `已演示员工166 ${day}` : "已演示员工166", tone: "", days: null });
+    list.push({ key: "left", text: day ? `已离职 ${day}` : "已离职", tone: "", days: null });
     return list;
   }
   const leaveGap = row?.relieving_date ? daysBetween(today, row.relieving_date) : null;
   if (leaveGap !== null && leaveGap >= 0) {
-    list.push({ key: "leaving", text: `${monthDay(row.relieving_date)} 演示员工166`, tone: "warn", days: leaveGap });
+    list.push({ key: "leaving", text: `${monthDay(row.relieving_date)} 离职`, tone: "warn", days: leaveGap });
   }
   const probationGap = row?.probation_end_date ? daysBetween(today, row.probation_end_date) : null;
   if (probationGap !== null && probationGap >= 0 && probationGap <= EXPIRY_WINDOW_DAYS) {
-    list.push({ key: "probation", text: `演示员工173期 ${monthDay(row.probation_end_date)} 到期`, tone: probationGap <= 7 ? "bad" : "warn", days: probationGap });
+    list.push({ key: "probation", text: `试用期 ${monthDay(row.probation_end_date)} 到期`, tone: probationGap <= 7 ? "bad" : "warn", days: probationGap });
   }
-  // 第二次演示员工116到期日晚于第一次的，第一次视为已续签，不再提醒
+  // 第二次合同到期日晚于第一次的，第一次视为已续签，不再提醒
   const first = row?.first_contract_end_date || "";
   const second = row?.second_contract_end_date || "";
   const firstSuperseded = first && second && (daysBetween(first, second) ?? 0) > 0;
@@ -178,7 +178,7 @@ export function reminders(row, today, { sensitiveHidden = false, missingCount, r
     .filter((item) => item.gap !== null && item.gap >= 0 && item.gap <= EXPIRY_WINDOW_DAYS)
     .sort((a, b) => a.gap - b.gap);
   if (ends.length) {
-    list.push({ key: "contract", text: `演示员工116 ${monthDay(ends[0].date)} 到期`, tone: ends[0].gap <= 7 ? "bad" : "warn", days: ends[0].gap });
+    list.push({ key: "contract", text: `合同 ${monthDay(ends[0].date)} 到期`, tone: ends[0].gap <= 7 ? "bad" : "warn", days: ends[0].gap });
   }
   if (rdGap) list.push({ key: "rdtype", text: "研发类型未设置，不在工时填报里", tone: "warn", days: null });
   const missing = missingCount ?? completeness(row, { sensitiveHidden }).missing.length;
@@ -354,7 +354,7 @@ export function departmentGroupMap(deptMeta) {
 }
 
 // deptMeta：get_dept_options 的结果，用来知道部门属于哪个分组；人数按当前列表数据现算，
-// 这样「在职 / 已演示员工166」切换、公司切换后数字都对得上。
+// 这样「在职 / 已离职」切换、公司切换后数字都对得上。
 export function departmentGroups(items, deptMeta, { company = "", status = "active", order = DEPARTMENT_GROUP_ORDER } = {}) {
   const groupOf = new Map();
   const position = new Map();
@@ -457,17 +457,17 @@ export function supervisorLabel(row, nameById) {
 
 // ---------- 从地址读筛选 ----------
 // 看板链接 /personnel?status=active&reminder=expiring 这类地址与页面筛选之间的转换（纯函数，页面负责绑定）。
-//   status=active|left      在职 / 已演示员工166（缺省 active）
-//   reminder=expiring       60 天内到期的演示员工173期 / 演示员工116（= reminders 里的 probation / contract，不是宽泛的「有提醒」）
-//   reminder=probation|contract  只看演示员工173期 / 只看演示员工116到期（看板的“演示员工173期到期”“演示员工116到期”提醒，决定 2026-10-13）
+//   status=active|left      在职 / 已离职（缺省 active）
+//   reminder=expiring       60 天内到期的试用期 / 合同（= reminders 里的 probation / contract，不是宽泛的「有提醒」）
+//   reminder=probation|contract  只看试用期 / 只看合同到期（看板的“试用期到期”“合同到期”提醒，决定 2026-10-13）
 //   rd=none|<研发类型>      none 表示没设研发类型
 //   group=<分组名>          部门分组，如 研发（见 departmentGroupMap）
 //   archive=待完善|待确认|已归档
 //   joined=month            本月入职
-//   left=month              本月演示员工166（演示员工166日在本月，和 status=left 一起用）
+//   left=month              本月离职（离职日在本月，和 status=left 一起用）
 //   dept=<部门>             部门展示名
 export const PERSONNEL_QUERY_KEYS = ["status", "reminder", "rd", "group", "archive", "joined", "left", "dept"];
-// reminder 认的值：60 天内到期（演示员工103都算）、只看演示员工173期、只看演示员工116。
+// reminder 认的值：60 天内到期（两样都算）、只看试用期、只看合同。
 export const REMINDER_KINDS = ["expiring", "probation", "contract"];
 
 function queryValue(query, key) {
@@ -492,7 +492,7 @@ export function parsePersonnelQuery(query) {
   };
 }
 
-// 筛选状态 -> 地址参数：只写非缺省值（在职是缺省，所以只有看「已演示员工166」才写 status），清空筛选就回到无参数。
+// 筛选状态 -> 地址参数：只写非缺省值（在职是缺省，所以只有看「已离职」才写 status），清空筛选就回到无参数。
 export function personnelQueryOf(filters = {}) {
   const query = {};
   if (filters.status === "left") query.status = "left";

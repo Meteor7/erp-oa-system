@@ -466,7 +466,7 @@ onBeforeUnmount(() => {
             <div class="f"><label>费用说明<b>{{ star('expense_description') }}</b></label><input v-model="edit.expense_description" :readonly="!editable" /><div class="h">写清楚这笔钱花在什么上，审批人会看到</div></div>
           </div>
 
-          <h4>补充附件 <span class="muted">选填 · 行程单、付款凭证等，最多 10 个；审批人和演示员工110会和发票一起看到</span></h4>
+          <h4>补充附件 <span class="muted">选填 · 行程单、付款凭证等，最多 10 个；审批人和出纳会和发票一起看到</span></h4>
           <div class="attach-list">
             <span v-for="file in attachments" :key="file.name" class="attach-chip">
               <button type="button" class="link" :title="file.original_filename" @click="previewAttachment = file">{{ file.original_filename }}</button>

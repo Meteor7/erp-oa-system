@@ -249,14 +249,14 @@ def test_morning_and_afternoon_are_separate_slots_across_requests():
     # 上午 + 下午：可以，哪张先申请都行
     assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(5), morning) is None
     assert hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(3), afternoon) is None
-    # 全天和这天任何已有的请假、调休冲突；已有全天时上午、下午也演示员工177行
+    # 全天和这天任何已有的请假、调休冲突；已有全天时上午、下午也都不行
     for others in (morning, afternoon):
         assert "合计不能超过 8 小时" in hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(8), others)
     full = [att_request("OA-3", hr.REQUEST_LEAVE, "已完成", [(day, 8)])]
     assert "上午已被占用" in hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(3), full)
     assert "下午已被占用" in hr.find_day_conflict(hr.REQUEST_COMP_TIME, wanted(5), full)
     assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(8), full)
-    # 上午被请假占了、下午被调休占了：这天满了，再申请什么演示员工177行
+    # 上午被请假占了、下午被调休占了：这天满了，再申请什么都不行
     both = morning + afternoon
     for hours in (3, 5, 8):
         assert hr.find_day_conflict(hr.REQUEST_LEAVE, wanted(hours), both)
@@ -397,7 +397,7 @@ def test_day_limits_flag_the_taken_half_of_the_day():
     assert both["max_hours"] == 0 and both["am_taken"] and both["pm_taken"] and both["conflict"]["request"] == "B"
     full = limit(att_request("A", hr.REQUEST_LEAVE, "已完成", [(day, 8)]))
     assert full["max_hours"] == 0 and full["am_taken"] and full["pm_taken"] and "请假申请 A（已通过）" in full["conflict"]["text"]
-    # 历史上的 4 小时：还剩 4 小时，上午下午演示员工177算被占（表单只让再加 3 小时的上午）
+    # 历史上的 4 小时：还剩 4 小时，上午下午都不算被占（表单只让再加 3 小时的上午）
     assert limit(att_request("OLD", hr.REQUEST_LEAVE, "已完成", [(day, 4)])) == {
         "max_hours": 4.0, "am_taken": False, "pm_taken": False, "conflict": None}
     # 两个旧半天加起来 8 小时，满了

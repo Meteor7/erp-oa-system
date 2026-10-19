@@ -55,7 +55,7 @@
 
 /* ------------------------------------------------------------ 指标卡 */
 .db-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-/* 2026-10-13 排版：列数按实际张数（lib/dashboardLayout.js kpiColumns）：1–4 演示员工128行放下，5–6 演示员工129列，7 张以上四列 */
+/* 2026-10-13 排版：列数按实际张数（lib/dashboardLayout.js kpiColumns）：1–4 南通工厂8行放下，5–6 南通工厂9列，7 张以上四列 */
 .db-kpis.is-c1 { grid-template-columns: minmax(0, 1fr); }
 .db-kpis.is-c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .db-kpis.is-c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }

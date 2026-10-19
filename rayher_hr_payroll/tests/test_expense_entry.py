@@ -280,7 +280,7 @@ def test_save_expense_refuses_when_month_has_a_submitted_allocation(monkeypatch)
     with pytest.raises(RuleError, match=FINALIZED_MESSAGE):
         _save_one_row(mod)
 
-    # 被拒绝时什么演示员工177动：不建新科目、不取消导入单或分摊单、不新建导入单、不提交。
+    # 被拒绝时什么都不动：不建新科目、不取消导入单或分摊单、不新建导入单、不提交。
     assert captured["ensure_paths"] == []
     assert captured["get_doc"] == []
     assert captured["canceled"] == []

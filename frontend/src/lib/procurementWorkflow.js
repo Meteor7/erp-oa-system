@@ -138,7 +138,7 @@ const lifecycleReady = (request) => (
 );
 export function canRecordArrival(request, documentTypes) {
   return lifecycleReady(request)
-    && ["演示员工116待登记", "演示员工116已生效", "付款计划已生成", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"].includes(request?.business_status)
+    && ["合同待登记", "合同已生效", "付款计划已生成", "采购执行中", "待到货", "部分到货", "预付款逾期", "催办中", "换货中"].includes(request?.business_status)
     && hasAny(documentTypes || [], ["送货单", "收料单", "入库单"]);
 }
 

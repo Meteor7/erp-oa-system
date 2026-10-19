@@ -1,7 +1,7 @@
 <script setup>
 // 新建出差申请（也用来继续填写草稿、修改被退回的申请）：单独一页，分三步：申请什么 → 去哪、哪几天 → 事由。
 // 出差只批"该不该去"，没有小时和额度；日期在月历上点出发日和返回日（周末也能选），天数按出发、返回日期含当天算。
-// 提交后的审批路线（直属主管 → 演示员工113经理）取自服务端；出差途中的费用在报销、付款里直接关联这张申请。
+// 提交后的审批路线（直属主管 → 副总经理）取自服务端；出差途中的费用在报销、付款里直接关联这张申请。
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { REQUEST_TRIP, TYPES, api, createLatest, isoDate, labelOfType, stepRole } from '../../lib/attendanceView.js';
 import { monthOf, pickRange, shiftMonth } from '../../lib/attendanceFlow.js';

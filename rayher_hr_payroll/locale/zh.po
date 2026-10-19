@@ -736,7 +736,7 @@ msgid "本期已存在未取消的费用导入单（{0}）；每个会计期间�
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:42
-msgid "本期已有已提交的分摊单，如需重算请联系系统演示员工170先撤销。"
+msgid "本期已有已提交的分摊单，如需重算请联系系统管理员先撤销。"
 msgstr ""
 
 #: rayher_hr_payroll/api/allocation_entry.py:34
@@ -869,11 +869,11 @@ msgid "该员工本期该项目存在手工工时单 {0}，请在后台处理后
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:27
-msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统演示员工170）。"
+msgid "该宿舍代扣已导出财务，不可修改（如需更正请联系系统管理员）。"
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/accommodation_deduction/accommodation_deduction.py:33
-msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统演示员工170）。"
+msgid "该宿舍代扣已导出财务，不可删除（如需更正请联系系统管理员）。"
 msgstr ""
 
 #: rayher_hr_payroll/rayher_hr_payroll/doctype/rd_cost_allocation/rd_cost_allocation.py:66
@@ -1011,7 +1011,7 @@ msgstr "信息"
 
 #: rayher_hr_payroll/core_report_label_supplements.py:25
 msgid "Employee Exits"
-msgstr "员工演示员工166"
+msgstr "员工离职"
 
 #: rayher_hr_payroll/core_report_label_supplements.py:26
 msgid "Employees Working on a Holiday"

@@ -109,9 +109,9 @@ test("missingSummary names the first three items", () => {
 test("reminders: probation and contract inside 60 days, soonest first, urgent when within a week", () => {
   const list = reminders(full({ probation_end_date: "2026-10-31", first_contract_end_date: "2026-12-06" }), TODAY);
   assert.deepEqual(list.map((item) => item.key), ["probation", "contract"]);
-  assert.equal(list[0].text, "演示员工173期 10-31 到期");
+  assert.equal(list[0].text, "试用期 10-31 到期");
   assert.equal(list[0].tone, "warn");
-  assert.equal(list[1].text, "演示员工116 12-06 到期");
+  assert.equal(list[1].text, "合同 12-06 到期");
   const urgent = reminders(full({ probation_end_date: "2026-10-12" }), TODAY);
   assert.equal(urgent[0].tone, "bad");
 });
@@ -123,13 +123,13 @@ test("reminders ignore dates past or beyond 60 days, and a renewed first contrac
   const renewed = reminders(full({ first_contract_end_date: "2026-11-01", second_contract_end_date: "2029-11-01" }), TODAY);
   assert.deepEqual(renewed, []);
   const second = reminders(full({ first_contract_end_date: "2023-11-01", second_contract_end_date: "2026-11-15" }), TODAY);
-  assert.equal(second[0].text, "演示员工116 11-15 到期");
+  assert.equal(second[0].text, "合同 11-15 到期");
 });
 
 test("reminders: leaving soon, left, and missing data", () => {
-  assert.deepEqual(reminders(full({ relieving_date: "2026-10-31" }), TODAY).map((item) => item.text), ["10-31 演示员工166"]);
+  assert.deepEqual(reminders(full({ relieving_date: "2026-10-31" }), TODAY).map((item) => item.text), ["10-31 离职"]);
   const left = reminders(full({ relieving_date: "2026-06-17", probation_end_date: "2026-10-31", cell_number: "" }), TODAY);
-  assert.deepEqual(left.map((item) => item.text), ["已演示员工166 06-17"]);
+  assert.deepEqual(left.map((item) => item.text), ["已离职 06-17"]);
   const missing = reminders(full({ cell_number: "", employee_number: "" }), TODAY);
   assert.deepEqual(missing.map((item) => item.text), ["缺 2 项资料"]);
 });
@@ -147,8 +147,8 @@ test("archive tones and avatar text", () => {
   assert.equal(archiveTone("已归档"), "ok");
   assert.equal(archiveTone("待确认"), "warn");
   assert.equal(archiveTone("待完善"), "");
-  assert.equal(avatarText("演示员工186"), "春林");
-  assert.equal(avatarText("演示员工108"), "演示员工108");
+  assert.equal(avatarText("演示员工186"), "86");
+  assert.equal(avatarText("演示员工108"), "08");
   assert.equal(avatarText("Chunlin Huang"), "CH");
   assert.equal(avatarText(""), "?");
 });
@@ -213,7 +213,7 @@ test("sortEmployees: default keeps order, others are stable", () => {
   assert.deepEqual(ids("joined_desc"), ["E1", "E3", "E4", "E5", "E2"]);
   assert.deepEqual(ids("joined_asc"), ["E2", "E5", "E4", "E3", "E1"]);
   assert.deepEqual(ids("number"), ["E4", "E2", "E5", "E1", "E3"]);
-  // 提醒优先：即将演示员工166 < 演示员工173期 < 演示员工116 < 缺资料 < 无提醒（一周内到期的排在所有提醒之前）
+  // 提醒优先：即将离职 < 试用期 < 合同 < 缺资料 < 无提醒（一周内到期的排在所有提醒之前）
   assert.deepEqual(ids("alert").slice(0, 4), ["E5", "E2", "E3", "E1"]);
   assert.equal(items.length, 5);
 });
@@ -269,7 +269,7 @@ test("an active person in an R&D department without an R&D type is flagged, othe
   assert.equal(flagged.rdGap, true);
   assert.equal(flagged.group, "研发");
   assert.ok(flagged.reminders.some((r) => r.key === "rdtype" && r.tone === "warn"));
-  // 填了类型、非研发部门、已演示员工166、没有分组信息：演示员工177提醒
+  // 填了类型、非研发部门、已离职、没有分组信息：都不提醒
   assert.equal(decorateEmployee(full({ rd_personnel_type: "全时研发" }), ctx).rdGap, false);
   assert.equal(decorateEmployee(full({ department: "财务部 - RAY", rd_personnel_type: "" }), ctx).rdGap, false);
   assert.equal(decorateEmployee(full({ department: "研发AI部 - RAY", rd_personnel_type: "", relieving_date: "2026-09-01" }), ctx).rdGap, false);
@@ -311,7 +311,7 @@ test("departmentGroups also reports how many people of each group fill in the R&
 });
 
 test("maskValue hides sensitive values and leaves blanks alone", () => {
-  assert.equal(maskValue("id_card_number_cn", "110101199001010050"), "440*************34");
+  assert.equal(maskValue("id_card_number_cn", "110101199001010050"), "110*************50");
   assert.equal(maskValue("bank_ac_no", "6222000011112222"), "•••• •••• ••••");
   assert.equal(maskValue("social_insurance_number", "SI123"), "•••• ••••");
   assert.equal(maskValue("housing_fund_number", "HF123"), "•••• ••••");

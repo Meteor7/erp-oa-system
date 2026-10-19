@@ -28,7 +28,7 @@ EMPLOYEE_FIELDS = [
     "contract_renewal_status", "second_contract_period_years", "second_contract_end_date",
     "degree_cn", "education_completion_type", "household_registration", "id_type_cn",
     "social_insurance_number", "housing_fund_number",
-    # 员工信息页的在职/演示员工166判断和抽屉底部「最近修改」用（不含敏感信息）。
+    # 员工信息页的在职/离职判断和抽屉底部「最近修改」用（不含敏感信息）。
     "status", "modified", "modified_by",
 ]
 
@@ -39,9 +39,9 @@ def _employment_status(relieving_date):
     try:
         effective = date.fromisoformat(str(relieving_date))
     except ValueError:
-        frappe.throw("演示员工166日期格式无效。")
+        frappe.throw("离职日期格式无效。")
     current = date.fromisoformat(str(frappe.utils.today()))
-    # 决定 D3（2026-09-29）：演示员工166日当天仍在职，第二天起演示员工166。
+    # 决定 D3（2026-09-29）：离职日当天仍在职，第二天起离职。
     return "Left" if effective < current else "Active"
 
 
@@ -192,8 +192,8 @@ def _require_unique_active_name(employee_name, exclude=None):
 
 def _refuse_leaving_approver(name):
     if frappe.db.get_value("OA Approval Role Assignment", {"employee": name, "enabled": 1}, "role_label"):
-        # 岗位任职人立即演示员工166会让这个岗位的审批全部卡住，先交接（修复 2026-09-29，模块 7）。
-        frappe.throw(frappe._("此人还担任审批岗位，请先在岗位任命中完成交接，再办理演示员工166。"))
+        # 岗位任职人立即离职会让这个岗位的审批全部卡住，先交接（修复 2026-09-29，模块 7）。
+        frappe.throw(frappe._("此人还担任审批岗位，请先在岗位任命中完成交接，再办理离职。"))
 
 
 # ---------- 保存员工：整理字段 -> 写入。save_employee 和 Excel 批量导入共用这三步 ----------
@@ -370,22 +370,22 @@ IMPORT_COLUMNS = (
     ("cell_number", "联系电话", "text", False),
     ("household_registration", "户口信息", "household", False),
     ("date_of_joining", "入职日期", "date", False),
-    ("relieving_date", "演示员工166日期", "date", False),
+    ("relieving_date", "离职日期", "date", False),
     ("department", "部门", "department", False),
     ("designation", "职位", "designation", False),
     ("reports_to", "直属主管", "supervisor", False),
-    ("employment_type", "演示员工116类型", "employment_type", False),
+    ("employment_type", "合同类型", "employment_type", False),
     ("rd_personnel_type", "研发人员类型", "rd_type", False),
     ("expense_account_category", "费用科目", "expense", False),
     ("archive_status", "归档状态", "archive", False),
-    ("labour_contract_start_date", "劳动演示员工116开始日期", "date", False),
-    ("probation_months", "演示员工173期（月）", "int", False),
-    ("probation_end_date", "演示员工173期到期日", "date", False),
-    ("first_contract_period_years", "第一次演示员工116期限（年）", "float", False),
-    ("first_contract_end_date", "第一次劳动演示员工116到期日", "date", False),
-    ("contract_renewal_status", "劳动演示员工116续签情况", "text", False),
-    ("second_contract_period_years", "第二次演示员工116期限（年）", "float", False),
-    ("second_contract_end_date", "第二次劳动演示员工116到期日", "date", False),
+    ("labour_contract_start_date", "劳动合同开始日期", "date", False),
+    ("probation_months", "试用期（月）", "int", False),
+    ("probation_end_date", "试用期到期日", "date", False),
+    ("first_contract_period_years", "第一次合同期限（年）", "float", False),
+    ("first_contract_end_date", "第一次劳动合同到期日", "date", False),
+    ("contract_renewal_status", "劳动合同续签情况", "text", False),
+    ("second_contract_period_years", "第二次合同期限（年）", "float", False),
+    ("second_contract_end_date", "第二次劳动合同到期日", "date", False),
     ("first_education_level", "第一学历", "text", False),
     ("first_education_school", "第一学历学校", "text", False),
     ("first_education_major", "第一学历专业", "text", False),
@@ -573,7 +573,7 @@ class _ImportLookup:
             self._employment_types = {str(x).lower(): x for x in frappe.get_all("Employment Type", pluck="name")}
         hit = self._employment_types.get(text.lower())
         if not hit:
-            raise _RowProblem("演示员工116类型“%s”不在演示员工116类型列表里。" % text)
+            raise _RowProblem("合同类型“%s”不在合同类型列表里。" % text)
         return hit
 
 
@@ -666,7 +666,7 @@ def _date_problems(final, today):
     if birth and joining and str(birth) >= str(joining):
         problems.append("入职日期必须晚于出生日期。")
     if joining and relieving and str(relieving) < str(joining):
-        problems.append("演示员工166日期不能早于入职日期。")
+        problems.append("离职日期不能早于入职日期。")
     return problems
 
 

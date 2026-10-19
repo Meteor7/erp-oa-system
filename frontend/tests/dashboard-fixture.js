@@ -4,12 +4,12 @@ const kpi = (key, label, value, extra = {}) => ({ key, label, value, unit: '', s
 
 export const KPIS = [
   kpi('cost.total', '本月费用合计', '128.6', { unit: '万', sub: '较上月 +3.2%', tone: '', target: t('cost.summary', { period: '2026-10' }), hint: '研发分摊 + 采购 + 报销', preview: true }),
-  kpi('pay.unpaid', '待付款', '42.3', { unit: '万', sub: '17 笔，其中加急 2 笔', tone: 'hot', target: t('payment.unpaid'), hint: '待付款 = 已审批、只差演示员工110付款的单据' }),
+  kpi('pay.unpaid', '待付款', '42.3', { unit: '万', sub: '17 笔，其中加急 2 笔', tone: 'hot', target: t('payment.unpaid'), hint: '待付款 = 已审批、只差出纳付款的单据' }),
   kpi('approval.stuck', '审批卡点', '5', { unit: '张', sub: '最久已等 9 天', tone: 'bad', target: t('claim.stuck') }),
   kpi('hr.active', '在职', '86', { unit: '人', sub: '研发 54 · 其他 32', tone: 'info', target: t('personnel.list', { status: 'active' }) }),
   kpi('ts.rate', '工时填报率', '92%', { sub: '研发 54 人，填工时 58 人', tone: 'ok', target: t('timesheet.board', { status: 'open' }), hint: '研发 N = 研发类型为全时/非全时/辅助的在职人数；填工时 M = 工时填报名单人数' }),
   kpi('alloc.status', '研发分摊', '预览', { sub: '未判定 ¥ 2.1 万', tone: 'warn', target: t('allocation', { period: '2026-10' }), preview: true }),
-  kpi('hr.expiring', '60 天内到期', '4', { unit: '人', sub: '演示员工173期 3 · 演示员工116 1', tone: 'warn', target: t('personnel.expiring') }),
+  kpi('hr.expiring', '60 天内到期', '4', { unit: '人', sub: '试用期 3 · 合同 1', tone: 'warn', target: t('personnel.expiring') }),
   kpi('proc.po_transit', 'PO 在途', '12', { unit: '张', target: t('procpay.work', { status: '待到货' }) }),
   // 没有跳转：只显示
   kpi('plain.noTarget', '只看数字', '7', { unit: '项' }),
@@ -28,7 +28,7 @@ export const ALERTS = [
 ];
 
 export const TODOS = [
-  { kind: '报销单', title: '差旅报销 · 演示员工129', sub: '研发软件部 · ¥ 3,280 · 已等待 5 天', btn: '去审批', tone: 'info', target: t('claim.detail', { request: 'OA-18291' }) },
+  { kind: '报销单', title: '差旅报销 · 南通工厂9', sub: '研发软件部 · ¥ 3,280 · 已等待 5 天', btn: '去审批', tone: 'info', target: t('claim.detail', { request: 'OA-18291' }) },
   { kind: '请假', title: '年假 2 天 · 演示员工146', sub: '研发算法部 · 今天提交', btn: '去审批', tone: 'info', target: t('attendance.detail', { request: 'OA-18300' }) },
   { kind: '价格审批', title: 'PA-0042 光学镜片', sub: '终审 · 已等待 2 天', btn: '去处理', tone: 'warn', target: t('price.approvals', { approval: 'PA-0042' }) },
 ];
@@ -65,12 +65,12 @@ export const STACK = {
 };
 
 export const LIST = {
-  key: 'block.expiring_list', type: 'list', title: '60 天内到期', sub: '演示员工173期 / 演示员工116', more: '全部', target: t('personnel.expiring'), hint: '', error: null,
+  key: 'block.expiring_list', type: 'list', title: '60 天内到期', sub: '试用期 / 合同', more: '全部', target: t('personnel.expiring'), hint: '', error: null,
   rows: [
-    { label: '演示员工157', sub: '演示员工173期', value: '10-15', tone: 'bad', target: t('personnel.expiring') },
-    { label: '演示员工175', sub: '演示员工116', value: '11-02', tone: 'warn', target: null },
-    { label: '孙七', sub: '演示员工173期', value: '11-20', tone: 'ok', target: t('no.such.target') },
-    { label: '周八', sub: '演示员工116', value: '12-01', tone: 'info', target: t('cost.summary') },
+    { label: '演示员工157', sub: '试用期', value: '10-15', tone: 'bad', target: t('personnel.expiring') },
+    { label: '演示员工175', sub: '合同', value: '11-02', tone: 'warn', target: null },
+    { label: '孙七', sub: '试用期', value: '11-20', tone: 'ok', target: t('no.such.target') },
+    { label: '周八', sub: '合同', value: '12-01', tone: 'info', target: t('cost.summary') },
   ],
 };
 
@@ -97,7 +97,7 @@ export const HOME_LEADER = {
 
 // 只有一个页签的岗位；待办为空；提醒块也在，但这会儿没有触发。
 export const HOME_SINGLE = {
-  role: { key: 'employee', label: '员工', person: '演示员工129', note: '我的待办、假期、申请、报销和工时。' },
+  role: { key: 'employee', label: '员工', person: '南通工厂9', note: '我的待办、假期、申请、报销和工时。' },
   period: '2026-10',
   tabs: [{ key: 'overview', label: '总览' }],
   pages: { overview: page({ kpis: KPIS.slice(0, 2), has_todos: true, has_alerts: true, blocks: [BARS] }) },

@@ -12,18 +12,18 @@ const deptMeta = [
   { department_name: "销售部 - RAY", group_name: "运营" },
 ];
 const rows = [
-  // 研发一部：演示员工173期 5 天后到期，本月入职，全时研发
-  { name: "E1", employee_name: "演示员工129", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2026-10-02", probation_end_date: "2026-10-14", rd_personnel_type: "全时研发", archive_status: "待完善" },
+  // 研发一部：试用期 5 天后到期，本月入职，全时研发
+  { name: "E1", employee_name: "南通工厂9", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2026-10-02", probation_end_date: "2026-10-14", rd_personnel_type: "全时研发", archive_status: "待完善" },
   // 研发一部：研发类型没设（缺口），档案待确认
   { name: "E2", employee_name: "演示员工146", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2025-01-01", rd_personnel_type: "", archive_status: "待确认" },
-  // 销售部：演示员工116 30 天后到期
+  // 销售部：合同 30 天后到期
   { name: "E3", employee_name: "演示员工157", company: "QIHENG Demo", department: "销售部 - RAY", status: "Active", date_of_joining: "2024-05-01", first_contract_end_date: "2026-11-08", rd_personnel_type: "非研发", archive_status: "已归档" },
-  // 研发一部：已演示员工166（演示员工166日早于今天），不该出现在到期提醒里
+  // 研发一部：已离职（离职日早于今天），不该出现在到期提醒里
   { name: "E4", employee_name: "演示员工175", company: "QIHENG Demo", department: "研发一部 - RAY", status: "Active", date_of_joining: "2023-01-01", relieving_date: "2026-09-01", probation_end_date: "2026-10-12", rd_personnel_type: "全时研发", archive_status: "已归档" },
   // 部门不在分组表里：算「其他」
   { name: "E5", employee_name: "演示员工179", company: "QIHENG Demo", department: "后勤部 - RAY", status: "Active", date_of_joining: "2022-01-01", rd_personnel_type: "非研发", archive_status: "已归档" },
   // 没有部门
-  { name: "E6", employee_name: "演示员工124", company: "QIHENG Demo", department: "", status: "Active", date_of_joining: "2022-02-01", rd_personnel_type: "", archive_status: "待完善" },
+  { name: "E6", employee_name: "南通工厂4", company: "QIHENG Demo", department: "", status: "Active", date_of_joining: "2022-02-01", rd_personnel_type: "", archive_status: "待完善" },
 ];
 const items = decorateEmployees(rows, { today: TODAY, groupOf: departmentGroupMap(deptMeta) });
 const names = (list) => list.map((item) => item.row.employee_name);
@@ -64,8 +64,8 @@ test("address -> state -> address is stable", () => {
 
 test("reminder=expiring is the 60-day probation / contract reminder, not 'has any reminder'", () => {
   const expiring = filterByUrlExtras(items, { reminder: "expiring" }, TODAY);
-  assert.deepEqual(names(expiring), ["演示员工129", "演示员工157"]);
-  // 与指标卡「60 天内演示员工116或演示员工173期到期」同口径：在职、probation 或 contract 提醒
+  assert.deepEqual(names(expiring), ["南通工厂9", "演示员工157"]);
+  // 与指标卡「60 天内合同或试用期到期」同口径：在职、probation 或 contract 提醒
   assert.equal(kpiCounts(items, TODAY).expiring, expiring.length);
   // 「只看有提醒」（alertOnly）更宽：缺资料、研发类型缺口也算
   const alerting = filterEmployees(items, { alertOnly: true });
@@ -73,14 +73,14 @@ test("reminder=expiring is the 60-day probation / contract reminder, not 'has an
 });
 
 test("group=研发 filters by department group; unknown departments are 其他; no department is in no group", () => {
-  assert.deepEqual(names(filterByUrlExtras(items, { group: "研发" }, TODAY)), ["演示员工129", "演示员工146", "演示员工175"]);
+  assert.deepEqual(names(filterByUrlExtras(items, { group: "研发" }, TODAY)), ["南通工厂9", "演示员工146", "演示员工175"]);
   assert.deepEqual(names(filterByUrlExtras(items, { group: "运营" }, TODAY)), ["演示员工157"]);
   assert.deepEqual(names(filterByUrlExtras(items, { group: "其他" }, TODAY)), ["演示员工179"]);
   assert.deepEqual(filterByUrlExtras(items, { group: "不存在的分组" }, TODAY), []);
 });
 
 test("joined=month keeps people who joined in the current month", () => {
-  assert.deepEqual(names(filterByUrlExtras(items, { joined: "month" }, TODAY)), ["演示员工129"]);
+  assert.deepEqual(names(filterByUrlExtras(items, { joined: "month" }, TODAY)), ["南通工厂9"]);
 });
 
 test("left=month with status=left keeps exactly the people who already left and whose leaving day is in this month", () => {
@@ -105,8 +105,8 @@ test("personnel.rd_gap target (active + no R&D type + group 研发) finds exactl
 
 test("filters combine; with none set everything passes through", () => {
   assert.equal(filterByUrlExtras(items, {}, TODAY), items);
-  assert.deepEqual(names(filterByUrlExtras(items, { group: "研发", reminder: "expiring" }, TODAY)), ["演示员工129"]);
-  assert.deepEqual(names(filterByUrlExtras(items, { group: "研发", joined: "month", reminder: "expiring" }, TODAY)), ["演示员工129"]);
+  assert.deepEqual(names(filterByUrlExtras(items, { group: "研发", reminder: "expiring" }, TODAY)), ["南通工厂9"]);
+  assert.deepEqual(names(filterByUrlExtras(items, { group: "研发", joined: "month", reminder: "expiring" }, TODAY)), ["南通工厂9"]);
   assert.deepEqual(filterByUrlExtras(items, { group: "运营", joined: "month" }, TODAY), []);
 });
 
@@ -167,8 +167,8 @@ test("the dashboard's personnel targets select the expected people", () => {
       TODAY,
     );
   };
-  assert.deepEqual(names(apply("personnel.expiring")), ["演示员工129", "演示员工157"]);
+  assert.deepEqual(names(apply("personnel.expiring")), ["南通工厂9", "演示员工157"]);
   assert.deepEqual(names(apply("personnel.rd_gap")), ["演示员工146"]);
-  assert.deepEqual(names(apply("personnel.file")), ["演示员工129", "演示员工124"]);
-  assert.deepEqual(names(apply("personnel.joined")), ["演示员工129"]);
+  assert.deepEqual(names(apply("personnel.file")), ["南通工厂9", "南通工厂4"]);
+  assert.deepEqual(names(apply("personnel.joined")), ["南通工厂9"]);
 });

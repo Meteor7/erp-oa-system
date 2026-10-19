@@ -1,8 +1,8 @@
 """财务、费用、付款和审批卡点的看板块（money）。
 
 数据都来自现有接口，口径不另起炉灶：
-- 费用：`overview_entry.get_cost_overview`（演示员工113、总经理岗位，或 Accounts User / System Manager）；
-  研发分摊：`allocation_entry.get_allocation`（Accounts User / System Manager；演示员工113、总经理岗位只读，含境外委托研发）。
+- 费用：`overview_entry.get_cost_overview`（副总、总经理岗位，或 Accounts User / System Manager）；
+  研发分摊：`allocation_entry.get_allocation`（Accounts User / System Manager；副总、总经理岗位只读，含境外委托研发）。
 - 付款：报销单 + 付款单用付款看板同一套查询和归集（`expense_board_entry._rows/_decorate` + `expense_boards.payment_board`），
   采购付款期次用 `procurement_chain.list_payment_work_items`（只在有 PO 查看权时）。付款看板的范围规则：
   财务、管理层看全公司，其他人不返回。
@@ -35,15 +35,15 @@ BOARD_ADMIN_USERS = {"Administrator", "admin@staff.example.invalid"}   # 同 exp
 FINANCE_ROLES = ("System Manager", "Accounts User")                   # 同 invoice_ocr.service.FINANCE_ROLES / RD_FINANCE_ROLES
 LABOR_ROLES = ("System Manager", "HR Manager", "HR User")
 LABOR_POSITIONS = ("vice_manager", "general_manager")
-LEADER_POSITIONS = ("vice_manager", "general_manager")   # 总经理、演示员工113经理：数字背后的页面都能只读打开（决定 2026-10-13）
+LEADER_POSITIONS = ("vice_manager", "general_manager")   # 总经理、副总经理：数字背后的页面都能只读打开（决定 2026-10-13）
 PAID_CLAIM_TYPES = ("费用付款申请", *boards.CLAIM_TYPES)    # 同 overview_entry.COST_REQUEST_TYPES
 
 # 付款审批的岗位（按报销/付款路线的先后排；采购付款路线的岗位也都在里面）。
 STEP_ROLES = (
-    ("finance_auditor", "演示员工110"), ("finance_accountant", "演示员工135"), ("finance_manager", "财务主管"),
-    ("vice_manager", "演示员工113经理"), ("general_manager", "总经理"),
+    ("finance_auditor", "出纳"), ("finance_accountant", "总账会计"), ("finance_manager", "财务主管"),
+    ("vice_manager", "副总经理"), ("general_manager", "总经理"),
 )
-STEP_ORDER = ("演示员工110", "直属主管", "演示员工135", "财务主管", "演示员工113经理", "总经理", "其他")
+STEP_ORDER = ("出纳", "直属主管", "总账会计", "财务主管", "副总经理", "总经理", "其他")
 
 ORANGE, BLUE, GREEN, RED, GRAY = "#E89A3C", "#4F6BDC", "#2F855A", "#D1453B", "#9AA0AA"
 
@@ -109,7 +109,7 @@ def _top_bars(pairs, limit, other_unit, tone_of=None):
 # ---------------------------------------------------------------- 权限
 # visible 必须等于背后接口的真实权限；这几个函数就是那些接口的判断，换成 ctx 的写法。
 def _can_cost(ctx):
-    """get_cost_overview：演示员工113、总经理岗位，或 Accounts User / System Manager。"""
+    """get_cost_overview：副总、总经理岗位，或 Accounts User / System Manager。"""
     return ctx.holds("vice_manager", "general_manager") or ctx.can(*FINANCE_ROLES)
 
 
@@ -119,12 +119,12 @@ def _can_alloc(ctx):
 
 
 def _can_alloc_read(ctx):
-    """读分摊数据（get_allocation / get_allocation_dashboard）：财务角色，或演示员工113、总经理岗位只读（allocation_entry._require_read_access）。"""
+    """读分摊数据（get_allocation / get_allocation_dashboard）：财务角色，或副总、总经理岗位只读（allocation_entry._require_read_access）。"""
     return ctx.can(*FINANCE_ROLES) or ctx.holds(*LEADER_POSITIONS)
 
 
 def _alloc_target(ctx):
-    """分摊数字点进去：财务去分摊页；演示员工113、总经理去研发费用汇总（只读，同一份分摊数据）。"""
+    """分摊数字点进去：财务去分摊页；副总、总经理去研发费用汇总（只读，同一份分摊数据）。"""
     if _can_alloc(ctx):
         return target("allocation", period=ctx.period)
     return target("cost.summary", period=ctx.period)
@@ -310,7 +310,7 @@ def _step_bucket(approvers, label, owners):
 
 
 def _step_buckets(ctx):
-    """审批中的单据 -> 当前审批节点归到哪个岗位：{单据号: "演示员工110" | "演示员工135" | … | "其他"}。
+    """审批中的单据 -> 当前审批节点归到哪个岗位：{单据号: "出纳" | "总账会计" | … | "其他"}。
 
     用 OA Approval Step.approvers（审批人账号）反查 `position_users`，岗位对不上的合并成「其他」。"""
     def load():
@@ -353,7 +353,7 @@ def _pay(ctx):
                 approving.append({"kind": row["request_type"], "name": row["name"], "request": row["name"], "po": "",
                                   "amount": float(row.get("amount") or 0), "waited": int(row["waited_days"]), "urgent": False,
                                   "bucket": buckets.get(row["name"], "其他"), "supplier": "", "stage": ""})
-        payables = []   # 采购付款里「演示员工116已生效、还没付清」的期次，给供应商排行用
+        payables = []   # 采购付款里「合同已生效、还没付清」的期次，给供应商排行用
         for item in ((purchase or {}).get("items") or []):
             status, request = item.get("work_status"), item.get("payment_request") or ""
             amount = float(item.get("amount") or 0)
@@ -366,7 +366,7 @@ def _pay(ctx):
                 unpaid.append(entry)
             elif status == "付款审批中":
                 approving.append(dict(entry, amount=amount))
-            if status not in ("已付款", "待演示员工116生效") and owed > 0:
+            if status not in ("已付款", "待合同生效") and owed > 0:
                 payables.append(entry)
         return {"unpaid": unpaid, "approving": approving, "payables": payables, "has_purchase": purchase is not None}
 
@@ -462,7 +462,7 @@ def _stuck(ctx):
                 started = acted.get(row["name"]) or submitted.get(row["name"]) or boards.as_date(row.get("modified"))
                 waited = max(0, (today - started).days) if started else 0
                 if waited > STUCK_DAYS:
-                    items.append({"type": "价格审批", "name": row["name"], "waited": waited, "step": "价格审批（演示员工113终审）"})
+                    items.append({"type": "价格审批", "name": row["name"], "waited": waited, "step": "价格审批（副总终审）"})
         return items
 
     return ctx.memo("money.stuck", load)
@@ -711,7 +711,7 @@ def cost_unknown(ctx):
 @provider("alloc.status", "kpi", visible=_can_alloc_read, title="研发分摊状态")
 def alloc_status(ctx):
     """三种状态（已定版 / 预览 / 未定版），和 cost.rd_pending 同一个 `_alloc_state`。
-    财务点进分摊页；演示员工113、总经理只读，点进研发费用汇总。"""
+    财务点进分摊页；副总、总经理只读，点进研发费用汇总。"""
     state = _alloc_state(ctx)
     to = _alloc_target(ctx)
     hint = "研发分摊本期的状态。" + _ALLOC_STATES + "未判定 = 还没判定资本化 / 费用化的金额。金额含境外委托研发，和点进去的页面一致。"
@@ -856,7 +856,7 @@ def _waiting(items):
     return [item for item in items if item["waited"] > STUCK_DAYS]
 
 
-# 等待时长分三段，全公司同一个口径：今天（0 天）/ 1–3 天 / 超过 3 天（> 3，不含）。付款看板的演示员工110待付款也是这三段。
+# 等待时长分三段，全公司同一个口径：今天（0 天）/ 1–3 天 / 超过 3 天（> 3，不含）。付款看板的出纳待付款也是这三段。
 WAIT_BUCKETS = (("今天", GRAY, lambda days: days <= 0), (f"1–{STUCK_DAYS} 天", ORANGE, lambda days: 0 < days <= STUCK_DAYS),
                 (f"超过 {STUCK_DAYS} 天", RED, lambda days: days > STUCK_DAYS))
 
@@ -888,7 +888,7 @@ def _unpaid_drill(ctx, key, title, items, note):
                  summary=f"共 {len(items)} 笔，合计 {_amt(sum(item['amount'] for item in items))}（{split}）", note=note)
 
 
-_UNPAID_NOTE = ("报销单、付款单状态「待办理」（只差演示员工110付款）+ 采购付款期次「待实际付款」（金额 = 期次金额 − 已付）；"
+_UNPAID_NOTE = ("报销单、付款单状态「待办理」（只差出纳付款）+ 采购付款期次「待实际付款」（金额 = 期次金额 − 已付）；"
                 "已等 = 从最近一次审批通过（没有就从提交）算起的日历天数，红色 = 超过 3 天。")
 
 
@@ -908,7 +908,7 @@ def pay_unpaid(ctx):
     # 报销/付款单和采购付款在两个页面里，付款看板没有采购付款：点进去是合在一起的清单（条数 = 卡片上的数字）
     return kpi("pay.unpaid", "待付款", number, unit, " · ".join(parts), "bad" if waiting else ("hot" if urgent else ""),
                to=drill_to("pay.unpaid", ctx) if items else None,
-               hint="待付款 = 报销单、付款单状态「待办理」（只差演示员工110付款）+ 采购付款期次「待实际付款」"
+               hint="待付款 = 报销单、付款单状态「待办理」（只差出纳付款）+ 采购付款期次「待实际付款」"
                     + ("" if data["has_purchase"] else "（你没有 PO 查看权，不含采购付款）") + "。当前状态，不随期间变化。点进去逐笔列出来。")
 
 
@@ -991,22 +991,22 @@ def drill_pay_paid(ctx):
                  summary=f"共 {len(docs)} 笔，合计 {_amt(sum(doc['amount'] for doc in docs))}", note=_PAID_HINT)
 
 
-@provider("pay.cashier_queue", "kpi", visible=_board_all, title="演示员工110待付款")
+@provider("pay.cashier_queue", "kpi", visible=_board_all, title="出纳待付款")
 def pay_cashier_queue(ctx):
     queue = [item for item in _pay(ctx)["unpaid"] if item["kind"] != "采购付款"]
     amount = sum(item["amount"] for item in queue)
     urgent = sum(1 for item in queue if item["urgent"])
     waiting = _waiting(queue)
     number, unit = money_wan(amount)
-    parts = [f"{len(queue)} 张" if queue else "演示员工110这一步没有待付款的"]
+    parts = [f"{len(queue)} 张" if queue else "出纳这一步没有待付款的"]
     if urgent:
         parts.append(f"加急 {urgent} 张")
     if waiting:
         parts.append(f"等待超过 {STUCK_DAYS} 天 {len(waiting)} 张")
-    return kpi("pay.cashier_queue", "演示员工110待付款", number, unit, " · ".join(parts), "bad" if waiting else ("hot" if urgent else ""),
-               to=target("board.payment", focus="cashier"),   # 直接滚到付款看板的「演示员工110待付款」那一块
-               hint="报销单、付款单走到最后一步「演示员工110确认付款」、还没付的（不含已付款等核验发票的付款单）。采购付款的最后一步是总经理，不在这里。"
-                    "和付款看板「演示员工110待付款」的张数、金额一样。")
+    return kpi("pay.cashier_queue", "出纳待付款", number, unit, " · ".join(parts), "bad" if waiting else ("hot" if urgent else ""),
+               to=target("board.payment", focus="cashier"),   # 直接滚到付款看板的「出纳待付款」那一块
+               hint="报销单、付款单走到最后一步「出纳确认付款」、还没付的（不含已付款等核验发票的付款单）。采购付款的最后一步是总经理，不在这里。"
+                    "和付款看板「出纳待付款」的张数、金额一样。")
 
 
 def _todo_waits(queue, keys):
@@ -1138,7 +1138,7 @@ def alert_pay_waiting(ctx):
         return None
     longest = max(item["waited"] for item in waiting)
     cashier = sum(1 for item in waiting if item["kind"] != "采购付款")
-    sub = f"最久已等 {longest} 天" + (f"，其中 {cashier} 笔在等演示员工110付款" if cashier else "，都在等总经理确认付款")
+    sub = f"最久已等 {longest} 天" + (f"，其中 {cashier} 笔在等出纳付款" if cashier else "，都在等总经理确认付款")
     # 按钮写的就是点进去看到的：这几笔超过 3 天的付款（报销、付款单和采购付款合在一起的清单）
     return alert("alert.pay_waiting", "bad", f"{len(waiting)} 笔付款等了超过 {STUCK_DAYS} 天，合计 {_amt(sum(i['amount'] for i in waiting))}",
                  sub, f"超过 {STUCK_DAYS} 天的付款", drill_to("pay.waiting", ctx))
@@ -1157,7 +1157,7 @@ def block_pay_wait_dist(ctx):
         rows.append(stack_row(label, f"{_wan(amount)} 万 · {len(part)} 笔", _pct(amount, total), color))
     return stack("block.pay_wait_dist", "待付款按等待时长", rows, sub=f"待付款 {_amt(total)}", more="查看明细", to=drill_to("pay.unpaid", ctx),
                  hint="从最近一次审批通过（没有就从提交）算起的等待天数：今天 / 1–3 天 / 超过 3 天（> 3，不含）。"
-                      "点进去是同一批待付款，每笔标了在哪一段；付款看板的演示员工110待付款也是这三段。")
+                      "点进去是同一批待付款，每笔标了在哪一段；付款看板的出纳待付款也是这三段。")
 
 
 @provider("block.pay_steps", "block", visible=_board_all, title="付款审批卡在哪一步")
@@ -1175,7 +1175,7 @@ def block_pay_steps(ctx):
     return bars("block.pay_steps", "付款审批卡在哪一步", rows, sub=f"付款审批中 {len(items)} 张" if items else "没有在审批的付款",
                 more="查看明细" if items else "", to=drill_to("pay.in_approval", ctx) if items else None,
                 hint="按当前审批节点的岗位拆（审批人账号反查岗位，对不上的归「其他」）；标红 = 这一步有等待超过 3 天的。"
-                     "报销/付款路线：演示员工110审核 → 直属主管 → 财务主管 → 演示员工113/总经理；采购付款路线：演示员工113 → 总账 → 财务主管 → 演示员工110 → 总经理。")
+                     "报销/付款路线：出纳审核 → 直属主管 → 财务主管 → 副总/总经理；采购付款路线：副总 → 总账 → 财务主管 → 出纳 → 总经理。")
 
 
 def _supplier_view(ctx):
@@ -1191,7 +1191,7 @@ def block_pay_suppliers(ctx):
     pairs = sorted(totals.items(), key=lambda pair: (-pair[1], pair[0]))
     return bars("block.pay_suppliers", "应付最多的供应商", _top_bars(pairs, 5, "家", lambda index, _label: "bad" if index == 0 else ""),
                 sub="采购付款还没付清 · 万元", more="采购付款", to=target("procpay.work"),
-                hint="按供应商汇总采购付款期次的「金额 − 已付」；只含演示员工116已生效的期次，不含已付清的。供应商是自由文本，同名（去掉首尾空格）合并。")
+                hint="按供应商汇总采购付款期次的「金额 − 已付」；只含合同已生效的期次，不含已付清的。供应商是自由文本，同名（去掉首尾空格）合并。")
 
 
 @provider("block.pay_stage", "block", visible=_supplier_view, title="付款类型")

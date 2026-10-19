@@ -111,8 +111,8 @@ def plan_personnel_import(records, existing):
             continue
         name_matches = by_name.get(name, []) if name else []
         # 修复（2026-09-29，审查 X3-2，决定 D2）：按姓名匹配只用于"没有工号可比"的在职员工。
-        # 原来会把新员工的身份证、银行卡写进同名演示员工166员工的档案（演示员工138自己没有档案），
-        # 或覆盖工号不同的同名在职同事。复职请在人员页清空原档的演示员工166日期。
+        # 原来会把新员工的身份证、银行卡写进同名离职员工的档案（新人自己没有档案），
+        # 或覆盖工号不同的同名在职同事。复职请在人员页清空原档的离职日期。
         if len(name_matches) == 1 and (name_matches[0].get("status") or "Active") != "Active":
             items.append({"action": "skip", "reason": "name_matches_left_employee", "record": record})
         elif len(name_matches) == 1 and number and _identifier(name_matches[0].get("employee_number")):

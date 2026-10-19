@@ -238,7 +238,7 @@ def notify_request_applicant(doc, status, *, actor=None, note=None, event_key=No
 
 
 def notify_travel_arranged(doc, *, actor=None, note=None, event_key=None, store=None):
-    """出差办理完（前台已备案）：给申请人一条单独的提醒，和抄送、审批结果通知演示员工177一样——他要按行程安排手头的工作。"""
+    """出差办理完（前台已备案）：给申请人一条单独的提醒，和抄送、审批结果通知都不一样——他要按行程安排手头的工作。"""
     store = store or FrappeAssignmentStore()
     user = _clean(getattr(doc, "owner", None))
     if not user:

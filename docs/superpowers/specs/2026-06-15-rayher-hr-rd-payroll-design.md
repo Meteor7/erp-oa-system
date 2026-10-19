@@ -19,7 +19,7 @@ QIHENG Demo 需要建设一套内部自用的信息化系统，统一管理人�
 
 第一版覆盖两组需求：
 
-1. 原始 6 条管理需求：请假、出差、加班、调休、报销、日常审批；员工和管理账号；审批提醒；入职演示员工166；员工信息表；职位变动。
+1. 原始 6 条管理需求：请假、出差、加班、调休、报销、日常审批；员工和管理账号；审批提醒；入职离职；员工信息表；职位变动。
 2. 研发链路：研发人员台账、研发工时填报、研发工时汇总表、财务研发支出导入、研发费用按工时分摊、数据看板。
 
 HTML 原型中的**工资核算表、薪资条、工资表导出不在本版**（属财务系统职责，见第 5 节）。
@@ -41,7 +41,7 @@ Frappe Framework
 |---|---|
 | Frappe Framework | 用户、角色、权限、DocType、Workflow、Notification、Assignment、API、后台任务 |
 | ERPNext | 项目、任务、Timesheet、成本中心、项目成本、基础财务对象 |
-| Frappe HR | 员工、请假、出差、加班、调休、报销、入职、演示员工166、调岗、晋升 |
+| Frappe HR | 员工、请假、出差、加班、调休、报销、入职、离职、调岗、晋升 |
 | rayher_hr_payroll | 中国化员工字段、QIHENG Demo 归档规则、宿舍费用登记、研发支出导入与按工时分摊、研发人员台账、员工简化入口 |
 
 不直接修改 Frappe、ERPNext、Frappe HR 核心代码。
@@ -55,9 +55,9 @@ Frappe/ERPNext 原生的薪酬引擎（Salary Slip、Salary Structure、Payroll 
 第一版必须做：
 
 1. 员工主档与中国化字段。
-2. 员工入职、演示员工166、职位变动。
+2. 员工入职、离职、职位变动。
 3. 请假、出差、加班、调休、报销、日常审批。
-4. 员工账号、主管账号、HR、财务、项目负责人、系统演示员工170权限。
+4. 员工账号、主管账号、HR、财务、项目负责人、系统管理员权限。
 5. 审批待办和提醒。
 6. ERPNext 项目、任务、工时。
 7. 研发人员台账自动归集。
@@ -86,7 +86,7 @@ Frappe/ERPNext 原生的薪酬引擎（Salary Slip、Salary Structure、Payroll 
 |---|---|
 | 员工主档 | Employee |
 | 入职 | Employee Onboarding |
-| 演示员工166 | Employee Separation |
+| 离职 | Employee Separation |
 | 职位变动 | Employee Transfer / Employee Promotion |
 | 请假 | Leave Application |
 | 出差 | Travel Request（+ Travel Itinerary） |
@@ -106,7 +106,7 @@ QIHENG Demo 自定义 App 补充对象：
 
 | 自定义对象 | 作用 |
 |---|---|
-| Employee 中国化字段 | 身份证号、学历、毕业院校、专业、民族、政治面貌、户籍/籍贯、演示员工116信息；**预留薪资基数、银行卡字段（本版空置，为将来工资模块预留）** |
+| Employee 中国化字段 | 身份证号、学历、毕业院校、专业、民族、政治面貌、户籍/籍贯、合同信息；**预留薪资基数、银行卡字段（本版空置，为将来工资模块预留）** |
 | Employee Archive Status | 员工信息完整性、待确认、已归档状态 |
 | Project 研发字段 | 研发项目编号、项目负责人、分管领导、是否允许填工时、资本化开始日期、资本化结束日期 |
 | Accommodation Deduction | 宿舍房租、水费、电费**登记**，导出给财务；**按可转 Additional Salary 的形态存储，为将来工资模块预留** |
@@ -145,7 +145,7 @@ QIHENG Demo 自定义 App 补充对象：
 - Frappe 的每个业务页面本质是一个 DocType，数据存数据库表，例如 Employee -> `tabEmployee`，Project -> `tabProject`，Timesheet -> `tabTimesheet`。
 - 附件不会直接塞进业务表。上传后会生成一条 `File` 记录，里面保存文件名、URL、是否私密、挂在哪个 DocType/哪条单据上。
 - 实际文件落服务器磁盘：公开文件在 `sites/<site>/public/files`，私密文件在 `sites/<site>/private/files`。
-- 研发项目证据、演示员工116、身份证、员工敏感附件默认必须使用 Private File；访问时依赖登录用户权限，不给普通员工开放。
+- 研发项目证据、合同、身份证、员工敏感附件默认必须使用 Private File；访问时依赖登录用户权限，不给普通员工开放。
 - 第一版不要求对象存储，使用 Frappe 默认本地文件目录。后续如附件量很大，S3/MinIO 不是核心开关，需要评估第三方 App（如外部存储插件）或自研存储适配；业务表结构通常不需要重做。
 
 ## 5. HTML 原型映射
@@ -167,7 +167,7 @@ QIHENG Demo 自定义 App 补充对象：
 
 诚实说明：本版**不覆盖 HTML 原型的工资核算表与薪资条**部分，这部分留在财务系统。其余 HTML 功能进入第一版。
 
-正式系统不采用 HTML 中“删除员工并级联删除相关记录”的行为。员工演示员工166后保留历史，只更新状态并归档。
+正式系统不采用 HTML 中“删除员工并级联删除相关记录”的行为。员工离职后保留历史，只更新状态并归档。
 
 ## 6. 原始 6 条需求映射
 
@@ -176,7 +176,7 @@ QIHENG Demo 自定义 App 补充对象：
 | 请假、出差、加班、调休、报销、日常审批整合 | Frappe HR 标准单据 + General Approval Request + Workflow |
 | 员工个人账号、管理人员账号 | User + Role + User Permission；员工端 ESS 自助门户 |
 | 审批提醒 | Assignment Rule + Notification，第一版站内和邮件，后续接企微/钉钉/飞书 |
-| 入职、演示员工166信息维护 | Employee Onboarding / Employee Separation |
+| 入职、离职信息维护 | Employee Onboarding / Employee Separation |
 | 员工信息表 | Employee + 中国化字段；所有入职过员工保留历史 |
 | 职位变动 | Employee Transfer / Employee Promotion |
 
@@ -193,11 +193,11 @@ QIHENG Demo 自定义 App 补充对象：
 | 员工 | 查看个人信息，提交申请，填报本人工时 |
 | 直属主管 | 审批下属申请，查看下属工时和团队待办 |
 | 项目负责人 | 审核项目/任务工时，查看项目工时和项目成本 |
-| HR | 维护员工主档、入职、演示员工166、职位变动、假勤规则 |
+| HR | 维护员工主档、入职、离职、职位变动、假勤规则 |
 | 财务 | 导入研发支出 GL，维护报销，登记宿舍费用，生成/查看研发费用分摊 |
-| 系统演示员工170 | 用户、角色、权限、流程、基础配置 |
+| 系统管理员 | 用户、角色、权限、流程、基础配置 |
 
-不再设“薪酬演示员工170”角色（工资不在本系统）。
+不再设“薪酬管理员”角色（工资不在本系统）。
 
 员工端使用 Employee Portal / Web Form / Frappe HR Mobile/PWA。管理端使用 Frappe Desk / Workspace。
 
@@ -206,7 +206,7 @@ QIHENG Demo 自定义 App 补充对象：
 ```text
 身份证号
 家庭住址/户籍信息
-劳动演示员工116附件
+劳动合同附件
 ```
 
 > 注：Frappe 字段级权限（permlevel）可限制读写，document version 可审计“修改”，但**不原生审计“查看”**。如需访问审计需自建。

@@ -230,7 +230,7 @@ async function approveRow(row) {
   }
 }
 
-// 批量同意：一演示员工128张批，每张都带着页面上看到的那一步；有失败的单独说明。
+// 批量同意：一南通工厂8张批，每张都带着页面上看到的那一步；有失败的单独说明。
 async function approveMany(rows) {
   if (busy.value || !rows.length) return;
   busy.value = true;
@@ -366,10 +366,10 @@ watch(drillDept, (department) => {
   latest.drill.begin();
   if (department) loadDrill();
 }, { immediate: true });
-// 看板的链接（section=away | month）给了只看得到自己的人：说一声，不悄悄地什么演示员工177显示。
+// 看板的链接（section=away | month）给了只看得到自己的人：说一声，不悄悄地什么都不显示。
 watch(() => [view.value, homeState.value.section, board.value?.level], () => {
   if (view.value === 'home' && homeState.value.section && board.value?.level === 'employee') {
-    notice.value = '「谁不在」和「N 月」概览只有部门主管、人事经理、演示员工113经理和总经理看得到；这里只显示你自己的数据。';
+    notice.value = '「谁不在」和「N 月」概览只有部门主管、人事经理、副总经理和总经理看得到；这里只显示你自己的数据。';
   }
 }, { immediate: true });
 

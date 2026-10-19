@@ -75,11 +75,11 @@ test("percentages are clamped and a tiny non-zero bar stays visible", () => {
 });
 
 test("colors that go into a style attribute are whitelisted", () => {
-  assert.equal(safeColor("#D9731F"), "#D9731F");
+  assert.equal(safeColor("#8A5A1C"), "#8A5A1C");
   assert.equal(safeColor("#abc"), "#abc");
   assert.equal(safeColor("rgb(1, 2, 3)"), "rgb(1, 2, 3)");
   assert.equal(safeColor("hsl(30 80% 50% / 0.5)"), "hsl(30 80% 50% / 0.5)");
-  assert.equal(safeColor("warn"), "#D9731F");
+  assert.equal(safeColor("warn"), "#8A5A1C");
   assert.equal(safeColor("red; background:url(//evil)", 1), STACK_PALETTE[1]);
   assert.equal(safeColor("javascript:alert(1)", 2), STACK_PALETTE[2]);
   assert.equal(safeColor("", STACK_PALETTE.length), STACK_PALETTE[0]);
@@ -158,7 +158,7 @@ test("cols rows mark the last column and size by percentage", () => {
 test("stack rows keep every legend entry but only coloured safe values", () => {
   const rows = stackRows(STACK.rows);
   assert.equal(rows.length, 4);
-  assert.equal(rows[0].color, "#D9731F");
+  assert.equal(rows[0].color, "#8A5A1C");
   assert.equal(rows[2].color, STACK_PALETTE[2], "an unsafe colour falls back to the palette");
   assert.equal(rows[3].width, 0);
   assert.equal(rows[0].value, "79.2 万");
@@ -171,7 +171,7 @@ test("list rows keep their own target and tone", () => {
   assert.equal(rows[0].toneClass, "t-bad");
   assert.deepEqual(rows[0].target, { key: "personnel.expiring", params: {} });
   assert.equal(rows[1].target, null);
-  assert.equal(rows[0].sub, "演示员工173期");
+  assert.equal(rows[0].sub, "试用期");
   assert.equal(listRows([{ label: "a", tone: "weird" }])[0].toneClass, "");
 });
 

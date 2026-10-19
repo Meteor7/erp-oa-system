@@ -30,7 +30,7 @@ def _load(monkeypatch, get_value=None, get_all=None):
     return module, frappe
 
 
-EMPLOYEE = {"name": "E1", "employee_name": "演示员工128", "company": "QIHENG Demo", "default_social_insurance_base": 5000,
+EMPLOYEE = {"name": "E1", "employee_name": "南通工厂8", "company": "QIHENG Demo", "default_social_insurance_base": 5000,
             "default_housing_fund_base": 6000, "household_registration": "湖南省长沙市"}
 
 

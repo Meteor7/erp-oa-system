@@ -1,6 +1,6 @@
 """宿舍看板数据（2026-09-30，模块 7，按用户确认的 demo 实现）。
 
-一次返回看板需要的全部数据：入住情况、租约到期提醒、演示员工166仍在住提醒、所选月份的
+一次返回看板需要的全部数据：入住情况、租约到期提醒、离职仍在住提醒、所选月份的
 公司/个人费用拆分、公司承担的用途与费用科目、每月费用走势和房间一览。
 只读；权限与宿舍基本信息、当月费用页相同（人事）。
 """
@@ -137,7 +137,7 @@ def _cost(rows):
 
 
 def build_board(rooms, occupancies, left_employees, deductions, period=None, today=None):
-    """纯函数：由房间、当前入住、演示员工166员工、费用记录算出看板数据（便于测试）。"""
+    """纯函数：由房间、当前入住、离职员工、费用记录算出看板数据（便于测试）。"""
     today = _date(today) or site_time.today()
     current = today.strftime("%Y-%m")
     registered = sorted({_get(row, "period") for row in deductions if _get(row, "period")})

@@ -12,7 +12,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['close', 'save', 'adjust', 'withdraw', 'go']);
 const f = computed(() => figures(props.row));
-// 只读（总经理、演示员工113经理）或工资条已确认 / 别处生成：输入框演示员工177能改。
+// 只读（总经理、副总经理）或工资条已确认 / 别处生成：输入框都不能改。
 const locked = computed(() => props.readOnly || rowLocked(props.row));
 // 撤回确认要写原因；换一个人就清空。
 const withdrawing = ref(false);
@@ -60,7 +60,7 @@ const needReason = computed(() => props.row.tax_manual && !String(props.row.tax_
         <template v-if="hasHours">
           <div class="pr-line"><span class="k">当月总工时<small>{{ row.work_days }} 个工作日 × 8<template v-if="row.calendar_source === 'weekday_fallback'">（公司没设假日表，按周一到周五）</template></small></span><span class="num" style="text-align:right">{{ hours(row.total_hours) }}</span></div>
           <div class="pr-line"><span class="k">事假<small>已批准的事假；年假、调休、病假、婚丧产假不扣</small></span><span class="num" style="text-align:right">{{ n(row.personal_leave_hours) ? '− ' + hours(row.personal_leave_hours) : '—' }}</span></div>
-          <div v-if="n(row.employed_hours) < n(row.total_hours)" class="pr-line"><span class="k">不在职的日子<small>入职前 / 演示员工166后</small></span><span class="num" style="text-align:right">− {{ hours(n(row.total_hours) - n(row.employed_hours)) }}</span></div>
+          <div v-if="n(row.employed_hours) < n(row.total_hours)" class="pr-line"><span class="k">不在职的日子<small>入职前 / 离职后</small></span><span class="num" style="text-align:right">− {{ hours(n(row.total_hours) - n(row.employed_hours)) }}</span></div>
           <div class="pr-line"><span class="k">实际工时<small v-if="row.hours_manual">手动改过 · <a v-if="!locked" href="#" @click.prevent="resetHours">按考勤重算（{{ hours(autoHours(row)) }}）</a></small><small v-else>按考勤算</small></span><input :value="row.actual_hours" :disabled="locked" type="number" min="0" :max="row.total_hours" step="0.5" aria-label="实际工时" @input="editHours"></div>
           <div class="pr-line"><span class="k">折算后基本工资<small>{{ money(f.adjusted) }} × {{ n(row.actual_hours) }} ÷ {{ n(row.total_hours) }}</small></span><span class="num" style="text-align:right">{{ money(f.prorated) }}</span></div>
         </template>

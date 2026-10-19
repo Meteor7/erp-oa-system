@@ -102,10 +102,10 @@ PAY_PURCHASE = purchase(
     items=[work_item("待实际付款", 5000.0, request="OA-P1", no=1, supplier=" 光学元件 ", stage="到货款", step=4),
            work_item("付款审批中", 7000.0, request="OA-P2", no=2, supplier="光学元件", stage="尾款", step=3),
            work_item("可提交付款审批", 3000.0, no=3, supplier="精密机加工", stage="预付款"),
-           work_item("待演示员工116生效", 9000.0, po="PO-2", supplier="电子元器件", stage="预付款"),
+           work_item("待合同生效", 9000.0, po="PO-2", supplier="电子元器件", stage="预付款"),
            work_item("已付款", 4000.0, po="PO-3", supplier="包装材料", stage="预付款", paid=4000.0)],
     waits={"OA-P1": 4, "OA-P2": 1}, paid_month=[3000.0, 2000.0])
-PAY_BUCKETS = {"OA-1": "演示员工110", "OA-P2": "总经理"}
+PAY_BUCKETS = {"OA-1": "出纳", "OA-P2": "总经理"}
 
 
 def pay_memo(**kw):
@@ -147,26 +147,26 @@ def test_every_detail_list_is_visible_to_exactly_the_people_who_see_its_card():
 @pytest.mark.parametrize("name, ctx_args, po_view, expected", [
     ("普通员工", dict(), False, ALWAYS),
     ("部门主管", dict(roles=("Employee", "Department Manager")), True, ALWAYS),
-    # PMC 有 Purchase User：现有的 PO 判断会把他当财务，这里的付款/费用块一个演示员工177能给
+    # PMC 有 Purchase User：现有的 PO 判断会把他当财务，这里的付款/费用块一个都不能给
     ("PMC", dict(roles=("Employee", "Purchase User"), positions=("pmc",)), True, ALWAYS),
     ("采购经理", dict(roles=("Employee", "Purchase Manager"), positions=("procurement_manager",)), True, ALWAYS),
     ("人事经理", dict(roles=("HR Manager", "HR User")), False, ALWAYS | LABOR),
-    # 2026-10-13：演示员工113、总经理只读分摊数据（allocation_entry._require_read_access），分摊块也给
-    ("演示员工113：能看费用、付款和分摊（只读），看不到发票", dict(positions=("vice_manager",)), True,
+    # 2026-10-13：副总、总经理只读分摊数据（allocation_entry._require_read_access），分摊块也给
+    ("副总：能看费用、付款和分摊（只读），看不到发票", dict(positions=("vice_manager",)), True,
      ALWAYS | COST | ALLOC | BOARD | SUPPLIER | LABOR),
     ("总经理没有 PO 查看权时不给采购付款块", dict(positions=("general_manager",)), False, ALWAYS | COST | ALLOC | BOARD | LABOR),
-    ("演示员工110（只有岗位）：付款看板范围，没有费用概览", dict(positions=("finance_auditor",)), True, ALWAYS | BOARD | SUPPLIER),
+    ("出纳（只有岗位）：付款看板范围，没有费用概览", dict(positions=("finance_auditor",)), True, ALWAYS | BOARD | SUPPLIER),
     ("财务主管 + Accounts User：除人力成本外全有", FINANCE, True, ALWAYS | COST | ALLOC | BOARD | SUPPLIER | INVOICE),
-    ("演示员工135 (Accounts User)", dict(roles=("Accounts User",), positions=("finance_accountant",)), False,
+    ("总账会计 (Accounts User)", dict(roles=("Accounts User",), positions=("finance_accountant",)), False,
      ALWAYS | COST | ALLOC | BOARD | INVOICE),
-    ("系统演示员工170", dict(roles=("System Manager",)), True, MONEY_KEYS),
+    ("系统管理员", dict(roles=("System Manager",)), True, MONEY_KEYS),
 ])
 def test_who_sees_what(name, ctx_args, po_view, expected):
     assert visible_keys(make_ctx(**ctx_args), po_view) == expected, name
 
 
 def test_hidden_blocks_never_touch_the_data_layer():
-    """没权限的人，底层函数一个演示员工177会被调用（备忘是空的：一旦调用就会去 import 接口并报错）。"""
+    """没权限的人，底层函数一个都不会被调用（备忘是空的：一旦调用就会去 import 接口并报错）。"""
     ctx = make_ctx(roles=("Employee", "Purchase User"), positions=("pmc",))
     ctx._memo["money.po_pay_view"] = True
     ctx._memo["money.invoice_open"] = True
@@ -214,7 +214,7 @@ def test_cost_cards_show_amounts_and_change_against_last_month():
     assert [row["cells"][0] for row in detail["rows"]] == ["研发分摊", "采购", "报销付款", "合计"]
     assert [row["cells"][2] for row in detail["rows"]] == ["¥ 286.4 万", "¥ 98.2 万", "¥ 33.6 万", "¥ 418.2 万"]
     assert detail["summary"] == "合计 ¥ 418.2 万" and "（预览，还没定版）" in detail["rows"][0]["cells"][1]
-    # 采购、报销付款点进去是同期间同口径的明细（原来去 PO 列表 / 付款看板，期间和口径演示员工177一样）
+    # 采购、报销付款点进去是同期间同口径的明细（原来去 PO 列表 / 付款看板，期间和口径都不一样）
     assert [row["target"] and row["target"]["key"] for row in detail["rows"]] == ["cost.summary", "drill", "drill", None]
     assert [row["target"]["params"]["item"] for row in detail["rows"][1:3]] == ["cost.po", "cost.expense"]
     rd = run("cost.rd", ctx)
@@ -254,7 +254,7 @@ def test_cost_po_and_expense_lists_sum_the_same_lines_the_overview_uses(monkeypa
         if doctype == "OA Purchase Order Line":
             return [{"parent": "PO-1", "amount": 100.0}, {"parent": "PO-1", "amount": 50.0}, {"parent": "PO-2", "amount": 150.0}]
         if doctype == "OA Approval Request":
-            return [{"name": "R-1", "request_type": "报销单", "subject": "差旅", "employee_name": "演示员工129", "paid_on": "2026-10-02"},
+            return [{"name": "R-1", "request_type": "报销单", "subject": "差旅", "employee_name": "南通工厂9", "paid_on": "2026-10-02"},
                     {"name": "R-2", "request_type": "付款单", "subject": "", "employee_name": "演示员工146", "paid_on": "2026-10-04"}]
         return [{"parent": "R-1", "total_amount": 80.0, "amount": 70.0}, {"parent": "R-2", "total_amount": None, "amount": 40.0}]
 
@@ -306,7 +306,7 @@ def test_cost_projects_top_five_and_the_rest_merged():
 
 
 def test_rd_pending_reads_the_allocation_so_leaders_get_it_too():
-    # 2026-10-13：和 alloc.status 同一个状态函数（分摊数据，演示员工113、总经理只读），点进去：财务去分摊页，领导去研发费用汇总
+    # 2026-10-13：和 alloc.status 同一个状态函数（分摊数据，副总、总经理只读），点进去：财务去分摊页，领导去研发费用汇总
     leader = make_ctx(positions=("vice_manager",))
     preview = run("cost.rd_pending", leader, **{"money.allocation": allocation()})
     assert (preview["value"], preview["tone"], preview["preview"]) == ("286.4", "warn", True)
@@ -339,7 +339,7 @@ def test_alloc_status_for_finance_and_for_leaders():
     assert (final["value"], final["tone"], final["preview"]) == ("已定版", "ok", False)
     empty = run("alloc.status", make_ctx(**FINANCE), **{"money.allocation": allocation(has_data=False)})
     assert empty["value"] == "—"
-    # 2026-10-13：演示员工113、总经理只读分摊数据，和财务同一个状态，点进研发费用汇总（只读）
+    # 2026-10-13：副总、总经理只读分摊数据，和财务同一个状态，点进研发费用汇总（只读）
     leader = make_ctx(positions=("general_manager",))
     seen = run("alloc.status", leader, **{"money.allocation": allocation()})
     assert (seen["value"], seen["sub"]) == ("预览", "10 月 ¥ 286.4 万，未定版，未判定 ¥ 13.3 万")
@@ -419,7 +419,7 @@ def test_waiting_card_and_alert():
     assert (card["label"], card["value"], card["unit"], card["sub"], card["tone"]) == ("等待超过 3 天", "7,000", "元", "2 笔 · 最久已等 5 天", "bad")
     alert_ = run("alert.pay_waiting", ctx)
     assert alert_["tone"] == "bad" and alert_["title"] == "2 笔付款等了超过 3 天，合计 ¥ 7,000"
-    assert alert_["sub"] == "最久已等 5 天，其中 1 笔在等演示员工110付款"
+    assert alert_["sub"] == "最久已等 5 天，其中 1 笔在等出纳付款"
     purchase_only = run("alert.pay_waiting", make_ctx(**FINANCE), **pay_memo(**{"money.claims": claims()}))
     assert purchase_only["sub"] == "最久已等 4 天，都在等总经理确认付款"
     assert purchase_only["target"] == {"key": "drill", "params": {"item": "pay.waiting", "period": "2026-10"}}
@@ -428,7 +428,7 @@ def test_waiting_card_and_alert():
 def test_in_approval_split_by_current_step_position():
     ctx = make_ctx(**FINANCE)
     card = run("pay.in_approval", ctx, **pay_memo())
-    assert (card["value"], card["unit"], card["sub"], card["tone"]) == ("2", "张", "演示员工110 1 · 总经理 1", "")
+    assert (card["value"], card["unit"], card["sub"], card["tone"]) == ("2", "张", "出纳 1 · 总经理 1", "")
     assert card["target"] == {"key": "drill", "params": {"item": "pay.in_approval", "period": "2026-10"}}
     # 报销单、付款单、采购付款在三个页面里：点进去是合在一起的清单，条数 = 卡片上的数字，每行进自己的单据
     detail = core.get_detail_for(ctx, "pay.in_approval")
@@ -480,7 +480,7 @@ def test_cashier_queue_is_claims_and_payments_only():
     card = run("pay.cashier_queue", make_ctx(positions=("finance_auditor",)), **pay_memo())
     assert (card["value"], card["sub"], card["tone"]) == ("3,000", "2 张 · 加急 1 张 · 等待超过 3 天 1 张", "bad")
     empty = run("pay.cashier_queue", make_ctx(positions=("finance_auditor",)), **pay_memo(**{"money.claims": claims()}))
-    assert empty["sub"] == "演示员工110这一步没有待付款的" and empty["value"] == "0"
+    assert empty["sub"] == "出纳这一步没有待付款的" and empty["value"] == "0"
 
 
 def test_wait_distribution_stack():
@@ -595,8 +595,8 @@ def test_processed_this_month():
 
 # ---------------------------------------------------------------- 审批卡点
 STUCK = [
-    {"type": "报销单", "name": "A", "waited": 5, "step": "财务主管：演示员工16"}, {"type": "报销单", "name": "B", "waited": 4, "step": "演示员工110审核"},
-    {"type": "价格审批", "name": "PA-1", "waited": 9, "step": "价格审批（演示员工113终审）"},
+    {"type": "报销单", "name": "A", "waited": 5, "step": "财务主管：演示员工16"}, {"type": "报销单", "name": "B", "waited": 4, "step": "出纳审核"},
+    {"type": "价格审批", "name": "PA-1", "waited": 9, "step": "价格审批（副总终审）"},
 ]
 
 
@@ -608,7 +608,7 @@ def test_stuck_card_and_alert():
     assert "不含请假、加班、调休" in card["hint"]
     alert_ = run("alert.stuck", ctx)
     assert alert_["title"] == "3 张审批超过 3 天没处理"
-    assert alert_["sub"] == "最久卡在「价格审批（演示员工113终审）」，已 9 天（报销单 2、价格审批 1）"
+    assert alert_["sub"] == "最久卡在「价格审批（副总终审）」，已 9 天（报销单 2、价格审批 1）"
     assert alert_["go"] == "审批卡点" and alert_["target"] == card["target"]
 
 
@@ -619,7 +619,7 @@ def test_stuck_list_has_one_row_per_stuck_item_and_each_row_opens_that_record():
     card = run("approval.stuck", ctx)
     detail = core.get_detail_for(ctx, "approval.stuck")
     assert len(detail["rows"]) == int(card["value"]) == 3 and detail["summary"] == "共 3 张超过 3 天没处理"
-    assert [row["cells"] for row in detail["rows"]] == [["价格审批", "PA-1", "价格审批（演示员工113终审）", "9 天"], ["报销单", "A", "财务主管：演示员工16", "5 天"], ["报销单", "B", "演示员工110审核", "4 天"]]
+    assert [row["cells"] for row in detail["rows"]] == [["价格审批", "PA-1", "价格审批（副总终审）", "9 天"], ["报销单", "A", "财务主管：演示员工16", "5 天"], ["报销单", "B", "出纳审核", "4 天"]]
     assert [row["target"] for row in detail["rows"]] == [
         {"key": "price.approvals", "params": {"approval": "PA-1"}}, {"key": "claim.detail", "params": {"request": "A"}}, {"key": "claim.detail", "params": {"request": "B"}}]
 
@@ -674,8 +674,8 @@ def test_stuck_loader_boundary_scope_and_price_approvals(monkeypatch):
 
 # ---------------------------------------------------------------- 审批卡在哪一步
 def test_step_bucket_maps_approver_accounts_to_positions():
-    owners = {"演示员工110": {"cashier@x"}, "演示员工135": {"ledger@x"}, "财务主管": {"fm@x"}, "演示员工113经理": {"vp@x"}, "总经理": {"gm@x"}}
-    assert money._step_bucket('["Cashier@X"]', "演示员工110审核", owners) == "演示员工110"      # 账号大小写不影响
+    owners = {"出纳": {"cashier@x"}, "总账会计": {"ledger@x"}, "财务主管": {"fm@x"}, "副总经理": {"vp@x"}, "总经理": {"gm@x"}}
+    assert money._step_bucket('["Cashier@X"]', "出纳审核", owners) == "出纳"      # 账号大小写不影响
     assert money._step_bucket('["fm@x", "vp@x"]', "", owners) == "财务主管"      # 会签取先走到的岗位
     assert money._step_bucket('["boss@x"]', "直属主管：某某", owners) == "直属主管"
     assert money._step_bucket('["ghost@x"]', "固定资产审批：人事经理", owners) == "其他"
@@ -689,7 +689,7 @@ def test_step_buckets_loader_uses_the_current_step_of_each_request(monkeypatch):
     holders = {"finance_auditor": {"cashier@x"}, "finance_accountant": {"ledger@x"}, "finance_manager": {"fm@x"},
                "vice_manager": {"vp@x"}, "general_manager": {"gm@x"}}
     steps = [
-        {"parent": "R1", "step_index": 0, "label": "演示员工110审核", "approvers": '["cashier@x"]'},
+        {"parent": "R1", "step_index": 0, "label": "出纳审核", "approvers": '["cashier@x"]'},
         {"parent": "R1", "step_index": 1, "label": "财务主管：演示员工16", "approvers": '["fm@x"]'},
         {"parent": "R2", "step_index": 2, "label": "直属主管：某", "approvers": '["boss@x"]'},
         {"parent": "P1", "step_index": 3, "label": "总经理付款", "approvers": '["gm@x"]'},

@@ -637,7 +637,7 @@ def _check_document_limits(content, mime):
 
     原来 PDF 不限页数（只受像素总量约束，约 50 页 A4），照片只有 PIL 的默认上限（约 1.8 亿像素）。
     现在上传时就拒绝：PDF 超过 5 页（一张发票 1 页，带销货清单的一般 2～3 页），
-    照片超过 5000 万像素（手机演示员工152拍照都在这以内）。
+    照片超过 5000 万像素（手机正常拍照都在这以内）。
     """
     if mime == "application/pdf":
         pages = _pdf_page_count(content)
@@ -1239,7 +1239,7 @@ def exclude_invoice(invoice_name, reason):
     name = str(invoice_name)
     with _transaction_lock("record", name):
         record = _current_doc(RECORD_DOCTYPE, name)
-        # 财务可以排除"疑似重复"的发票（和"解除疑似重复"同权限）；其他状态仍只有发票所有人、申请人和系统演示员工170能排除。
+        # 财务可以排除"疑似重复"的发票（和"解除疑似重复"同权限）；其他状态仍只有发票所有人、申请人和系统管理员能排除。
         if not (_roles(_user()) & FINANCE_ROLES and _get(record, "recognition_status") == "疑似重复"):
             record = _require_record(name, write=True, current=True)
         # 修复（2026-09-28）：卡住（排队或识别超过 15 分钟）的发票也可以排除。

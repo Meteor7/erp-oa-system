@@ -83,7 +83,7 @@ def test_supplier_payment_plan_requires_full_percentage_and_amount(monkeypatch):
     monkeypatch.setattr(procurement_chain.frappe, "throw", lambda message: (_ for _ in ()).throw(ValueError(message)))
     valid = procurement_chain._normalize_supplier_payment_plan([{
         "installment_name": "预付款", "payment_stage": "预付款", "percentage": 30,
-        "amount": 300, "trigger_condition": "演示员工116生效", "invoice_requirement": "付款后提供",
+        "amount": 300, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供",
     }, {
         "installment_name": "尾款", "payment_stage": "尾款", "percentage": 70,
         "amount": 700, "trigger_condition": "验收通过", "invoice_requirement": "付款前提供",
@@ -92,7 +92,7 @@ def test_supplier_payment_plan_requires_full_percentage_and_amount(monkeypatch):
     with pytest.raises(ValueError, match="100%"):
         procurement_chain._normalize_supplier_payment_plan([{
             "payment_stage": "预付款", "percentage": 30, "amount": 1000,
-            "trigger_condition": "演示员工116生效", "invoice_requirement": "付款后提供",
+            "trigger_condition": "合同生效", "invoice_requirement": "付款后提供",
         }], 1000)
 
 
@@ -123,10 +123,10 @@ def role(key, label, user, name):
 
 def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
     roles = {
-        "finance_auditor": role("finance_auditor", "演示员工110", "finance@example.com", "演示员工32"),
-        "finance_accountant": role("finance_accountant", "演示员工135", "accountant@example.com", "演示员工19"),
+        "finance_auditor": role("finance_auditor", "出纳", "finance@example.com", "演示员工32"),
+        "finance_accountant": role("finance_accountant", "总账会计", "accountant@example.com", "演示员工19"),
         "finance_manager": role("finance_manager", "财务主管", "manager@example.com", "演示员工16"),
-        "vice_manager": role("vice_manager", "演示员工113经理", "li@example.com", "演示员工21"),
+        "vice_manager": role("vice_manager", "副总经理", "li@example.com", "演示员工21"),
         "general_manager": role("general_manager", "总经理", "wang@example.com", "演示员工29"),
     }
 
@@ -134,7 +134,7 @@ def test_procurement_payment_routes_pre_and_post_arrival_payments_differ():
         REQUEST_PROCUREMENT_PAYMENT, payment_stage="预付款", roles=roles
     )
     expected_labels = [
-        "演示员工21", "演示员工135：演示员工19", "财务主管：演示员工16", "演示员工110：演示员工32", "总经理付款：演示员工29"
+        "演示员工21", "总账会计：演示员工19", "财务主管：演示员工16", "出纳：演示员工32", "总经理付款：演示员工29"
     ]
     assert [row["label"] for row in prepayment] == expected_labels
     assert [row["approvers"] for row in prepayment] == [
@@ -542,7 +542,7 @@ def test_completed_procurement_price_approval_moves_to_execution():
     from decimal import Decimal
     from rayher_hr_payroll.api import oa_entry
 
-    step = SimpleNamespace(step_index=1, label="价格审批：演示员工113经理：演示员工21")
+    step = SimpleNamespace(step_index=1, label="价格审批：副总经理：演示员工21")
     doc = SimpleNamespace(
         steps=[step],
         request_type=oa_entry.REQUEST_PROCUREMENT,
@@ -557,7 +557,7 @@ def test_completed_procurement_price_approval_moves_to_execution():
     oa_entry._advance_after_step(doc, step)
 
     assert doc.workflow_status == oa_entry.STATUS_COMPLETED
-    assert doc.business_status == "价格已批准/待补充演示员工116信息"
+    assert doc.business_status == "价格已批准/待补充合同信息"
     assert doc.approved_amount == Decimal("123.45")
 
 

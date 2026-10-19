@@ -307,7 +307,7 @@ def me_requests(ctx):
         parts.append(f"草稿 {drafts}")
     return kpi("me.requests", "我的申请", len(items), "张", " · ".join(parts) or "没有进行中的申请", tone="hot" if returned else "",
                to=drill_to("me.requests", ctx) if items else None,
-               hint="我提交的、还没办结的申请（审批中、被退回、草稿）；点进去一演示员工128行，每一行进那张单据。" + RETURNED_HINT)
+               hint="我提交的、还没办结的申请（审批中、被退回、草稿）；点进去一南通工厂8行，每一行进那张单据。" + RETURNED_HINT)
 
 
 @provider("drill.me.requests", "drill", visible=_has_employee, title="我的申请")
@@ -359,8 +359,8 @@ def me_claim(ctx):
         sub += f" · 草稿 {drafts}"
     # 报销页“我的”列出我所有的报销单（含已付款的），和这里的“在途”张数对不上；点进去是同一份在途清单（决定 2026-10-13）。
     return kpi("me.claim", "我的报销", len(active), "张", sub, to=drill_to("me.claim", ctx) if rows else target("claim.mine"),
-               hint="我名下的报销单：审批中或等演示员工110付款的张数；金额取审批金额（没有就取申请金额）。不预测到账日，只显示审批到了哪一步。"
-                    "点进去一演示员工128行（草稿浅色列在后面，不算在张数里），每一行进报销单。")
+               hint="我名下的报销单：审批中或等出纳付款的张数；金额取审批金额（没有就取申请金额）。不预测到账日，只显示审批到了哪一步。"
+                    "点进去一南通工厂8行（草稿浅色列在后面，不算在张数里），每一行进报销单。")
 
 
 @provider("drill.me.claim", "drill", visible=_has_employee, title="我的报销")
@@ -374,7 +374,7 @@ def drill_me_claim(ctx):
     out += [drill_row([row["name"], "草稿", _yuan(row.get("amount"))], target("claim.detail", request=row["name"]), tone="info") for row in drafts]
     total = sum(float(row.get("approved_amount") or row.get("amount") or 0) for row in active)
     return drill("drill.me.claim", "我在途的报销单", [("单号",), ("进度",), ("金额", "r")], out, summary=f"在途 {len(active)} 张，合计 {_yuan(total)}",
-                 note="审批中或等演示员工110付款的报销单；草稿浅色列在后面，不算在张数里。已付款的在报销页“我的”里看。")
+                 note="审批中或等出纳付款的报销单；草稿浅色列在后面，不算在张数里。已付款的在报销页“我的”里看。")
 
 
 # ---------------------------------------------------------------- 我的工时

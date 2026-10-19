@@ -941,7 +941,7 @@ def test_existing_monthly_documents_are_read_with_a_lock(monthly_module):
 
 
 def test_left_employee_can_be_backfilled_for_the_relieving_month_only(monthly_module):
-    # 审查 X3-6：演示员工166当天账号就停用，演示员工166当月的工时原来谁都补登不了。
+    # 审查 X3-6：离职当天账号就停用，离职当月的工时原来谁都补登不了。
     from datetime import date
 
     mod, frappe = monthly_module
@@ -951,7 +951,7 @@ def test_left_employee_can_be_backfilled_for_the_relieving_month_only(monthly_mo
 
     mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 9, 1))
     mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 8, 1))
-    with pytest.raises(RuleError, match="演示员工166当月"):
+    with pytest.raises(RuleError, match="离职当月"):
         mod._require_monthly_employee("EMP-LEFT", "edit", date(2026, 10, 1))
     with pytest.raises(RuleError, match="在职研发员工"):
         mod._require_monthly_employee("EMP-LEFT", "edit")

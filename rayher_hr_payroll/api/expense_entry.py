@@ -71,7 +71,7 @@ def _expense_rows(items):
         direct_project = _direct_project_for_row(it)
         account_level_1, account_level_2, account_level_3, account_level_4 = _account_levels(it)
         voucher_no = _clean(it.get("voucher_no")) or ("V%03d" % (idx + 1))
-        # 同一个项目一张凭证里把同一样东西买几次是演示员工152的，完全相同的行也允许保存；
+        # 同一个项目一张凭证里把同一样东西买几次是正常的，完全相同的行也允许保存；
         # 费用导入页只提醒（见 lib/rdExpense.js duplicateVoucherRows），不拦截。
         rows.append({
             "source_row_key": _row_key(idx, direct_project),
@@ -123,7 +123,7 @@ def _create_import(period, year, month, rows):
     except frappe.UniqueValidationError as exc:
         if "active_period_key" not in str(exc):
             raise
-        frappe.throw("本期间已被演示员工114操作保存，请刷新后在现有费用导入单上继续编辑。")
+        frappe.throw("本期间已被另一个操作保存，请刷新后在现有费用导入单上继续编辑。")
     return doc
 
 

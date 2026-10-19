@@ -4,7 +4,7 @@ import pytest
 from rayher_hr_payroll.dashboard import core, layout
 
 WATCH = ("general_manager", "vice_manager", "finance_manager", "hr_manager")
-# 找不到合适的第 4 张卡、宁可少一张也不硬凑的页签（前端按 3 演示员工128行排）
+# 找不到合适的第 4 张卡、宁可少一张也不硬凑的页签（前端按 3 南通工厂8行排）
 ALLOWED_SHORT = {("projects", "我负责的项目")}
 
 
@@ -32,7 +32,7 @@ def tab_of(profile, key):
 
 
 def test_every_tab_and_section_fills_its_card_rows():
-    # 指标卡排满整排：4 演示员工128排、6 张 3 列 × 2 排、8 张 4 列 × 2 排（列数规则见 frontend/src/lib/dashboardLayout.js）
+    # 指标卡排满整排：4 南通工厂8排、6 张 3 列 × 2 排、8 张 4 列 × 2 排（列数规则见 frontend/src/lib/dashboardLayout.js）
     for profile, item in all_tabs():
         groups = [(item["label"], item["kpis"])] + [(part["title"], part["kpis"]) for part in item["sections"]]
         for title, kpis in groups:

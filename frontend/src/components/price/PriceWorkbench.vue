@@ -1,5 +1,5 @@
 <script setup>
-// 价格审批 + PO 与演示员工116。一个页面三个栏目：PR 待比价物料 | 价格审批单 | PO 与演示员工116。
+// 价格审批 + PO 与合同。一个页面三个栏目：PR 待比价物料 | 价格审批单 | PO 与合同。
 // 用查询参数区分页面（通知和旧链接照常有效）：tab=po、view=source|approvals、request=<OA>（只看这张采购申请的链路）、
 // approval=<PA>、po=<PO>、pr=<PR>。到货 / 验收 / 付款登记在"采购付款"里，这里只看进度。
 import { computed, onMounted, reactive, ref } from 'vue';
@@ -173,7 +173,7 @@ async function submitApproval(text) {
   await run(async () => {
     await actions.updateSummary.submit({ name: approval.name, summary: value });
     return actions.submitApproval.submit({ name: approval.name });
-  }, `${approval.name} 已提交演示员工113经理审批`);
+  }, `${approval.name} 已提交副总经理审批`);
 }
 async function withdrawApproval() {
   await run(() => actions.withdrawApproval.submit({ name: activeApproval.value.name }), '已撤回，可修改后重新提交');
@@ -193,20 +193,20 @@ async function approveApproval() {
 
 // ---------------------------------------------------------------- PO / contract
 async function saveDelivery(lines) {
-  await run(() => actions.updateDelivery.submit({ name: activePo.value.name, lines: JSON.stringify(lines) }), '演示员工116交期已保存');
+  await run(() => actions.updateDelivery.submit({ name: activePo.value.name, lines: JSON.stringify(lines) }), '合同交期已保存');
 }
 async function confirmPo(lines) {
   const po = activePo.value;
   await run(async () => {
     await actions.updateDelivery.submit({ name: po.name, lines: JSON.stringify(lines) });
     return actions.confirmPo.submit({ name: po.name });
-  }, `${po.name} 已确认，进入演示员工116复核`);
+  }, `${po.name} 已确认，进入合同复核`);
 }
 async function generateContract(payload) {
-  await run(() => actions.savePoContract.submit(payload), 'PO 演示员工116草稿已生成，请核对后复核');
+  await run(() => actions.savePoContract.submit(payload), 'PO 合同草稿已生成，请核对后复核');
 }
 async function reviewContract() {
-  await run(() => actions.reviewPoContract.submit({ name: activePo.value.name }), 'PO 演示员工116已复核，等待演示员工113经理电子用印');
+  await run(() => actions.reviewPoContract.submit({ name: activePo.value.name }), 'PO 合同已复核，等待副总经理电子用印');
 }
 async function sealContract() {
   await run(() => actions.sealPoContract.submit({ name: activePo.value.name }), 'PO 已完成电子用印并生效');
@@ -225,8 +225,8 @@ onMounted(reloadAll);
       <div>
         <div class="crumb">审批中心 · 采购/购买申请</div>
         <h3>{{ pageTitle(tab) }}</h3>
-        <div v-if="tab === 'po'" class="muted">价格审批通过后按成交供应商生成的采购订单（PO）：确认 PO、演示员工116复核、电子用印；到货、验收、付款在“采购付款”里办理。</div>
-        <div v-else class="muted">采购从 PR 里挑物料发起比价，录入各家报价；演示员工113经理选一家成交，没报价的物料退回 PR。</div>
+        <div v-if="tab === 'po'" class="muted">价格审批通过后按成交供应商生成的采购订单（PO）：确认 PO、合同复核、电子用印；到货、验收、付款在“采购付款”里办理。</div>
+        <div v-else class="muted">采购从 PR 里挑物料发起比价，录入各家报价；副总经理选一家成交，没报价的物料退回 PR。</div>
       </div>
       <div class="head-actions">
         <button type="button" class="btn" :disabled="busy || loaders.prs.loading || loaders.approvals.loading || loaders.pos.loading" @click="reloadAll">刷新</button>

@@ -53,7 +53,7 @@ test("every KPI card is clickable: a list page or an anchor on the same board (2
 test("KPI cards that open scope=all are not clickable for people who cannot see all (2026-10 audit P2-7)", () => {
   const nobody = { travelAll: false, claimAll: false };
   const request = requestKpis({}, nobody);
-  assert.equal(request[3].to, null, "出差的全部只给系统演示员工170 / QIHENG Demo Business Executive");
+  assert.equal(request[3].to, null, "出差的全部只给系统管理员 / QIHENG Demo Business Executive");
   assert.match(request[3].note, /没有查看全部的权限/);
   assert.ok(request[0].to, "购买申请的列表对非全局角色显示“与我相关”，不泄露，所以仍可点");
   assert.deepEqual(request[1].to, { anchor: "bd-budget" }, "页面内锚点不受限制");
@@ -218,11 +218,11 @@ test("the two boards are separate pages, each with its own 采购 tab kept in th
 test("付款看板 merges the aging chart into the cashier panel, reflows the bottom row and has no month select without API support", () => {
   const payment = read("../src/pages/PaymentBoard.vue");
   assert.match(payment, /id="bd-cashier"/);
-  assert.match(payment, /演示员工110待付款/);
+  assert.match(payment, /出纳待付款/);
   assert.match(payment, /agingTiles\(queue\.value\)/);
   assert.match(payment, /class="bd-tile"/);
   assert.doesNotMatch(payment, /ColumnChart/);
-  assert.doesNotMatch(payment, /演示员工110待付：等了多久/);
+  assert.doesNotMatch(payment, /出纳待付：等了多久/);
   assert.match(payment, /bottomColumns\(data\.value\)/);
   assert.match(payment, /'bd-cols-' \+ columnCount/);
   assert.match(payment, /v-if="data\.scope !== 'department'"/);

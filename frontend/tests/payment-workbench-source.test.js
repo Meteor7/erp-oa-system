@@ -36,7 +36,7 @@ test('workbench keeps the two tabs, the PO-view gating and the query-driven view
   assert.match(workbench, /rayher_hr_payroll\.api\.oa_entry\.|OA_API \+ 'get_options'/);
   assert.match(workbench, /route\.query\.request/);
   assert.match(workbench, /tab: 'approvals'/);
-  assert.match(workbench, /查看 PO 与演示员工116/);
+  assert.match(workbench, /查看 PO 与合同/);
   // 30 秒 + 窗口获得焦点 + 页面重新可见时刷新
   assert.match(workbench, /setInterval\(\(\) => \{ if \(!document\.hidden\) refreshAll\(\); \}, 30000\)/);
   assert.match(workbench, /addEventListener\('focus'/);
@@ -99,7 +99,7 @@ test('installment cards show the gates, the trigger text, blockers and who is aw
   assert.match(card, /看付款审批单/);
   const grid = component('PayGateGrid.vue');
   assert.match(grid, /tile\.k/);
-  for (const text of ['演示员工116已生效', '全部到货', '验收通过']) assert.match(view, new RegExp(text), text);
+  for (const text of ['合同已生效', '全部到货', '验收通过']) assert.match(view, new RegExp(text), text);
   for (const text of ['等生产主管登记到货', '等生产主管登记验收', '等供应商换货到货', '等退货发出 / 供应商补发', '等采购提交付款审批']) assert.match(view, new RegExp(text), text);
   assert.match(view, /审批过程中条件已回退/);
   assert.match(view, /上次被退回的付款单/);
@@ -155,7 +155,7 @@ test('business documents: list / attach / remove with the reason typed inline', 
   assert.match(documents, /legacyChecklist/);
   assert.match(documents, /作废原因/);
   assert.match(documents, /上传补充资料/);
-  assert.match(documents, /报价和演示员工116属于 PO/);
+  assert.match(documents, /报价和合同属于 PO/);
   assert.match(view, /付款前提供/);
 });
 

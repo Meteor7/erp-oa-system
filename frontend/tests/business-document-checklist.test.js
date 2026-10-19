@@ -4,7 +4,7 @@ import { documentChecklistForRequest } from "../src/lib/businessDocumentChecklis
 
 test("procurement checklist follows the active lifecycle node", () => {
   const rows = documentChecklistForRequest({ request_type: "采购申请", business_status: "待到货" }, [
-    { document_type: "演示员工116", version_no: 1, status: "有效" },
+    { document_type: "合同", version_no: 1, status: "有效" },
   ]);
   const arrival = rows.find((item) => item.key === "arrival");
   assert.ok(arrival);

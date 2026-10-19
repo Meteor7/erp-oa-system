@@ -35,7 +35,7 @@ const social = createResource({ url: "rayher_hr_payroll.api.social_insurance_imp
 const fund = createResource({ url: "rayher_hr_payroll.api.housing_fund_import_entry.get_fund_workbench", method: "GET", makeParams: () => ({ period: period.value, company: "all" }), auto: true });
 const saver = createResource({ url: api + "save_payroll_draft" });
 const adjuster = createResource({ url: api + "apply_salary_adjustment" });
-// 确认本月工资 / 撤回确认（决定 2026-10-13）；总经理、演示员工113经理能打开但只读（can_edit = false）。
+// 确认本月工资 / 撤回确认（决定 2026-10-13）；总经理、副总经理能打开但只读（can_edit = false）。
 const confirmer = createResource({ url: api + "confirm_payroll" });
 const withdrawer = createResource({ url: api + "withdraw_payroll_confirmation" });
 const access = createResource({ url: api + "get_payroll_access", method: "GET", auto: true });

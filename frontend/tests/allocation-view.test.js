@@ -74,7 +74,7 @@ test("preview month matrix adds preview: 1 and never an allocation name", () => 
     stage: "all",
     preview: true,
   }), { year: 2026, month: 6, stage: "all", preview: 1 });
-  // 年度和已定版演示员工177带 preview
+  // 年度和已定版都不带 preview
   assert.deepEqual(buildAllocationMatrixFilters({ scope: "year", period: "2026-06", stage: "all", preview: true }), { year: 2026, stage: "all" });
   assert.equal("preview" in buildAllocationMatrixFilters({ scope: "month", period: "2026-06", allocation: "A", stage: "all", preview: false }), false);
 });
@@ -219,13 +219,13 @@ test("finalize check lines: amber when above zero, ok when zero", () => {
 
 test("finalize check lines accept people lists and warning objects, and tolerate missing fields", () => {
   const lines = buildFinalizeCheckLines({
-    unfilled_people: [{ employee_name: "演示员工129" }, "演示员工146"],
+    unfilled_people: [{ employee_name: "南通工厂9" }, "演示员工146"],
     underfilled_people: [],
     warnings: [{ message: "提醒 A" }, "", null],
   });
   const byKey = Object.fromEntries(lines.map((l) => [l.key, l]));
   assert.equal(byKey.unfilled.text, "2 人未填工时");
-  assert.equal(byKey.unfilled.detail, "演示员工129、演示员工146");
+  assert.equal(byKey.unfilled.detail, "南通工厂9、演示员工146");
   assert.equal(byKey.underfilled.tone, "ok");
   assert.equal(byKey["warning-0"].text, "提醒 A");
   assert.equal(lines.length, 3);

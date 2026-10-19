@@ -63,7 +63,7 @@ const updater = createResource({ url: 'rayher_hr_payroll.api.material_progress.u
 const canceller = createResource({ url: 'rayher_hr_payroll.api.material_progress.cancel_material_progress' });
 const prCreator = createResource({ url: 'rayher_hr_payroll.api.procurement_chain.create_pr', method: 'POST' });
 
-// 看板的「物料逾期未到」点进来（?overdue=1）：只看演示员工116交期已过且未收齐的物料。
+// 看板的「物料逾期未到」点进来（?overdue=1）：只看合同交期已过且未收齐的物料。
 // 逾期在服务端筛（overdue=1，按服务器的今天算，和看板同一句 SQL，2026-10-13）；这个模式下把各页取全（每次 200 条，最多 10 次）不分页，
 // 前端再用接口给的 contract_overdue 过一遍（不会再按浏览器的日期另算）。
 const SWEEP_SIZE = 200;
@@ -509,11 +509,11 @@ async function cancelRow(reason) {
     </div>
 
     <div v-if="overdueOnly" class="mp-source">
-      <span>只看 <b>演示员工116交期已过、还没收齐</b> 的物料：{{ sweeping ? '正在统计…' : `${Math.max(overdueTotal, overdueFound.length)} 项` }}<template v-if="sweepCut">（物料太多，只列了前 {{ SWEEP_SIZE * SWEEP_PAGES }} 项）</template></span>
+      <span>只看 <b>合同交期已过、还没收齐</b> 的物料：{{ sweeping ? '正在统计…' : `${Math.max(overdueTotal, overdueFound.length)} 项` }}<template v-if="sweepCut">（物料太多，只列了前 {{ SWEEP_SIZE * SWEEP_PAGES }} 项）</template></span>
       <button type="button" class="link" @click="setOverdue(false)">查看全部物料</button>
     </div>
     <div v-if="uncodedOnly" class="mp-source" data-testid="uncoded-filter">
-      <span>只看 <b>还没有物料编码</b> 的物料（状态演示员工152、源申请没被拒绝或撤回）：{{ listLoading ? '正在统计…' : `${overdueOnly ? Math.max(overdueTotal, overdueFound.length) : total} 项` }}</span>
+      <span>只看 <b>还没有物料编码</b> 的物料（状态正常、源申请没被拒绝或撤回）：{{ listLoading ? '正在统计…' : `${overdueOnly ? Math.max(overdueTotal, overdueFound.length) : total} 项` }}</span>
       <button type="button" class="link" @click="clearBoardFilter('uncoded')">去掉这个筛选</button>
     </div>
     <div v-if="projectOnly" class="mp-source" data-testid="project-filter">
@@ -536,7 +536,7 @@ async function cancelRow(reason) {
       <select v-model="requester" aria-label="需求人" @change="query"><option value="">全部需求人</option><option v-for="item in requesters" :key="item" :value="item">{{ item }}</option></select>
       <input v-model="search" type="search" placeholder="物料编号、名称、型号、日期、项目、PR、PO、供应商或单号，回车搜索" aria-label="搜索物料" @keyup.enter="query" />
       <button type="button" class="btn dark" @click="query">查询</button>
-      <button type="button" :class="['btn', { dark: overdueOnly }]" :aria-pressed="overdueOnly" title="演示员工116交期早于今天、累计到货少于 PO 数量" @click="setOverdue(!overdueOnly)">交期已过未收齐</button>
+      <button type="button" :class="['btn', { dark: overdueOnly }]" :aria-pressed="overdueOnly" title="合同交期早于今天、累计到货少于 PO 数量" @click="setOverdue(!overdueOnly)">交期已过未收齐</button>
     </div>
 
     <div v-if="message" class="banner ok">{{ message }}</div>

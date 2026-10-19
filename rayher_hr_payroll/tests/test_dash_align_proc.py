@@ -1,7 +1,7 @@
 """看板数字和点进去看到的对齐（采购 / PMC / 生产主管 / 项目负责人，2026-10-13 审查 F1–F17）。
 
 规则（用户 2026-10-13 定的）：看板上每个数 = 点进去看到的（同样的行、同样的条数 / 合计），对不上就点进同一份数据的明细；
-采购金额 = PO 物料行金额合计；PMC、生产主管从看板点得到的地方演示员工177出现金额；“超过 3 天” = 严格大于 3 个日历日；
+采购金额 = PO 物料行金额合计；PMC、生产主管从看板点得到的地方都不出现金额；“超过 3 天” = 严格大于 3 个日历日；
 看板给谁看一行，谁就能打开那一行的详情。
 今天固定为 2026-10-09（周五），本周 = 10-05 到 10-11。
 """
@@ -84,13 +84,13 @@ class FakeFrappe:
 # ---------------------------------------------------------------- F1 待提 PR：卡片和明细同一份数据
 def test_f1_await_pr_card_opens_a_list_built_from_the_same_rows(world):
     world["await"] = [{"request": "R1", "line": "1"}, {"request": "R1", "line": "2"}, {"request": "R2", "line": "1"}]
-    world["heads"] = {"R1": {"subject": " 伺服电机 ", "employee_name": "演示员工129", "project": "RD03"}, "R2": {"subject": "", "employee_name": "", "project": ""}}
+    world["heads"] = {"R1": {"subject": " 伺服电机 ", "employee_name": "南通工厂9", "project": "RD03"}, "R2": {"subject": "", "employee_name": "", "project": ""}}
     ctx = manager()
     card = run("proc.await_pr", ctx)
     assert card["value"] == "2" and card["target"] == {"key": "drill", "params": {"item": "proc.await_pr", "period": "2026-10"}}
     detail = core.get_detail_for(ctx, "proc.await_pr")
     assert len(detail["rows"]) == int(card["value"]) and detail["summary"] == "共 2 张，3 项物料"
-    assert detail["rows"][0]["cells"] == ["R1", "伺服电机", "演示员工129", "RD03", "2 项"]
+    assert detail["rows"][0]["cells"] == ["R1", "伺服电机", "南通工厂9", "RD03", "2 项"]
     # 采购经理能看物料进度看板：点一行到看板里这张申请的物料（PMC 在那里提 PR）
     assert detail["rows"][0]["target"] == {"key": "material.progress", "params": {"request": "R1"}}
 
@@ -125,7 +125,7 @@ def test_f2_the_page_filter_and_the_card_are_one_sql():
     where, params = conditions(overdue=True, today=TODAY)
     assert overdue_sql() in where and params["today"] == TODAY
     sql = overdue_sql()
-    # 已取消的物料不算；PO 演示员工116已生效；交期早于今天（服务器的今天）；没收齐或退货中
+    # 已取消的物料不算；PO 合同已生效；交期早于今天（服务器的今天）；没收齐或退货中
     for part in ("b.status!='已取消'", "po.status IN ('已生效','供应商制作中','到货验收中','付款中')", "pl.contract_delivery_date < %(today)s",
                  "COALESCE(pl.received_quantity,0) < COALESCE(pl.quantity,0)", "COALESCE(pl.inspection_status,'')='退货中'"):
         assert part in sql, part
@@ -150,7 +150,7 @@ def test_f2_card_count_equals_the_rows_the_page_lists_and_projects_link_with_a_f
     ctx = pmc()
     card = run("proc.material_overdue", ctx)
     assert (card["value"], card["sub"], card["target"]) == ("3", "最久逾期 19 天", {"key": "material.overdue", "params": {}})
-    assert run("alert.material_overdue", ctx)["title"] == "3 项物料超过演示员工116交期还没到"
+    assert run("alert.material_overdue", ctx)["title"] == "3 项物料超过合同交期还没到"
     aging = run("block.overdue_aging", ctx)
     assert sum(int(row["value"]) for row in aging["rows"]) == 3
     risk = core.get_detail_for(ctx, "proc.risk_projects")
@@ -200,7 +200,7 @@ def test_f3_month_amount_card_drill_suppliers_and_projects_all_add_up_to_line_am
     detail = core.get_detail_for(ctx, "proc.month_amount")
     assert detail["summary"] == "共 2 个 PO，合计 10.4 万"
     assert [row["cells"][4] for row in detail["rows"]] == ["¥ 100,000.50", "¥ 4,000.00"]
-    assert "2 个 PO 的表头总额和行金额合计对不上（N1、N2）" in detail["note"]          # 表头 10 万 / 5000 和行合计演示员工177一样
+    assert "2 个 PO 的表头总额和行金额合计对不上（N1、N2）" in detail["note"]          # 表头 10 万 / 5000 和行合计都不一样
     suppliers = core.get_detail_for(ctx, "proc.suppliers")
     assert [row["cells"][2] for row in suppliers["rows"]] == ["¥ 100,000.50", "¥ 4,000.00"]
     by_project = core.get_detail_for(ctx, "proc.projects")
@@ -473,7 +473,7 @@ def test_f13_direct_purchases_are_left_out_when_their_page_is_switched_off(world
 def test_f14_chain_activity_moves_the_since_date(monkeypatch):
     from rayher_hr_payroll.api import oa_entry
 
-    rows = [{"name": "U1", "request_type": "采购申请", "subject": "电机", "employee_name": "演示员工129", "project": "", "workflow_status": "已完成",
+    rows = [{"name": "U1", "request_type": "采购申请", "subject": "电机", "employee_name": "南通工厂9", "project": "", "workflow_status": "已完成",
              "business_status": "需求已批准/待询价", "current_step_label": "", "expected_delivery_date": None, "creation": "2026-09-01 09:00:00"},
             {"name": "U2", "request_type": "采购申请", "subject": "导轨", "employee_name": "演示员工146", "project": "", "workflow_status": "已完成",
              "business_status": "需求已批准/待询价", "current_step_label": "", "expected_delivery_date": None, "creation": "2026-09-01 09:00:00"}]

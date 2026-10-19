@@ -128,7 +128,7 @@ def test_the_request_row_is_locked_before_the_once_a_day_check_and_released_by_t
 
 
 def test_nobody_can_lock_a_request_they_may_not_nudge(api):
-    """没权限、不是申请人 / 项目负责人、还没到 3 天：这些情况演示员工177会去锁申请那一行。"""
+    """没权限、不是申请人 / 项目负责人、还没到 3 天：这些情况都不会去锁申请那一行。"""
     _logs, state = api
     state["perm"] = False
     with pytest.raises(PermissionError):

@@ -33,7 +33,7 @@ def sync_user_for_employee(doc, method=None):
         if not want_enabled and frappe.db.exists(
             "Employee", {"user_id": doc.user_id, "status": "Active", "name": ["!=", getattr(doc, "name", None) or ""]}
         ):
-            # 修复（2026-09-29，审查 X3-5）：复职的人新档和旧的演示员工166档共用同一个账号时，
+            # 修复（2026-09-29，审查 X3-5）：复职的人新档和旧的离职档共用同一个账号时，
             # 保存旧档不能把账号停用。
             return
         user = frappe.get_doc("User", doc.user_id)

@@ -26,7 +26,7 @@ class MemoryStore:
     def identity(self):
         return {
             "employee": None,
-            "employee_name": "演示员工170",
+            "employee_name": "管理员",
             "department": "",
             "company": "QIHENG DEMO",
             "supervisor": "直属领导",
@@ -152,7 +152,7 @@ def test_payment_source_options_return_only_completed_available_procurements():
             "workflow_status": "已完成", "approved_amount": 100,
             "purchaser_user": "buyer@example.com", "contract_status": "已生效",
             "supplier": "SUP-1", "inspection_status": "未验收", "arrival_status": "未到货",
-            "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 100, "amount": 100, "trigger_condition": "演示员工116生效", "invoice_requirement": "付款后提供"}],
+            "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 100, "amount": 100, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供"}],
         },
         {
             "name": "PROC-2", "request_type": "采购申请", "subject": "无余额",
@@ -360,7 +360,7 @@ def test_procurement_payment_source_must_be_completed_procurement_and_is_snapsho
             {"item_name": "A", "quantity": 2, "unit": "个", "unit_price": 20},
             {"item_name": "B", "quantity": 3, "unit": "个", "unit_price": 20},
         ],
-        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 100, "amount": 100, "trigger_condition": "演示员工116生效", "invoice_requirement": "付款后提供"}],
+        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 100, "amount": 100, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供"}],
     }
     payload = payment_payload()
     with pytest.raises(approval_center.ApprovalCenterError, match="已生效"):
@@ -525,7 +525,7 @@ def test_direct_purchase_method_and_procurement_payment_fields_are_separate():
         "workflow_status": "已完成", "currency": "CNY", "approved_amount": 100,
         "modified": "2026-08-15 10:00:00", "contract_status": "已生效", "supplier": "SUP-1",
         "business_lines": [{"item_name": "A", "quantity": 1, "unit": "个", "unit_price": 100}],
-        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 30, "amount": 100, "trigger_condition": "演示员工116生效", "invoice_requirement": "付款后提供"}],
+        "payment_plan": [{"name": "PLAN-1", "status": "待下推", "payment_stage": "预付款", "percentage": 30, "amount": 100, "trigger_condition": "合同生效", "invoice_requirement": "付款后提供"}],
     }
     payment = approval_center.save_draft(
         approval_center.REQUEST_PROCUREMENT_PAYMENT, payment_payload(), store=store

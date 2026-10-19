@@ -52,7 +52,7 @@ def procurement(scope="项目采购"):
         owner="applicant@example.com",
         request_type="采购申请",
         workflow_status="已完成",
-        business_status="演示员工116待登记",
+        business_status="合同待登记",
         expected_delivery_date="2026-09-10",
         procurement_scope=scope,
         purchaser_user="buyer@example.com",
@@ -144,12 +144,12 @@ def test_late_contract_appends_confirmation_steps_and_preserves_history(monkeypa
 
     result = oa_entry.register_contract_delivery(doc.name, "2026-09-15", "供应商排产延期")
 
-    assert result["business_status"] == "演示员工116交期待确认"
+    assert result["business_status"] == "合同交期待确认"
     assert result["contract_delivery_date"] == ""
     assert result["pending_contract_delivery_date"] == "2026-09-15"
     assert [row.label for row in doc.steps] == [
         "PMC：演示员工178", "直属主管：演示员工132", "项目主管：项目主管",
-        "演示员工116交期确认-PMC：演示员工178", "演示员工116交期确认-项目主管：项目主管",
+        "合同交期确认-PMC：演示员工178", "合同交期确认-项目主管：项目主管",
     ]
     assert all(row.status == "已通过" for row in doc.steps[:3])
     assert doc.current_step_index == 4
@@ -171,7 +171,7 @@ def test_non_project_late_contract_only_adds_pmc_confirmation(monkeypatch, oa_en
     doc = procurement("非项目采购")
     install_endpoint(monkeypatch, doc, oa_entry)
     oa_entry.register_contract_delivery(doc.name, "2026-09-15", "供应商排产延期")
-    assert [row.label for row in doc.steps[3:]] == ["演示员工116交期确认-PMC：演示员工178"]
+    assert [row.label for row in doc.steps[3:]] == ["合同交期确认-PMC：演示员工178"]
 
 def test_last_late_delivery_confirmation_commits_date_and_prepares_copy(monkeypatch, oa_entry):
     doc = procurement()
@@ -189,14 +189,14 @@ def test_last_late_delivery_confirmation_commits_date_and_prepares_copy(monkeypa
     assert doc.pending_contract_delivery_date == ""
     assert doc.business_status == "采购执行中"
     assert len(json.loads(doc.copied_to)) == 5
-    assert json.loads(doc.operation_log)[-1]["action"] == "确认演示员工116交期"
+    assert json.loads(doc.operation_log)[-1]["action"] == "确认合同交期"
 
 def test_late_confirmation_deduplicates_same_pmc_and_project_owner_account(monkeypatch, oa_entry):
     doc = procurement()
     doc.project_owner = "pmc@example.com"
     install_endpoint(monkeypatch, doc, oa_entry)
     oa_entry.register_contract_delivery(doc.name, "2026-09-15", "供应商排产延期")
-    assert [row.label for row in doc.steps[3:]] == ["演示员工116交期确认-PMC：演示员工178"]
+    assert [row.label for row in doc.steps[3:]] == ["合同交期确认-PMC：演示员工178"]
 
 
 def test_completed_base_procurement_moves_to_pr_and_price_inquiry(oa_entry):

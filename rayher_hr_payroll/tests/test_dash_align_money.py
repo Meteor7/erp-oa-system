@@ -2,7 +2,7 @@
 
 规则：每个数字点进去看到的就是这个数字（同一批行、同样的条数 / 合计）；页面列不出“正好这些”的，点进去是
 同一份数据的明细（drill.*）。「超过 3 天」= 严格大于 3 个日历日；等待分三段：今天 / 1–3 天 / 超过 3 天。
-演示员工113、总经理能只读打开数字背后的页面（研发分摊点进研发费用汇总）。
+副总、总经理能只读打开数字背后的页面（研发分摊点进研发费用汇总）。
 """
 import importlib
 import sys
@@ -63,7 +63,7 @@ STATES = [
 
 
 @pytest.mark.parametrize("name, alloc, status_value, pending_sub", STATES, ids=[item[0] for item in STATES])
-@pytest.mark.parametrize("who", [FINANCE, dict(positions=("general_manager",)), dict(positions=("vice_manager",))], ids=["财务", "总经理", "演示员工113"])
+@pytest.mark.parametrize("who", [FINANCE, dict(positions=("general_manager",)), dict(positions=("vice_manager",))], ids=["财务", "总经理", "副总"])
 def test_alloc_status_and_rd_pending_share_one_state(name, alloc, status_value, pending_sub, who):
     ctx = make_ctx(**who)
     status = run("alloc.status", ctx, **{"money.allocation": alloc})
@@ -76,7 +76,7 @@ def test_alloc_status_and_rd_pending_share_one_state(name, alloc, status_value, 
     assert pending["value"] == core.money_wan(total)[0]
     if alloc["has_data"]:
         assert status["sub"].startswith(f"10 月 {money._amt(total)}")
-    # 财务去分摊页；演示员工113、总经理只读，去研发费用汇总
+    # 财务去分摊页；副总、总经理只读，去研发费用汇总
     key = "allocation" if who is FINANCE else "cost.summary"
     assert status["target"]["key"] == pending["target"]["key"] == key
     assert "money.cost_overview" not in ctx._memo      # 不再一个看概览、一个看分摊
@@ -100,7 +100,7 @@ def test_unknown_card_subtitle_on_a_finalized_month():
     assert draft["sub"] == "定版前要确认"
 
 
-# ---------------------------------------------------------------- 10 / 14 演示员工113、总经理：分摊数字只读、能点开
+# ---------------------------------------------------------------- 10 / 14 副总、总经理：分摊数字只读、能点开
 @pytest.mark.parametrize("position", ["general_manager", "vice_manager"])
 def test_leaders_get_allocation_blocks_read_only_with_working_links(position):
     ctx = make_ctx(positions=(position,))
@@ -270,7 +270,7 @@ def _cost_frappe(monkeypatch):
             return [{"parent": "PO-1", "amount": 100.0, "project": "NP"}, {"parent": "PO-1", "amount": 40.0, "project": "RD1"},
                     {"parent": "PO-2", "amount": 60.0, "project": "RD1"}, {"parent": "PO-3", "amount": 30.0, "project": None}]
         if doctype == "OA Approval Request":
-            return [{"name": "R-1", "request_type": "报销单", "subject": "差旅", "employee_name": "演示员工129", "paid_on": "2026-10-02", "project": "RD1"},
+            return [{"name": "R-1", "request_type": "报销单", "subject": "差旅", "employee_name": "南通工厂9", "paid_on": "2026-10-02", "project": "RD1"},
                     {"name": "R-2", "request_type": "付款单", "subject": "", "employee_name": "演示员工146", "paid_on": "2026-10-04", "project": ""},
                     {"name": "R-3", "request_type": "费用付款申请", "subject": "旧单", "employee_name": "演示员工157", "paid_on": "2026-10-06", "project": ""}]
         assert doctype == "OA Approval Expense Line", doctype
@@ -353,7 +353,7 @@ def test_paid_loader_uses_line_totals_like_the_cost_overview(monkeypatch):
 
 
 PAID = {"money.paid:2026-10-01:2026-10-31": {
-    "docs": [{"name": "R-1", "kind": "报销单", "subject": "差旅", "employee_name": "演示员工129", "paid_on": "2026-10-02", "amount": 100.0},
+    "docs": [{"name": "R-1", "kind": "报销单", "subject": "差旅", "employee_name": "南通工厂9", "paid_on": "2026-10-02", "amount": 100.0},
              {"name": "R-2", "kind": "付款单", "subject": "", "employee_name": "演示员工146", "paid_on": "2026-10-04", "amount": 40.0},
              {"name": "R-3", "kind": "费用付款申请", "subject": "", "employee_name": "", "paid_on": "2026-10-06", "amount": 15.0}],
     "lines": [{"parent": "R-1", "project": "", "amount": 80.0, "account": "管理费用 / 差旅费"},
@@ -439,7 +439,7 @@ def test_cost_trend_list_rows_open_each_months_cost_total():
 
 def test_processed_card_opens_the_list_of_what_i_processed():
     ctx = make_ctx()
-    rows = [{"name": "R1", "kind": "报销单", "subject": "差旅", "employee_name": "演示员工129", "acted_on": "2026-10-03"},
+    rows = [{"name": "R1", "kind": "报销单", "subject": "差旅", "employee_name": "南通工厂9", "acted_on": "2026-10-03"},
             {"name": "L1", "kind": "请假申请", "subject": "", "employee_name": "演示员工146", "acted_on": "2026-10-05"},
             {"name": "X1", "kind": "没见过的类型", "subject": "", "employee_name": "", "acted_on": "2026-10-01"}]
     card = run("me.processed", ctx, **{"money.processed": {"count": 3, "kinds": {"报销单": 1, "请假申请": 1, "没见过的类型": 1}, "rows": rows}})
@@ -461,7 +461,7 @@ def test_processed_loader_counts_each_request_once(monkeypatch):
             assert filters["action_by"] == "u@example.com" and filters["acted_on"] == ["between", ["2026-10-01", "2026-10-31"]]
             return [{"parent": "R1", "acted_on": "2026-10-02 09:00:00"}, {"parent": "R1", "acted_on": "2026-10-04 09:00:00"},
                     {"parent": "P1", "acted_on": "2026-10-03 10:00:00"}]
-        return [{"name": "R1", "request_type": "报销单", "subject": "差旅", "employee_name": "演示员工129"},
+        return [{"name": "R1", "request_type": "报销单", "subject": "差旅", "employee_name": "南通工厂9"},
                 {"name": "P1", "request_type": "付款单", "subject": None, "employee_name": "演示员工146"}]
 
     monkeypatch.setattr(frappe, "get_all", fake_get_all, raising=False)

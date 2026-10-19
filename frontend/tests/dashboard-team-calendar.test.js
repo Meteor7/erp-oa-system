@@ -14,7 +14,7 @@ const calendarBlock = (extra = {}) => ({
   key: 'block.team_calendar', type: 'calendar', title: '团队日历', sub: '', rows: [], more: '考勤中心', hint: '', error: null, days,
   people: [
     { name: '杨员工', cells: [{ kind: 'annual', pending: false }, { kind: 'comp', pending: true }, null, { kind: 'bogus' }, ...Array(10).fill(null)] },
-    { name: '演示员工120', cells: Array(14).fill(null) },
+    { name: '南通工厂0', cells: Array(14).fill(null) },
   ],
   totals: days.map((day, index) => (day.off_day ? { off: 0, present: null } : { off: index === 0 ? 1 : 0, present: index === 0 ? 1 : 2 })),
   ...extra,
@@ -93,7 +93,7 @@ test('the procurement list knows the project-owner scope and never lists the own
   assert.equal(listScope({ scope: 'owned' }, 'mine'), 'owned');
   assert.equal(listScope({ scope: 'nope' }, 'mine'), 'mine');
   const rows = [
-    { name: 'A', project_owner: 'Owner@tests-x.example.invalid', owner: 'bob@tests-x.example.invalid', employee: 'E2', workflow_status: '待审批' },
+    { name: 'A', project_owner: 'Person041@tests-x.example.invalid', owner: 'bob@tests-x.example.invalid', employee: 'E2', workflow_status: '待审批' },
     { name: 'B', project_owner: 'person041@tests-x.example.invalid', owner: 'person041@tests-x.example.invalid', employee: 'E1', workflow_status: '已完成' },
     { name: 'C', project_owner: 'person041@tests-x.example.invalid', owner: 'carol@tests-x.example.invalid', employee: 'E1', workflow_status: '已完成' },
     { name: 'D', project_owner: 'person041@tests-x.example.invalid', owner: 'dan@tests-x.example.invalid', employee: 'E4', workflow_status: '草稿' },

@@ -62,7 +62,7 @@ def _in_scope(doctype, doc, user, roles, employee):
 
 
 def _employee_of(user):
-    # 同一账号有在职档和旧的演示员工166档（复职）时取在职档（修复 2026-09-29，审查 X3-5）。
+    # 同一账号有在职档和旧的离职档（复职）时取在职档（修复 2026-09-29，审查 X3-5）。
     return frappe.db.get_value("Employee", {"user_id": user, "status": "Active"}, "name") or frappe.db.get_value("Employee", {"user_id": user}, "name")
 
 

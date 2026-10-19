@@ -1,4 +1,4 @@
-"""确认本月工资（决定 2026-10-13）：草稿核对完一次确认、确认后锁定；要改先撤回确认；总经理、演示员工113经理只读。"""
+"""确认本月工资（决定 2026-10-13）：草稿核对完一次确认、确认后锁定；要改先撤回确认；总经理、副总经理只读。"""
 import importlib
 import json
 import sys
@@ -90,7 +90,7 @@ class Slip:
 
 
 DRAFTS = [
-    {"name": "SAL-1", "employee": "E1", "employee_name": "演示员工128", "hr_spa_managed": 1},
+    {"name": "SAL-1", "employee": "E1", "employee_name": "南通工厂8", "hr_spa_managed": 1},
     {"name": "SAL-2", "employee": "E2", "employee_name": "演示员工143", "hr_spa_managed": 0},
     {"name": "SAL-3", "employee": "E3", "employee_name": "演示员工156", "hr_spa_managed": 1},
 ]
@@ -202,7 +202,7 @@ def test_general_and_vice_manager_can_read_payroll_but_not_change_it(monkeypatch
 def test_a_new_draft_is_numbered_after_its_employee(monkeypatch):
     """新草稿的编号带员工号（Sal Slip/HR-EMP-1/…），不是 Sal Slip/None/…。"""
     module, frappe, _ = _load(monkeypatch)
-    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "演示员工128"})
+    monkeypatch.setattr(module, "_employee", lambda employee: {"name": employee, "company": "QIHENG Demo", "employee_name": "南通工厂8"})
     monkeypatch.setattr(module, "_inputs", lambda: FakeInputs())
     monkeypatch.setattr(module, "_accommodation", lambda *args: 0)
     monkeypatch.setattr(module, "_slip", lambda *args: None)

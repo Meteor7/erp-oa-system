@@ -1,4 +1,4 @@
-// 总经理、演示员工113经理只读打开看板数字背后的页面（决定 2026-10-13）；能改的仍然只有人事 / 财务角色。
+// 总经理、副总经理只读打开看板数字背后的页面（决定 2026-10-13）；能改的仍然只有人事 / 财务角色。
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canEditHr, canSee } from "../src/lib/access.js";

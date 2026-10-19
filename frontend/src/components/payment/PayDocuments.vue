@@ -118,7 +118,7 @@ defineExpose({ load });
     <div v-if="!noAccess" class="pay-docs-foot">
       <button type="button" class="btn" :disabled="uploading" @click="pick('其他补充资料')">{{ uploading ? '上传中…' : '上传补充资料' }}</button>
       <span class="muted">
-        <template v-if="poSourced">报价和演示员工116属于 PO，不再出现在这里的“缺资料”里；到货、验收记录在左边只读显示。<template v-if="text(invoiceRequirement) === INVOICE_BEFORE && missing.length"> 当前缺发票，确认付款时系统会拦下。</template></template>
+        <template v-if="poSourced">报价和合同属于 PO，不再出现在这里的“缺资料”里；到货、验收记录在左边只读显示。<template v-if="text(invoiceRequirement) === INVOICE_BEFORE && missing.length"> 当前缺发票，确认付款时系统会拦下。</template></template>
         <template v-else>当前节点缺少 {{ missing.length }} 项；资料可在审批后补交；到货、验收、付款、退款回单和关闭节点会再次校验。</template>
       </span>
     </div>

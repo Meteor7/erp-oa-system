@@ -732,8 +732,8 @@ def _purchase_order_tasks():
     stages = {
         "草稿": ("待采购确认订单", "我是采购", is_purchase or is_admin),
         "待采购确认": ("待采购确认订单", "我是采购", is_purchase or is_admin),
-        "待演示员工116复核": ("演示员工116待复核", "我是采购", is_purchase or is_admin),
-        "待电子用印": ("演示员工116待电子用印", "我负责用印", is_purchase or is_admin),
+        "待合同复核": ("合同待复核", "我是采购", is_purchase or is_admin),
+        "待电子用印": ("合同待电子用印", "我负责用印", is_purchase or is_admin),
         "供应商制作中": ("待登记到货", "我是生产主管", is_asset_owner or is_admin),
         "到货验收中": ("待验收", "我是采购", is_purchase or is_admin),
     }

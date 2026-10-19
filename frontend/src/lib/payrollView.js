@@ -34,7 +34,7 @@ export function figures(row) {
   };
 }
 
-// 本月按工时折算（入职、演示员工166当月，或者请了事假）：实际工时少于当月总工时。
+// 本月按工时折算（入职、离职当月，或者请了事假）：实际工时少于当月总工时。
 export const isProrated = (row) => { const hours = payrollHours(row || {}); return hours.total > 0 && hours.actual < hours.total; };
 
 // 按考勤算出来的实际工时（在职工时 − 事假），人事手动改过以后点“按考勤重算”恢复成它。

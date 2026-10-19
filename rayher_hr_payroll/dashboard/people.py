@@ -1,8 +1,8 @@
 """看板里的人事、薪酬与社保、宿舍。
 
 数据口径尽量和现有页面一致，不另起一套：
-- 员工数字（在职、入职演示员工166、到期提醒、档案、研发类型）和前端 `lib/personnelView.js` 同一口径：60 天窗口、
-  第二次演示员工116到期晚于第一次视为已续签、演示员工166日当天仍算在职、研发组取 `DEPARTMENT_GROUP_BY_NAME`。
+- 员工数字（在职、入职离职、到期提醒、档案、研发类型）和前端 `lib/personnelView.js` 同一口径：60 天窗口、
+  第二次合同到期晚于第一次视为已续签、离职日当天仍算在职、研发组取 `DEPARTMENT_GROUP_BY_NAME`。
 - 工资条人数看 Salary Slip（每人一张，已确认优先），应有工资条的人和薪酬计算页 `get_payroll_rows` 一样；
   金额只算已确认（已提交）的工资条，取 `payroll_bridge.period_pay_totals / period_salaries`，和经营页、研发分摊一个数（决定 2026-10-13）。
 - 社保公积金公司承担部分只算已确认的记录（`payroll_bridge.period_company_contributions`）。
@@ -10,7 +10,7 @@
   今天不在岗用 `attendance_board_entry.today_away`，都和考勤中心同一个函数。
 
 个人信息永远不进块：只给人数、进度、汇总金额；名单只给姓名 + 日期。
-权限：`visible` 看真实权限。员工表类的块 HR 角色或演示员工113/总经理岗位可看（和 `overview_entry.hr_scope` 一致）；
+权限：`visible` 看真实权限。员工表类的块 HR 角色或副总/总经理岗位可看（和 `overview_entry.hr_scope` 一致）；
 工资、社保、公积金、宿舍的底层接口只认 HR 角色，这里同样只认 HR 角色；社保公积金再叠加
 `_guards.HR_SENSITIVE_HIDDEN_USERS`（被屏蔽的账号整块不返回）。
 """
@@ -56,7 +56,7 @@ def _hr_view(ctx):
 
 
 def company_attendance(ctx):
-    """考勤中心首页能不能看全公司的人名（和 attendance_scope 的 company 一档同一个判断：人事经理 / 演示员工113 / 总经理岗位，或 Administrator）。
+    """考勤中心首页能不能看全公司的人名（和 attendance_scope 的 company 一档同一个判断：人事经理 / 副总 / 总经理岗位，或 Administrator）。
     看板的考勤卡片据此决定点进去落在首页的哪一块；只有 HR 角色的人首页只看到自己，卡片仍然进原来的清单。"""
     from rayher_hr_payroll.attendance_scope import COMPANY_POSITIONS
 
@@ -135,7 +135,7 @@ def _is_current_month(ctx):
 
 # ---------------------------------------------------------------- 员工表：纯函数
 def is_left(row, today):
-    """与 personnelView.isLeft 一致：状态是 Left，或演示员工166日已过（演示员工166日当天仍在职）。"""
+    """与 personnelView.isLeft 一致：状态是 Left，或离职日已过（离职日当天仍在职）。"""
     if str(row.get("status") or "") == "Left":
         return True
     relieving = _d(row.get("relieving_date"))
@@ -148,17 +148,17 @@ def archive_status_of(row):
 
 
 def expiry_items(row, today):
-    """60 天内到期的演示员工173期 / 演示员工116：[(种类, 日期, 还剩几天)]。第二次演示员工116到期晚于第一次的，第一次视为已续签。"""
+    """60 天内到期的试用期 / 合同：[(种类, 日期, 还剩几天)]。第二次合同到期晚于第一次的，第一次视为已续签。"""
     items = []
     probation = _d(row.get("probation_end_date"))
     if probation is not None and 0 <= (probation - today).days <= EXPIRY_DAYS:
-        items.append(("演示员工173期", probation, (probation - today).days))
+        items.append(("试用期", probation, (probation - today).days))
     first, second = _d(row.get("first_contract_end_date")), _d(row.get("second_contract_end_date"))
     if first is not None and second is not None and (second - first).days > 0:
         first = None
     ends = sorted(day for day in (first, second) if day is not None and 0 <= (day - today).days <= EXPIRY_DAYS)
     if ends:
-        items.append(("演示员工116", ends[0], (ends[0] - today).days))
+        items.append(("合同", ends[0], (ends[0] - today).days))
     return items
 
 
@@ -223,7 +223,7 @@ def _dedupe_slips(slips):
 def summarize_payroll(employees, slips, period):
     """工资条的人数（金额不在这里算，见 _pay_totals / _salaries）。
 
-    本月应有工资条的人 = 入职日不晚于月末、且没在月初之前演示员工166（与 hr_payroll_entry._period_employee_filters 一致）。
+    本月应有工资条的人 = 入职日不晚于月末、且没在月初之前离职（与 hr_payroll_entry._period_employee_filters 一致）。
     每人一张：已确认（docstatus = 1）优先，没有才看草稿。confirmed = 已确认的人，draft = 只有草稿的人，missing = 还没生成的人。
     draft_gross = 草稿工资条的应发合计（只用来提示“还有多少没确认”，不进金额）。
     """
@@ -428,30 +428,30 @@ def hr_active(ctx):
     facts = _facts(ctx)
     return kpi("hr.active", "在职员工", facts["active"], "人", f"研发 {facts['rd']} · 其他 {facts['other']}",
                to=target("personnel.list", status="active"),
-               hint="在职 = 状态不是演示员工166、且演示员工166日还没过（演示员工166日当天仍算在职）。研发 = 研发人员类型是全时 / 非全时 / 辅助的人；"
+               hint="在职 = 状态不是离职、且离职日还没过（离职日当天仍算在职）。研发 = 研发人员类型是全时 / 非全时 / 辅助的人；"
                     "工时填报率里的「填工时」人数是工时填报名单（排除免填账号），两个数不一定相等。")
 
 
-@provider("hr.joined_left", "kpi", visible=_hr_view, title="本月入职 / 演示员工166")
+@provider("hr.joined_left", "kpi", visible=_hr_view, title="本月入职 / 离职")
 def hr_joined_left(ctx):
     facts = _facts(ctx)
     # 点进去的员工页只会按“当前月”筛，所以看别的月份时不给跳转（数字对不上就不如不跳）。
     to = target("personnel.joined") if _is_current_month(ctx) else None
     return kpi("hr.joined_left", "本月入职", len(facts["new_joiners"]), "人",
-               f"演示员工173期中 {facts['on_probation']} 人 · 本月演示员工166 {facts['left_effective']} 人", to=to,
-               hint="入职 = 入职日在所选月份、现在还在职的人。演示员工173期中 = 在职且演示员工173期结束日不早于今天。"
+               f"试用期中 {facts['on_probation']} 人 · 本月离职 {facts['left_effective']} 人", to=to,
+               hint="入职 = 入职日在所选月份、现在还在职的人。试用期中 = 在职且试用期结束日不早于今天。"
                     "点进去是员工页的「本月入职」，人数和这里一致。")
 
 
-@provider("hr.left_month", "kpi", visible=_hr_view, title="本月演示员工166")
+@provider("hr.left_month", "kpi", visible=_hr_view, title="本月离职")
 def hr_left_month(ctx):
     facts = _facts(ctx)
     to = target("personnel.left_month") if _is_current_month(ctx) else None
-    return kpi("hr.left_month", "本月演示员工166", facts["left_effective"], "人",
-               f"另有 {facts['left_pending']} 人演示员工166日在本月、还没到" if facts["left_pending"] else "演示员工166日在本月、已经演示员工166的人",
+    return kpi("hr.left_month", "本月离职", facts["left_effective"], "人",
+               f"另有 {facts['left_pending']} 人离职日在本月、还没到" if facts["left_pending"] else "离职日在本月、已经离职的人",
                to=to,
-               hint="演示员工166日在所选月份、且已经演示员工166的人（演示员工166日当天仍算在职）；演示员工166日还没到的叫「待演示员工166」，不算在这里，仍在在职名单里。"
-                    "点进去是员工页的「已演示员工166 + 本月演示员工166」，人数和这里一致。")
+               hint="离职日在所选月份、且已经离职的人（离职日当天仍算在职）；离职日还没到的叫「待离职」，不算在这里，仍在在职名单里。"
+                    "点进去是员工页的「已离职 + 本月离职」，人数和这里一致。")
 
 
 @provider("hr.away_today", "kpi", visible=_hr_view, title="今天不在岗")
@@ -461,24 +461,24 @@ def hr_away_today(ctx):
     if away.get("trip"):
         parts.append(f"另有出差 {away['trip']}")
     count = int(away.get("count") or 0)
-    # 考勤中心首页看全公司人名的（人事经理、演示员工113、总经理）落在「谁不在 · 今天」；只有 HR 角色、没有这些岗位的人首页只有自己，
+    # 考勤中心首页看全公司人名的（人事经理、副总、总经理）落在「谁不在 · 今天」；只有 HR 角色、没有这些岗位的人首页只有自己，
     # 仍然进“今天不在岗”的列表（全部申请里筛今天，权限和“全部”一样）。
     to = (target("attendance.away") if company_attendance(ctx) else target("attendance.today")) if count else None
     return kpi("hr.away_today", "今天不在岗", count, "人", " · ".join(parts), to=to,
                hint="今天（工作日）有已批准的请假或调休的在职员工，一人只算一次（一个人有几张单只算一人）；出差不算不在岗，单独看“出差中”。"
-                    "点进去是考勤中心的「谁不在 · 今天」（请假、调休各是一格，人数加起来可能多于这里：同一个人演示员工103都有），每一行进那张申请。")
+                    "点进去是考勤中心的「谁不在 · 今天」（请假、调休各是一格，人数加起来可能多于这里：同一个人两样都有），每一行进那张申请。")
 
 
 @provider("hr.expiring", "kpi", visible=_hr_view, title="60 天内到期")
 def hr_expiring(ctx):
     people = _facts(ctx)["expiring"]
-    probation = sum(1 for person in people if any(item[0] == "演示员工173期" for item in person["items"]))
-    contract = sum(1 for person in people if any(item[0] == "演示员工116" for item in person["items"]))
+    probation = sum(1 for person in people if any(item[0] == "试用期" for item in person["items"]))
+    contract = sum(1 for person in people if any(item[0] == "合同" for item in person["items"]))
     soonest = min((item[2] for person in people for item in person["items"]), default=None)
     tone = "bad" if soonest is not None and soonest <= URGENT_DAYS else ("hot" if people else "")
-    return kpi("hr.expiring", f"{EXPIRY_DAYS} 天内到期", len(people), "人", f"演示员工116 {contract} · 演示员工173期 {probation}", tone,
+    return kpi("hr.expiring", f"{EXPIRY_DAYS} 天内到期", len(people), "人", f"合同 {contract} · 试用期 {probation}", tone,
                to=target("personnel.expiring"),
-               hint="在职员工里演示员工173期或演示员工116 60 天内到期的人数（一个人演示员工103都到期只算一人）。演示员工116：第二次演示员工116到期晚于第一次的，第一次视为已续签。")
+               hint="在职员工里试用期或合同 60 天内到期的人数（一个人两样都到期只算一人）。合同：第二次合同到期晚于第一次的，第一次视为已续签。")
 
 
 @provider("hr.file_pending", "kpi", visible=_hr_view, title="档案待完善")
@@ -525,41 +525,41 @@ def optional_target(key, fallback, **params):
     return target(key, **params) if key in load_targets() else fallback
 
 
-# 演示员工173期 / 演示员工116到期分开看（决定 2026-10-13）：员工信息页 ?reminder=probation|contract 只列这一种；
+# 试用期 / 合同到期分开看（决定 2026-10-13）：员工信息页 ?reminder=probation|contract 只列这一种；
 # targets.json 还没有这两个目标时，点进去是同一份名单的明细。
-_EXPIRY_TARGETS = {"演示员工173期": "personnel.probation", "演示员工116": "personnel.contract"}
+_EXPIRY_TARGETS = {"试用期": "personnel.probation", "合同": "personnel.contract"}
 
 
 def _expiry_target(ctx, kind):
-    if kind == "演示员工173期":
+    if kind == "试用期":
         return optional_target(_EXPIRY_TARGETS[kind], drill_to("hr.probation", ctx))
     return optional_target(_EXPIRY_TARGETS[kind], drill_to("hr.contract", ctx))
 
 
 @provider("alert.probation", "alert", visible=_hr_view)
 def alert_probation(ctx):
-    people = _expiry_people(ctx, "演示员工173期", PROBATION_ALERT_DAYS)
+    people = _expiry_people(ctx, "试用期", PROBATION_ALERT_DAYS)
     if not people:
         return None
     first = people[0]
     tone = "bad" if first["gap"] <= URGENT_DAYS else "warn"
     if len(people) == 1:
         left = f"，只剩 {first['gap']} 天" if first["gap"] else "（今天）"
-        return alert("alert.probation", tone, f"{first['name']} 演示员工173期 {_md(first['date'])} 到期{left}", "需要转正评估",
-                     "员工信息", _expiry_target(ctx, "演示员工173期"))
-    return alert("alert.probation", tone, _names_title(people, f"演示员工173期 {PROBATION_ALERT_DAYS} 天内到期"),
-                 f"最早 {_md(first['date'])} · 需要转正评估", "员工信息", _expiry_target(ctx, "演示员工173期"))
+        return alert("alert.probation", tone, f"{first['name']} 试用期 {_md(first['date'])} 到期{left}", "需要转正评估",
+                     "员工信息", _expiry_target(ctx, "试用期"))
+    return alert("alert.probation", tone, _names_title(people, f"试用期 {PROBATION_ALERT_DAYS} 天内到期"),
+                 f"最早 {_md(first['date'])} · 需要转正评估", "员工信息", _expiry_target(ctx, "试用期"))
 
 
 @provider("alert.contract", "alert", visible=_hr_view)
 def alert_contract(ctx):
-    people = _expiry_people(ctx, "演示员工116", EXPIRY_DAYS)
+    people = _expiry_people(ctx, "合同", EXPIRY_DAYS)
     if not people:
         return None
     first = people[0]
     return alert("alert.contract", "bad" if first["gap"] <= URGENT_DAYS else "warn",
-                 _names_title(people, f"演示员工116 {EXPIRY_DAYS} 天内到期"), f"最早 {_md(first['date'])}",
-                 "员工信息", _expiry_target(ctx, "演示员工116"))
+                 _names_title(people, f"合同 {EXPIRY_DAYS} 天内到期"), f"最早 {_md(first['date'])}",
+                 "员工信息", _expiry_target(ctx, "合同"))
 
 
 def _expiry_drill(ctx, key, kind, within):
@@ -571,14 +571,14 @@ def _expiry_drill(ctx, key, kind, within):
                  note=f"在职员工里{kind} {within} 天内到期的人，按剩余天数从近到远；红色 = {URGENT_DAYS} 天内。每一行进员工信息页。")
 
 
-@provider("drill.hr.probation", "drill", visible=_hr_view, title="演示员工173期到期")
+@provider("drill.hr.probation", "drill", visible=_hr_view, title="试用期到期")
 def drill_probation(ctx):
-    return _expiry_drill(ctx, "drill.hr.probation", "演示员工173期", PROBATION_ALERT_DAYS)
+    return _expiry_drill(ctx, "drill.hr.probation", "试用期", PROBATION_ALERT_DAYS)
 
 
-@provider("drill.hr.contract", "drill", visible=_hr_view, title="演示员工116到期")
+@provider("drill.hr.contract", "drill", visible=_hr_view, title="合同到期")
 def drill_contract(ctx):
-    return _expiry_drill(ctx, "drill.hr.contract", "演示员工116", EXPIRY_DAYS)
+    return _expiry_drill(ctx, "drill.hr.contract", "合同", EXPIRY_DAYS)
 
 
 @provider("alert.rd_gap", "alert", visible=_hr_view)
@@ -612,7 +612,7 @@ def hr_payroll(ctx):
     return kpi("hr.payroll", "工资条已确认", f"{payroll['confirmed']} / {payroll['expected']}", "人",
                " · ".join(parts) or ("全部已确认" if payroll["expected"] else ""), "hot" if draft or missing else "",
                to=target("payroll", period=ctx.period, status="draft" if draft else None),
-               hint="已确认 / 本月应有工资条的人（入职日不晚于月末、且没在月初之前演示员工166，与薪酬计算页一致）。"
+               hint="已确认 / 本月应有工资条的人（入职日不晚于月末、且没在月初之前离职，与薪酬计算页一致）。"
                     "草稿 = 生成了还没确认的工资条；未生成 = 还没有工资条的人。只有已确认的工资条计入应发合计。")
 
 
@@ -774,19 +774,19 @@ def hr_dorm_lease(ctx):
     parts = [f"其中已过期 {expired} 间"] if expired else []
     if alert_.get("earliest_date"):
         parts.append(f"最早 {alert_['earliest_date'][5:]} 到期")
-    # 点进去的续租清单列的是“60 天内到期 + 已经过期”的在用房间，卡片上的数字也按这演示员工103合计（决定 2026-10-13）。
+    # 点进去的续租清单列的是“60 天内到期 + 已经过期”的在用房间，卡片上的数字也按这两样合计（决定 2026-10-13）。
     return kpi("hr.dorm_lease", "租约到期 / 已过期", count + expired, "间", " · ".join(parts),
                "hot" if count or expired else "", to=target("dorm.lease") if count or expired else None,
                hint=f"在用房间里租约结束日在今天起 {LEASE_DAYS} 天内、或者已经过期的间数（已过期的在副标题里单独说）。"
                     "点进去是房间台账的续租清单，间数和这里一样。")
 
 
-@provider("hr.dorm_leaver", "kpi", visible=_hr, title="已演示员工166仍占房")
+@provider("hr.dorm_leaver", "kpi", visible=_hr, title="已离职仍占房")
 def hr_dorm_leaver(ctx):
     count = len(_dorm(ctx).get("leavers_in_rooms") or [])
-    return kpi("hr.dorm_leaver", "已演示员工166仍占房", count, "人", "需要清退" if count else "", "bad" if count else "",
+    return kpi("hr.dorm_leaver", "已离职仍占房", count, "人", "需要清退" if count else "", "bad" if count else "",
                to=target("dorm.leaver") if count else None,
-               hint="在用房间里，已演示员工166员工的住宿登记还没取消，房间仍算被他占着。点进去是房间台账里这些房间，人数和这里一样。")
+               hint="在用房间里，已离职员工的住宿登记还没取消，房间仍算被他占着。点进去是房间台账里这些房间，人数和这里一样。")
 
 
 @provider("alert.dorm_lease", "alert", visible=_hr)
@@ -810,7 +810,7 @@ def alert_dorm_leaver(ctx):
     if not leavers:
         return None
     rooms = "、".join(str(item.get("room_no")) for item in leavers[:3]) + ("等" if len(leavers) > 3 else "")
-    return alert("alert.dorm_leaver", "warn", f"{len(leavers)} 位已演示员工166员工仍占房", f"房间 {rooms}", "宿舍", target("dorm.leaver"))
+    return alert("alert.dorm_leaver", "warn", f"{len(leavers)} 位已离职员工仍占房", f"房间 {rooms}", "宿舍", target("dorm.leaver"))
 
 
 @provider("alert.dorm_register", "alert", visible=_hr)
@@ -861,7 +861,7 @@ def block_expiring_list(ctx):
         rows.append(list_row(person["name"], f"{kind} {_md(day)} 到期", f"{gap} 天" if gap else "今天",
                              "bad" if gap <= URGENT_DAYS else "warn", target("personnel.expiring")))
     more = f"还有 {len(people) - LIST_LIMIT} 人" if len(people) > LIST_LIMIT else ""
-    return listing("block.expiring_list", "即将到期", rows, f"演示员工173期 / 演示员工116 · {EXPIRY_DAYS} 天内" if rows else "60 天内没有到期的演示员工173期或演示员工116",
+    return listing("block.expiring_list", "即将到期", rows, f"试用期 / 合同 · {EXPIRY_DAYS} 天内" if rows else "60 天内没有到期的试用期或合同",
                    more, target("personnel.expiring"), hint="只列姓名和日期，按剩余天数从近到远，最多 5 人。")
 
 
@@ -933,7 +933,7 @@ def block_dorm_summary(ctx):
                  (f"最早 {lease['earliest_date'][5:]}" if lease.get("earliest_date") else ""),
                  f"{int(lease.get('count') or 0) + int(lease.get('expired_count') or 0)} 间",
                  "warn" if lease.get("count") or lease.get("expired_count") else "", target("dorm.lease")),
-        list_row("已演示员工166员工仍占房", "", f"{len(leavers)} 人", "bad" if leavers else "", target("dorm.leaver")),
+        list_row("已离职员工仍占房", "", f"{len(leavers)} 人", "bad" if leavers else "", target("dorm.leaver")),
     ]
     return listing("block.dorm_summary", "宿舍", rows, _month_label(ctx), to=target("dorm.board"),
                    hint="直接取宿舍看板的数：入住率 = 入住 ÷（入住 + 空置）；空置房租 = 空置房间的月租合计。")

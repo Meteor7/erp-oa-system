@@ -1,4 +1,4 @@
-// 确认本月工资（决定 2026-10-13）：草稿核对完一次确认、确认后锁定，要改先撤回确认；总经理、演示员工113经理只读。
+// 确认本月工资（决定 2026-10-13）：草稿核对完一次确认、确认后锁定，要改先撤回确认；总经理、副总经理只读。
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";

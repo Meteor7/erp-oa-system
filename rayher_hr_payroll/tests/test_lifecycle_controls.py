@@ -75,7 +75,7 @@ def test_new_user_created_and_bound(monkeypatch):
     monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda dt, name=None: False))
     monkeypatch.setattr(lc.frappe, "new_doc", lambda *a, **k: user)
     monkeypatch.setattr(lc.frappe, "get_doc", lambda d: types.SimpleNamespace(insert=lambda **k: None))
-    emp = FakeEmp(company_email="newhire@corp.example.invalid", employee_name="演示员工138")
+    emp = FakeEmp(company_email="newhire@corp.example.invalid", employee_name="新人")
     lc.sync_user_for_employee(emp)
     assert user.inserted and user.roles_added == ["Employee"]
     assert emp._db_set == [("user_id", "newhire@corp.example.invalid")]
@@ -90,7 +90,7 @@ def test_linked_user_disabled_on_left(monkeypatch):
 
 
 def test_saving_an_old_leaver_record_keeps_the_rehired_login(monkeypatch):
-    # 审查 X3-5：复职后新旧两份档案共用一个账号，保存旧的演示员工166档不能停用账号。
+    # 审查 X3-5：复职后新旧两份档案共用一个账号，保存旧的离职档不能停用账号。
     user = FakeUser(enabled=1)
     monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: True))
     monkeypatch.setattr(lc.frappe, "get_doc", lambda *a, **k: user)
@@ -122,7 +122,7 @@ def test_new_user_gets_own_employee_user_permission(monkeypatch):
     monkeypatch.setattr(lc.frappe, "db", types.SimpleNamespace(exists=lambda *a, **k: False))
     monkeypatch.setattr(lc.frappe, "new_doc", lambda *a, **k: user)
     monkeypatch.setattr(lc.frappe, "get_doc", lambda d: inserted.append(d) or types.SimpleNamespace(insert=lambda **k: None))
-    emp = FakeEmp(company_email="newhire@corp.example.invalid", employee_name="演示员工138", company="Test Co")
+    emp = FakeEmp(company_email="newhire@corp.example.invalid", employee_name="新人", company="Test Co")
     emp.name = "HR-EMP-9001"
     lc.sync_user_for_employee(emp)
     ups = [d for d in inserted if d.get("doctype") == "User Permission"]

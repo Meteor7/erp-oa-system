@@ -125,7 +125,7 @@ def test_jun_zhang_bypasses_philippe_and_skips_stage_two():
 
 
 def test_bu_manager_bypasses_sabri_and_skips_stage_two():
-    result = resolve_stage_two_supervisor("演示员工127", resolve_user)
+    result = resolve_stage_two_supervisor("南通工厂7", resolve_user)
     assert result.decision == "skip"
     assert result.traversed == ("Sabri", "演示员工21")
 
@@ -212,7 +212,7 @@ assert route_labels(r_and_d_employee_other_asset) == [
     "财务审核：演示员工13",
     "直属主管：演示员工132",
     "财务主管：演示员工16",
-    "演示员工113经理：演示员工21",
+    "副总经理：演示员工21",
     "总经理：演示员工29",
     "确认付款：演示员工13",
 ]
@@ -221,7 +221,7 @@ assert route_labels(r_and_d_manager_non_electronic_asset) == [
     "财务审核：演示员工13",
     "固定资产审批：演示员工10",
     "财务主管：演示员工16",
-    "演示员工113经理：演示员工21",
+    "副总经理：演示员工21",
     "总经理：演示员工29",
     "确认付款：演示员工13",
 ]

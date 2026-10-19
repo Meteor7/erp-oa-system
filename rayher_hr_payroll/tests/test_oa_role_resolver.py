@@ -169,7 +169,7 @@ def test_bootstrap_pmc_keeps_the_configured_successor():
     store = MemoryStore()
     store.assignments["pmc"] = {
         "role_key": "pmc", "role_label": "PMC", "employee": "NEW-PMC",
-        "employee_name": "演示员工137", "user": "successor@example.com", "enabled": 1,
+        "employee_name": "接任人", "user": "successor@example.com", "enabled": 1,
     }
     store.enabled_users.add("successor@example.com")
     result = bootstrap_pmc(store=store)
@@ -212,12 +212,12 @@ def test_hr_assignment_overrides_designation_until_employee_profile_is_available
 def test_seed_fills_only_positions_without_any_assignment():
     # 新站点：没有任何任命的岗位按职务补建一次；已有（包括停用的）任命不动；职务后来再变不影响审批人。
     store = MemoryStore()
-    store.by_designation["演示员工110"] = [employee(user="first@example.com")]
+    store.by_designation["出纳"] = [employee(user="first@example.com")]
     store.by_designation["财务主管"] = [employee("EMP-FM", "主管", "fm@example.com")]
     store.enabled_users.update({"first@example.com", "second@example.com", "fm@example.com"})
     store.assignments["finance_manager"] = {"role_key": "finance_manager", "user": "keep@example.com", "enabled": 0}
     assert seed_missing_assignments(store=store) == ["finance_auditor"]
     assert store.assignments["finance_manager"]["user"] == "keep@example.com"
     assert resolve_role("finance_auditor", store=store)["user"] == "first@example.com"
-    store.by_designation["演示员工110"] = [employee(user="second@example.com")]
+    store.by_designation["出纳"] = [employee(user="second@example.com")]
     assert resolve_role("finance_auditor", store=store)["user"] == "first@example.com"

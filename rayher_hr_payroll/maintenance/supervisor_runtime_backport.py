@@ -8,7 +8,7 @@ def adapt_organization(source):
         raise ValueError("Unexpected organization baseline")
     source = source.replace(old, "supervisors = current_supervisors() if mapping is None else mapping")
     source = source.replace("in TOP_EXECUTIVES", "in executive_names()")
-    source = source.replace("演示员工37或演示员工28", "演示员工113经理或总经理")
+    source = source.replace("演示员工37或演示员工28", "副总经理或总经理")
     compile(source, "oa_organization.py", "exec")
     return source
 

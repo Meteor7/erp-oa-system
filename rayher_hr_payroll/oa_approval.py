@@ -34,13 +34,13 @@ GENERAL_MANAGER_USER = "person060@staff.example.invalid"
 PROCUREMENT_MANAGER_NAME = "演示员工216"
 PROCUREMENT_MANAGER_USER = "person033@staff.example.invalid"
 
-FINANCE_AUDIT_LABEL = "演示员工110审核"
+FINANCE_AUDIT_LABEL = "出纳审核"
 SUPERVISOR_LABEL_PREFIX = "直属主管："
 ASSET_APPROVAL_LABEL_PREFIX = "固定资产审批："
 FINANCE_MANAGER_LABEL = "财务主管：" + FINANCE_MANAGER_NAME
-VICE_MANAGER_LABEL = "演示员工113经理：" + VICE_MANAGER_NAME
+VICE_MANAGER_LABEL = "副总经理：" + VICE_MANAGER_NAME
 GENERAL_MANAGER_LABEL = "总经理：" + GENERAL_MANAGER_NAME
-FINANCE_HANDLE_LABEL = "演示员工110确认付款"
+FINANCE_HANDLE_LABEL = "出纳确认付款"
 CASHIER_LABEL = FINANCE_HANDLE_LABEL
 
 FINANCE_DEPARTMENT = "财务部"
@@ -137,7 +137,7 @@ LEAVE_OTHER_APPROVER_USER = VICE_MANAGER_USER
 
 
 # 请假从第一天到最后一天连续不超过 3 个日历日（含周末和节假日，决定 2026-10-13）：审批到人事经理为止，
-# 不再走演示员工113经理 / 总经理，也不再单独抄送演示员工113（演示员工113在数据看板和考勤中心里能看到）。
+# 不再走副总经理 / 总经理，也不再单独抄送副总（副总在数据看板和考勤中心里能看到）。
 SHORT_LEAVE_MAX_DAYS = 3
 
 
@@ -270,10 +270,10 @@ def build_leave_route(
 
 
 def build_travel_route(*, department, supervisor, supervisor_user, supervisor_decision=None, applicant_user=None, roles=None):
-    """出差申请（决定 2026-10-13）：直属上级 → 演示员工113经理（财务部门是总经理）→ 前台办理（行政专员）。
+    """出差申请（决定 2026-10-13）：直属上级 → 副总经理（财务部门是总经理）→ 前台办理（行政专员）。
 
-    - 直属上级本人就是演示员工113 / 总经理时，只批这一步，然后到前台办理；
-    - 演示员工113、总经理自己出差不用审批，直接到前台备案；
+    - 直属上级本人就是副总 / 总经理时，只批这一步，然后到前台办理；
+    - 副总、总经理自己出差不用审批，直接到前台备案；
     - 前台自己出差，前台这一步跳过（不自己办理自己的）。
     前台这一步是“办理”，只能点已办理，不能退回；办完给申请人发一条单独的行程提醒。
     """
@@ -296,7 +296,7 @@ def build_travel_route(*, department, supervisor, supervisor_user, supervisor_de
         if not direct_is_top:
             final_key = "general_manager" if classify_department(department) == "finance" else "vice_manager"
             final = snapshots[final_key]
-            prefix = "总经理：" if final_key == "general_manager" else "演示员工113经理："
+            prefix = "总经理：" if final_key == "general_manager" else "副总经理："
             _append_unique_approval(
                 steps, prefix + (_role_label(final, name_only=True) or ""), _role_user(final, _role_label(final)),
                 applicant_user=applicant,
@@ -341,7 +341,7 @@ def build_expense_payment_route(
     finance_manager = snapshots["finance_manager"]
     vice = snapshots["vice_manager"]
     general = snapshots["general_manager"]
-    steps = [_step("演示员工110审核", approvers=[_role_user(finance, "演示员工110")])]
+    steps = [_step("出纳审核", approvers=[_role_user(finance, "出纳")])]
     steps.extend(_stage_two_steps(supervisor, supervisor_user, supervisor_decision, roles))
 
     if asset == ADMIN_ASSET:
@@ -359,7 +359,7 @@ def build_expense_payment_route(
         _append_unique_approval(steps, _role_label(general, with_name=True), _role_user(general, "总经理"))
     elif dept == "sales":
         managers = [
-            (_role_label(vice, with_name=True), _role_user(vice, "演示员工113经理")),
+            (_role_label(vice, with_name=True), _role_user(vice, "副总经理")),
             (_role_label(general, with_name=True), _role_user(general, "总经理")),
         ]
         existing = {_clean(value).lower() for step in steps for value in step["approvers"]}
@@ -372,9 +372,9 @@ def build_expense_payment_route(
                 mode="all" if len(remaining) > 1 else "approve",
             )
     else:
-        _append_unique_approval(steps, _role_label(vice, with_name=True), _role_user(vice, "演示员工113经理"))
+        _append_unique_approval(steps, _role_label(vice, with_name=True), _role_user(vice, "副总经理"))
         _append_unique_approval(steps, _role_label(general, with_name=True), _role_user(general, "总经理"))
-    steps.append(_handle("演示员工110确认付款", approvers=[_role_user(finance, "演示员工110")]))
+    steps.append(_handle("出纳确认付款", approvers=[_role_user(finance, "出纳")]))
     return steps
 
 
@@ -434,7 +434,7 @@ def build_procurement_route(
         steps, _role_label(pmc, with_name=True), _role_user(pmc, "PMC"),
     )
     vice = snapshots["vice_manager"]
-    vice_user = _role_user(vice, "演示员工113经理")
+    vice_user = _role_user(vice, "副总经理")
     _append_unique_approval(
         steps, "需求终审：" + _role_label(vice, with_name=True), vice_user,
         applicant_user=applicant_user,
@@ -456,7 +456,7 @@ def build_direct_purchase_route(
         approvers = []
         for label, user_id in (
             ("人事经理", _role_user(hr, "人事经理")),
-            (_role_label(vice, name_only=True), _role_user(vice, "演示员工113经理")),
+            (_role_label(vice, name_only=True), _role_user(vice, "副总经理")),
         ):
             if user_id != _clean(applicant_user).lower() and user_id not in approvers:
                 approvers.append(user_id)
@@ -488,12 +488,12 @@ def build_direct_purchase_route(
 
         vice = snapshots["vice_manager"]
         vice_name = _clean(vice.get("employee_name")) or _clean(vice.get("role_label")) or "演示员工21"
-        vice_user = _role_user(vice, "演示员工113经理")
+        vice_user = _role_user(vice, "副总经理")
         if _top_supervisor("", applicant_user, snapshots):
             raise ApprovalRouteError("公司高管本人不适用员工其他购买审批流程")
         _append_unique_approval(
             steps,
-            "演示员工113经理：" + vice_name,
+            "副总经理：" + vice_name,
             vice_user,
             applicant_user=applicant_user,
         )
@@ -513,16 +513,16 @@ def build_procurement_payment_route(*, payment_stage, roles=None):
     finance_manager = snapshots["finance_manager"]
     finance = snapshots["finance_auditor"]
     general = snapshots["general_manager"]
-    finance_user = _role_user(finance, "演示员工110")
+    finance_user = _role_user(finance, "出纳")
     general_user = _role_user(general, "总经理")
     return [
         _step(
             _role_label(vice, name_only=True),
-            approvers=[_role_user(vice, "演示员工113经理")],
+            approvers=[_role_user(vice, "副总经理")],
         ),
         _step(
             _role_label(accountant, with_name=True),
-            approvers=[_role_user(accountant, "演示员工135")],
+            approvers=[_role_user(accountant, "总账会计")],
         ),
         _step(
             _role_label(finance_manager, with_name=True),

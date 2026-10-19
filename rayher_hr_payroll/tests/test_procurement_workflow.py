@@ -48,10 +48,10 @@ def test_payment_submission_derives_prepayment_without_client_stage():
     request = payment_request(payment_stage="", prepayment_percentage=100)
     request.update(
         expected_arrival_date="2026-09-20",
-        prepayment_risk_note="供应商长期合作，演示员工116约定逾期退款",
+        prepayment_risk_note="供应商长期合作，合同约定逾期退款",
     )
     assert validate_payment_submission(
-        request, evidence={"演示员工116", "付款计划"}
+        request, evidence={"合同", "付款计划"}
     ) == "预付款"
 
 
@@ -152,14 +152,14 @@ def test_100_percent_prepayment_requires_arrival_date_risk_note_and_documents():
         prepayment_risk_note="",
     )
     with pytest.raises(ProcurementWorkflowError, match="预计到货日期"):
-        validate_payment_submission(request, evidence={"演示员工116", "付款计划"})
+        validate_payment_submission(request, evidence={"合同", "付款计划"})
     request["expected_arrival_date"] = "2026-09-20"
     with pytest.raises(ProcurementWorkflowError, match="预付款风险说明"):
-        validate_payment_submission(request, evidence={"演示员工116", "付款计划"})
-    request["prepayment_risk_note"] = "供应商长期合作，演示员工116约定逾期退款"
+        validate_payment_submission(request, evidence={"合同", "付款计划"})
+    request["prepayment_risk_note"] = "供应商长期合作，合同约定逾期退款"
     with pytest.raises(ProcurementWorkflowError, match="付款计划"):
-        validate_payment_submission(request, evidence={"演示员工116"})
-    validate_payment_submission(request, evidence={"演示员工116", "付款计划"})
+        validate_payment_submission(request, evidence={"合同"})
+    validate_payment_submission(request, evidence={"合同", "付款计划"})
 
 
 def test_tail_payment_requires_full_arrival_acceptance_invoice_and_evidence():

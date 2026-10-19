@@ -69,7 +69,7 @@ test('acknowledgement keys follow row content, not row position', () => {
   const after = duplicateVoucherRows([row('V9', 'x', 'y', 'z', 1), a, b]);
   assert.deepEqual(after.groups, [[1, 2]]);
   assert.deepEqual(after.keys, before.keys);
-  // 改了金额，就是演示员工114键
+  // 改了金额，就是另一个键
   const edited = duplicateVoucherRows([a, { ...b, amount: 101 }, { ...b, amount: 101 }]);
   assert.notDeepEqual(edited.keys, before.keys);
 

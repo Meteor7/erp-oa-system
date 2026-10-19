@@ -109,7 +109,7 @@ const ownerReadOnly = computed(() => Boolean(row.value && ctx.currentUser && Str
   && !canApprove.value && !canReject.value));
 const targets = computed(() => row.value?.rejection_targets || []);
 
-// 下一步要去哪里办：PMC 去物料看板提 PR；采购 / 演示员工113去价格审批单（只有行标志允许的人才看到）。
+// 下一步要去哪里办：PMC 去物料看板提 PR；采购 / 副总去价格审批单（只有行标志允许的人才看到）。
 const chainAction = computed(() => {
   const current = row.value;
   const key = current?.procurement_chain?.stage;
@@ -350,7 +350,7 @@ function toggleLine(index) {
           <MaterialExecutionProgress v-if="showExec" :key="row.name" :request="row.name" :expanded="true" />
 
           <section v-if="showExec && poRows.length" class="panel">
-            <div class="pt"><span>PO 与付款计划 <span class="muted">来自价格审批单选定的供应商；只有采购 / PMC / 演示员工113 / 财务看得到</span></span></div>
+            <div class="pt"><span>PO 与付款计划 <span class="muted">来自价格审批单选定的供应商；只有采购 / PMC / 副总 / 财务看得到</span></span></div>
             <div v-for="po in poRows" :key="po.name" class="pr-po">
               <div class="pr-po-head">
                 <div><span class="muted">{{ po.name }} · 供应商</span><b>{{ po.supplier || '—' }}</b></div>
@@ -406,7 +406,7 @@ function toggleLine(index) {
               <router-link v-if="item.to" :to="item.to" class="link">{{ item.v }}</router-link>
               <span v-else class="muted">{{ item.v }}</span>
             </div>
-            <div class="muted pr-docs-note">"价格审批 / PO"只有采购、PMC、演示员工113、财务看得到；"物料看板"只有 PMC、采购经理、演示员工113能打开。你可以在上面的执行明细里看到每项物料的数量和进度。</div>
+            <div class="muted pr-docs-note">"价格审批 / PO"只有采购、PMC、副总、财务看得到；"物料看板"只有 PMC、采购经理、副总能打开。你可以在上面的执行明细里看到每项物料的数量和进度。</div>
           </section>
 
           <ProcDocuments ref="docs" :request="row.name" :row="row" />

@@ -58,7 +58,7 @@ test("the template header row is recognised by the same header detection the imp
   const map = detectEmployeeHeader(sheet.rows[0]);
   assert.ok(map);
   for (const column of TRANSFER_COLUMNS) assert.equal(map[column.key], TRANSFER_COLUMNS.indexOf(column), column.key);
-  assert.equal(detectEmployeeHeader(["演示员工129", "A001", "研发软件部", 100]), null);
+  assert.equal(detectEmployeeHeader(["南通工厂9", "A001", "研发软件部", 100]), null);
   assert.equal(detectEmployeeHeader(["姓名", "部门"]), null, "needs the employee number column");
   const headerOnly = parseEmployeeTableRows([sheet.rows[0]]);
   assert.deepEqual(headerOnly.errors, ["表里只有表头，没有数据行。"]);
@@ -66,11 +66,11 @@ test("the template header row is recognised by the same header detection the imp
 
 test("headers are matched leniently: aliases, spaces, full-width brackets, required markers", () => {
   assert.equal(headerField("用工类型"), "employment_type");
-  assert.equal(headerField(" 演示员工116类型 "), "employment_type");
+  assert.equal(headerField(" 合同类型 "), "employment_type");
   assert.equal(headerField("入职时间"), "date_of_joining");
   assert.equal(headerField("*姓名"), "employee_name");
-  assert.equal(headerField("演示员工173期(月)"), "probation_months");
-  assert.equal(headerField("演示员工173期（月）"), "probation_months");
+  assert.equal(headerField("试用期(月)"), "probation_months");
+  assert.equal(headerField("试用期（月）"), "probation_months");
   assert.equal(headerField("岗位"), "designation");
   assert.equal(headerField("工资卡银行账号"), "bank_ac_no");
   assert.equal(headerField("employee_number"), "employee_number");
@@ -156,7 +156,7 @@ test("parsing: reordered columns, unknown columns, blank rows, row numbers and b
     [],
     ["人员花名册（2026-10）"],
     ["姓名", "*员工号", "多余的列", "入职时间", "手机号", "所属单位", "部门"],
-    ["演示员工129", "A001", "x", serialOf(2026, 1, 5), 13800000002, "示例总部", "研发软件部"],
+    ["南通工厂9", "A001", "x", serialOf(2026, 1, 5), 13800000002, "栖衡科技", "研发软件部"],
     ["", "", "", "", "", "", ""],
     ["演示员工146", "007", "", "2026/2/3", "", "示例研发中心", ""],
   ];
@@ -166,7 +166,7 @@ test("parsing: reordered columns, unknown columns, blank rows, row numbers and b
   assert.deepEqual(parsed.unknownHeaders, ["多余的列"]);
   assert.equal(parsed.dataRows, 2);
   assert.deepEqual(parsed.rows, [
-    { _row: 4, employee_name: "演示员工129", employee_number: "A001", date_of_joining: "2026-01-05", cell_number: "13800000002", company: "示例总部", department: "研发软件部" },
+    { _row: 4, employee_name: "南通工厂9", employee_number: "A001", date_of_joining: "2026-01-05", cell_number: "13800000002", company: "栖衡科技", department: "研发软件部" },
     { _row: 6, employee_name: "演示员工146", employee_number: "007", date_of_joining: "2026-02-03", company: "示例研发中心" },
   ]);
   assert.deepEqual(parsed.problems, []);
@@ -261,9 +261,9 @@ test("only roles that can save employees see the import button", () => {
 
 // ---------- 导出 ----------
 const sampleRow = (extra = {}) => ({
-  name: "HR-EMP-90001", company: "QIHENG Demo", employee_number: "007", employee_name: "演示员工129", english_name: "Zhang San", gender: "Male",
+  name: "HR-EMP-90001", company: "QIHENG Demo", employee_number: "007", employee_name: "南通工厂9", english_name: "Zhang San", gender: "Male",
   date_of_birth: "1995-01-15", cell_number: "13800000002", household_registration: "深圳", date_of_joining: "2026-01-05", relieving_date: null,
-  department: "研发软件部 - RAY", designation: "工程师", reports_to: "HR-EMP-90009", employment_type: "劳动演示员工116", rd_personnel_type: "全时研发",
+  department: "研发软件部 - RAY", designation: "工程师", reports_to: "HR-EMP-90009", employment_type: "劳动合同", rd_personnel_type: "全时研发",
   expense_account_category: "研发费用", archive_status: "待完善", probation_months: 3, first_contract_period_years: 0, status: "Active",
   default_monthly_salary: 12000.5, salary_months: 13, default_social_insurance_base: 0, default_housing_fund_base: 8000, social_insurance_number: "0012345",
   housing_fund_number: null, id_type_cn: "身份证", id_card_number_cn: "110101199001010090", bank_name: "招商银行", bank_ac_no: "0622000011112222",
@@ -316,7 +316,7 @@ test("export cells: ids and bank numbers are text, zeros are blank, names are sh
   assert.equal(cell("bank_ac_no"), "0622000011112222");
   assert.equal(typeof cell("id_card_number_cn"), "string");
   assert.equal(cell("cell_number"), "13800000002");
-  assert.equal(cell("company"), "示例总部");
+  assert.equal(cell("company"), "栖衡科技");
   assert.equal(cell("gender"), "男");
   assert.equal(cell("department"), "研发软件部");
   assert.equal(cell("reports_to"), "王主管");
@@ -378,7 +378,7 @@ test("a real xlsx round trip keeps ids and bank numbers as text cells and re-imp
   assert.equal(parsed.rows[0].employee_number, "007");
   assert.equal(parsed.rows[0].bank_ac_no, "0622000011112222");
   assert.equal(parsed.rows[0].id_card_number_cn, "110101199001010090");
-  assert.equal(parsed.rows[0].company, "示例总部");
+  assert.equal(parsed.rows[0].company, "栖衡科技");
   assert.equal(parsed.rows[0].department, "研发软件部");
   assert.equal(parsed.rows[0].reports_to, "王主管");
   assert.equal(parsed.rows[0].default_monthly_salary, "12000.5");

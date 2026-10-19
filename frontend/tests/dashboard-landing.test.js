@@ -108,15 +108,15 @@ test("contract delivery dates come as one string joined by 、", () => {
 
 test("a material line is overdue when its contract date has passed and the PO quantity is not fully received", () => {
   const today = "2026-10-09";
-  const row = (extra) => ({ contract_delivery_date: "2026-10-01", po_quantity: 10, received_quantity: 4, record_status: "演示员工152", ...extra });
+  const row = (extra) => ({ contract_delivery_date: "2026-10-01", po_quantity: 10, received_quantity: 4, record_status: "正常", ...extra });
   assert.equal(isContractOverdue(row(), today), true);
   // 收齐了（含超收）不算
   assert.equal(isContractOverdue(row({ received_quantity: 10 }), today), false);
   assert.equal(isContractOverdue(row({ received_quantity: 12 }), today), false);
-  // 演示员工116交期是今天或以后不算（必须早于今天）
+  // 合同交期是今天或以后不算（必须早于今天）
   assert.equal(isContractOverdue(row({ contract_delivery_date: "2026-10-09" }), today), false);
   assert.equal(isContractOverdue(row({ contract_delivery_date: "2026-10-20" }), today), false);
-  // 缺演示员工116交期、还没下 PO 的不算；已取消的物料不算
+  // 缺合同交期、还没下 PO 的不算；已取消的物料不算
   assert.equal(isContractOverdue(row({ contract_delivery_date: "" }), today), false);
   assert.equal(isContractOverdue(row({ po_quantity: 0, received_quantity: 0 }), today), false);
   assert.equal(isContractOverdue(row({ record_status: "已取消" }), today), false);

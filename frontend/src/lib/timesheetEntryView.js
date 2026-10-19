@@ -271,7 +271,7 @@ export function capText({ month, hourLimit, baseHourLimit, leaveHours, joinedOn,
   parts.push(`= 日历工时 ${fmtHours(base)} 小时 − 已批请假 ${fmtHours(leaveHours || 0)} 小时`);
   let text = parts.join(' ');
   if (joinedOn) text += ` · ${joinedOn} 入职，之前的日子不计`;
-  if (relievedOn) text += ` · ${relievedOn} 演示员工166，之后的日子不计`;
+  if (relievedOn) text += ` · ${relievedOn} 离职，之后的日子不计`;
   return text;
 }
 

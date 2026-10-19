@@ -47,7 +47,7 @@ def _summary_db(monkeypatch):
         if doctype == "OA Price Approval" and fieldname == "total_amount":
             return 5000
         if doctype == "OA Purchase Order":
-            return {"supplier": "苏州精测", "status": "待演示员工116复核", "total_amount": 800}
+            return {"supplier": "苏州精测", "status": "待合同复核", "total_amount": 800}
         if doctype == "OA Purchase Order Line":
             return "探针卡"
         if doctype == "OA Material Progress":

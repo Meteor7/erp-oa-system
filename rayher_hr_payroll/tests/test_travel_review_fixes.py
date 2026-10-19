@@ -40,7 +40,7 @@ class Doc(SimpleNamespace):
 
 
 def _step(mode="handle", status="待办理", **extra):
-    values = dict(step_index=3, step_key="desk", origin="base", mode=mode, label="前台办理：演示员工30" if mode == "handle" else "演示员工113经理：演示员工21",
+    values = dict(step_index=3, step_key="desk", origin="base", mode=mode, label="前台办理：演示员工30" if mode == "handle" else "副总经理：演示员工21",
                   approvers='["desk@tests-x.example.invalid"]', approved_by="[]", status=status, action_by="", acted_on=None, note="")
     values.update(extra)
     return SimpleNamespace(**values)
@@ -106,9 +106,9 @@ def _holder(name, user):
 
 
 def test_only_the_front_desk_position_is_seeded_and_a_skip_says_why(monkeypatch, capsys):
-    store = Store({"行政专员": [_holder("E-FD", "fd@tests-x.example.invalid")], "演示员工110": [_holder("E-CA", "ca@tests-x.example.invalid")]})
+    store = Store({"行政专员": [_holder("E-FD", "fd@tests-x.example.invalid")], "出纳": [_holder("E-CA", "ca@tests-x.example.invalid")]})
     assert oa_role_resolver.seed_missing_assignment("front_desk", store=store) == (True, "")
-    assert store.assignments == {"front_desk": ("E-FD", "fd@tests-x.example.invalid")}, "演示员工110等别的空岗位不跟着补"
+    assert store.assignments == {"front_desk": ("E-FD", "fd@tests-x.example.invalid")}, "出纳等别的空岗位不跟着补"
     seeded, reason = oa_role_resolver.seed_missing_assignment("front_desk", store=store)
     assert seeded is False and "已有岗位任命" in reason
     two = Store({"行政专员": [_holder("E-1", "a@tests-x.example.invalid"), _holder("E-2", "b@tests-x.example.invalid")]})
@@ -126,7 +126,7 @@ def test_only_the_front_desk_position_is_seeded_and_a_skip_says_why(monkeypatch,
 
 
 def test_withdrawing_works_when_a_route_position_has_no_assignment(fake_frappe, monkeypatch):
-    # 演示员工113已经批过、现在在总经理这一步；前台办理岗位没有任命，preview_route 会报“没有找到有效配置”。
+    # 副总已经批过、现在在总经理这一步；前台办理岗位没有任命，preview_route 会报“没有找到有效配置”。
     step = _step(mode="approve", status="待审批", approved_by='["vm@tests-x.example.invalid"]', action_by="vm@tests-x.example.invalid", note="同意")
     document = _trip(step)
     monkeypatch.setattr(oa_entry, "_route_context", lambda **kwargs: {"department": "研发软件部 - RAY", "supervisor": "", "asset_category": ""})
@@ -180,7 +180,7 @@ def test_copy_notification_rounds_do_not_stall_when_the_log_is_full(fake_frappe,
 
 # ---------------------------------------------------------------- 5. 费用审批记录不重复
 def test_expense_approval_records_list_each_approval_once(fake_frappe, monkeypatch):
-    step = SimpleNamespace(step_index=1, step_key="s1", label="演示员工110审核", mode="approve", approvers='["fin@tests-x.example.invalid"]', status="已通过",
+    step = SimpleNamespace(step_index=1, step_key="s1", label="出纳审核", mode="approve", approvers='["fin@tests-x.example.invalid"]', status="已通过",
                            approved_by='["fin@tests-x.example.invalid"]', action_by="fin@tests-x.example.invalid", acted_on="2026-10-13 09:00:00", note="ok")
     log = [{"action": "提交申请", "actor": "a@tests-x.example.invalid", "acted_on": "2026-10-12 09:00:00"},
            {"action": "同意", "actor": "fin@tests-x.example.invalid", "acted_on": "2026-10-13 09:00:00"},

@@ -22,7 +22,7 @@ test("lease alert reads like the demo and asks for a decision a week ahead", () 
 
 test("occupancy donut covers occupied, vacant, guest and nap rooms in order", () => {
   const gradient = donutGradient({ total: 35, 入住: 22, 空置: 8, 客房: 2, 午休室: 3 });
-  assert.equal(gradient, "conic-gradient(#5470C6 0.0deg 226.3deg, #D98C4A 226.3deg 308.6deg, #8C96A8 308.6deg 329.1deg, #C3CAD6 329.1deg 360.0deg)");
+  assert.equal(gradient, "conic-gradient(#5470C6 0.0deg 226.3deg, #4B9E91 226.3deg 308.6deg, #8C96A8 308.6deg 329.1deg, #C3CAD6 329.1deg 360.0deg)");
   assert.equal(percent(22, 30, 0), "73%");
   assert.equal(percent(34483.6, 52765.6), "65.4%");
 });
@@ -78,7 +78,7 @@ test("the dormitory board is the first dormitory page and links to the other two
   for (const page of [board, master, monthly]) assert.match(page, /<AccommodationTabs \/>/);
   // 房间管理：room= 由 parseRoomsLocation 读（view=edit&room=…，旧的 ?room=… 也打开编辑页）
   assert.match(master, /parseRoomsLocation\(route\.query\)/);
-  // 租约到期清单 / 已演示员工166仍占房、月份：都从地址读（bindRouteFilters），看板链接和数据看板链接共用
+  // 租约到期清单 / 已离职仍占房、月份：都从地址读（bindRouteFilters），看板链接和数据看板链接共用
   assert.match(master, /queryText\(query, 'lease'\) === 'expiring'/);
   assert.match(monthly, /periodRouteSpec\(\)/);
   assert.match(monthly, /route\.query\.room/);

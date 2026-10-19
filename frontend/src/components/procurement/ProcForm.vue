@@ -282,10 +282,10 @@ function lineTotal(line) {
               <label>购买方式</label>
               <div class="pr-methods">
                 <button type="button" :class="['pr-method', { on: form.purchase_method === '京东购买' }]" :aria-pressed="form.purchase_method === '京东购买'" @click="form.purchase_method = '京东购买'">
-                  <b>京东购买</b><span class="muted">审批：人事经理 + 演示员工113经理 会签</span>
+                  <b>京东购买</b><span class="muted">审批：人事经理 + 副总经理 会签</span>
                 </button>
                 <button type="button" :class="['pr-method', { on: form.purchase_method === '其他购买' }]" :aria-pressed="form.purchase_method === '其他购买'" @click="form.purchase_method = '其他购买'">
-                  <b>其他购买</b><span class="muted">审批：直属部门主管 → 演示员工113经理</span>
+                  <b>其他购买</b><span class="muted">审批：直属部门主管 → 副总经理</span>
                 </button>
               </div>
             </div>

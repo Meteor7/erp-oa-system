@@ -91,7 +91,7 @@ def example_prerequisites():
             "pmc": {"user": "pmc@example.com", "employee_name": "演示员工178"},
             "hr_manager": {"user": "hr@example.com", "employee_name": "人事经理"},
             "finance_auditor": {"user": "finance@example.com", "employee_name": "财务审核"},
-            "finance_accountant": {"user": "accountant@example.com", "employee_name": "演示员工135"},
+            "finance_accountant": {"user": "accountant@example.com", "employee_name": "总账会计"},
             "finance_manager": {"user": "manager@example.com", "employee_name": "财务主管"},
             "vice_manager": {"user": "vice@example.com", "employee_name": "演示员工21"},
             "general_manager": {"user": "general@example.com", "employee_name": "演示员工29"},
@@ -114,8 +114,8 @@ def _validate_prerequisites(values):
         missing.append("供应商")
     roles = (values or {}).get("roles") or {}
     for key, label in (
-        ("pmc", "PMC"), ("hr_manager", "人事经理"), ("finance_auditor", "演示员工110确认付款"),
-        ("finance_accountant", "演示员工135"),
+        ("pmc", "PMC"), ("hr_manager", "人事经理"), ("finance_auditor", "出纳确认付款"),
+        ("finance_accountant", "总账会计"),
         ("finance_manager", "财务主管"), ("vice_manager", "演示员工21"), ("general_manager", "演示员工29"),
         ("production_asset_owner", "生产设备负责人"),
     ):
@@ -146,7 +146,7 @@ def _memory_steps(scenario, prerequisites):
     else:
         rows = [
             ("演示员工21", roles["vice_manager"]["user"]),
-            ("演示员工135审核", roles["finance_accountant"]["user"]),
+            ("总账会计审核", roles["finance_accountant"]["user"]),
             ("财务主管审核", roles["finance_manager"]["user"]),
             ("财务确认付款", roles["finance_auditor"]["user"]),
         ]
@@ -445,7 +445,7 @@ class FrappeSeedStore:
 
                 if scenario["request_type"] == REQUEST_PROCUREMENT_PAYMENT:
                     if key in {"full_prepayment_overdue", "partial_prepayment_paid"}:
-                        self._create_evidence(doc.name, batch_id, "演示员工116", index)
+                        self._create_evidence(doc.name, batch_id, "合同", index)
                         self._create_evidence(doc.name, batch_id, "付款计划", index)
                     else:
                         self._create_evidence(doc.name, batch_id, "验收资料", index)

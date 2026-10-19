@@ -36,7 +36,7 @@ const hoursText = (row) => (row.total_hours != null ? `${Number(row.actual_hours
     </table>
     <table v-else>
       <thead><tr>
-        <th>序号</th><th>所属单位</th><th>身份证号</th><th>性别</th><th>费用科目</th><th>部门</th><th>职位</th><th>入职时间</th><th>演示员工166时间</th><th class="r">实际/总工时</th><th>姓名</th>
+        <th>序号</th><th>所属单位</th><th>身份证号</th><th>性别</th><th>费用科目</th><th>部门</th><th>职位</th><th>入职时间</th><th>离职时间</th><th class="r">实际/总工时</th><th>姓名</th>
         <th class="r">基本工资</th><th class="r">调薪</th><th class="r">调薪后</th><th class="r">公司补贴</th><th class="r">奖金</th><th class="r">其他补/扣</th><th class="r">应付工资</th>
         <th class="r">养老（个人）</th><th class="r">医疗（个人）</th><th class="r">失业（个人）</th><th class="r">社保合计</th><th class="r">公积金（个人）</th><th class="r">个税（代扣）</th><th class="r">宿舍代扣</th><th class="r">已发放</th><th class="r">实发工资</th>
         <th>开户银行</th><th>银行账号</th><th>手机号</th><th>状态</th>
