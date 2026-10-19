@@ -25,3 +25,6 @@ household_registration_backfill.json
 # Local deployment credentials, bundles and generated Python metadata
 .local/
 *.egg-info/
+
+# Local visual review captures; curated screenshots live in docs/images.
+.impeccable/review/
